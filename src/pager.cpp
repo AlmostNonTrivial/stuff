@@ -16,7 +16,6 @@ struct Page {
   char padding[PAGE_SIZE - sizeof(unsigned int)];
 };
 
-#define FREE_PAGES_PER_FREE_PAGE ((PAGE_SIZE - (sizeof(unsigned int) * 4)) / 4)
 struct FreePage {
   unsigned int index;
   unsigned int next_free_page;
@@ -76,7 +75,6 @@ static void write_page_to_disk(unsigned int page_index, const void *data);
 static bool read_page_from_disk(unsigned int page_index, void *data);
 static void journal_page(unsigned int page_index, const void *data);
 
-
 static void build_free_pages_set() {
   pager.free_pages_set.clear();
 
@@ -99,7 +97,6 @@ static void build_free_pages_set() {
 }
 
 static void cache_init() {
-
   for (int i = 0; i < MAX_CACHE_ENTRIES; i++) {
     pager.cache[i].page_index = PAGE_INVALID;
     pager.cache[i].is_dirty = false;
@@ -365,8 +362,7 @@ void pager_init(const char *filename) {
 
   bool exists = os_file_exists(filename);
 
-  pager.data_fd =
-      os_file_open(filename, true, true);
+  pager.data_fd = os_file_open(filename, true, true);
 
   bool journal_exists = os_file_exists(pager.journal_file);
   if (journal_exists) {

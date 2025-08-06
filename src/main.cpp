@@ -1,7 +1,3 @@
-
-
-
-
 #include "pager.hpp"
 
 #include <iostream>
