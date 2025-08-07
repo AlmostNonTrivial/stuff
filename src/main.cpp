@@ -316,64 +316,104 @@ void test_sequential_operations() {
     std::vector<ColumnInfo> schema = {{TYPE_INT64}};
     BPlusTree tree = bp_create(schema);
 
-    int els = tree.leaf_max_keys * 20;
+    int count = tree.leaf_max_keys * 5;
     bp_init(tree);
 
     // Sequential insertion
-    for (int i = 0; i < els; i++) {
+    for (int i = 0; i < count; i++) {
         Int64Record data = {i * 1000LL};
+
         bp_insert_element(tree, i, reinterpret_cast<const uint8_t*>(&data));
     }
 
-    for (int i = 0; i < els; i++) {
-          if(i % 5) {
-              bp_delete_element(tree, i);
-          }
+
+    // Verify sequential order in leaves
+    auto leaves = bp_print_leaves(tree);
+    bool ordered = true;
+    for (size_t i = 1; i < leaves.size(); i++) {
+        if (leaves[i-1].first >= leaves[i].first) {
+            ordered = false;
+            break;
+        }
+    }
+    check("Sequential insertion maintains sorted order", ordered);
+    check("All sequential elements in leaves", leaves.size() == count);
+
+///    Verify data integrity
+    bool data_intact = true;
+    for (size_t i = 0; i < leaves.size(); i++) {
+        const Int64Record* rec = reinterpret_cast<const Int64Record*>(leaves[i].second);
+        if (rec->value != static_cast<int64_t>(leaves[i].first * 1000)) {
+            data_intact = false;
+            break;
+        }
     }
 
-   bool working = true;
-    for (int i = 0; i < els; i++) {
-          if(i % 5) {
-             if(bp_find_element(tree, i)) {
-                 working = false;
-                break;
-             }
-          }
+    // Add this to test_sequential_operations() function, after the existing checks
 
-         else {
-             if(!bp_find_element(tree, i)) {
-                 working = false;
-                 break;
-             }
-         }
+        // Test leaf node linked list structure
+        std::cout << "Testing leaf node linked list integrity..." << std::endl;
 
-    }
+        BTreeNode* leftmost = bp_left_most(tree);
+        check("Left-most leaf node exists", leftmost != nullptr);
+
+        if (leftmost) {
+            // Walk through the linked list and verify order
+            std::vector<uint32_t> linked_list_keys;
+            BTreeNode* current = leftmost;
+
+            while (current) {
+                uint32_t* keys = reinterpret_cast<uint32_t*>(current->data);
+                for (uint32_t i = 0; i < current->num_keys; i++) {
+                    linked_list_keys.push_back(keys[i]);
+                }
+                current = bp_get_next(current);
+            }
+
+            // Verify linked list has same count as leaf traversal
+            check("Linked list contains all keys", linked_list_keys.size() == count);
+
+            // Verify linked list is sorted
+            bool linked_list_sorted = true;
+            for (size_t i = 1; i < linked_list_keys.size(); i++) {
+                if (linked_list_keys[i-1] >= linked_list_keys[i]) {
+                    linked_list_sorted = false;
+                    break;
+                }
+            }
+            check("Linked list maintains sorted order", linked_list_sorted);
+
+            // Test backward traversal
+            BTreeNode* rightmost = leftmost;
+            while (bp_get_next(rightmost)) {
+                rightmost = bp_get_next(rightmost);
+            }
+
+            std::vector<uint32_t> reverse_keys;
+            current = rightmost;
+            while (current) {
+                uint32_t* keys = reinterpret_cast<uint32_t*>(current->data);
+                // Add keys in reverse order within each node
+                for (int i = current->num_keys - 1; i >= 0; i--) {
+                    reverse_keys.push_back(keys[i]);
+                }
+                current = bp_get_prev(current);
+            }
+
+            // Verify backward traversal gives reverse order
+            std::reverse(reverse_keys.begin(), reverse_keys.end());
+            bool backward_correct = (reverse_keys == linked_list_keys);
+            check("Backward linked list traversal correct", backward_correct);
+
+            // Test that first node has no previous
+            check("Left-most node has no previous", bp_get_prev(leftmost) == nullptr);
+
+            // Test that last node has no next
+            check("Right-most node has no next", bp_get_next(rightmost) == nullptr);
+        }
 
 
-
-
-    // // Verify sequential order in leaves
-    // auto leaves = bp_print_leaves(tree);
-    // bool ordered = true;
-    // for (size_t i = 1; i < leaves.size(); i++) {
-    //     if (leaves[i-1].first >= leaves[i].first) {
-    //         ordered = false;
-    //         break;
-    //     }
-    // }
-    // check("Sequential insertion maintains sorted order", ordered);
-    // check("All sequential elements in leaves", leaves.size() == 100);
-
-    // Verify data integrity
-    // bool data_intact = true;
-    // for (size_t i = 0; i < leaves.size(); i++) {
-    //     const Int64Record* rec = reinterpret_cast<const Int64Record*>(leaves[i].second);
-    //     if (rec->value != static_cast<int64_t>(leaves[i].first * 1000)) {
-    //         data_intact = false;
-    //         break;
-    //     }
-    // }
-    // check("Sequential data values intact", data_intact);
+    check("Sequential data values intact", data_intact);
 
     pager_commit();
     pager_close();
@@ -640,13 +680,17 @@ int main() {
 
     try {
 
-// test_capacity_and_splits();
-       test_sequential_operations();
+
+
+test_capacity_and_splits();
+test_sequential_operations();
+test_update_operations();
 test_data_types();
 test_boundary_conditions();
-// test_persistence();
 test_random_operations();
 test_composite_records();
+test_persistence();
+
 
         std::cout << "\n=== Test Suite Completed ===" << std::endl;
         std::cout << "All tests finished. Check individual results above." << std::endl;

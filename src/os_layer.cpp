@@ -1,7 +1,9 @@
 #include "os_layer.hpp"
 
+// Comment out the next line to use memory filesystem instead of platform-specific
+// #define USE_PLATFORM_FS
 
-#ifdef _WIN32
+#if defined(USE_PLATFORM_FS) && defined(_WIN32)
 #include <windows.h>
 #include <io.h>
 
@@ -29,11 +31,6 @@ bool os_file_exists(const char* filename) {
 void os_file_delete(const char* filename) {
     DeleteFileA(filename);
 }
-
-
-
-
-
 
 os_file_size_t os_file_read(os_file_handle_t handle, void* buffer, os_file_size_t size) {
     DWORD bytes_read = 0;
@@ -70,78 +67,74 @@ void os_file_truncate(os_file_handle_t handle, os_file_offset_t size) {
     SetEndOfFile((HANDLE)handle);
 }
 
-#else
-
-
+#elif defined(USE_PLATFORM_FS)
+// Unix/Linux implementation
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
-#include "os_layer.hpp"
+
+#define OS_INVALID_HANDLE -1
+
+os_file_handle_t os_file_open(const char* filename, bool read_write, bool create) {
+    int flags = read_write ? O_RDWR : O_RDONLY;
+    if (create) flags |= O_CREAT;
+    return open(filename, flags, 0644);
+}
+
+void os_file_close(os_file_handle_t handle) {
+    if (handle != OS_INVALID_HANDLE) {
+        close(handle);
+    }
+}
+
+bool os_file_exists(const char* filename) {
+    struct stat st;
+    return stat(filename, &st) == 0;
+}
+
+void os_file_delete(const char* filename) {
+    unlink(filename);
+}
+
+os_file_size_t os_file_read(os_file_handle_t handle, void* buffer, os_file_size_t size) {
+    ssize_t result = read(handle, buffer, size);
+    return (result < 0) ? 0 : (os_file_size_t)result;
+}
+
+os_file_size_t os_file_write(os_file_handle_t handle, const void* buffer, os_file_size_t size) {
+    ssize_t result = write(handle, buffer, size);
+    return (result < 0) ? 0 : (os_file_size_t)result;
+}
+
+void os_file_sync(os_file_handle_t handle) {
+    fsync(handle);
+}
+
+void os_file_seek(os_file_handle_t handle, os_file_offset_t offset) {
+    lseek(handle, offset, SEEK_SET);
+}
+
+os_file_offset_t os_file_size(os_file_handle_t handle) {
+    struct stat st;
+    if (fstat(handle, &st) == 0) {
+        return (os_file_offset_t)st.st_size;
+    }
+    return 0;
+}
+
+void os_file_truncate(os_file_handle_t handle, os_file_offset_t size) {
+    ftruncate(handle, size);
+}
+
+#else
+// Memory filesystem implementation
 #include <unordered_map>
 #include <vector>
 #include <string>
 #include <cstring>
 #include <algorithm>
-//#define OS_INVALID_HANDLE -1
+
 #define OS_INVALID_HANDLE 0
-
-
-
-
-// os_file_handle_t os_file_open(const char* filename, bool read_write, bool create) {
-//     int flags = read_write ? O_RDWR : O_RDONLY;
-//     if (create) flags |= O_CREAT;
-//     return open(filename, flags, 0644);
-// }
-
-// void os_file_close(os_file_handle_t handle) {
-//     if (handle != OS_INVALID_HANDLE) {
-//         close(handle);
-//     }
-// }
-
-// bool os_file_exists(const char* filename) {
-//     struct stat st;
-//     return stat(filename, &st) == 0;
-// }
-
-// void os_file_delete(const char* filename) {
-//     unlink(filename);
-// }
-
-
-// os_file_size_t os_file_read(os_file_handle_t handle, void* buffer, os_file_size_t size) {
-//     ssize_t result = read(handle, buffer, size);
-//     return (result < 0) ? 0 : (os_file_size_t)result;
-// }
-
-// os_file_size_t os_file_write(os_file_handle_t handle, const void* buffer, os_file_size_t size) {
-//     ssize_t result = write(handle, buffer, size);
-//     return (result < 0) ? 0 : (os_file_size_t)result;
-// }
-
-// void os_file_sync(os_file_handle_t handle) {
-//     fsync(handle);
-// }
-
-// void os_file_seek(os_file_handle_t handle, os_file_offset_t offset) {
-//     lseek(handle, offset, SEEK_SET);
-// }
-
-// os_file_offset_t os_file_size(os_file_handle_t handle) {
-//     struct stat st;
-//     if (fstat(handle, &st) == 0) {
-//         return (os_file_offset_t)st.st_size;
-//     }
-//     return 0;
-// }
-
-// void os_file_truncate(os_file_handle_t handle, os_file_offset_t size) {
-//     ftruncate(handle, size);
-// }
-
-/*----------------------------- */
-
 
 struct MemoryFile {
     std::vector<uint8_t> data;
@@ -282,4 +275,5 @@ void os_file_truncate(os_file_handle_t handle, os_file_offset_t size) {
         file->position = (size_t)size;
     }
 }
+
 #endif

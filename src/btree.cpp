@@ -361,7 +361,7 @@ void bp_insert_repair(BPlusTree& tree, BTreeNode* node) {
 }
 
 BTreeNode* bp_split(BPlusTree& tree, BTreeNode* node) {
-    std::cout << "split\n";
+
     BTreeNode* right_node = bp_create_node(tree, node->is_leaf);
 
     uint32_t split_index = bp_get_split_index(tree, node);
@@ -373,7 +373,7 @@ BTreeNode* bp_split(BPlusTree& tree, BTreeNode* node) {
 
     if (node->parent != 0) {
         BTreeNode* current_parent = bp_get_parent(node);
-        std::cout << current_parent->index <<"\n";
+
         uint32_t* parent_keys = get_keys(current_parent);
         uint32_t* parent_children = get_children(current_parent);
 
@@ -697,7 +697,6 @@ void bp_repair_after_delete(BPlusTree& tree, BTreeNode* node) {
 }
 
 BTreeNode* bp_merge_right(BPlusTree& tree, BTreeNode* node) {
-    std::cout << "merge right\n";
     BTreeNode* parent_node = bp_get_parent(node);
     uint32_t* parent_children = get_children(parent_node);
     uint32_t* parent_keys = get_keys(parent_node);
