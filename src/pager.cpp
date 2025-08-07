@@ -577,9 +577,6 @@ void pager_get_stats(unsigned int *total_pages, unsigned int *free_pages,
 }
 
 void pager_close() {
-  pager_sync();
-
   os_file_close(pager.data_fd);
-
   pager.data_fd = -1;
 }

@@ -4,9 +4,10 @@
 #define PAGE_INVALID 0
 #define PAGE_ROOT 0
 
-#define PAGE_SIZE 4096
+
 #define MAX_CACHE_ENTRIES 12
 #define FREE_PAGES_PER_FREE_PAGE ((PAGE_SIZE - (sizeof(unsigned int) * 4)) / 4)
+#include "defs.hpp"
 
 void pager_init(const char *filename);
 
