@@ -114,3 +114,7 @@ BTreeNode* bp_merge_right(BPlusTree& tree, BTreeNode* node);
 BTreeNode* bp_steal_from_left(BPlusTree& tree, BTreeNode* node, uint32_t parent_index);
 BTreeNode* bp_steal_from_right(BPlusTree& tree, BTreeNode* node, uint32_t parent_index);
 void bp_update_parent_keys(BPlusTree& tree, BTreeNode* node, uint32_t deleted_key);
+
+void bp_debug_print_tree(const BPlusTree& tree);
+void bp_debug_print_structure(const BPlusTree& tree);
+uint64_t debug_hash_tree(const BPlusTree& tree);

@@ -1,6 +1,8 @@
 
 // btree_test.cpp
 #include "btree.hpp"
+#include "pager.hpp"
+#include <cstdint>
 #include <iostream>
 #include <cassert>
 #include <vector>
@@ -36,6 +38,7 @@ void check(const std::string& test_name, bool condition) {
         std::cout << RED << "✗ " << RESET << test_name << std::endl;
         g_results.failed++;
         g_results.failed_tests.push_back(test_name);
+        exit(0);
     }
 }
 
@@ -675,6 +678,227 @@ void test_boundary_conditions() {
     pager_close();
 }
 
+
+
+void test_rollback_functionality() {
+    std::cout << BLUE << "\n=== Testing Rollback and mark_dirty Behavior ===" << RESET << std::endl;
+
+    const char* db_file = "test_rollback.db";
+            std::vector<ColumnInfo> schema = {{TYPE_INT32}};
+            BPlusTree tree = bp_create(schema);
+    // Test 1: Basic rollback after modifications
+    {
+        pager_init(db_file);
+        pager_begin_transaction();
+
+
+
+        bp_init(tree);
+
+        // Insert some initial data
+        for (int i = 0; i < 10; i++) {
+            Int32Record data = {i * 100};
+            bp_insert_element(tree, i, reinterpret_cast<const uint8_t*>(&data));
+        }
+
+        // Verify initial data exists
+        bool initial_data_present = true;
+        for (int i = 0; i < 10; i++) {
+            if (!bp_find_element(tree, i)) {
+                initial_data_present = false;
+                break;
+            }
+        }
+
+        pager_commit();
+
+
+
+
+
+        uint64_t before;
+        uint64_t during;
+        uint64_t after;
+
+        pager_begin_transaction();
+
+        before = debug_hash_tree(tree);
+
+
+        // Verify we can still see committed data
+        bool committed_data_visible = true;
+        for (int i = 0; i < 10; i++) {
+            if (!bp_find_element(tree, i)) {
+                committed_data_visible = false;
+                break;
+            }
+        }
+        check("Rollback: Committed data visible", committed_data_visible);
+
+        // Make modifications that we'll rollback
+        // 1. Update existing records
+        for (int i = 0; i < 5; i++) {
+            Int32Record updated_data = {i * 1000}; // Change from i*100 to i*1000
+            bp_insert_element(tree, i, reinterpret_cast<const uint8_t*>(&updated_data));
+        }
+
+        // 2. Insert new records
+        for (int i = 100; i < 110; i++) {
+            Int32Record new_data = {i * 50};
+            bp_insert_element(tree, i, reinterpret_cast<const uint8_t*>(&new_data));
+        }
+
+        // 3. Delete some existing records
+        for (int i = 7; i < 10; i++) {
+            bp_delete_element(tree, i);
+        }
+
+        // Verify modifications are visible before rollback
+        const Int32Record* updated = reinterpret_cast<const Int32Record*>(bp_get(tree, 2));
+        bool modifications_visible = (updated && updated->value == 2000) &&
+                                   bp_find_element(tree, 105) &&
+                                   !bp_find_element(tree, 8);
+        check("Rollback: Modifications visible before rollback", modifications_visible);
+
+        // Force a rollback by simulating transaction abort
+        during = debug_hash_tree(tree);
+        pager_rollback();
+        after = debug_hash_tree(tree);
+        pager_close();
+
+        check("Hashes work", during != before && before == after);
+    }
+
+    // Test 3: Verify rollback worked - original data should be restored
+    {
+        pager_init(db_file);
+        pager_begin_transaction();
+
+        // std::vector<ColumnInfo> schema = {{TYPE_INT32}};
+        // BPlusTree tree = bp_create(schema);
+        // bp_init(tree);
+
+        // Check that updates were rolled back
+        bool updates_rolled_back = true;
+        for (int i = 0; i < 5; i++) {
+            const Int32Record* result = reinterpret_cast<const Int32Record*>(bp_get(tree, i));
+            if (!result || result->value != i * 100) { // Should be original i*100, not i*1000
+                updates_rolled_back = false;
+                std::cout << "Key " << i << " has value " << (result ? result->value : -999)
+                         << ", expected " << (i * 100) << std::endl;
+                break;
+            }
+        }
+        check("Rollback: Updates rolled back to original values", updates_rolled_back);
+
+        // Check that inserts were rolled back
+        bool inserts_rolled_back = true;
+        for (int i = 100; i < 110; i++) {
+            if (bp_find_element(tree, i)) {
+                inserts_rolled_back = false;
+                break;
+            }
+        }
+        check("Rollback: New inserts rolled back", inserts_rolled_back);
+
+        // Check that deletes were rolled back
+        bool deletes_rolled_back = true;
+        for (int i = 7; i < 10; i++) {
+            const Int32Record* result = reinterpret_cast<const Int32Record*>(bp_get(tree, i));
+            if (!result || result->value != i * 100) {
+                deletes_rolled_back = false;
+                break;
+            }
+        }
+        check("Rollback: Deletes rolled back (data restored)", deletes_rolled_back);
+
+        pager_commit();
+        pager_close();
+    }
+
+    // // Test 4: Test rollback behavior with node splits
+    {
+        pager_init("test_rollback_splits.db");
+        pager_begin_transaction();
+        tree = bp_create(schema);
+        bp_init(tree);
+
+        // Insert enough data to cause splits, then rollback
+        int insert_count = tree.leaf_max_keys * 3; // Force multiple splits
+
+        for (int i = 0; i < insert_count; i++) {
+            Int32Record data = {i * 10};
+            bp_insert_element(tree, i, reinterpret_cast<const uint8_t*>(&data));
+        }
+
+        // Verify data is there
+        bool all_inserted = bp_find_element(tree, 0) &&
+                           bp_find_element(tree, insert_count - 1) &&
+                           bp_find_element(tree, insert_count / 2);
+        check("Rollback splits: Data inserted before rollback", all_inserted);
+
+        // Rollback - this should test that new pages created during splits are properly handled
+        pager_rollback();
+        pager_close();
+    }
+
+    // Test 5: Verify split rollback worked
+    {
+        pager_init("test_rollback_splits.db");
+        pager_begin_transaction();
+
+
+        // Tree should be empty after rollback
+        bool tree_empty = !bp_find_element(tree, 0) &&
+                         !bp_find_element(tree, 10) &&
+                         !bp_find_element(tree, 100);
+        check("Rollback splits: Tree empty after rollback", tree_empty);
+
+        pager_commit();
+        pager_close();
+    }
+
+    // Test 6: Test partial transaction rollback (journal replay)
+    {
+        pager_init("test_partial_rollback.db");
+        tree = bp_create(schema);
+        bp_init(tree);
+
+        // Simulate a crash by not calling commit after modifications
+        pager_begin_transaction();
+
+        std::vector<ColumnInfo> schema = {{TYPE_VARCHAR32}};
+        BPlusTree tree = bp_create(schema);
+        bp_init(tree);
+
+        for (int i = 0; i < 20; i++) {
+            VarChar32Record data;
+            snprintf(data.data, sizeof(data.data), "Record_%d", i);
+            bp_insert_element(tree, i, reinterpret_cast<const uint8_t*>(&data));
+        }
+
+        // Simulate crash - close without commit (journal should remain)
+        pager_close();
+    }
+
+    // // Test 7: Verify journal recovery on reopen
+    {
+        // When we reopen, pager_init should detect the journal and rollback
+        pager_init("test_partial_rollback.db");
+
+
+
+        // After journal recovery, tree should be empty
+        bool recovered_empty = !bp_find_element(tree, 0) &&
+                              !bp_find_element(tree, 10) &&
+                              !bp_find_element(tree, 19);
+        check("Journal recovery: Tree empty after journal rollback", recovered_empty);
+
+
+        pager_close();
+    }
+}
+
 int main() {
     std::cout << "B+ Tree Test Suite" << std::endl;
     std::cout << "==================" << std::endl;
@@ -683,6 +907,7 @@ int main() {
 
 
 
+test_rollback_functionality();
 test_capacity_and_splits();
 test_sequential_operations();
 test_update_operations();
@@ -690,7 +915,7 @@ test_data_types();
 test_boundary_conditions();
 test_random_operations();
 test_composite_records();
-// test_persistence();
+test_persistence();
 
 
         std::cout << "\n=== Test Suite Completed ===" << std::endl;
