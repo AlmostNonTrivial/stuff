@@ -437,7 +437,7 @@ unsigned int pager_new() {
 }
 
 void pager_mark_dirty(unsigned int page_index) {
-  if (page_index > pager.root.page_counter && !pager.in_transaction) {
+  if (page_index > pager.root.page_counter || !pager.in_transaction) {
     return;
   }
 
@@ -455,7 +455,7 @@ void pager_mark_dirty(unsigned int page_index) {
 
 void pager_delete(unsigned int page_index) {
   if (page_index == PAGE_INVALID ||
-      page_index >= pager.root.page_counter && !pager.in_transaction) {
+      page_index >= pager.root.page_counter || !pager.in_transaction) {
     return;
   }
 
