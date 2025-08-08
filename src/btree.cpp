@@ -415,6 +415,21 @@ BTreeNode *bp_split(BPlusTree &tree, BTreeNode *node) {
            right_node->num_keys * tree.record_size);
   }
 
+  // Right before setting node->num_keys = split_index:
+  std::cout << "SPLIT DEBUG: Original node " << node->index
+            << " had keys: ";
+  for (uint32_t i = 0; i < node->num_keys; i++) {
+      std::cout << node_keys[i] << " ";
+  }
+  std::cout << "\nAfter split - Left will have: ";
+  for (uint32_t i = 0; i < split_index; i++) {
+      std::cout << node_keys[i] << " ";
+  }
+  std::cout << "\nRight will have: ";
+  for (uint32_t i = 0; i < right_node->num_keys; i++) {
+      std::cout << right_keys[i] << " ";
+  }
+  std::cout << "\nRising key: " << rising_key << std::endl;
   node->num_keys = split_index;
 
   if (node->parent != 0) {
@@ -1345,4 +1360,219 @@ void bp_debug_node_layout(BPlusTree &tree, BTreeNode *node,
   }
 
   std::cout << "==========================" << std::endl;
+}
+
+
+
+
+
+
+#include <cassert>
+
+static void bp_verify_node_invariants(BPlusTree &tree, BTreeNode *node) {
+    if (!node) return;
+
+    // Check key count bounds
+    uint32_t min_keys = bp_get_min_keys(tree, node);
+    uint32_t max_keys = bp_get_max_keys(tree, node);
+
+    // Root can have fewer than min_keys
+    if (node->parent != 0 && node->num_keys < min_keys) {
+        std::cerr << "INVARIANT VIOLATION: Node " << node->index
+                  << " has " << node->num_keys << " keys, minimum is " << min_keys << std::endl;
+        exit(1);
+    }
+
+    if (node->num_keys > max_keys) {
+        std::cerr << "INVARIANT VIOLATION: Node " << node->index
+                  << " has " << node->num_keys << " keys, maximum is " << max_keys << std::endl;
+        exit(1);
+    }
+
+    uint32_t *keys = get_keys(node);
+
+    // Check key ordering within node
+    for (uint32_t i = 1; i < node->num_keys; i++) {
+        if (keys[i-1] >= keys[i]) {
+            std::cerr << "INVARIANT VIOLATION: Keys not sorted in node " << node->index
+                      << " at positions " << i-1 << " and " << i
+                      << " (values " << keys[i-1] << ", " << keys[i] << ")" << std::endl;
+            exit(1);
+        }
+    }
+
+    // Check child pointer count for internal nodes
+    if (!node->is_leaf) {
+        uint32_t *children = get_children(tree, node);
+
+        // Should have exactly num_keys + 1 children
+        for (uint32_t i = 0; i <= node->num_keys; i++) {
+            if (children[i] == 0) {
+                std::cerr << "INVARIANT VIOLATION: Internal node " << node->index
+                          << " missing child pointer at index " << i << std::endl;
+                exit(1);
+            }
+        }
+
+        // Check that children point back to this node as parent
+        for (uint32_t i = 0; i <= node->num_keys; i++) {
+            BTreeNode *child = bp_get_child(tree, node, i);
+            if (!child) {
+                std::cerr << "INVARIANT VIOLATION: Cannot access child " << i
+                          << " of node " << node->index << std::endl;
+                exit(1);
+            }
+            if (child->parent != node->index) {
+                std::cerr << "INVARIANT VIOLATION: Child " << child->index
+                          << " has parent " << child->parent
+                          << " but should be " << node->index << std::endl;
+                exit(1);
+            }
+        }
+    }
+}
+
+static void bp_verify_key_separation(BPlusTree &tree, BTreeNode *node) {
+    if (!node || node->is_leaf) return;
+
+    uint32_t *keys = get_keys(node);
+
+    for (uint32_t i = 0; i <= node->num_keys; i++) {
+        BTreeNode *child = bp_get_child(tree, node, i);
+        if (!child) continue;
+
+        uint32_t *child_keys = get_keys(child);
+
+        // Check left boundary: all keys in left child should be < separator
+        if (i > 0) {
+            uint32_t separator = keys[i-1];
+            for (uint32_t j = 0; j < child->num_keys; j++) {
+                if (child_keys[j] >= separator) {
+                    std::cerr << "INVARIANT VIOLATION: Key " << child_keys[j]
+                              << " in child " << child->index
+                              << " violates left separator " << separator
+                              << " from parent " << node->index << std::endl;
+                    exit(1);
+                }
+            }
+        }
+
+        // Check right boundary: all keys in right child should be >= separator
+        if (i < node->num_keys) {
+            uint32_t separator = keys[i];
+            for (uint32_t j = 0; j < child->num_keys; j++) {
+                if (child_keys[j] < separator) {
+                    std::cerr << "INVARIANT VIOLATION: Key " << child_keys[j]
+                              << " in child " << child->index
+                              << " violates right separator " << separator
+                              << " from parent " << node->index << std::endl;
+                    exit(1);
+                }
+            }
+        }
+
+        // Recursively check children
+        bp_verify_key_separation(tree, child);
+    }
+}
+
+static void bp_verify_leaf_links(BPlusTree &tree) {
+    BTreeNode *current = bp_left_most(tree);
+    BTreeNode *prev = nullptr;
+
+    while (current) {
+        if (!current->is_leaf) {
+            std::cerr << "INVARIANT VIOLATION: Non-leaf node " << current->index
+                      << " found in leaf traversal" << std::endl;
+            exit(1);
+        }
+
+        // Check backward link
+        if (prev && current->previous != (prev ? prev->index : 0)) {
+            std::cerr << "INVARIANT VIOLATION: Leaf " << current->index
+                      << " has previous=" << current->previous
+                      << " but should be " << (prev ? prev->index : 0) << std::endl;
+            exit(1);
+        }
+
+        // Check forward link consistency
+        if (prev && prev->next != current->index) {
+            std::cerr << "INVARIANT VIOLATION: Leaf " << prev->index
+                      << " has next=" << prev->next
+                      << " but should be " << current->index << std::endl;
+            exit(1);
+        }
+
+        prev = current;
+        current = bp_get_next(current);
+    }
+}
+
+static void bp_verify_tree_height(BPlusTree &tree, BTreeNode *node, int expected_height, int current_height = 0) {
+    if (!node) return;
+
+    if (node->is_leaf) {
+        if (current_height != expected_height) {
+            std::cerr << "INVARIANT VIOLATION: Leaf " << node->index
+                      << " at height " << current_height
+                      << " but expected height " << expected_height << std::endl;
+            exit(1);
+        }
+    } else {
+        for (uint32_t i = 0; i <= node->num_keys; i++) {
+            BTreeNode *child = bp_get_child(tree, node, i);
+            if (child) {
+                bp_verify_tree_height(tree, child, expected_height, current_height + 1);
+            }
+        }
+    }
+}
+
+static int bp_calculate_tree_height(BPlusTree &tree) {
+    BTreeNode *node = bp_get_root(tree);
+    int height = 0;
+
+    while (node && !node->is_leaf) {
+        node = bp_get_child(tree, node, 0);
+        height++;
+    }
+
+    return height;
+}
+
+void bp_verify_all_invariants(BPlusTree &tree) {
+    BTreeNode *root = bp_get_root(tree);
+    if (!root) return;
+
+    // Calculate expected height
+    int expected_height = bp_calculate_tree_height(tree);
+
+    // Verify all nodes
+    std::queue<BTreeNode*> to_visit;
+    to_visit.push(root);
+
+    while (!to_visit.empty()) {
+        BTreeNode *node = to_visit.front();
+        to_visit.pop();
+
+        bp_verify_node_invariants(tree, node);
+
+        if (!node->is_leaf) {
+            for (uint32_t i = 0; i <= node->num_keys; i++) {
+                BTreeNode *child = bp_get_child(tree, node, i);
+                if (child) {
+                    to_visit.push(child);
+                }
+            }
+        }
+    }
+
+    // Verify key separation
+    bp_verify_key_separation(tree, root);
+
+    // Verify leaf links
+    bp_verify_leaf_links(tree);
+
+    // Verify uniform height
+    bp_verify_tree_height(tree, root, expected_height);
 }
