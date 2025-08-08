@@ -33,13 +33,13 @@ struct BPlusTree {
     uint32_t internal_split_index;
     uint32_t leaf_split_index;
     uint32_t record_size;  // Total size of each record
+    uint32_t node_key_size;
 };
 
 #define NODE_HEADER_SIZE 28
-#define NODE_KEY_SIZE sizeof(uint32_t)
 
 // B+Tree node structure - fits in a single page
-struct BTreeNode {
+struct BPTreeNode {
     // Node header (28 bytes)
     uint32_t index;          // Page index
     uint32_t parent;         // Parent page index (0 if root)
@@ -62,37 +62,39 @@ struct LeafDataEntry {
     std::vector<uint8_t> data;  // Copied record data
 };
 
-static_assert(sizeof(BTreeNode) == PAGE_SIZE, "BTreeNode must be exactly PAGE_SIZE");
+static_assert(sizeof(BPTreeNode) == PAGE_SIZE, "BTreeNode must be exactly PAGE_SIZE");
 
 // Capacity calculation
-BPlusTreeCapacity bp_calculate_capacity(const std::vector<ColumnInfo>& schema);
+
+
+BPlusTreeCapacity bp_calculate_capacity(BPlusTree&tree, const std::vector<ColumnInfo> &schema);
 
 // Tree management
-BPlusTree bp_create(const std::vector<ColumnInfo>& schema);
+BPlusTree bp_create(DataType key, const std::vector<ColumnInfo> &schema);
 void bp_init(BPlusTree& tree);
 void bp_reset(BPlusTree& tree);
 
 // Node management
-BTreeNode* bp_create_node(BPlusTree& tree, bool is_leaf);
-void bp_destroy_node(BTreeNode* node);
-void bp_mark_dirty(BTreeNode* node);
+BPTreeNode* bp_create_node(BPlusTree& tree, bool is_leaf);
+void bp_destroy_node(BPTreeNode* node);
+void bp_mark_dirty(BPTreeNode* node);
 
 // Node navigation
-BTreeNode* bp_get_parent(BTreeNode* node);
-BTreeNode* bp_get_child(BPlusTree& tree, BTreeNode* node, uint32_t index);
-BTreeNode* bp_get_next(BTreeNode* node);
-BTreeNode* bp_get_prev(BTreeNode* node);
+BPTreeNode* bp_get_parent(BPTreeNode* node);
+BPTreeNode* bp_get_child(BPlusTree& tree, BPTreeNode* node, uint32_t index);
+BPTreeNode* bp_get_next(BPTreeNode* node);
+BPTreeNode* bp_get_prev(BPTreeNode* node);
 
 // Node linking
-void bp_set_parent(BTreeNode* node, uint32_t parent_index);
-void bp_set_child(BPlusTree& tree, BTreeNode* node, uint32_t child_index, uint32_t node_index);
-void bp_set_next(BTreeNode* node, uint32_t index);
-void bp_set_prev(BTreeNode* node, uint32_t index);
+void bp_set_parent(BPTreeNode* node, uint32_t parent_index);
+void bp_set_child(BPlusTree& tree, BPTreeNode* node, uint32_t child_index, uint32_t node_index);
+void bp_set_next(BPTreeNode* node, uint32_t index);
+void bp_set_prev(BPTreeNode* node, uint32_t index);
 
 // Tree properties
-uint32_t bp_get_max_keys(BPlusTree& tree, BTreeNode* node);
-uint32_t bp_get_min_keys(BPlusTree& tree, BTreeNode* node);
-uint32_t bp_get_split_index(BPlusTree& tree, BTreeNode* node);
+uint32_t bp_get_max_keys(BPlusTree& tree, BPTreeNode* node);
+uint32_t bp_get_min_keys(BPlusTree& tree, BPTreeNode* node);
+uint32_t bp_get_split_index(BPlusTree& tree, BPTreeNode* node);
 
 // Core operations - data is a buffer containing the record
 void bp_insert_element(BPlusTree& tree, uint32_t key, const uint8_t* data);
@@ -101,28 +103,31 @@ void bp_delete_element(BPlusTree& tree, uint32_t key);
 // Search operations - returns pointer to record data within node
 bool bp_find_element(BPlusTree& tree, uint32_t key);
 const uint8_t* bp_get(BPlusTree& tree, uint32_t key);
-BTreeNode* bp_find_leaf_node(BPlusTree& tree, BTreeNode* node, uint32_t key);
+BPTreeNode* bp_find_leaf_node(BPlusTree& tree, BPTreeNode* node, uint32_t key);
 
 // Tree traversal
-BTreeNode* bp_get_root(BPlusTree& tree);
-BTreeNode* bp_left_most(BPlusTree& tree);
+BPTreeNode* bp_get_root(BPlusTree& tree);
+BPTreeNode* bp_left_most(BPlusTree& tree);
 std::vector<std::pair<uint32_t, const uint8_t*>> bp_print_leaves(BPlusTree& tree);
 
 // Internal operations
-void bp_insert(BPlusTree& tree, BTreeNode* node, uint32_t key, const uint8_t* data);
-void bp_insert_repair(BPlusTree& tree, BTreeNode* node);
-BTreeNode* bp_split(BPlusTree& tree, BTreeNode* node);
-void bp_do_delete(BPlusTree& tree, BTreeNode* node, uint32_t key);
-void bp_repair_after_delete(BPlusTree& tree, BTreeNode* node);
-BTreeNode* bp_merge_right(BPlusTree& tree, BTreeNode* node);
-BTreeNode* bp_steal_from_left(BPlusTree& tree, BTreeNode* node, uint32_t parent_index);
-BTreeNode* bp_steal_from_right(BPlusTree& tree, BTreeNode* node, uint32_t parent_index);
-void bp_update_parent_keys(BPlusTree& tree, BTreeNode* node, uint32_t deleted_key);
+void bp_insert(BPlusTree& tree, BPTreeNode* node, uint32_t key, const uint8_t* data);
+void bp_insert_repair(BPlusTree& tree, BPTreeNode* node);
+BPTreeNode* bp_split(BPlusTree& tree, BPTreeNode* node);
+void bp_do_delete(BPlusTree& tree, BPTreeNode* node, uint32_t key);
+void bp_repair_after_delete(BPlusTree& tree, BPTreeNode* node);
+BPTreeNode* bp_merge_right(BPlusTree& tree, BPTreeNode* node);
+BPTreeNode* bp_steal_from_left(BPlusTree& tree, BPTreeNode* node, uint32_t parent_index);
+BPTreeNode* bp_steal_from_right(BPlusTree& tree, BPTreeNode* node, uint32_t parent_index);
+void bp_update_parent_keys(BPlusTree& tree, BPTreeNode* node, uint32_t deleted_key);
 
 // Debug operations
 void bp_debug_print_tree(BPlusTree& tree);
 void bp_debug_print_structure(BPlusTree& tree);
 uint64_t debug_hash_tree(BPlusTree& tree);
-void bp_debug_capacity_calculation(const std::vector<ColumnInfo>& schema);
-void bp_debug_node_layout(BPlusTree& tree, BTreeNode* node, std::vector<ColumnInfo>& schema);
+
+
+void bp_debug_capacity_calculation(BPlusTree& tree, const std::vector<ColumnInfo> &schema);
+void bp_debug_node_layout(BPlusTree& tree, BPTreeNode* node, std::vector<ColumnInfo>& schema);
 std::vector<LeafDataEntry> bp_extract_leaf_data(BPlusTree& tree);
+void bp_verify_all_invariants(BPlusTree &tree);

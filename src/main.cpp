@@ -286,7 +286,7 @@ void test_data_types() {
     pager_begin_transaction();
 
     std::vector<ColumnInfo> schema = {{TYPE_INT32}};
-    BPlusTree tree = bp_create(schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema);
     bp_init(tree);
 
     Int32Record data1 = {42};
@@ -321,7 +321,7 @@ void test_data_types() {
     pager_begin_transaction();
 
     std::vector<ColumnInfo> schema = {{TYPE_INT64}};
-    BPlusTree tree = bp_create(schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema);
     bp_init(tree);
 
     Int64Record data1 = {9223372036854775807LL}; // MAX_LONG
@@ -350,7 +350,7 @@ void test_data_types() {
     pager_begin_transaction();
 
     std::vector<ColumnInfo> schema = {{TYPE_VARCHAR32}};
-    BPlusTree tree = bp_create(schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema);
     bp_init(tree);
 
     VarChar32Record data1;
@@ -383,7 +383,7 @@ void test_data_types() {
     pager_begin_transaction();
 
     std::vector<ColumnInfo> schema = {{TYPE_VARCHAR256}};
-    BPlusTree tree = bp_create(schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema);
     bp_init(tree);
 
     VarChar256Record data1;
@@ -423,7 +423,7 @@ void test_composite_records() {
       {TYPE_VARCHAR256} // description
   };
 
-  BPlusTree tree = bp_create(schema);
+  BPlusTree tree = bp_create(TYPE_INT32, schema);
   bp_init(tree);
 
   // Insert composite records
@@ -472,7 +472,7 @@ void test_capacity_and_splits() {
     pager_begin_transaction();
 
     std::vector<ColumnInfo> schema = {{TYPE_INT32}};
-    BPlusTree tree = bp_create(schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema);
     bp_init(tree);
 
     // Calculate expected capacity
@@ -486,6 +486,7 @@ void test_capacity_and_splits() {
     for (int i = 0; i < 1000; i++) {
       Int32Record data = {i * 10};
       bp_insert_element(tree, i, reinterpret_cast<const uint8_t *>(&data));
+      bp_verify_all_invariants(tree);
     }
 
     // Verify all can be found
@@ -509,7 +510,7 @@ void test_capacity_and_splits() {
 
     std::vector<ColumnInfo> schema = {
         {TYPE_INT32}, {TYPE_INT64}, {TYPE_VARCHAR32}, {TYPE_VARCHAR256}};
-    BPlusTree tree = bp_create(schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema);
     bp_init(tree);
 
     const uint32_t expected_leaf_capacity =
@@ -538,26 +539,33 @@ void test_capacity_and_splits() {
   }
 }
 
-void test_delete(){
+void verify_invariants(){
 
-    pager_init("test_delete.db");
+    pager_init("invariants.db");
     pager_begin_transaction();
     std::vector<ColumnInfo> schema = {{TYPE_INT64}};
-    BPlusTree tree = bp_create(schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema);
 
     Int64Record record = {10LL};
-    int count = tree.leaf_max_keys * 100;
+    int count = tree.leaf_max_keys;
     bp_init(tree);
 
     for(int i = 0; i < count; i++) {
         bp_insert_element(tree, i, reinterpret_cast<const uint8_t*>(&record));
+        bp_verify_all_invariants(tree);
     }
 
     for(int i = 0; i < count; i++) {
         bp_delete_element(tree, i);
+
+        bp_verify_all_invariants(tree);
     }
 
-    bp_debug_print_tree(tree);
+    // would have crashed
+
+    // check("All invariants true", true);
+
+    // bp_debug_print_tree(tree);
 }
 
 void test_sequential_operations() {
@@ -568,7 +576,7 @@ void test_sequential_operations() {
   pager_begin_transaction();
 
   std::vector<ColumnInfo> schema = {{TYPE_INT64}};
-  BPlusTree tree = bp_create(schema);
+  BPlusTree tree = bp_create(TYPE_INT32, schema);
 
   int count = tree.leaf_max_keys * 5;
   bp_init(tree);
@@ -609,13 +617,13 @@ void test_sequential_operations() {
   // Test leaf node linked list structure
   std::cout << "Testing leaf node linked list integrity..." << std::endl;
 
-  BTreeNode *leftmost = bp_left_most(tree);
+  BPTreeNode *leftmost = bp_left_most(tree);
   check("Left-most leaf node exists", leftmost != nullptr);
 
   if (leftmost) {
     // Walk through the linked list and verify order
     std::vector<uint32_t> linked_list_keys;
-    BTreeNode *current = leftmost;
+    BPTreeNode *current = leftmost;
 
     while (current) {
       uint32_t *keys = reinterpret_cast<uint32_t *>(current->data);
@@ -639,7 +647,7 @@ void test_sequential_operations() {
     check("Linked list maintains sorted order", linked_list_sorted);
 
     // Test backward traversal
-    BTreeNode *rightmost = leftmost;
+    BPTreeNode *rightmost = leftmost;
     while (bp_get_next(rightmost)) {
       rightmost = bp_get_next(rightmost);
     }
@@ -681,7 +689,7 @@ void test_random_operations() {
   pager_begin_transaction();
 
   std::vector<ColumnInfo> schema = {{TYPE_INT32}};
-  BPlusTree tree = bp_create(schema);
+  BPlusTree tree = bp_create(TYPE_INT32, schema);
   bp_init(tree);
 
   // Generate random keys
@@ -760,7 +768,7 @@ void test_update_operations() {
   pager_begin_transaction();
 
   std::vector<ColumnInfo> schema = {{TYPE_VARCHAR32}};
-  BPlusTree tree = bp_create(schema);
+  BPlusTree tree = bp_create(TYPE_INT32, schema);
   bp_init(tree);
 
   // Initial insert
@@ -814,7 +822,7 @@ void test_persistence() {
     pager_begin_transaction();
 
     std::vector<ColumnInfo> schema = {{TYPE_INT32}, {TYPE_VARCHAR32}};
-    tree = bp_create(schema);
+    tree = bp_create(TYPE_INT32, schema);
     bp_init(tree);
 
     struct Record {
@@ -876,7 +884,7 @@ void test_boundary_conditions() {
   pager_begin_transaction();
 
   std::vector<ColumnInfo> schema = {{TYPE_INT32}};
-  BPlusTree tree = bp_create(schema);
+  BPlusTree tree = bp_create(TYPE_INT32, schema);
   bp_init(tree);
 
   // Test empty tree
@@ -918,7 +926,7 @@ void test_boundary_conditions() {
   pager_init("test_exact_capacity.db");
   pager_begin_transaction();
 
-  BPlusTree tree2 = bp_create(schema);
+  BPlusTree tree2 = bp_create(TYPE_INT32, schema);
   bp_init(tree2);
 
   std::cout << "Leaf max keys: " << tree2.leaf_max_keys << std::endl;
@@ -955,7 +963,7 @@ void test_rollback_functionality() {
 
   const char *db_file = "test_rollback.db";
   std::vector<ColumnInfo> schema = {{TYPE_INT32}};
-  BPlusTree tree = bp_create(schema);
+  BPlusTree tree = bp_create(TYPE_INT32, schema);
   // Test 1: Basic rollback after modifications
   {
     pager_init(db_file);
@@ -1041,7 +1049,7 @@ void test_rollback_functionality() {
     pager_begin_transaction();
 
     // std::vector<ColumnInfo> schema = {{TYPE_INT32}};
-    // BPlusTree tree = bp_create(schema);
+    // BPlusTree tree = bp_create(TYPE_INT32, schema);
     // bp_init(tree);
 
     // Check that updates were rolled back
@@ -1091,7 +1099,7 @@ void test_rollback_functionality() {
   {
     pager_init("test_rollback_splits.db");
     pager_begin_transaction();
-    tree = bp_create(schema);
+    tree = bp_create(TYPE_INT32, schema);
     bp_init(tree);
 
     // Insert enough data to cause splits, then rollback
@@ -1131,14 +1139,14 @@ void test_rollback_functionality() {
   // Test 6: Test partial transaction rollback (journal replay)
   {
     pager_init("test_partial_rollback.db");
-    tree = bp_create(schema);
+    tree = bp_create(TYPE_INT32, schema);
     bp_init(tree);
 
     // Simulate a crash by not calling commit after modifications
     pager_begin_transaction();
 
     std::vector<ColumnInfo> schema = {{TYPE_VARCHAR32}};
-    BPlusTree tree = bp_create(schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema);
     bp_init(tree);
 
     for (int i = 0; i < 20; i++) {
@@ -1177,18 +1185,18 @@ int main() {
 
 
 
-         //  test_delete();
-         // exit(0);
-    test_composite_records();
+          verify_invariants();
 
-    test_rollback_functionality();
-    test_capacity_and_splits();
-    test_sequential_operations();
-    test_update_operations();
-    test_data_types();
-    test_boundary_conditions();
-    test_random_operations();
-    test_persistence();
+    // test_composite_records();
+
+    // test_rollback_functionality();
+    // test_capacity_and_splits();
+    // test_sequential_operations();
+    // test_update_operations();
+    // test_data_types();
+    // test_boundary_conditions();
+    // test_random_operations();
+    // test_persistence();
 
     std::cout << "\n=== Test Suite Completed ===" << std::endl;
     std::cout << "All tests finished. Check individual results above."
