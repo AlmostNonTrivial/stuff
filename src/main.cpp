@@ -538,6 +538,28 @@ void test_capacity_and_splits() {
   }
 }
 
+void test_delete(){
+
+    pager_init("test_delete.db");
+    pager_begin_transaction();
+    std::vector<ColumnInfo> schema = {{TYPE_INT64}};
+    BPlusTree tree = bp_create(schema);
+
+    Int64Record record = {10LL};
+    int count = tree.leaf_max_keys * 100;
+    bp_init(tree);
+
+    for(int i = 0; i < count; i++) {
+        bp_insert_element(tree, i, reinterpret_cast<const uint8_t*>(&record));
+    }
+
+    for(int i = 0; i < count; i++) {
+        bp_delete_element(tree, i);
+    }
+
+    bp_debug_print_tree(tree);
+}
+
 void test_sequential_operations() {
   std::cout << BLUE << "\n=== Testing Sequential Operations ===" << RESET
             << std::endl;
@@ -1152,6 +1174,11 @@ int main() {
   try {
 
           // large_records();
+
+
+
+         //  test_delete();
+         // exit(0);
     test_composite_records();
 
     test_rollback_functionality();
