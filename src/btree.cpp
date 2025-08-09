@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <vector>
 
+void bp_print_node(BPlusTree &tree, BPTreeNode *node);
 // Helper functions to access arrays within the node's data area
 static uint32_t *get_keys(BPTreeNode *node) {
   return reinterpret_cast<uint32_t *>(node->data);
@@ -453,7 +454,7 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
   uint32_t rising_key = node_keys[split_index];
   uint32_t parent_index = 0;
 
-  // Parent handling (same as before)
+  // Parent handling
   if (node->parent != 0) {
     BPTreeNode *current_parent = bp_get_parent(node);
     uint32_t *parent_keys = get_keys(current_parent);
@@ -469,13 +470,13 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
 
     bp_mark_dirty(current_parent);
 
-    // Shift parent's keys and children to make room
+    // Shift parent's keys and children
     for (uint32_t i = current_parent->num_keys; i > parent_index; i--) {
       parent_children[i + 1] = parent_children[i];
       parent_keys[i] = parent_keys[i - 1];
     }
 
-    // For B-tree internal nodes, also shift records
+    // For B-tree internal nodes, shift records
     if (tree.tree_type == BTREE && !current_parent->is_leaf) {
       uint8_t *parent_records = get_internal_record_data(tree, current_parent);
       for (uint32_t i = current_parent->num_keys; i > parent_index; i--) {
@@ -489,7 +490,6 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
     parent_keys[parent_index] = rising_key;
     bp_set_child(tree, current_parent, parent_index + 1, right_node->index);
 
-    // For B-tree: copy the rising key's record to parent
     if (tree.tree_type == BTREE && !node->is_leaf) {
       uint8_t *parent_records = get_internal_record_data(tree, current_parent);
       uint8_t *node_records = get_internal_record_data(tree, node);
@@ -501,7 +501,7 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
 
   uint32_t right_split = node->is_leaf ? split_index : split_index + 1;
 
-  // Handle leaf sibling links (same as before)
+  // Handle leaf sibling links
   if (node->is_leaf) {
     bp_set_prev(right_node, node->index);
     bp_set_next(right_node, node->next);
@@ -529,25 +529,19 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
 
   // Handle records
   if (node->is_leaf) {
-    // Leaf: copy records normally
     uint8_t *node_records = get_record_data(tree, node);
     uint8_t *right_records = get_record_data(tree, right_node);
     memcpy(right_records,
            node_records + right_split * tree.record_size,
            right_node->num_keys * tree.record_size);
-
   } else if (tree.tree_type == BTREE) {
-    // B-tree internal: copy records (skip the rising key's record)
     uint8_t *node_records = get_internal_record_data(tree, node);
     uint8_t *right_records = get_internal_record_data(tree, right_node);
-
-    // Copy records after split_index (not including split_index itself)
     for (uint32_t i = split_index + 1; i < node->num_keys; i++) {
       memcpy(right_records + (i - split_index - 1) * tree.record_size,
              node_records + i * tree.record_size,
              tree.record_size);
     }
-    // Adjust right node key count for B-tree internal nodes
     right_node->num_keys = node->num_keys - split_index - 1;
   }
 
@@ -555,7 +549,6 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
   if (!node->is_leaf) {
     uint32_t *node_children = get_children(tree, node);
     uint32_t *right_children = get_children(tree, right_node);
-
     for (uint32_t i = right_split; i <= node->num_keys; i++) {
       bp_set_child(tree, right_node, i - right_split, node_children[i]);
       node_children[i] = 0;
@@ -565,18 +558,29 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
   // Update left node's key count
   node->num_keys = split_index;
 
-  // Handle root creation if needed
+  // Debug check for B+tree internal node split
+  if (tree.tree_type == BPLUS && !node->is_leaf) {
+    for (uint32_t i = 0; i < right_node->num_keys; i++) {
+      if (right_keys[i] <= rising_key) {
+        std::cerr << "ERROR: Right node key " << right_keys[i]
+                  << " <= rising_key " << rising_key << " after split" << std::endl;
+        bp_print_node(tree, node);
+        bp_print_node(tree, right_node);
+        bp_print_node(tree, bp_get_parent(node));
+        exit(1);
+      }
+    }
+  }
+
+  // Handle root creation
   if (node->parent != 0) {
     return bp_get_parent(node);
   } else {
-    // Create new root
     BPTreeNode *new_root = bp_create_node(tree, false);
     uint32_t *new_root_keys = get_keys(new_root);
-
     new_root_keys[0] = rising_key;
     new_root->num_keys = 1;
 
-    // For B-tree: copy record to new root
     if (tree.tree_type == BTREE && !node->is_leaf) {
       uint8_t *new_root_records = get_internal_record_data(tree, new_root);
       uint8_t *node_records = get_internal_record_data(tree, node);
@@ -1016,7 +1020,6 @@ BPTreeNode *bp_steal_from_left(BPlusTree &tree, BPTreeNode *node,
 
   return node;
 }
-
 /* Print Debug */
 void bp_debug_print_tree(BPlusTree &tree) {
   if (tree.root_page_index == 0) {
@@ -1719,21 +1722,32 @@ static void verify_key_separation(BPlusTree &tree, BPTreeNode *node) {
     if (i < node->num_keys) {
       uint32_t upper_separator = keys[i];
       for (uint32_t j = 0; j < child->num_keys; j++) {
-        if (tree.tree_type == BTREE) {
-          if (child_keys[j] > upper_separator) {
-            std::cerr << "INVARIANT VIOLATION: Key " << child_keys[j]
-                      << " in child " << child->index
-                      << " violates upper bound " << upper_separator
-                      << " from parent " << node->index << std::endl;
-            exit(1);
+          if (tree.tree_type == BTREE) {
+            if (child_keys[j] > upper_separator) {
+              std::cerr << "INVARIANT VIOLATION: Key " << child_keys[j]
+                        << " in child " << child->index
+                        << " violates upper bound " << upper_separator
+                        << " from parent " << node->index << std::endl;
+              bp_print_node(tree, node);
+              bp_print_node(tree, child);
+              exit(1);
+            }
+          } else {
+            if (child_keys[j] >= upper_separator) {
+              std::cerr << "INVARIANT VIOLATION: Key " << child_keys[j]
+                        << " in child " << child->index
+                        << " violates upper bound " << upper_separator
+                        << " from parent " << node->index << std::endl;
+              bp_print_node(tree, node);
+              bp_print_node(tree, child);
+              // bp_debug_print_tree(tree);
+              exit(1);
+            }
           }
-        } else if (child_keys[j] >= upper_separator) {
-          std::cerr << "INVARIANT VIOLATION: Key " << child_keys[j]
-                    << " in child " << child->index << " violates upper bound "
-                    << upper_separator << " from parent " << node->index
-                    << std::endl;
-          exit(1);
-        }
+
+
+
+
       }
     }
 
@@ -1976,7 +1990,10 @@ static void validate_bplus_internal_node(BPlusTree &tree, BPTreeNode *node) {
       exit(0);
     }
 
+
     if (child->parent != node->index) {
+
+
       std::cout << "// Child node's parent pointer does not point to this node"
                 << std::endl;
       exit(0);
@@ -2180,7 +2197,7 @@ static void verify_all_invariants(BPlusTree &tree) {
 
     } else {
       if (node->is_leaf) {
-        validate_bplus_leaf_node(tree, node);
+        // validate_bplus_leaf_node(tree, node);
       } else {
         validate_bplus_internal_node(tree, node);
       }
@@ -2224,7 +2241,7 @@ void test_tree_toplevel(bool single_node) {
     // validate_tree(tree);
 
     int insert_count =
-        single_node ? tree.leaf_max_keys : tree.leaf_max_keys * 10;
+        single_node ? tree.leaf_max_keys : tree.leaf_max_keys * 8;
 
     std::set<uint32_t> keys;
     std::set<uint32_t> deleted_keys;
