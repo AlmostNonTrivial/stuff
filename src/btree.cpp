@@ -33,7 +33,7 @@ static uint8_t *get_record_at(BPlusTree &tree, BPTreeNode *node,
                               uint32_t index) {
   if (!node->is_leaf || index >= node->num_keys)
     return nullptr;
-  return get_record_data(tree, node) + (index * node->record_size);
+  return get_record_data(tree, node) + (index * tree.record_size);
 }
 
 // Forward declaration
@@ -61,6 +61,14 @@ BPlusTree bp_create(DataType key, const std::vector<ColumnInfo> &schema,
     record_size += col.type;
   }
   tree.record_size = record_size;
+
+
+ if(tree_type == BTREE)  {
+     tree.record_size = 4;
+     tree.node_key_size = 4;
+ }
+
+
 
   constexpr uint32_t USABLE_SPACE = PAGE_SIZE - NODE_HEADER_SIZE;
   const uint32_t minimum_entry_count = 3U;
@@ -146,7 +154,7 @@ BPTreeNode *bp_create_node(BPlusTree &tree, bool is_leaf) {
   node->previous = 0;
   node->num_keys = 0;
   node->is_leaf = is_leaf ? 1 : 0;
-  node->record_size = is_leaf ? tree.record_size : 0;
+  // node->record_size = is_leaf ? tree.record_size : 0;
 
   memset(node->data, 0, sizeof(node->data));
 
@@ -332,7 +340,7 @@ void bp_insert(BPlusTree &tree, BPTreeNode *node, uint32_t key,
     uint8_t *record_data = get_record_data(tree, node);
 
     for (uint32_t i = 0; i < node->num_keys; i++) {
-      if (keys[i] == key) {
+      if (keys[i] == key && tree.tree_type == BPLUS) {
         bp_mark_dirty(node);
         memcpy(record_data + i * tree.record_size, data, tree.record_size);
         return;
@@ -479,8 +487,7 @@ static bool bp_find_in_tree(BPlusTree &tree, BPTreeNode *node, uint32_t key) {
   uint32_t *keys = get_keys(node);
   uint32_t i;
 
-  for (i = 0; i < node->num_keys && keys[i] < key; i++)
-    ;
+  for (i = 0; i < node->num_keys && keys[i] < key; i++);
 
   if (i == node->num_keys) {
     if (!node->is_leaf) {
@@ -1346,13 +1353,13 @@ void bp_debug_node_layout(BPlusTree &tree, BPTreeNode *node,
   std::cout << "  Index: " << node->index << std::endl;
   std::cout << "  Is leaf: " << (node->is_leaf ? "YES" : "NO") << std::endl;
   std::cout << "  Num keys: " << node->num_keys << std::endl;
-  std::cout << "  Record size: " << node->record_size << std::endl;
+  std::cout << "  Record size: " << tree.record_size << std::endl;
 
   if (node->is_leaf) {
     uint32_t keys_end = tree.leaf_max_keys * tree.node_key_size;
     uint32_t records_start = keys_end;
     uint32_t records_end =
-        records_start + tree.leaf_max_keys * node->record_size;
+        records_start + tree.leaf_max_keys * tree.record_size;
 
     std::cout << "Leaf layout:" << std::endl;
     std::cout << "  Keys: data[0] to data[" << (keys_end - 1) << "]"
@@ -1669,12 +1676,6 @@ void validate_bplus_leaf_node(BPlusTree &tree, BPTreeNode *node) {
         }
     }
 
-    // Record size must match tree's record size for leaf nodes
-    if (node->record_size != tree.record_size) {
-        std::cout << "// Leaf node record size mismatch: node=" << node->record_size
-                  << " != tree=" << tree.record_size << std::endl;
-        exit(0);
-    }
 
     // If this is not the root, validate parent relationship
     if (node->parent != 0) {
@@ -1758,12 +1759,7 @@ void validate_bplus_internal_node(BPlusTree &tree, BPTreeNode *node) {
         }
     }
 
-    // Record size must be 0 for internal nodes in B+ trees
-    if (node->record_size != 0) {
-        std::cout << "// Internal node should have record_size = 0, got "
-                  << node->record_size << std::endl;
-        exit(0);
-    }
+
 
     // Must have n+1 children for n keys
     uint32_t *children = get_children(tree, node);
@@ -1854,19 +1850,14 @@ void validate_btree_node(BPlusTree &tree, BPTreeNode *node) {
     // Keys must be sorted in ascending order
     uint32_t *keys = get_keys(node);
     for (uint32_t i = 1; i < node->num_keys; i++) {
-        if (keys[i] <= keys[i-1]) {
+        if (keys[i] < keys[i-1]) {
             std::cout << "// B-tree keys not in ascending order: keys[" << i-1
-                      << "] = " << keys[i-1] << " >= keys[" << i << "] = " << keys[i] << std::endl;
+                      << "] = " << keys[i-1] << " > keys[" << i << "] = " << keys[i] << std::endl;
             exit(0);
         }
     }
 
-    // Record size must match tree's record size (both leaf and internal store records in B-tree)
-    if (node->record_size != tree.record_size) {
-        std::cout << "// B-tree node record size mismatch: node=" << node->record_size
-                  << " != tree=" << tree.record_size << std::endl;
-        exit(0);
-    }
+
 
     // If internal node, validate children
     if (!node->is_leaf) {

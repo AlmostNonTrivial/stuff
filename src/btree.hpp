@@ -40,20 +40,19 @@ struct BPlusTree {
     TreeType tree_type;
 };
 
-#define NODE_HEADER_SIZE 28
+#define NODE_HEADER_SIZE 24
 
 // B+Tree node structure - fits in a single page
 struct BPTreeNode {
-    // Node header (28 bytes)
+    // Node header (24 bytes)
     uint32_t index;          // Page index
     uint32_t parent;         // Parent page index (0 if root)
     uint32_t next;           // Next sibling (for leaf nodes)
     uint32_t previous;       // Previous sibling (for leaf nodes)
     uint32_t num_keys;       // Number of keys in this node
-    uint32_t record_size;    // Size of each record (for leaves)
     uint8_t is_leaf;         // 1 if leaf, 0 if internal
     uint8_t padding[3];      // Alignment padding (increased due to max_keys removal)
-    // 28 bytes ^
+    // 24 bytes ^
     // Data area - stores keys, children pointers, and data
     // Layout for internal nodes: [keys][children]
     // Layout for leaf nodes: [keys][records]
