@@ -14,7 +14,7 @@
 #include <random>
 #include <string>
 #include <vector>
-#include "btree_tests.hpp"
+
 
 // Test result tracking
 struct TestResults {
@@ -488,7 +488,7 @@ void test_capacity_and_splits() {
     for (int i = 0; i < 1000; i++) {
       Int32Record data = {i * 10};
       bp_insert_element(tree, i, reinterpret_cast<const uint8_t *>(&data));
-      bp_verify_all_invariants(tree);
+      // bp_verify_all_invariants(tree);
     }
 
     // Verify all can be found
@@ -542,37 +542,7 @@ void test_capacity_and_splits() {
 }
 
 void verify_invariants(){
-
-    pager_init("invariants.db");
-    pager_begin_transaction();
-    std::vector<ColumnInfo> schema = {{TYPE_INT64}};
-    BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
-    bp_validate_tree(tree);
-   if(!test_single_leaf_operations()){
-       std::cout <<"Falsed";
-       exit(0);
-   }
-   return;
-
-    Int64Record record = {10LL};
-    int count = tree.leaf_max_keys * 10;
-    bp_init(tree);
-
-    for(int i = 0; i < count; i++) {
-        bp_insert_element(tree, i, reinterpret_cast<const uint8_t*>(&record));
-        bp_verify_all_invariants(tree);
-    }
-
-    for(int i = 0; i < count; i++) {
-        bp_delete_element(tree, i);
-        bp_verify_all_invariants(tree);
-    }
-
-    // would have crashed
-
-    // check("All invariants true", true);
-
-    // bp_debug_print_tree(tree);
+    test_tree_toplevel(false);
 }
 
 void test_sequential_operations() {

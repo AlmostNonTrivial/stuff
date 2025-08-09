@@ -135,11 +135,8 @@ uint64_t debug_hash_tree(BPlusTree& tree);
 void bp_debug_capacity_calculation(BPlusTree& tree, const std::vector<ColumnInfo> &schema);
 void bp_debug_node_layout(BPlusTree& tree, BPTreeNode* node, std::vector<ColumnInfo>& schema);
 std::vector<LeafDataEntry> bp_extract_leaf_data(BPlusTree& tree);
-void bp_verify_all_invariants(BPlusTree &tree);
+
 
 uint32_t *get_key_at(BPlusTree & tree, BPTreeNode *node, uint32_t index);
 
-
-void validate_bplus_leaf_node(BPlusTree &tree, BPTreeNode *node);
-void validate_bplus_internal_node(BPlusTree &tree, BPTreeNode *node);
-void validate_btree_node(BPlusTree &tree, BPTreeNode *node);
+void test_tree_toplevel(bool single_node);
