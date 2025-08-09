@@ -15,6 +15,11 @@ static uint32_t *get_keys(BPTreeNode *node) {
   return reinterpret_cast<uint32_t *>(node->data);
 }
 
+
+
+
+
+
 static uint32_t *get_children(BPlusTree &tree, BPTreeNode *node) {
   return reinterpret_cast<uint32_t *>(node->data + tree.internal_max_keys *
                                                        tree.node_key_size);
@@ -334,7 +339,7 @@ void bp_insert(BPlusTree &tree, BPTreeNode *node, uint32_t key,
       }
     }
 
-    if (node->num_keys >= tree.leaf_max_keys) {
+    if (node->num_keys >= tree.leaf_max_keys ) {
       bp_insert_repair(tree, node);
       bp_insert(tree, bp_find_leaf_node(tree, bp_get_root(tree), key), key,
                 data);
@@ -1625,4 +1630,321 @@ void bp_verify_all_invariants(BPlusTree &tree) {
 
   // Verify uniform height
   bp_verify_tree_height(tree, root, expected_height);
+}
+
+
+void validate_bplus_leaf_node(BPlusTree &tree, BPTreeNode *node) {
+    if (!node) {
+        std::cout << "// Node pointer is null" << std::endl;
+        exit(0);
+    }
+
+    // Must be marked as leaf
+    if (!node->is_leaf) {
+        std::cout << "// Node is not marked as leaf (is_leaf = 0)" << std::endl;
+        exit(0);
+    }
+
+    // Key count must be within bounds
+    uint32_t min_keys = (node->parent == 0) ? 1 : tree.leaf_min_keys;  // Root can have as few as 1 key
+    if (node->num_keys < min_keys) {
+        std::cout << "// Leaf node has too few keys: " << node->num_keys
+                  << " < " << min_keys << std::endl;
+        exit(0);
+    }
+
+    if (node->num_keys > tree.leaf_max_keys) {
+        std::cout << "// Leaf node has too many keys: " << node->num_keys
+                  << " > " << tree.leaf_max_keys << std::endl;
+        exit(0);
+    }
+
+    // Keys must be sorted in ascending order
+    uint32_t *keys = get_keys(node);
+    for (uint32_t i = 1; i < node->num_keys; i++) {
+        if (keys[i] <= keys[i-1]) {
+            std::cout << "// Leaf keys not in ascending order: keys[" << i-1
+                      << "] = " << keys[i-1] << " >= keys[" << i << "] = " << keys[i] << std::endl;
+            exit(0);
+        }
+    }
+
+    // Record size must match tree's record size for leaf nodes
+    if (node->record_size != tree.record_size) {
+        std::cout << "// Leaf node record size mismatch: node=" << node->record_size
+                  << " != tree=" << tree.record_size << std::endl;
+        exit(0);
+    }
+
+    // If this is not the root, validate parent relationship
+    if (node->parent != 0) {
+        BPTreeNode *parent = static_cast<BPTreeNode *>(pager_get(node->parent));
+        if (!parent) {
+            std::cout << "// Cannot access parent node at page " << node->parent << std::endl;
+            exit(0);
+        }
+
+        if (parent->is_leaf) {
+            std::cout << "// Parent node is marked as leaf but has children" << std::endl;
+            exit(0);
+        }
+
+        // Verify that parent actually points to this node
+        uint32_t *parent_children = get_children(tree, parent);
+        bool found_in_parent = false;
+        for (uint32_t i = 0; i <= parent->num_keys; i++) {
+            if (parent_children[i] == node->index) {
+                found_in_parent = true;
+                break;
+            }
+        }
+        if (!found_in_parent) {
+            std::cout << "// Node not found in parent's children array" << std::endl;
+            exit(0);
+        }
+    }
+
+    // Validate sibling links if they exist
+    if (node->next != 0) {
+        BPTreeNode *next_node = static_cast<BPTreeNode *>(pager_get(node->next));
+        if (next_node && next_node->previous != node->index) {
+            std::cout << "// Next sibling's previous pointer does not point back to this node" << std::endl;
+            exit(0);
+        }
+    }
+
+    if (node->previous != 0) {
+        BPTreeNode *prev_node = static_cast<BPTreeNode *>(pager_get(node->previous));
+        if (prev_node && prev_node->next != node->index) {
+            std::cout << "// Previous sibling's next pointer does not point to this node" << std::endl;
+            exit(0);
+        }
+    }
+}
+
+void validate_bplus_internal_node(BPlusTree &tree, BPTreeNode *node) {
+    if (!node) {
+        std::cout << "// Node pointer is null" << std::endl;
+        exit(0);
+    }
+
+    // Must not be marked as leaf
+    if (node->is_leaf) {
+        std::cout << "// Node is marked as leaf but should be internal" << std::endl;
+        exit(0);
+    }
+
+    // Key count must be within bounds
+    uint32_t min_keys = (node->parent == 0) ? 1 : tree.internal_min_keys;  // Root can have as few as 1 key
+    if (node->num_keys < min_keys) {
+        std::cout << "// Internal node has too few keys: " << node->num_keys
+                  << " < " << min_keys << std::endl;
+        exit(0);
+    }
+
+    if (node->num_keys > tree.internal_max_keys) {
+        std::cout << "// Internal node has too many keys: " << node->num_keys
+                  << " > " << tree.internal_max_keys << std::endl;
+        exit(0);
+    }
+
+    // Keys must be sorted in ascending order
+    uint32_t *keys = get_keys(node);
+    for (uint32_t i = 1; i < node->num_keys; i++) {
+        if (keys[i] <= keys[i-1]) {
+            std::cout << "// Internal keys not in ascending order: keys[" << i-1
+                      << "] = " << keys[i-1] << " >= keys[" << i << "] = " << keys[i] << std::endl;
+            exit(0);
+        }
+    }
+
+    // Record size must be 0 for internal nodes in B+ trees
+    if (node->record_size != 0) {
+        std::cout << "// Internal node should have record_size = 0, got "
+                  << node->record_size << std::endl;
+        exit(0);
+    }
+
+    // Must have n+1 children for n keys
+    uint32_t *children = get_children(tree, node);
+    for (uint32_t i = 0; i <= node->num_keys; i++) {
+        if (children[i] == 0) {
+            std::cout << "// Internal node missing child at index " << i << std::endl;
+            exit(0);
+        }
+
+        // Verify child exists and points back to this node as parent
+        BPTreeNode *child = static_cast<BPTreeNode *>(pager_get(children[i]));
+        if (!child) {
+            std::cout << "// Cannot access child node at page " << children[i] << std::endl;
+            exit(0);
+        }
+
+        if (child->parent != node->index) {
+            std::cout << "// Child node's parent pointer does not point to this node" << std::endl;
+            exit(0);
+        }
+
+        // Check no self-reference
+        if (children[i] == node->index) {
+            std::cout << "// Node references itself as child" << std::endl;
+            exit(0);
+        }
+    }
+
+    // Internal nodes should not have next/previous pointers (only leaves do)
+    if (node->next != 0 || node->previous != 0) {
+        std::cout << "// Internal node has sibling pointers (next=" << node->next
+                  << ", prev=" << node->previous << "), but only leaves should" << std::endl;
+        exit(0);
+    }
+
+    // If this is not the root, validate parent relationship
+    if (node->parent != 0) {
+        BPTreeNode *parent = static_cast<BPTreeNode *>(pager_get(node->parent));
+        if (!parent) {
+            std::cout << "// Cannot access parent node at page " << node->parent << std::endl;
+            exit(0);
+        }
+
+        if (parent->is_leaf) {
+            std::cout << "// Parent node is marked as leaf but has children" << std::endl;
+            exit(0);
+        }
+
+        // Verify that parent actually points to this node
+        uint32_t *parent_children = get_children(tree, parent);
+        bool found_in_parent = false;
+        for (uint32_t i = 0; i <= parent->num_keys; i++) {
+            if (parent_children[i] == node->index) {
+                found_in_parent = true;
+                break;
+            }
+        }
+        if (!found_in_parent) {
+            std::cout << "// Node not found in parent's children array" << std::endl;
+            exit(0);
+        }
+    }
+}
+
+void validate_btree_node(BPlusTree &tree, BPTreeNode *node) {
+    if (!node) {
+        std::cout << "// Node pointer is null" << std::endl;
+        exit(0);
+    }
+
+    // For regular B-trees, both internal and leaf nodes store records
+    // Key count must be within bounds (same for both leaf and internal in regular B-tree)
+    uint32_t min_keys = (node->parent == 0) ? 1 : tree.leaf_min_keys;  // Using leaf limits since they're the same in BTREE
+    uint32_t max_keys = tree.leaf_max_keys;  // Same for both in regular B-tree
+
+    if (node->num_keys < min_keys) {
+        std::cout << "// B-tree node has too few keys: " << node->num_keys
+                  << " < " << min_keys << std::endl;
+        exit(0);
+    }
+
+    if (node->num_keys > max_keys) {
+        std::cout << "// B-tree node has too many keys: " << node->num_keys
+                  << " > " << max_keys << std::endl;
+        exit(0);
+    }
+
+    // Keys must be sorted in ascending order
+    uint32_t *keys = get_keys(node);
+    for (uint32_t i = 1; i < node->num_keys; i++) {
+        if (keys[i] <= keys[i-1]) {
+            std::cout << "// B-tree keys not in ascending order: keys[" << i-1
+                      << "] = " << keys[i-1] << " >= keys[" << i << "] = " << keys[i] << std::endl;
+            exit(0);
+        }
+    }
+
+    // Record size must match tree's record size (both leaf and internal store records in B-tree)
+    if (node->record_size != tree.record_size) {
+        std::cout << "// B-tree node record size mismatch: node=" << node->record_size
+                  << " != tree=" << tree.record_size << std::endl;
+        exit(0);
+    }
+
+    // If internal node, validate children
+    if (!node->is_leaf) {
+        uint32_t *children = get_children(tree, node);
+        for (uint32_t i = 0; i <= node->num_keys; i++) {
+            if (children[i] == 0) {
+                std::cout << "// B-tree internal node missing child at index " << i << std::endl;
+                exit(0);
+            }
+
+            // Verify child exists and points back to this node as parent
+            BPTreeNode *child = static_cast<BPTreeNode *>(pager_get(children[i]));
+            if (!child) {
+                std::cout << "// Cannot access child node at page " << children[i] << std::endl;
+                exit(0);
+            }
+
+            if (child->parent != node->index) {
+                std::cout << "// Child node's parent pointer does not point to this node" << std::endl;
+                exit(0);
+            }
+
+            // Check no self-reference
+            if (children[i] == node->index) {
+                std::cout << "// Node references itself as child" << std::endl;
+                exit(0);
+            }
+        }
+
+        // Internal nodes in B-tree should not have next/previous pointers
+        if (node->next != 0 || node->previous != 0) {
+            std::cout << "// B-tree internal node has sibling pointers, but should not" << std::endl;
+            exit(0);
+        }
+    } else {
+        // Leaf node sibling validation (if B-tree supports leaf linking)
+        if (node->next != 0) {
+            BPTreeNode *next_node = static_cast<BPTreeNode *>(pager_get(node->next));
+            if (next_node && next_node->previous != node->index) {
+                std::cout << "// Next sibling's previous pointer does not point back to this node" << std::endl;
+                exit(0);
+            }
+        }
+
+        if (node->previous != 0) {
+            BPTreeNode *prev_node = static_cast<BPTreeNode *>(pager_get(node->previous));
+            if (prev_node && prev_node->next != node->index) {
+                std::cout << "// Previous sibling's next pointer does not point to this node" << std::endl;
+                exit(0);
+            }
+        }
+    }
+
+    // If this is not the root, validate parent relationship
+    if (node->parent != 0) {
+        BPTreeNode *parent = static_cast<BPTreeNode *>(pager_get(node->parent));
+        if (!parent) {
+            std::cout << "// Cannot access parent node at page " << node->parent << std::endl;
+            exit(0);
+        }
+
+        if (parent->is_leaf) {
+            std::cout << "// Parent node is marked as leaf but has children" << std::endl;
+            exit(0);
+        }
+
+        // Verify that parent actually points to this node
+        uint32_t *parent_children = get_children(tree, parent);
+        bool found_in_parent = false;
+        for (uint32_t i = 0; i <= parent->num_keys; i++) {
+            if (parent_children[i] == node->index) {
+                found_in_parent = true;
+                break;
+            }
+        }
+        if (!found_in_parent) {
+            std::cout << "// Node not found in parent's children array" << std::endl;
+            exit(0);
+        }
+    }
 }

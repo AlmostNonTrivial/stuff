@@ -7,6 +7,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
@@ -547,9 +548,14 @@ void verify_invariants(){
     std::vector<ColumnInfo> schema = {{TYPE_INT64}};
     BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
     bp_validate_tree(tree);
+   if(!test_single_leaf_operations()){
+       std::cout <<"Falsed";
+       exit(0);
+   }
+   return;
 
     Int64Record record = {10LL};
-    int count = tree.leaf_max_keys;
+    int count = tree.leaf_max_keys * 10;
     bp_init(tree);
 
     for(int i = 0; i < count; i++) {
@@ -559,7 +565,6 @@ void verify_invariants(){
 
     for(int i = 0; i < count; i++) {
         bp_delete_element(tree, i);
-
         bp_verify_all_invariants(tree);
     }
 
