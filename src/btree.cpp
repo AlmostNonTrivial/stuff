@@ -1,4 +1,5 @@
 #include "btree.hpp"
+#include "pager.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -19,26 +20,23 @@ static uint32_t *get_children(BPlusTree &tree, BPTreeNode *node) {
   if (tree.tree_type == BTREE && !node->is_leaf) {
     // In B-trees, children come after keys AND records
     return reinterpret_cast<uint32_t *>(
-      node->data +
-      tree.internal_max_keys * tree.node_key_size +  // keys
-      tree.internal_max_keys * tree.record_size       // records
+        node->data + tree.internal_max_keys * tree.node_key_size + // keys
+        tree.internal_max_keys * tree.record_size                  // records
     );
   } else {
     // B+tree layout unchanged
-    return reinterpret_cast<uint32_t *>(
-      node->data + tree.internal_max_keys * tree.node_key_size
-    );
+    return reinterpret_cast<uint32_t *>(node->data + tree.internal_max_keys *
+                                                         tree.node_key_size);
   }
 }
-
-
 
 static uint8_t *get_internal_record_data(BPlusTree &tree, BPTreeNode *node) {
   // For B-trees, records come after keys in internal nodes
   return node->data + tree.internal_max_keys * tree.node_key_size;
 }
 
-static uint8_t *get_internal_record_at(BPlusTree &tree, BPTreeNode *node, uint32_t index) {
+static uint8_t *get_internal_record_at(BPlusTree &tree, BPTreeNode *node,
+                                       uint32_t index) {
   if (node->is_leaf || index >= node->num_keys)
     return nullptr;
   return get_internal_record_data(tree, node) + (index * tree.record_size);
@@ -48,8 +46,8 @@ static uint8_t *get_record_data(BPlusTree &tree, BPTreeNode *node) {
   return node->data + tree.leaf_max_keys * tree.node_key_size;
 }
 
-
-static uint8_t *get_record_at(BPlusTree &tree, BPTreeNode *node, uint32_t index) {
+static uint8_t *get_record_at(BPlusTree &tree, BPTreeNode *node,
+                              uint32_t index) {
   if (index >= node->num_keys)
     return nullptr;
 
@@ -60,9 +58,6 @@ static uint8_t *get_record_at(BPlusTree &tree, BPTreeNode *node, uint32_t index)
   }
   return nullptr;
 }
-
-
-
 
 // Forward declaration
 static bool bp_find_in_tree(BPlusTree &tree, BPTreeNode *node, uint32_t key);
@@ -90,11 +85,6 @@ BPlusTree bp_create(DataType key, const std::vector<ColumnInfo> &schema,
   }
   tree.record_size = record_size;
 
-  // if(tree_type == BTREE)  {
-  //     tree.record_size = 4;
-  //     tree.node_key_size = 4;
-  // }
-
   constexpr uint32_t USABLE_SPACE = PAGE_SIZE - NODE_HEADER_SIZE;
   const uint32_t minimum_entry_count = 3U;
 
@@ -105,35 +95,35 @@ BPlusTree bp_create(DataType key, const std::vector<ColumnInfo> &schema,
   }
 
   if (tree_type == BTREE) {
-      // B-tree internal nodes: [keys][records][children]
-        // Need space for n keys + n records + (n+1) child pointers
+    // B-tree internal nodes: [keys][records][children]
+    // Need space for n keys + n records + (n+1) child pointers
 
-        uint32_t key_record_size = tree.node_key_size + record_size;
-        uint32_t child_ptr_size = tree.node_key_size;
+    uint32_t key_record_size = tree.node_key_size + record_size;
+    uint32_t child_ptr_size = tree.node_key_size;
 
-        // Calculate max keys for internal nodes
-        // n*(key + record) + (n+1)*ptr <= USABLE_SPACE
-        // n*(key + record + ptr) + ptr <= USABLE_SPACE
-        // n <= (USABLE_SPACE - ptr) / (key + record + ptr)
-        uint32_t max_internal = (USABLE_SPACE - child_ptr_size) /
-                                (key_record_size + child_ptr_size);
+    // Calculate max keys for internal nodes
+    // n*(key + record) + (n+1)*ptr <= USABLE_SPACE
+    // n*(key + record + ptr) + ptr <= USABLE_SPACE
+    // n <= (USABLE_SPACE - ptr) / (key + record + ptr)
+    uint32_t max_internal =
+        (USABLE_SPACE - child_ptr_size) / (key_record_size + child_ptr_size);
 
-        // Leaf nodes just have [keys][records]
-        uint32_t max_leaf = USABLE_SPACE / key_record_size;
+    // Leaf nodes just have [keys][records]
+    uint32_t max_leaf = USABLE_SPACE / key_record_size;
 
-        // Use smaller for consistency
-        uint32_t max_keys = std::min(max_internal, max_leaf);
-        max_keys = std::max(minimum_entry_count, max_keys);
+    // Use smaller for consistency
+    uint32_t max_keys = std::min(max_internal, max_leaf);
+    max_keys = std::max(minimum_entry_count, max_keys);
 
-        uint32_t min_keys = max_keys / 2;
-        uint32_t split_index = max_keys / 2;
+    uint32_t min_keys = max_keys / 2;
+    uint32_t split_index = max_keys / 2;
 
-        tree.leaf_max_keys = max_keys;
-        tree.leaf_min_keys = min_keys;
-        tree.leaf_split_index = split_index;
-        tree.internal_max_keys = max_keys;
-        tree.internal_min_keys = min_keys;
-        tree.internal_split_index = split_index;
+    tree.leaf_max_keys = max_keys;
+    tree.leaf_min_keys = min_keys;
+    tree.leaf_split_index = split_index;
+    tree.internal_max_keys = max_keys;
+    tree.internal_min_keys = min_keys;
+    tree.internal_split_index = split_index;
   } else if (tree_type == BPLUS) {
     // === B+TREE: Different capacities for leaf vs internal ===
 
@@ -285,7 +275,7 @@ void bp_set_child(BPlusTree &tree, BPTreeNode *node, uint32_t child_index,
   if (node->index == node_index) {
     std::cerr << "ERROR: Attempting to make node " << node->index
               << " its own child!" << std::endl;
-    // exit(1);
+    exit(1);
   }
 
   bp_mark_dirty(node);
@@ -370,7 +360,8 @@ void bp_insert_repair(BPlusTree &tree, BPTreeNode *node) {
   }
 }
 
-void bp_insert(BPlusTree &tree, BPTreeNode *node, uint32_t key, const uint8_t *data) {
+void bp_insert(BPlusTree &tree, BPTreeNode *node, uint32_t key,
+               const uint8_t *data) {
   if (node->is_leaf) {
     uint32_t *keys = get_keys(node);
     uint8_t *record_data = get_record_data(tree, node);
@@ -390,7 +381,8 @@ void bp_insert(BPlusTree &tree, BPTreeNode *node, uint32_t key, const uint8_t *d
     // Check if split needed
     if (node->num_keys >= tree.leaf_max_keys) {
       bp_insert_repair(tree, node);
-      bp_insert(tree, bp_find_leaf_node(tree, bp_get_root(tree), key), key, data);
+      bp_insert(tree, bp_find_leaf_node(tree, bp_get_root(tree), key), key,
+                data);
       return;
     }
 
@@ -413,13 +405,13 @@ void bp_insert(BPlusTree &tree, BPTreeNode *node, uint32_t key, const uint8_t *d
     for (uint32_t i = node->num_keys; i > insert_index; i--) {
       keys[i] = keys[i - 1];
       memcpy(record_data + i * tree.record_size,
-             record_data + (i - 1) * tree.record_size,
-             tree.record_size);
+             record_data + (i - 1) * tree.record_size, tree.record_size);
     }
 
     // Insert new key and record
     keys[insert_index] = key;
-    memcpy(record_data + insert_index * tree.record_size, data, tree.record_size);
+    memcpy(record_data + insert_index * tree.record_size, data,
+           tree.record_size);
     node->num_keys++;
 
   } else {
@@ -434,7 +426,8 @@ void bp_insert(BPlusTree &tree, BPTreeNode *node, uint32_t key, const uint8_t *d
 
     // For B-tree: if key equals internal key, go to right subtree
     // This ensures duplicates end up in right subtree
-    if (tree.tree_type == BTREE && find_index < node->num_keys && keys[find_index] == key) {
+    if (tree.tree_type == BTREE && find_index < node->num_keys &&
+        keys[find_index] == key) {
       find_index++;
     }
 
@@ -445,13 +438,24 @@ void bp_insert(BPlusTree &tree, BPTreeNode *node, uint32_t key, const uint8_t *d
   }
 }
 
-
 // ============================================
 // 4. MODIFY bp_split FOR B-TREE RECORDS
 // ============================================
 
 BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
   BPTreeNode *right_node = bp_create_node(tree, node->is_leaf);
+
+  if (!right_node || right_node->index == 0) {
+    std::cerr << "ERROR: Failed to create right_node in split" << std::endl;
+    exit(1);
+  }
+
+  if (right_node->index == node->index) {
+    std::cerr << "ERROR: right_node has same index as original node: "
+              << node->index << std::endl;
+    exit(1);
+  }
+
   uint32_t split_index = bp_get_split_index(tree, node);
   uint32_t *node_keys = get_keys(node);
   uint32_t rising_key = node_keys[split_index];
@@ -465,7 +469,8 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
 
     for (parent_index = 0; parent_index < current_parent->num_keys + 1 &&
                            parent_children[parent_index] != node->index;
-         parent_index++);
+         parent_index++)
+      ;
 
     if (parent_index == current_parent->num_keys + 1) {
       throw std::runtime_error("Couldn't find which child we were!");
@@ -474,8 +479,12 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
     bp_mark_dirty(current_parent);
 
     // Shift parent's keys and children to make room
+    // First shift children (need to shift n+1 children for n keys)
     for (uint32_t i = current_parent->num_keys; i > parent_index; i--) {
       parent_children[i + 1] = parent_children[i];
+    }
+    // Then shift keys
+    for (uint32_t i = current_parent->num_keys; i > parent_index; i--) {
       parent_keys[i] = parent_keys[i - 1];
     }
 
@@ -484,13 +493,21 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
       uint8_t *parent_records = get_internal_record_data(tree, current_parent);
       for (uint32_t i = current_parent->num_keys; i > parent_index; i--) {
         memcpy(parent_records + i * tree.record_size,
-               parent_records + (i - 1) * tree.record_size,
-               tree.record_size);
+               parent_records + (i - 1) * tree.record_size, tree.record_size);
       }
     }
 
     current_parent->num_keys++;
     parent_keys[parent_index] = rising_key;
+
+    // Debug check before setting child
+    if (right_node->index == current_parent->index) {
+      std::cerr << "ERROR: About to make parent " << current_parent->index
+                << " and right_node the same at position " << (parent_index + 1)
+                << std::endl;
+      exit(1);
+    }
+
     bp_set_child(tree, current_parent, parent_index + 1, right_node->index);
 
     // For B-tree: copy the rising key's record to parent
@@ -498,14 +515,11 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
       uint8_t *parent_records = get_internal_record_data(tree, current_parent);
       uint8_t *node_records = get_internal_record_data(tree, node);
       memcpy(parent_records + parent_index * tree.record_size,
-             node_records + split_index * tree.record_size,
-             tree.record_size);
+             node_records + split_index * tree.record_size, tree.record_size);
     }
   }
 
-  uint32_t right_split = node->is_leaf ? split_index : split_index + 1;
-
-  // Handle leaf sibling links (same as before)
+  // Handle leaf sibling links
   if (node->is_leaf) {
     bp_set_prev(right_node, node->index);
     bp_set_next(right_node, node->next);
@@ -521,48 +535,85 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
   bp_mark_dirty(right_node);
   bp_mark_dirty(node);
 
-  // Set right node key count
-  right_node->num_keys = node->num_keys - right_split;
-
   uint32_t *right_keys = get_keys(right_node);
 
-  // Copy keys to right node
-  for (uint32_t i = right_split; i < node->num_keys; i++) {
-    right_keys[i - right_split] = node_keys[i];
-  }
-
-  // Handle records
+  // Handle the split differently for leaf vs internal, and B-tree vs B+tree
   if (node->is_leaf) {
-    // Leaf: copy records normally
+    // Leaf nodes: split at split_index
+    right_node->num_keys = node->num_keys - split_index;
+
+    // Copy keys to right node
+    for (uint32_t i = split_index; i < node->num_keys; i++) {
+      right_keys[i - split_index] = node_keys[i];
+    }
+
+    // Copy records
     uint8_t *node_records = get_record_data(tree, node);
     uint8_t *right_records = get_record_data(tree, right_node);
-    memcpy(right_records,
-           node_records + right_split * tree.record_size,
+    memcpy(right_records, node_records + split_index * tree.record_size,
            right_node->num_keys * tree.record_size);
 
-  } else if (tree.tree_type == BTREE) {
-    // B-tree internal: copy records (skip the rising key's record)
-    uint8_t *node_records = get_internal_record_data(tree, node);
-    uint8_t *right_records = get_internal_record_data(tree, right_node);
+  } else {
+    // Internal nodes
+    if (tree.tree_type == BTREE) {
+      // B-tree: rising key at split_index goes to parent
+      // Keys after split_index go to right node
+      right_node->num_keys = node->num_keys - split_index - 1;
 
-    // Copy records after split_index (not including split_index itself)
-    for (uint32_t i = split_index + 1; i < node->num_keys; i++) {
-      memcpy(right_records + (i - split_index - 1) * tree.record_size,
-             node_records + i * tree.record_size,
-             tree.record_size);
-    }
-    // Adjust right node key count for B-tree internal nodes
-    right_node->num_keys = node->num_keys - split_index - 1;
-  }
+      // Copy keys after the rising key to right node
+      for (uint32_t i = split_index + 1; i < node->num_keys; i++) {
+        right_keys[i - split_index - 1] = node_keys[i];
+      }
 
-  // Handle children for internal nodes
-  if (!node->is_leaf) {
-    uint32_t *node_children = get_children(tree, node);
-    uint32_t *right_children = get_children(tree, right_node);
+      // Copy records (excluding the rising key's record which went to parent)
+      uint8_t *node_records = get_internal_record_data(tree, node);
+      uint8_t *right_records = get_internal_record_data(tree, right_node);
+      for (uint32_t i = split_index + 1; i < node->num_keys; i++) {
+        memcpy(right_records + (i - split_index - 1) * tree.record_size,
+               node_records + i * tree.record_size, tree.record_size);
+      }
 
-    for (uint32_t i = right_split; i <= node->num_keys; i++) {
-      bp_set_child(tree, right_node, i - right_split, node_children[i]);
-      node_children[i] = 0;
+      // Copy children (starting from split_index + 1)
+      uint32_t *node_children = get_children(tree, node);
+      for (uint32_t i = split_index + 1; i <= node->num_keys; i++) {
+        uint32_t child_to_move = node_children[i];
+        uint32_t target_index = i - split_index - 1;
+
+        std::cerr << "DEBUG: Moving child from node " << node->index
+                  << " position " << i << " (child=" << child_to_move
+                  << ") to right_node " << right_node->index << " position "
+                  << target_index << std::endl;
+
+        if (child_to_move != 0) {
+          if (child_to_move == right_node->index) {
+            std::cerr << "ERROR: Trying to make right_node "
+                      << right_node->index << " its own child!" << std::endl;
+            exit(1);
+          }
+          bp_set_child(tree, right_node, target_index, child_to_move);
+          node_children[i] = 0;
+        }
+      }
+
+    } else {
+      // B+tree: rising key stays in nodes
+      right_node->num_keys = node->num_keys - split_index - 1;
+
+      // Copy keys after split_index to right node
+      for (uint32_t i = split_index + 1; i < node->num_keys; i++) {
+        right_keys[i - split_index - 1] = node_keys[i];
+      }
+
+      // Copy children
+      uint32_t *node_children = get_children(tree, node);
+      uint32_t *right_children = get_children(tree, right_node);
+      for (uint32_t i = split_index + 1; i <= node->num_keys; i++) {
+        uint32_t child_to_move = node_children[i];
+        if (child_to_move != 0) {
+          bp_set_child(tree, right_node, i - split_index - 1, child_to_move);
+          node_children[i] = 0;
+        }
+      }
     }
   }
 
@@ -584,8 +635,7 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
     if (tree.tree_type == BTREE && !node->is_leaf) {
       uint8_t *new_root_records = get_internal_record_data(tree, new_root);
       uint8_t *node_records = get_internal_record_data(tree, node);
-      memcpy(new_root_records,
-             node_records + split_index * tree.record_size,
+      memcpy(new_root_records, node_records + split_index * tree.record_size,
              tree.record_size);
     }
 
@@ -595,6 +645,7 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
     return new_root;
   }
 }
+
 bool bp_find_element(BPlusTree &tree, uint32_t key) {
   BPTreeNode *root = bp_get_root(tree);
   return bp_find_in_tree(tree, root, key);
@@ -680,21 +731,53 @@ BPTreeNode *bp_left_most(BPlusTree &tree) {
   return temp;
 }
 
-std::vector<std::pair<uint32_t, const uint8_t *>>
-bp_print_leaves(BPlusTree &tree) {
-  std::vector<std::pair<uint32_t, const uint8_t *>> result;
-  BPTreeNode *temp = bp_left_most(tree);
+// The issue is that we need to delete the predecessor from the leaf
+// without triggering repairs that might free the current node
+static void bp_delete_internal_btree(BPlusTree &tree, BPTreeNode *node,
+                                     uint32_t index) {
+  uint32_t *keys = get_keys(node);
 
-  while (temp) {
-    uint32_t *keys = get_keys(temp);
+  // Find predecessor in left subtree
+  BPTreeNode *left_child = bp_get_child(tree, node, index);
+  if (!left_child)
+    return;
 
-    for (uint32_t i = 0; i < temp->num_keys; i++) {
-      result.push_back({keys[i], get_record_at(tree, temp, i)});
-    }
-    temp = bp_get_next(temp);
+  // Navigate to rightmost leaf in left subtree
+  BPTreeNode *curr = left_child;
+  while (!curr->is_leaf) {
+    curr = bp_get_child(tree, curr, curr->num_keys);
   }
 
-  return result;
+  // Get the predecessor (rightmost key in the leaf)
+  uint32_t pred_index = curr->num_keys - 1;
+  uint32_t pred_key = get_keys(curr)[pred_index];
+  uint8_t *pred_record = get_record_at(tree, curr, pred_index);
+
+  // Replace the key and record in the internal node
+  bp_mark_dirty(node);
+  keys[index] = pred_key;
+
+  uint8_t *internal_records = get_internal_record_data(tree, node);
+  memcpy(internal_records + index * tree.record_size, pred_record,
+         tree.record_size);
+
+  // Now delete the predecessor from the leaf node directly
+  // without going through bp_do_delete which might restructure the tree
+  bp_mark_dirty(curr);
+  uint32_t *leaf_keys = get_keys(curr);
+  uint8_t *leaf_records = get_record_data(tree, curr);
+
+  // Shift keys and records in the leaf to remove the predecessor
+  for (uint32_t j = pred_index; j < curr->num_keys - 1; j++) {
+    leaf_keys[j] = leaf_keys[j + 1];
+    memcpy(leaf_records + j * tree.record_size,
+           leaf_records + (j + 1) * tree.record_size, tree.record_size);
+  }
+  curr->num_keys--;
+
+  // Now repair the leaf if needed
+  // This is safe because we're done modifying the internal node
+  bp_repair_after_delete(tree, curr);
 }
 
 void bp_delete_element(BPlusTree &tree, uint32_t key) {
@@ -716,6 +799,7 @@ void bp_delete_element(BPlusTree &tree, uint32_t key) {
 
   pager_sync();
 }
+// Simplified B-tree deletion that reuses existing logic
 
 void bp_do_delete(BPlusTree &tree, BPTreeNode *node, uint32_t key) {
   if (!node)
@@ -724,36 +808,169 @@ void bp_do_delete(BPlusTree &tree, BPTreeNode *node, uint32_t key) {
   uint32_t *keys = get_keys(node);
   uint32_t i;
 
+  // Find position of key
   for (i = 0; i < node->num_keys && keys[i] < key; i++)
     ;
 
-  if (i == node->num_keys) {
-    if (!node->is_leaf) {
-      bp_do_delete(tree, bp_get_child(tree, node, node->num_keys), key);
+  if (tree.tree_type == BTREE) {
+    // B-tree specific handling
+    if (i < node->num_keys && keys[i] == key) {
+      // Found key in this node
+      if (node->is_leaf) {
+        // Delete from leaf - same as B+tree leaf deletion
+        bp_mark_dirty(node);
+        uint8_t *record_data = get_record_data(tree, node);
+
+        // Shift left
+        for (uint32_t j = i; j < node->num_keys - 1; j++) {
+          keys[j] = keys[j + 1];
+          memcpy(record_data + j * tree.record_size,
+                 record_data + (j + 1) * tree.record_size, tree.record_size);
+        }
+        node->num_keys--;
+
+        // Use existing repair logic
+        bp_repair_after_delete(tree, node);
+      } else {
+        // Delete from internal node - use predecessor/successor replacement
+        // This is the only truly new logic needed
+        bp_delete_internal_btree(tree, node, i);
+      }
+    } else if (!node->is_leaf) {
+      // Not in this node, recurse to appropriate child
+      if (i < node->num_keys && keys[i] > key) {
+        bp_do_delete(tree, bp_get_child(tree, node, i), key);
+      } else {
+        bp_do_delete(tree, bp_get_child(tree, node, i), key);
+      }
     }
-  } else if (!node->is_leaf && keys[i] == key) {
-    bp_do_delete(tree, bp_get_child(tree, node, i + 1), key);
-  } else if (!node->is_leaf) {
-    bp_do_delete(tree, bp_get_child(tree, node, i), key);
-  } else if (node->is_leaf && keys[i] == key) {
-    bp_mark_dirty(node);
+  } else {
+    // B+tree - existing logic unchanged
+    if (i == node->num_keys) {
+      if (!node->is_leaf) {
+        bp_do_delete(tree, bp_get_child(tree, node, node->num_keys), key);
+      }
+    } else if (!node->is_leaf && keys[i] == key) {
+      bp_do_delete(tree, bp_get_child(tree, node, i + 1), key);
+    } else if (!node->is_leaf) {
+      bp_do_delete(tree, bp_get_child(tree, node, i), key);
+    } else if (node->is_leaf && keys[i] == key) {
+      bp_mark_dirty(node);
+      uint8_t *record_data = get_record_data(tree, node);
 
-    uint8_t *record_data = get_record_data(tree, node);
+      for (uint32_t j = i; j < node->num_keys - 1; j++) {
+        keys[j] = keys[j + 1];
+        memcpy(record_data + j * tree.record_size,
+               record_data + (j + 1) * tree.record_size, tree.record_size);
+      }
+      node->num_keys--;
 
-    for (uint32_t j = i; j < node->num_keys - 1; j++) {
-      keys[j] = keys[j + 1];
-      memcpy(record_data + j * tree.record_size,
-             record_data + (j + 1) * tree.record_size, tree.record_size);
+      if (i == 0 && node->parent != 0) {
+        bp_update_parent_keys(tree, node, key);
+      }
+
+      bp_repair_after_delete(tree, node);
     }
-    node->num_keys--;
-
-    if (i == 0 && node->parent != 0) {
-      bp_update_parent_keys(tree, node, key);
-    }
-
-    bp_repair_after_delete(tree, node);
   }
 }
+
+// The existing bp_repair_after_delete already handles most of what we need!
+// It already:
+// - Checks minimum key requirements
+// - Steals from siblings (bp_steal_from_left/right)
+// - Merges nodes (bp_merge_right)
+// - Updates parent keys
+// All this logic works for B-trees too!
+
+// We just need small tweaks to stealing/merging to handle internal records:
+
+BPTreeNode *bp_steal_from_left(BPlusTree &tree, BPTreeNode *node,
+                               uint32_t parent_index) {
+
+  BPTreeNode *parent_node = bp_get_parent(node);
+  BPTreeNode *left_sibling = bp_get_child(tree, parent_node, parent_index - 1);
+
+  uint32_t *node_keys = get_keys(node);
+  uint32_t *parent_keys = get_keys(parent_node);
+  uint32_t *sibling_keys = get_keys(left_sibling);
+
+  bp_mark_dirty(node);
+  bp_mark_dirty(parent_node);
+  bp_mark_dirty(left_sibling);
+
+  // Shift node's keys and records right
+  for (uint32_t i = node->num_keys; i > 0; i--) {
+    node_keys[i] = node_keys[i - 1];
+  }
+
+  if (node->is_leaf) {
+    // Leaf: move sibling's last key/record to node's first position
+    node_keys[0] = sibling_keys[left_sibling->num_keys - 1];
+
+    uint8_t *node_records = get_record_data(tree, node);
+    uint8_t *sibling_records = get_record_data(tree, left_sibling);
+
+    // Shift node's records right
+    memmove(node_records + tree.record_size, node_records,
+            node->num_keys * tree.record_size);
+
+    // Copy sibling's last record to node's first
+    memcpy(node_records,
+           sibling_records + (left_sibling->num_keys - 1) * tree.record_size,
+           tree.record_size);
+
+    // Update parent key
+    parent_keys[parent_index - 1] = node_keys[0];
+  } else {
+    // Internal node: rotate through parent
+
+    // Move parent key down to node
+    node_keys[0] = parent_keys[parent_index - 1];
+
+    // For B-tree: also handle records in internal nodes
+    if (tree.tree_type == BTREE) {
+      uint8_t *node_records = get_internal_record_data(tree, node);
+      uint8_t *parent_records = get_internal_record_data(tree, parent_node);
+      uint8_t *sibling_records = get_internal_record_data(tree, left_sibling);
+
+      // Shift node's records right
+      memmove(node_records + tree.record_size, node_records,
+              node->num_keys * tree.record_size);
+
+      // Move parent record down to node
+      memcpy(node_records,
+             parent_records + (parent_index - 1) * tree.record_size,
+             tree.record_size);
+
+      // Move sibling's last record up to parent
+      parent_keys[parent_index - 1] = sibling_keys[left_sibling->num_keys - 1];
+      memcpy(parent_records + (parent_index - 1) * tree.record_size,
+             sibling_records + (left_sibling->num_keys - 1) * tree.record_size,
+             tree.record_size);
+    } else {
+      // B+tree: just move key up from sibling
+      parent_keys[parent_index - 1] = sibling_keys[left_sibling->num_keys - 1];
+    }
+
+    // Move child pointer
+    uint32_t *node_children = get_children(tree, node);
+    uint32_t *sibling_children = get_children(tree, left_sibling);
+
+    for (uint32_t i = node->num_keys + 1; i > 0; i--) {
+      bp_set_child(tree, node, i, node_children[i - 1]);
+    }
+    bp_set_child(tree, node, 0, sibling_children[left_sibling->num_keys]);
+  }
+
+  node->num_keys++;
+  left_sibling->num_keys--;
+
+  return parent_node;
+}
+
+// Similar small modifications needed for:
+// - bp_steal_from_right (mirror of above)
+// - bp_merge_right (needs to handle internal records for B-tree)
 
 void bp_update_parent_keys(BPlusTree &tree, BPTreeNode *node,
                            uint32_t deleted_key) {
@@ -841,686 +1058,228 @@ void bp_repair_after_delete(BPlusTree &tree, BPTreeNode *node) {
         bp_steal_from_right(tree, node, parent_index);
       } else if (parent_index == 0 && right_sibling) {
         BPTreeNode *next_node = bp_merge_right(tree, node);
-        bp_repair_after_delete(tree, bp_get_parent(next_node));
+        bp_repair_after_delete(tree, parent_node);
       } else if (left_sibling) {
         BPTreeNode *next_node = bp_merge_right(tree, left_sibling);
-        bp_repair_after_delete(tree, bp_get_parent(next_node));
+        bp_repair_after_delete(tree, parent_node);
       }
     }
   }
 }
-
-BPTreeNode *bp_merge_right(BPlusTree &tree, BPTreeNode *node) {
-  BPTreeNode *parent_node = bp_get_parent(node);
-  uint32_t *parent_children = get_children(tree, parent_node);
-  uint32_t *parent_keys = get_keys(parent_node);
-  uint32_t parent_index = 0;
-
-  for (parent_index = 0; parent_children[parent_index] != node->index;
-       parent_index++)
-    ;
-
-  BPTreeNode *right_sib = bp_get_child(tree, parent_node, parent_index + 1);
-  uint32_t *node_keys = get_keys(node);
-  uint32_t *right_keys = get_keys(right_sib);
-  uint32_t *node_children = get_children(tree, node);
-  uint32_t *right_children = get_children(tree, right_sib);
-
-  bp_mark_dirty(node);
-
-  if (!node->is_leaf) {
-    node_keys[node->num_keys] = parent_keys[parent_index];
-  }
-
-  for (uint32_t i = 0; i < right_sib->num_keys; i++) {
-    uint32_t insert_index = node->num_keys + 1 + i;
-    if (node->is_leaf) {
-      insert_index -= 1;
-    }
-    node_keys[insert_index] = right_keys[i];
-  }
-
-  if (!node->is_leaf) {
-    for (uint32_t i = 0; i <= right_sib->num_keys; i++) {
-      bp_set_child(tree, node, node->num_keys + 1 + i, right_children[i]);
-    }
-    node->num_keys = node->num_keys + right_sib->num_keys + 1;
-  } else {
-    uint8_t *node_records = get_record_data(tree, node);
-    uint8_t *right_records = get_record_data(tree, right_sib);
-
-    memcpy(node_records + node->num_keys * tree.record_size, right_records,
-           right_sib->num_keys * tree.record_size);
-
-    node->num_keys = node->num_keys + right_sib->num_keys;
-
-    bp_set_next(node, right_sib->next);
-
-    if (right_sib->next != 0) {
-      BPTreeNode *next_node = bp_get_next(right_sib);
-      if (next_node) {
-        bp_set_prev(next_node, node->index);
-      }
-    }
-  }
-
-  bp_mark_dirty(parent_node);
-
-  for (uint32_t i = parent_index + 1; i < parent_node->num_keys; i++) {
-    parent_children[i] = parent_children[i + 1];
-    parent_keys[i - 1] = parent_keys[i];
-  }
-  parent_node->num_keys--;
-
-  bp_destroy_node(right_sib);
-  return node;
-}
+// B-tree modifications for steal_from_right and merge operations
 
 BPTreeNode *bp_steal_from_right(BPlusTree &tree, BPTreeNode *node,
                                 uint32_t parent_index) {
   BPTreeNode *parent_node = bp_get_parent(node);
-  BPTreeNode *right_sib = bp_get_child(tree, parent_node, parent_index + 1);
+  BPTreeNode *right_sibling = bp_get_child(tree, parent_node, parent_index + 1);
 
   uint32_t *node_keys = get_keys(node);
-  uint32_t *right_keys = get_keys(right_sib);
   uint32_t *parent_keys = get_keys(parent_node);
-  uint32_t *node_children = get_children(tree, node);
-  uint32_t *right_children = get_children(tree, right_sib);
+  uint32_t *sibling_keys = get_keys(right_sibling);
 
   bp_mark_dirty(node);
-  bp_mark_dirty(right_sib);
   bp_mark_dirty(parent_node);
-
-  node->num_keys++;
+  bp_mark_dirty(right_sibling);
 
   if (node->is_leaf) {
-    node_keys[node->num_keys - 1] = right_keys[0];
+    // Leaf: move sibling's first key/record to node's last position
+    node_keys[node->num_keys] = sibling_keys[0];
 
     uint8_t *node_records = get_record_data(tree, node);
-    uint8_t *right_records = get_record_data(tree, right_sib);
+    uint8_t *sibling_records = get_record_data(tree, right_sibling);
 
-    memcpy(node_records + (node->num_keys - 1) * tree.record_size,
-           right_records, tree.record_size);
-
-    parent_keys[parent_index] = right_keys[1];
-
-    for (uint32_t i = 1; i < right_sib->num_keys; i++) {
-      right_keys[i - 1] = right_keys[i];
-      memcpy(right_records + (i - 1) * tree.record_size,
-             right_records + i * tree.record_size, tree.record_size);
-    }
-  } else {
-    node_keys[node->num_keys - 1] = parent_keys[parent_index];
-    parent_keys[parent_index] = right_keys[0];
-
-    bp_set_child(tree, node, node->num_keys, right_children[0]);
-
-    for (uint32_t i = 1; i < right_sib->num_keys + 1; i++) {
-      right_children[i - 1] = right_children[i];
-    }
-
-    for (uint32_t i = 1; i < right_sib->num_keys; i++) {
-      right_keys[i - 1] = right_keys[i];
-    }
-  }
-
-  right_sib->num_keys--;
-
-  return node;
-}
-
-BPTreeNode *bp_steal_from_left(BPlusTree &tree, BPTreeNode *node,
-                               uint32_t parent_index) {
-  BPTreeNode *parent_node = bp_get_parent(node);
-  BPTreeNode *left_sib = bp_get_child(tree, parent_node, parent_index - 1);
-
-  uint32_t *node_keys = get_keys(node);
-  uint32_t *left_keys = get_keys(left_sib);
-  uint32_t *parent_keys = get_keys(parent_node);
-  uint32_t *node_children = get_children(tree, node);
-  uint32_t *left_children = get_children(tree, left_sib);
-
-  bp_mark_dirty(node);
-  bp_mark_dirty(left_sib);
-  bp_mark_dirty(parent_node);
-
-  node->num_keys++;
-
-  for (uint32_t i = node->num_keys - 1; i > 0; i--) {
-    node_keys[i] = node_keys[i - 1];
-  }
-
-  if (node->is_leaf) {
-    uint8_t *node_records = get_record_data(tree, node);
-    uint8_t *left_records = get_record_data(tree, left_sib);
-
-    for (uint32_t i = node->num_keys - 1; i > 0; i--) {
-      memcpy(node_records + i * tree.record_size,
-             node_records + (i - 1) * tree.record_size, tree.record_size);
-    }
-
-    node_keys[0] = left_keys[left_sib->num_keys - 1];
-    memcpy(node_records,
-           left_records + (left_sib->num_keys - 1) * tree.record_size,
+    // Copy sibling's first record to node's last
+    memcpy(node_records + node->num_keys * tree.record_size, sibling_records,
            tree.record_size);
 
-    parent_keys[parent_index - 1] = left_keys[left_sib->num_keys - 1];
-  } else {
-    node_keys[0] = parent_keys[parent_index - 1];
-    parent_keys[parent_index - 1] = left_keys[left_sib->num_keys - 1];
-
-    for (uint32_t i = node->num_keys; i > 0; i--) {
-      node_children[i] = node_children[i - 1];
+    // Shift sibling's keys and records left
+    for (uint32_t i = 0; i < right_sibling->num_keys - 1; i++) {
+      sibling_keys[i] = sibling_keys[i + 1];
+      memcpy(sibling_records + i * tree.record_size,
+             sibling_records + (i + 1) * tree.record_size, tree.record_size);
     }
-    bp_set_child(tree, node, 0, left_children[left_sib->num_keys]);
-    left_children[left_sib->num_keys] = 0;
+
+    // Update parent key
+    parent_keys[parent_index] = sibling_keys[0];
+  } else {
+    // Internal node: rotate through parent
+
+    // Move parent key down to node
+    node_keys[node->num_keys] = parent_keys[parent_index];
+
+    // For B-tree: also handle records in internal nodes
+    if (tree.tree_type == BTREE) {
+      uint8_t *node_records = get_internal_record_data(tree, node);
+      uint8_t *parent_records = get_internal_record_data(tree, parent_node);
+      uint8_t *sibling_records = get_internal_record_data(tree, right_sibling);
+
+      // Move parent record down to node
+      memcpy(node_records + node->num_keys * tree.record_size,
+             parent_records + parent_index * tree.record_size,
+             tree.record_size);
+
+      // Move sibling's first key and record up to parent
+      parent_keys[parent_index] = sibling_keys[0];
+      memcpy(parent_records + parent_index * tree.record_size, sibling_records,
+             tree.record_size);
+
+      // Shift sibling's records left
+      for (uint32_t i = 0; i < right_sibling->num_keys - 1; i++) {
+        memcpy(sibling_records + i * tree.record_size,
+               sibling_records + (i + 1) * tree.record_size, tree.record_size);
+      }
+    } else {
+      // B+tree: just move key up from sibling
+      parent_keys[parent_index] = sibling_keys[0];
+    }
+
+    // Shift sibling's keys left
+    for (uint32_t i = 0; i < right_sibling->num_keys - 1; i++) {
+      sibling_keys[i] = sibling_keys[i + 1];
+    }
+
+    // Move child pointer
+    uint32_t *node_children = get_children(tree, node);
+    uint32_t *sibling_children = get_children(tree, right_sibling);
+
+    // Take sibling's first child
+    bp_set_child(tree, node, node->num_keys + 1, sibling_children[0]);
+
+    // Shift sibling's children left
+    for (uint32_t i = 0; i < right_sibling->num_keys; i++) {
+      bp_set_child(tree, right_sibling, i, sibling_children[i + 1]);
+    }
   }
 
-  left_sib->num_keys--;
+  node->num_keys++;
+  right_sibling->num_keys--;
+
+  return parent_node;
+}
+
+BPTreeNode *bp_merge_right(BPlusTree &tree, BPTreeNode *node) {
+  BPTreeNode *parent = bp_get_parent(node);
+  if (!parent)
+    return node;
+
+  uint32_t *parent_keys = get_keys(parent);
+  uint32_t *parent_children = get_children(tree, parent);
+
+  // Find this node's position in parent
+  uint32_t node_index = 0;
+  for (; node_index <= parent->num_keys; node_index++) {
+    if (parent_children[node_index] == node->index)
+      break;
+  }
+
+  if (node_index >= parent->num_keys)
+    return node; // No right sibling
+
+  BPTreeNode *right_sibling = bp_get_child(tree, parent, node_index + 1);
+  if (!right_sibling)
+    return node;
+
+  uint32_t *node_keys = get_keys(node);
+  uint32_t *sibling_keys = get_keys(right_sibling);
+
+  bp_mark_dirty(node);
+  bp_mark_dirty(parent);
+
+  if (node->is_leaf) {
+    // Merge leaf nodes
+    uint8_t *node_records = get_record_data(tree, node);
+    uint8_t *sibling_records = get_record_data(tree, right_sibling);
+
+    // Copy all keys and records from sibling to node
+    for (uint32_t i = 0; i < right_sibling->num_keys; i++) {
+      node_keys[node->num_keys + i] = sibling_keys[i];
+      memcpy(node_records + (node->num_keys + i) * tree.record_size,
+             sibling_records + i * tree.record_size, tree.record_size);
+    }
+
+    node->num_keys += right_sibling->num_keys;
+
+    // Update leaf links (only for B+tree)
+    if (tree.tree_type == BPLUS) {
+      bp_set_next(node, right_sibling->next);
+      if (right_sibling->next != 0) {
+        BPTreeNode *next_node = bp_get_next(right_sibling);
+        if (next_node) {
+          bp_set_prev(next_node, node->index);
+        }
+      }
+    }
+  } else {
+    // Merge internal nodes
+
+    // Pull down parent key (this becomes the separator)
+    node_keys[node->num_keys] = parent_keys[node_index];
+
+    // For B-tree: also copy parent's record
+    if (tree.tree_type == BTREE) {
+      uint8_t *node_records = get_internal_record_data(tree, node);
+      uint8_t *parent_records = get_internal_record_data(tree, parent);
+      uint8_t *sibling_records = get_internal_record_data(tree, right_sibling);
+
+      // Copy parent's record for the separator key
+      memcpy(node_records + node->num_keys * tree.record_size,
+             parent_records + node_index * tree.record_size, tree.record_size);
+
+      // Copy all sibling's records
+      for (uint32_t i = 0; i < right_sibling->num_keys; i++) {
+        memcpy(node_records + (node->num_keys + 1 + i) * tree.record_size,
+               sibling_records + i * tree.record_size, tree.record_size);
+      }
+    }
+
+    // Copy all keys from sibling
+    for (uint32_t i = 0; i < right_sibling->num_keys; i++) {
+      node_keys[node->num_keys + 1 + i] = sibling_keys[i];
+    }
+
+    // Copy all child pointers from sibling
+    uint32_t *node_children = get_children(tree, node);
+    uint32_t *sibling_children = get_children(tree, right_sibling);
+
+    for (uint32_t i = 0; i <= right_sibling->num_keys; i++) {
+      bp_set_child(tree, node, node->num_keys + 1 + i, sibling_children[i]);
+    }
+
+    node->num_keys += 1 + right_sibling->num_keys;
+  }
+
+  // Remove sibling from parent
+  for (uint32_t i = node_index; i < parent->num_keys - 1; i++) {
+    parent_keys[i] = parent_keys[i + 1];
+    parent_children[i + 1] = parent_children[i + 2];
+
+    // For B-tree: also shift parent's internal records
+    if (tree.tree_type == BTREE && !parent->is_leaf) {
+      uint8_t *parent_records = get_internal_record_data(tree, parent);
+      memcpy(parent_records + i * tree.record_size,
+             parent_records + (i + 1) * tree.record_size, tree.record_size);
+    }
+  }
+
+  parent->num_keys--;
+
+  // Clean up sibling
+  bp_destroy_node(right_sibling);
+
+  // Check if parent needs repair
+  if (parent->num_keys < bp_get_min_keys(tree, parent)) {
+    if (parent->parent == 0 && parent->num_keys == 0) {
+      // Parent is root and now empty - make node the new root
+      tree.root_page_index = node->index;
+      bp_set_parent(node, 0);
+      bp_destroy_node(parent);
+      return node;
+    } else {
+      bp_repair_after_delete(tree, parent);
+    }
+  }
 
   return node;
-}
-/* Print Debug */
-void bp_debug_print_tree(BPlusTree &tree) {
-  if (tree.root_page_index == 0) {
-    std::cout << "Tree is empty (no root)\n";
-    return;
-  }
-
-  BPTreeNode *root = bp_get_root(tree);
-  if (!root) {
-    std::cout << "Failed to get root node\n";
-    return;
-  }
-
-  std::cout << "=== B+ TREE DEBUG VISUALIZATION ===\n";
-  std::cout << "Tree Configuration:\n";
-  std::cout << "  Internal max_keys: " << tree.internal_max_keys
-            << ", min_keys: " << tree.internal_min_keys << "\n";
-  std::cout << "  Leaf max_keys: " << tree.leaf_max_keys
-            << ", min_keys: " << tree.leaf_min_keys << "\n";
-  std::cout << "  Record size: " << tree.record_size << " bytes\n";
-  std::cout << "  Root page: " << tree.root_page_index << "\n\n";
-
-  struct NodeInfo {
-    BPTreeNode *node;
-    int level;
-    int position_in_level;
-  };
-
-  std::queue<NodeInfo> node_queue;
-  node_queue.push({root, 0, 0});
-
-  int current_level = -1;
-  int position_counter = 0;
-
-  while (!node_queue.empty()) {
-    NodeInfo info = node_queue.front();
-    node_queue.pop();
-
-    BPTreeNode *node = info.node;
-    if (!node)
-      continue;
-
-    if (info.level != current_level) {
-      if (current_level >= 0) {
-        std::cout << "\n";
-      }
-      current_level = info.level;
-      position_counter = 0;
-      std::cout << "LEVEL " << current_level << ":\n";
-      std::cout << std::string(80, '-') << "\n";
-    }
-
-    std::cout << "Node[" << position_counter << "] (Page " << node->index
-              << "): ";
-
-    if (node->is_leaf) {
-      std::cout << "LEAF";
-    } else {
-      std::cout << "INTERNAL";
-    }
-
-    std::cout << " | Parent: ";
-    if (node->parent == 0) {
-      std::cout << "ROOT";
-    } else {
-      std::cout << node->parent;
-    }
-
-    std::cout << " | Keys(" << node->num_keys << "/"
-              << (node->is_leaf ? tree.leaf_max_keys : tree.internal_max_keys)
-              << "): ";
-
-    uint32_t *keys = get_keys(node);
-    std::cout << "[";
-    for (uint32_t i = 0; i < node->num_keys; i++) {
-      if (i > 0)
-        std::cout << ", ";
-      std::cout << keys[i];
-    }
-    std::cout << "]";
-
-    if (!node->is_leaf) {
-      uint32_t *children = get_children(tree, node);
-      std::cout << " | Children: [";
-      for (uint32_t i = 0; i <= node->num_keys; i++) {
-        if (i > 0)
-          std::cout << ", ";
-        std::cout << children[i];
-      }
-      std::cout << "]";
-    } else {
-      std::cout << " | Prev: "
-                << (node->previous == 0 ? "NULL"
-                                        : std::to_string(node->previous));
-      std::cout << " | Next: "
-                << (node->next == 0 ? "NULL" : std::to_string(node->next));
-    }
-
-    std::cout << "\n";
-
-    if (!node->is_leaf) {
-      uint32_t *children = get_children(tree, node);
-      int child_position = 0;
-      for (uint32_t i = 0; i <= node->num_keys; i++) {
-        if (children[i] != 0) {
-          BPTreeNode *child = static_cast<BPTreeNode *>(pager_get(children[i]));
-          node_queue.push({child, info.level + 1, child_position++});
-        }
-      }
-    }
-
-    position_counter++;
-  }
-
-  std::cout << "\n" << std::string(80, '=') << "\n";
-
-  std::cout << "LEAF CHAIN TRAVERSAL:\n";
-  std::cout << std::string(80, '-') << "\n";
-
-  BPTreeNode *leftmost = bp_left_most(tree);
-  if (leftmost) {
-    BPTreeNode *current_leaf = leftmost;
-    int leaf_count = 0;
-
-    while (current_leaf) {
-      uint32_t *keys = get_keys(current_leaf);
-
-      std::cout << "Leaf[" << leaf_count << "] (Page " << current_leaf->index
-                << "): ";
-      std::cout << "Keys[" << current_leaf->num_keys << "]: ";
-
-      for (uint32_t i = 0; i < current_leaf->num_keys; i++) {
-        if (i > 0)
-          std::cout << ", ";
-        std::cout << keys[i];
-      }
-
-      if (current_leaf->num_keys > 0) {
-        uint8_t *records = get_record_data(tree, current_leaf);
-        std::cout << " | Sample record bytes: ";
-        for (uint32_t i = 0; i < std::min(3U, current_leaf->num_keys); i++) {
-          std::cout << "[";
-          for (uint32_t j = 0; j < std::min(8U, tree.record_size); j++) {
-            if (j > 0)
-              std::cout << " ";
-            std::cout << std::hex << std::setw(2) << std::setfill('0')
-                      << static_cast<int>(records[i * tree.record_size + j]);
-          }
-          std::cout << std::dec << "]";
-          if (tree.record_size > 8)
-            std::cout << "...";
-          if (i < std::min(3U, current_leaf->num_keys) - 1)
-            std::cout << " ";
-        }
-      }
-
-      std::cout << "\n";
-
-      if (current_leaf->next == 0) {
-        break;
-      }
-      current_leaf = bp_get_next(current_leaf);
-      leaf_count++;
-
-      if (leaf_count > 100) {
-        std::cout << "... (truncated after 100 leaves)\n";
-        break;
-      }
-    }
-  } else {
-    std::cout << "No leftmost leaf found\n";
-  }
-
-  std::cout << std::string(80, '=') << "\n";
-  std::cout << "END TREE VISUALIZATION\n";
-}
-
-static void bp_debug_print_node_recursive(BPlusTree &tree, BPTreeNode *node,
-                                          int depth,
-                                          const std::string &prefix) {
-  if (!node)
-    return;
-
-  uint32_t *keys = get_keys(node);
-
-  std::cout << prefix << (node->is_leaf ? "LEAF" : "INTERNAL")
-            << "(pg:" << node->index << ") [";
-
-  for (uint32_t i = 0; i < node->num_keys; i++) {
-    if (i > 0)
-      std::cout << ",";
-    std::cout << keys[i];
-  }
-  std::cout << "]\n";
-
-  if (!node->is_leaf) {
-    uint32_t *children = get_children(tree, node);
-    for (uint32_t i = 0; i <= node->num_keys; i++) {
-      if (children[i] != 0) {
-        BPTreeNode *child = static_cast<BPTreeNode *>(pager_get(children[i]));
-        bp_debug_print_node_recursive(tree, child, depth + 1, prefix + "  ");
-      }
-    }
-  }
-}
-
-void bp_debug_print_structure(BPlusTree &tree) {
-  if (tree.root_page_index == 0) {
-    std::cout << "Empty tree\n";
-    return;
-  }
-
-  BPTreeNode *root = bp_get_root(tree);
-  if (!root) {
-    std::cout << "Invalid root\n";
-    return;
-  }
-
-  std::cout << "Tree Structure (keys only):\n";
-  bp_debug_print_node_recursive(tree, root, 0, "");
-}
-
-void hash_node_recursive(BPlusTree &tree, BPTreeNode *node, uint64_t *hash,
-                         uint64_t prime, int depth) {
-  if (!node)
-    return;
-
-  *hash ^= node->index;
-  *hash *= prime;
-  *hash ^= node->parent;
-  *hash *= prime;
-  *hash ^= node->next;
-  *hash *= prime;
-  *hash ^= node->previous;
-  *hash *= prime;
-  *hash ^= node->num_keys;
-  *hash *= prime;
-  *hash ^= (node->is_leaf ? 1 : 0) | (depth << 1);
-  *hash *= prime;
-
-  uint32_t *keys = get_keys(node);
-  for (uint32_t i = 0; i < node->num_keys; i++) {
-    *hash ^= keys[i];
-    *hash *= prime;
-  }
-
-  if (node->is_leaf) {
-    uint8_t *record_data = get_record_data(tree, node);
-    for (uint32_t i = 0; i < node->num_keys; i++) {
-      const uint8_t *record = record_data + i * tree.record_size;
-      uint32_t bytes_to_hash = std::min(8U, tree.record_size);
-      for (uint32_t j = 0; j < bytes_to_hash; j++) {
-        *hash ^= record[j];
-        *hash *= prime;
-      }
-    }
-  } else {
-    uint32_t *children = get_children(tree, node);
-    for (uint32_t i = 0; i <= node->num_keys; i++) {
-      if (children[i] != 0) {
-        BPTreeNode *child = bp_get_child(tree, node, i);
-        if (child) {
-          hash_node_recursive(tree, child, hash, prime, depth + 1);
-        }
-      }
-    }
-  }
-}
-
-uint64_t debug_hash_tree(BPlusTree &tree) {
-  uint64_t hash = 0xcbf29ce484222325ULL;
-  const uint64_t prime = 0x100000001b3ULL;
-
-  hash ^= tree.root_page_index;
-  hash *= prime;
-  hash ^= tree.internal_max_keys;
-  hash *= prime;
-  hash ^= tree.leaf_max_keys;
-  hash *= prime;
-  hash ^= tree.record_size;
-  hash *= prime;
-
-  if (tree.root_page_index != 0) {
-    BPTreeNode *root = bp_get_root(tree);
-    if (root) {
-      hash_node_recursive(tree, root, &hash, prime, 0);
-    }
-  }
-
-  return hash;
-}
-
-std::vector<LeafDataEntry> bp_extract_leaf_data(BPlusTree &tree) {
-  std::vector<LeafDataEntry> result;
-  auto leaf_pairs = bp_print_leaves(tree);
-  BPTreeNode *current_node = bp_left_most(tree);
-  uint32_t current_node_page = current_node ? current_node->index : 0;
-  size_t pair_index = 0;
-
-  while (current_node && pair_index < leaf_pairs.size()) {
-    uint32_t *keys = get_keys(current_node);
-
-    for (uint32_t i = 0;
-         i < current_node->num_keys && pair_index < leaf_pairs.size(); i++) {
-      if (keys[i] == leaf_pairs[pair_index].first) {
-        LeafDataEntry entry;
-        entry.key = leaf_pairs[pair_index].first;
-        entry.node_page = current_node_page;
-        entry.data.resize(tree.record_size);
-        memcpy(entry.data.data(), leaf_pairs[pair_index].second,
-               tree.record_size);
-        result.push_back(entry);
-        pair_index++;
-      }
-    }
-
-    if (current_node->next == 0) {
-      break;
-    }
-    current_node = bp_get_next(current_node);
-    if (current_node) {
-      current_node_page = current_node->index;
-    }
-  }
-
-  return result;
-}
-
-void bp_debug_capacity_calculation(BPlusTree &tree,
-                                   const std::vector<ColumnInfo> &schema) {
-  std::cout << "=== B-TREE CAPACITY DEBUG ===" << std::endl;
-  std::cout << "PAGE_SIZE: " << PAGE_SIZE << " bytes" << std::endl;
-  std::cout << "NODE_HEADER_SIZE: " << NODE_HEADER_SIZE << " bytes"
-            << std::endl;
-  std::cout << "USABLE_SPACE: " << (PAGE_SIZE - NODE_HEADER_SIZE) << " bytes"
-            << std::endl;
-  std::cout << "tree.node_key_size: " << tree.node_key_size << " bytes"
-            << std::endl;
-
-  uint32_t record_size = 0;
-  std::cout << "\nSchema breakdown:" << std::endl;
-  for (size_t i = 0; i < schema.size(); i++) {
-    std::cout << "  Column " << i << ": " << schema[i].type << " bytes"
-              << std::endl;
-    record_size += schema[i].type;
-  }
-  std::cout << "Total record size: " << record_size << " bytes" << std::endl;
-
-  uint32_t usable_space = PAGE_SIZE - NODE_HEADER_SIZE;
-  uint32_t leaf_entry_size = tree.node_key_size + record_size;
-  uint32_t leaf_max_keys = usable_space / leaf_entry_size;
-
-  std::cout << "\nLEAF NODE CAPACITY:" << std::endl;
-  std::cout << "  Entry size (key + record): " << leaf_entry_size << " bytes"
-            << std::endl;
-  std::cout << "  Calculated max_keys: " << leaf_max_keys << std::endl;
-  std::cout << "  Space used by max_keys: " << (leaf_max_keys * leaf_entry_size)
-            << " bytes" << std::endl;
-  std::cout << "  Remaining space: "
-            << (usable_space - (leaf_max_keys * leaf_entry_size)) << " bytes"
-            << std::endl;
-
-  bool can_fit_one_more =
-      (usable_space - (leaf_max_keys * leaf_entry_size)) >= leaf_entry_size;
-  std::cout << "  Can fit one more entry? " << (can_fit_one_more ? "YES" : "NO")
-            << std::endl;
-
-  if (can_fit_one_more) {
-    std::cout << "  WARNING: Capacity calculation may be off by 1!"
-              << std::endl;
-  }
-
-  uint32_t internal_entry_size = 2 * tree.node_key_size;
-  uint32_t internal_space_needed_for_n_keys = 0;
-  uint32_t internal_max_keys = 0;
-
-  for (uint32_t n = 1; n <= 2000; n++) {
-    internal_space_needed_for_n_keys =
-        n * tree.node_key_size + (n + 1) * tree.node_key_size;
-    if (internal_space_needed_for_n_keys > usable_space) {
-      internal_max_keys = n - 1;
-      break;
-    }
-  }
-
-  std::cout << "\nINTERNAL NODE CAPACITY:" << std::endl;
-  std::cout << "  For n=" << internal_max_keys << " keys:" << std::endl;
-  std::cout << "    Keys space: " << (internal_max_keys * tree.node_key_size)
-            << " bytes" << std::endl;
-  std::cout << "    Children space: "
-            << ((internal_max_keys + 1) * tree.node_key_size) << " bytes"
-            << std::endl;
-  std::cout << "    Total space: "
-            << (internal_max_keys * tree.node_key_size +
-                (internal_max_keys + 1) * tree.node_key_size)
-            << " bytes" << std::endl;
-  std::cout << "    Remaining: "
-            << (usable_space - (internal_max_keys * tree.node_key_size +
-                                (internal_max_keys + 1) * tree.node_key_size))
-            << " bytes" << std::endl;
-
-  uint32_t test_space = (internal_max_keys + 1) * tree.node_key_size +
-                        (internal_max_keys + 2) * tree.node_key_size;
-  std::cout << "  For n=" << (internal_max_keys + 1)
-            << " keys would need: " << test_space << " bytes";
-  if (test_space <= usable_space) {
-    std::cout << " (FITS - calculation error!)";
-  }
-  std::cout << std::endl;
-
-  std::cout << "\nMEMORY LAYOUT ANALYSIS:" << std::endl;
-  std::cout << "Node structure in memory:" << std::endl;
-  std::cout << "  Offset 0-31: Node header ("
-            << sizeof(BPTreeNode) - (PAGE_SIZE - NODE_HEADER_SIZE) << " bytes)"
-            << std::endl;
-  std::cout << "  Offset 32-" << (32 + leaf_max_keys * tree.node_key_size - 1)
-            << ": Keys array (" << (leaf_max_keys * tree.node_key_size)
-            << " bytes)" << std::endl;
-  std::cout << "  Offset " << (32 + leaf_max_keys * tree.node_key_size) << "-"
-            << (32 + leaf_max_keys * tree.node_key_size +
-                leaf_max_keys * record_size - 1)
-            << ": Records array (" << (leaf_max_keys * record_size) << " bytes)"
-            << std::endl;
-  std::cout << "  End at offset: "
-            << (32 + leaf_max_keys * tree.node_key_size +
-                leaf_max_keys * record_size)
-            << std::endl;
-  std::cout << "  Page ends at: " << PAGE_SIZE << std::endl;
-
-  uint32_t total_used =
-      32 + leaf_max_keys * tree.node_key_size + leaf_max_keys * record_size;
-  if (total_used > PAGE_SIZE) {
-    std::cout << "  OVERFLOW! Used " << total_used
-              << " bytes, but page is only " << PAGE_SIZE << " bytes!"
-              << std::endl;
-    std::cout << "  Overflow by: " << (total_used - PAGE_SIZE) << " bytes"
-              << std::endl;
-  }
-
-  std::cout << "============================" << std::endl;
-}
-
-void bp_debug_node_layout(BPlusTree &tree, BPTreeNode *node,
-                          std::vector<ColumnInfo> &schema) {
-  if (!node) {
-    std::cout << "Node is null!" << std::endl;
-    return;
-  }
-
-  std::cout << "=== NODE LAYOUT DEBUG ===" << std::endl;
-  std::cout << "Node info:" << std::endl;
-  std::cout << "  Index: " << node->index << std::endl;
-  std::cout << "  Is leaf: " << (node->is_leaf ? "YES" : "NO") << std::endl;
-  std::cout << "  Num keys: " << node->num_keys << std::endl;
-  std::cout << "  Record size: " << tree.record_size << std::endl;
-
-  if (node->is_leaf) {
-    uint32_t keys_end = tree.leaf_max_keys * tree.node_key_size;
-    uint32_t records_start = keys_end;
-    uint32_t records_end =
-        records_start + tree.leaf_max_keys * tree.record_size;
-
-    std::cout << "Leaf layout:" << std::endl;
-    std::cout << "  Keys: data[0] to data[" << (keys_end - 1) << "]"
-              << std::endl;
-    std::cout << "  Records: data[" << records_start << "] to data["
-              << (records_end - 1) << "]" << std::endl;
-    std::cout << "  Total data used: " << records_end << " bytes" << std::endl;
-    std::cout << "  Available data space: " << (PAGE_SIZE - NODE_HEADER_SIZE)
-              << " bytes" << std::endl;
-
-    if (records_end > (PAGE_SIZE - NODE_HEADER_SIZE)) {
-      std::cout << "  ERROR: Data extends beyond available space!" << std::endl;
-      std::cout << "  Overflow: "
-                << (records_end - (PAGE_SIZE - NODE_HEADER_SIZE)) << " bytes"
-                << std::endl;
-    }
-  } else {
-    uint32_t keys_end = tree.internal_max_keys * tree.node_key_size;
-    uint32_t children_start = keys_end;
-    uint32_t children_end =
-        children_start + (tree.internal_max_keys + 1) * tree.node_key_size;
-
-    std::cout << "Internal layout:" << std::endl;
-    std::cout << "  Keys: data[0] to data[" << (keys_end - 1) << "]"
-              << std::endl;
-    std::cout << "  Children: data[" << children_start << "] to data["
-              << (children_end - 1) << "]" << std::endl;
-    std::cout << "  Total data used: " << children_end << " bytes" << std::endl;
-    std::cout << "  Available data space: " << (PAGE_SIZE - NODE_HEADER_SIZE)
-              << " bytes" << std::endl;
-
-    if (children_end > (PAGE_SIZE - NODE_HEADER_SIZE)) {
-      std::cout << "  ERROR: Data extends beyond available space!" << std::endl;
-      std::cout << "  Overflow: "
-                << (children_end - (PAGE_SIZE - NODE_HEADER_SIZE)) << " bytes"
-                << std::endl;
-    }
-  }
-
-  std::cout << "==========================" << std::endl;
 }
 
 void bp_print_node(BPlusTree &tree, BPTreeNode *node) {
@@ -1531,24 +1290,6 @@ void bp_print_node(BPlusTree &tree, BPTreeNode *node) {
 
   // Print basic node information
   std::cout << "=== NODE " << node->index << " ===" << std::endl;
-
-  // Print tree type and node type
-  std::cout << "Tree Type: ";
-  switch (tree.tree_type) {
-  case BTREE:
-    std::cout << "B-TREE";
-    break;
-  case BPLUS:
-    std::cout << "B+TREE";
-    break;
-  case INVALID:
-    std::cout << "INVALID";
-    break;
-  default:
-    std::cout << "UNKNOWN(" << tree.tree_type << ")";
-    break;
-  }
-  std::cout << std::endl;
 
   std::cout << "Node Type: ";
   if (node->is_leaf) {
@@ -1609,38 +1350,38 @@ void bp_print_node(BPlusTree &tree, BPTreeNode *node) {
     std::cout << "]" << std::endl;
   } else {
     // Print record data for leaf nodes
-    if (tree.tree_type == BPLUS || tree.tree_type == BTREE) {
-      std::cout << "Records:" << std::endl;
-      for (uint32_t i = 0; i < node->num_keys; i++) {
-        const uint8_t *record = get_record_at(tree, node, i);
-        if (record) {
-          std::cout << "  [" << i << "] Key=" << keys[i] << " Data=";
+    // if (tree.tree_type == BPLUS || tree.tree_type == BTREE) {
+    //   std::cout << "Records:" << std::endl;
+    //   for (uint32_t i = 0; i < node->num_keys; i++) {
+    //     const uint8_t *record = get_record_at(tree, node, i);
+    //     if (record) {
+    //       std::cout << "  [" << i << "] Key=" << keys[i] << " Data=";
 
-          // Print first few bytes of record in hex
-          uint32_t bytes_to_show = std::min(16U, tree.record_size);
-          for (uint32_t j = 0; j < bytes_to_show; j++) {
-            std::cout << std::hex << std::setw(2) << std::setfill('0')
-                      << static_cast<int>(record[j]);
-            if (j < bytes_to_show - 1)
-              std::cout << " ";
-          }
-          std::cout << std::dec;
+    //       // Print first few bytes of record in hex
+    //       uint32_t bytes_to_show = std::min(16U, tree.record_size);
+    //       for (uint32_t j = 0; j < bytes_to_show; j++) {
+    //         std::cout << std::hex << std::setw(2) << std::setfill('0')
+    //                   << static_cast<int>(record[j]);
+    //         if (j < bytes_to_show - 1)
+    //           std::cout << " ";
+    //       }
+    //       std::cout << std::dec;
 
-          if (tree.record_size > 16) {
-            std::cout << "... (" << tree.record_size << " bytes total)";
-          }
+    //       if (tree.record_size > 16) {
+    //         std::cout << "... (" << tree.record_size << " bytes total)";
+    //       }
 
-          // For simple 4-byte records, also show as integer
-          if (tree.record_size == 4) {
-            uint32_t value;
-            memcpy(&value, record, 4);
-            std::cout << " (int: " << value << ")";
-          }
+    //       // For simple 4-byte records, also show as integer
+    //       if (tree.record_size == 4) {
+    //         uint32_t value;
+    //         memcpy(&value, record, 4);
+    //         std::cout << " (int: " << value << ")";
+    //       }
 
-          std::cout << std::endl;
-        }
-      }
-    }
+    //       std::cout << std::endl;
+    //     }
+    //   }
+    // }
   }
 
   // Show memory layout information
@@ -1676,20 +1417,49 @@ void bp_print_node(BPlusTree &tree, BPTreeNode *node) {
         << std::endl;
   }
 
-  // Show different behavior for B+TREE vs BTREE
-  if (tree.tree_type == BPLUS) {
-    if (node->is_leaf) {
-      std::cout << "B+TREE: Only leaf nodes store actual records" << std::endl;
-    } else {
-      std::cout << "B+TREE: Internal nodes store only keys and child pointers"
-                << std::endl;
-    }
-  } else if (tree.tree_type == BTREE) {
-    std::cout << "B-TREE: Both internal and leaf nodes store records"
-              << std::endl;
+  std::cout << "=====================" << std::endl;
+}
+
+#include <queue>
+
+void bp_print_tree(BPlusTree &tree) {
+  BPTreeNode *root = bp_get_root(tree);
+  if (!root) {
+    std::cout << "Tree is empty" << std::endl;
+    return;
   }
 
-  std::cout << "=====================" << std::endl;
+  std::queue<BPTreeNode *> to_visit;
+  to_visit.push(root);
+
+  while (!to_visit.empty()) {
+    // Get the number of nodes at the current level
+    size_t level_size = to_visit.size();
+
+    // Print all nodes at the current level
+    for (size_t i = 0; i < level_size; i++) {
+      BPTreeNode *node = to_visit.front();
+      to_visit.pop();
+
+      // Print the current node using the existing bp_print_node function
+      bp_print_node(tree, node);
+
+      // Add children to the queue if the node is not a leaf
+      if (!node->is_leaf) {
+        uint32_t *children = get_children(tree, node);
+        for (uint32_t j = 0; j <= node->num_keys; j++) {
+          if (children[j] != 0) {
+            BPTreeNode *child = bp_get_child(tree, node, j);
+            if (child) {
+              to_visit.push(child);
+            }
+          }
+        }
+      }
+    }
+    // Print a separator between levels
+    std::cout << "\n=== END OF LEVEL ===\n" << std::endl;
+  }
 }
 
 /* DBGINV */
@@ -1722,32 +1492,26 @@ static void verify_key_separation(BPlusTree &tree, BPTreeNode *node) {
     if (i < node->num_keys) {
       uint32_t upper_separator = keys[i];
       for (uint32_t j = 0; j < child->num_keys; j++) {
-          if (tree.tree_type == BTREE) {
-            if (child_keys[j] > upper_separator) {
-              std::cerr << "INVARIANT VIOLATION: Key " << child_keys[j]
-                        << " in child " << child->index
-                        << " violates upper bound " << upper_separator
-                        << " from parent " << node->index << std::endl;
+        if (tree.tree_type == BTREE) {
+          if (child_keys[j] > upper_separator) {
+            std::cerr << "INVARIANT VIOLATION: Key " << child_keys[j]
+                      << " in child " << child->index
+                      << " violates upper bound " << upper_separator
+                      << " from parent " << node->index << std::endl;
 
-
-              exit(1);
-            }
-          } else {
-            if (child_keys[j] >= upper_separator) {
-              std::cerr << "INVARIANT VIOLATION: Key " << child_keys[j]
-                        << " in child " << child->index
-                        << " violates upper bound " << upper_separator
-                        << " from parent " << node->index << std::endl;
-
-
-              // bp_debug_print_tree(tree);
-              exit(1);
-            }
+            exit(1);
           }
+        } else {
+          if (child_keys[j] >= upper_separator) {
+            std::cerr << "INVARIANT VIOLATION: Key " << child_keys[j]
+                      << " in child " << child->index
+                      << " violates upper bound " << upper_separator
+                      << " from parent " << node->index << std::endl;
 
-
-
-
+            // bp_debug_print_tree(tree);
+            exit(1);
+          }
+        }
       }
     }
 
@@ -1839,7 +1603,7 @@ static int calculate_tree_height(BPlusTree &tree) {
 }
 
 static void validate_bplus_leaf_node(BPlusTree &tree, BPTreeNode *node) {
-    return;
+  return;
   if (!node) {
     std::cout << "// Node pointer is null" << std::endl;
     exit(0);
@@ -1914,7 +1678,8 @@ static void validate_bplus_leaf_node(BPlusTree &tree, BPTreeNode *node) {
   if (node->next != 0) {
     BPTreeNode *next_node = static_cast<BPTreeNode *>(pager_get(node->next));
     if (next_node && next_node->previous != node->index) {
-      // std::cout << "// Next sibling's previous pointer does not point back to "
+      // std::cout << "// Next sibling's previous pointer does not point back to
+      // "
       //              "this node"
       //           << std::endl;
       exit(0);
@@ -1925,7 +1690,8 @@ static void validate_bplus_leaf_node(BPlusTree &tree, BPTreeNode *node) {
     BPTreeNode *prev_node =
         static_cast<BPTreeNode *>(pager_get(node->previous));
     if (prev_node && prev_node->next != node->index) {
-      // std::cout << "/////Previous sibling's next pointer does not point to this node"
+      // std::cout << "/////Previous sibling's next pointer does not point to
+      // this node"
       //     << std::endl;
       exit(0);
     }
@@ -1990,9 +1756,7 @@ static void validate_bplus_internal_node(BPlusTree &tree, BPTreeNode *node) {
       exit(0);
     }
 
-
     if (child->parent != node->index) {
-
 
       std::cout << "// Child node's parent pointer does not point to this node"
                 << std::endl;
@@ -2122,12 +1886,14 @@ static void validate_btree_node(BPlusTree &tree, BPTreeNode *node) {
       exit(0);
     }
   } else {
-      // just junk, might just leave
+    // just junk, might just leave
     // // Leaf node sibling validation (if B-tree supports leaf linking)
     // if (node->next != 0) {
-    //   BPTreeNode *next_node = static_cast<BPTreeNode *>(pager_get(node->next));
-    //   if (next_node && next_node->previous != node->index) {
-    //     std::cout << "// Next sibling's previous pointer does not point back "
+    //   BPTreeNode *next_node = static_cast<BPTreeNode
+    //   *>(pager_get(node->next)); if (next_node && next_node->previous !=
+    //   node->index) {
+    //     std::cout << "// Next sibling's previous pointer does not point back
+    //     "
     //                  "to this node"
     //               << std::endl;
     //     exit(0);
@@ -2233,15 +1999,14 @@ uint32_t random_u32() {
 
 void test_tree_toplevel(bool single_node) {
   pager_init("test_large_records.db");
-  pager_begin_transaction();
-  for (auto type : {BPLUS, BTREE}) {
 
+  for (auto type : {BPLUS, BTREE}) {
+    pager_begin_transaction();
     std::vector<ColumnInfo> schema = {{TYPE_INT32}};
     BPlusTree tree = bp_create(TYPE_INT32, schema, type);
-    if(tree.tree_type == INVALID) {
-        std::cout <<"invalid tree\n";
-        exit(1);
-
+    if (tree.tree_type == INVALID) {
+      std::cout << "invalid tree\n";
+      exit(1);
     }
     bp_init(tree);
     // validate_tree(tree);
@@ -2264,13 +2029,12 @@ void test_tree_toplevel(bool single_node) {
       inserted++;
       verify_all_invariants(tree);
 
-      // if (key % 7 == 0 && deleted_keys.size() + 1 != inserted) {
-      //   deleted_keys.insert(key);
-      //   bp_delete_element(tree, key);
-      //   verify_all_invariants(tree);
+      if (key % 7 == 0 && deleted_keys.size() + 1 != inserted) {
+        deleted_keys.insert(key);
+        bp_delete_element(tree, key);
+        verify_all_invariants(tree);
 
-      // } else
-      if (key % 9 == 0) {
+      } else if (key % 9 == 0) {
         bp_insert_element(tree, key, record);
         if (type == BTREE) {
           duplicated++;
@@ -2278,17 +2042,92 @@ void test_tree_toplevel(bool single_node) {
       }
     }
 
-    auto records = bp_print_leaves(tree);
-    if (records.size() != (keys.size() + duplicated) - deleted_keys.size()) {
-      std::cout << "Size wrong\n";
-      exit(1);
+    for (uint32_t key : keys) {
+      bp_delete_element(tree, key);
+      verify_all_invariants(tree);
     }
 
-    // for(uint32_t key : keys) {
-    //     bp_delete_element(tree, key);
-    //     verify_all_invariants(tree);
-    // }
+    pager_rollback();
   }
 
   std::cout << "allpassed\n";
+}
+
+/*------------- HASH -------------- */
+
+uint64_t debug_hash_tree(BPlusTree &tree) {
+  uint64_t hash = 0xcbf29ce484222325ULL;
+  const uint64_t prime = 0x100000001b3ULL;
+
+  // Hash tree metadata
+  hash ^= tree.root_page_index;
+  hash *= prime;
+  hash ^= tree.internal_max_keys;
+  hash *= prime;
+  hash ^= tree.leaf_max_keys;
+  hash *= prime;
+  hash ^= tree.record_size;
+  hash *= prime;
+
+  // Recursive node hashing function
+  std::function<void(BPTreeNode *, int)> hash_node = [&](BPTreeNode *node,
+                                                         int depth) {
+    if (!node)
+      return;
+
+    // Hash node metadata
+    hash ^= node->index;
+    hash *= prime;
+    hash ^= node->parent;
+    hash *= prime;
+    hash ^= node->next;
+    hash *= prime;
+    hash ^= node->previous;
+    hash *= prime;
+    hash ^= node->num_keys;
+    hash *= prime;
+    hash ^= (node->is_leaf ? 1 : 0) | (depth << 1);
+    hash *= prime;
+
+    // Hash keys
+    uint32_t *keys = get_keys(node);
+    for (uint32_t i = 0; i < node->num_keys; i++) {
+      hash ^= keys[i];
+      hash *= prime;
+    }
+
+    if (node->is_leaf) {
+      // Hash leaf node records
+      uint8_t *record_data = get_record_data(tree, node);
+      for (uint32_t i = 0; i < node->num_keys; i++) {
+        const uint8_t *record = record_data + i * tree.record_size;
+        uint32_t bytes_to_hash = std::min(8U, tree.record_size);
+        for (uint32_t j = 0; j < bytes_to_hash; j++) {
+          hash ^= record[j];
+          hash *= prime;
+        }
+      }
+    } else {
+      // Recursively hash children
+      uint32_t *children = get_children(tree, node);
+      for (uint32_t i = 0; i <= node->num_keys; i++) {
+        if (children[i] != 0) {
+          BPTreeNode *child = bp_get_child(tree, node, i);
+          if (child) {
+            hash_node(child, depth + 1);
+          }
+        }
+      }
+    }
+  };
+
+  // Hash the tree starting from root
+  if (tree.root_page_index != 0) {
+    BPTreeNode *root = bp_get_root(tree);
+    if (root) {
+      hash_node(root, 0);
+    }
+  }
+
+  return hash;
 }

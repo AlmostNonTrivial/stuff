@@ -5,7 +5,7 @@
 #define PAGE_ROOT 0
 
 
-#define MAX_CACHE_ENTRIES 64
+#define MAX_CACHE_ENTRIES 32
 #define FREE_PAGES_PER_FREE_PAGE ((PAGE_SIZE - (sizeof(unsigned int) * 4)) / 4)
 #include "defs.hpp"
 

@@ -113,7 +113,7 @@ BPTreeNode* bp_find_leaf_node(BPlusTree& tree, BPTreeNode* node, uint32_t key);
 // Tree traversal
 BPTreeNode* bp_get_root(BPlusTree& tree);
 BPTreeNode* bp_left_most(BPlusTree& tree);
-std::vector<std::pair<uint32_t, const uint8_t*>> bp_print_leaves(BPlusTree& tree);
+
 
 // Internal operations
 void bp_insert(BPlusTree& tree, BPTreeNode* node, uint32_t key, const uint8_t* data);
@@ -127,16 +127,14 @@ BPTreeNode* bp_steal_from_right(BPlusTree& tree, BPTreeNode* node, uint32_t pare
 void bp_update_parent_keys(BPlusTree& tree, BPTreeNode* node, uint32_t deleted_key);
 
 // Debug operations
-void bp_debug_print_tree(BPlusTree& tree);
-void bp_debug_print_structure(BPlusTree& tree);
+
 uint64_t debug_hash_tree(BPlusTree& tree);
 
 
-void bp_debug_capacity_calculation(BPlusTree& tree, const std::vector<ColumnInfo> &schema);
-void bp_debug_node_layout(BPlusTree& tree, BPTreeNode* node, std::vector<ColumnInfo>& schema);
-std::vector<LeafDataEntry> bp_extract_leaf_data(BPlusTree& tree);
 
 
 uint32_t *get_key_at(BPlusTree & tree, BPTreeNode *node, uint32_t index);
 
 void test_tree_toplevel(bool single_node);
+
+void bp_print_tree(BPlusTree &tree);
