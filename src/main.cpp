@@ -556,6 +556,10 @@ void test_sequential_operations() {
 
   std::vector<ColumnInfo> schema = {{TYPE_INT64}};
   BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
+  if(tree.tree_type == INVALID) {
+      std::cout <<"Invalid tree\n";
+      exit(1);
+  }
 
   int count = tree.leaf_max_keys * 5;
   bp_init(tree);
