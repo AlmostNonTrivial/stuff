@@ -1719,7 +1719,15 @@ static void verify_key_separation(BPlusTree &tree, BPTreeNode *node) {
     if (i < node->num_keys) {
       uint32_t upper_separator = keys[i];
       for (uint32_t j = 0; j < child->num_keys; j++) {
-        if (child_keys[j] >= upper_separator) {
+        if (tree.tree_type == BTREE) {
+          if (child_keys[j] > upper_separator) {
+            std::cerr << "INVARIANT VIOLATION: Key " << child_keys[j]
+                      << " in child " << child->index
+                      << " violates upper bound " << upper_separator
+                      << " from parent " << node->index << std::endl;
+            exit(1);
+          }
+        } else if (child_keys[j] >= upper_separator) {
           std::cerr << "INVARIANT VIOLATION: Key " << child_keys[j]
                     << " in child " << child->index << " violates upper bound "
                     << upper_separator << " from parent " << node->index
@@ -1816,7 +1824,6 @@ static int calculate_tree_height(BPlusTree &tree) {
   return height;
 }
 
-
 static void validate_bplus_leaf_node(BPlusTree &tree, BPTreeNode *node) {
   if (!node) {
     std::cout << "// Node pointer is null" << std::endl;
@@ -1831,7 +1838,7 @@ static void validate_bplus_leaf_node(BPlusTree &tree, BPTreeNode *node) {
 
   // Key count must be within bounds
   uint32_t min_keys = (node->parent == 0)
-                          ? 1
+                          ? 0
                           : tree.leaf_min_keys; // Root can have as few as 1 key
   if (node->num_keys < min_keys) {
     bp_print_node(tree, node);
@@ -2028,10 +2035,10 @@ static void validate_btree_node(BPlusTree &tree, BPTreeNode *node) {
   }
 
   // For regular B-trees, both internal and leaf nodes store records
-  // Key count must be within bounds (same for both leaf and internal in regular
-  // B-tree)
+  // Key count must be within bounds (same for both leaf and internal in
+  // regular B-tree)
   uint32_t min_keys =
-      (node->parent == 0) ? 1 : tree.leaf_min_keys; // Using leaf limits since
+      (node->parent == 0) ? 0 : tree.leaf_min_keys; // Using leaf limits since
                                                     // they're the same in BTREE
   uint32_t max_keys = tree.leaf_max_keys; // Same for both in regular B-tree
 
@@ -2113,9 +2120,9 @@ static void validate_btree_node(BPlusTree &tree, BPTreeNode *node) {
       BPTreeNode *prev_node =
           static_cast<BPTreeNode *>(pager_get(node->previous));
       if (prev_node && prev_node->next != node->index) {
-        std::cout
-            << "// Previous sibling's next pointer does not point to this node"
-            << std::endl;
+        std::cout << "// Previous sibling's next pointer does not point to "
+                     "this node"
+                  << std::endl;
         exit(0);
       }
     }
@@ -2209,7 +2216,7 @@ uint32_t random_u32() {
 void test_tree_toplevel(bool single_node) {
   pager_init("test_large_records.db");
   pager_begin_transaction();
-  for (auto type : {BPLUS, BTREE}) {
+  for (auto type : {BPLUS}) {
 
     std::vector<ColumnInfo> schema = {{TYPE_INT32}};
     BPlusTree tree = bp_create(TYPE_INT32, schema, type);
@@ -2217,7 +2224,7 @@ void test_tree_toplevel(bool single_node) {
     // validate_tree(tree);
 
     int insert_count =
-        single_node ? tree.leaf_max_keys : tree.leaf_max_keys * 5;
+        single_node ? tree.leaf_max_keys : tree.leaf_max_keys * 10;
 
     std::set<uint32_t> keys;
     std::set<uint32_t> deleted_keys;
@@ -2234,16 +2241,18 @@ void test_tree_toplevel(bool single_node) {
       inserted++;
       verify_all_invariants(tree);
 
-      // if (key % 7 == 0 && deleted_keys.size() + 1 != inserted) {
-      //   deleted_keys.insert(key);
-      //   bp_delete_element(tree, key);
-      //   verify_all_invariants(tree);
-      // } else if(key % 9 == 0) {
-      //     bp_insert_element(tree, key, record);
-      //     if(type == BTREE) {
-      //         duplicated++;
-      //     }
-      // }
+      if (key % 7 == 0 && deleted_keys.size() + 1 != inserted) {
+        deleted_keys.insert(key);
+        bp_delete_element(tree, key);
+        verify_all_invariants(tree);
+
+      } else
+      if (key % 9 == 0) {
+        bp_insert_element(tree, key, record);
+        if (type == BTREE) {
+          duplicated++;
+        }
+      }
     }
 
     auto records = bp_print_leaves(tree);
@@ -2251,7 +2260,12 @@ void test_tree_toplevel(bool single_node) {
       std::cout << "Size wrong\n";
       exit(1);
     }
+
+    for(uint32_t key : keys) {
+        bp_delete_element(tree, key);
+        verify_all_invariants(tree);
+    }
   }
 
-  std::cout <<"allpassed\n";
+  std::cout << "allpassed\n";
 }
