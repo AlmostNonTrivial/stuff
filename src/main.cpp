@@ -542,7 +542,9 @@ void test_capacity_and_splits() {
 }
 
 void verify_invariants(){
-    test_tree_toplevel(false);
+    test_tree_toplevel(true);
+    std::cout <<"passed single\n";
+    test_tree_toplevel(true);
 }
 
 void test_sequential_operations() {
