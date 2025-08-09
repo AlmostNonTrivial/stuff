@@ -12,16 +12,19 @@ enum DataType : uint32_t {
     TYPE_VARCHAR256 = 256 // Variable char up to 256 bytes
 };
 
+enum TreeType : uint32_t {
+    BPLUS = 0,
+    BTREE = 1,
+    INVALID = 2
+};
+
 // Column information for schema
 struct ColumnInfo {
     DataType type;
 };
 
-// B+Tree capacity information
-struct BPlusTreeCapacity {
-    uint32_t max_keys;
-    uint32_t min_keys;
-};
+
+
 
 // B+Tree control structure
 struct BPlusTree {
@@ -34,6 +37,7 @@ struct BPlusTree {
     uint32_t leaf_split_index;
     uint32_t record_size;  // Total size of each record
     uint32_t node_key_size;
+    TreeType tree_type;
 };
 
 #define NODE_HEADER_SIZE 28
@@ -67,10 +71,12 @@ static_assert(sizeof(BPTreeNode) == PAGE_SIZE, "BTreeNode must be exactly PAGE_S
 // Capacity calculation
 
 
-BPlusTreeCapacity bp_calculate_capacity(BPlusTree&tree, const std::vector<ColumnInfo> &schema);
+
 
 // Tree management
-BPlusTree bp_create(DataType key, const std::vector<ColumnInfo> &schema);
+
+BPlusTree bp_create(DataType key, const std::vector<ColumnInfo> &schema,
+                    TreeType tree_type);
 void bp_init(BPlusTree& tree);
 void bp_reset(BPlusTree& tree);
 

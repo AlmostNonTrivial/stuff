@@ -13,6 +13,7 @@
 #include <random>
 #include <string>
 #include <vector>
+#include "btree_tests.hpp"
 
 // Test result tracking
 struct TestResults {
@@ -286,7 +287,7 @@ void test_data_types() {
     pager_begin_transaction();
 
     std::vector<ColumnInfo> schema = {{TYPE_INT32}};
-    BPlusTree tree = bp_create(TYPE_INT32, schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     Int32Record data1 = {42};
@@ -321,7 +322,7 @@ void test_data_types() {
     pager_begin_transaction();
 
     std::vector<ColumnInfo> schema = {{TYPE_INT64}};
-    BPlusTree tree = bp_create(TYPE_INT32, schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     Int64Record data1 = {9223372036854775807LL}; // MAX_LONG
@@ -350,7 +351,7 @@ void test_data_types() {
     pager_begin_transaction();
 
     std::vector<ColumnInfo> schema = {{TYPE_VARCHAR32}};
-    BPlusTree tree = bp_create(TYPE_INT32, schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     VarChar32Record data1;
@@ -383,7 +384,7 @@ void test_data_types() {
     pager_begin_transaction();
 
     std::vector<ColumnInfo> schema = {{TYPE_VARCHAR256}};
-    BPlusTree tree = bp_create(TYPE_INT32, schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     VarChar256Record data1;
@@ -423,7 +424,7 @@ void test_composite_records() {
       {TYPE_VARCHAR256} // description
   };
 
-  BPlusTree tree = bp_create(TYPE_INT32, schema);
+  BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
   bp_init(tree);
 
   // Insert composite records
@@ -472,7 +473,7 @@ void test_capacity_and_splits() {
     pager_begin_transaction();
 
     std::vector<ColumnInfo> schema = {{TYPE_INT32}};
-    BPlusTree tree = bp_create(TYPE_INT32, schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     // Calculate expected capacity
@@ -510,7 +511,7 @@ void test_capacity_and_splits() {
 
     std::vector<ColumnInfo> schema = {
         {TYPE_INT32}, {TYPE_INT64}, {TYPE_VARCHAR32}, {TYPE_VARCHAR256}};
-    BPlusTree tree = bp_create(TYPE_INT32, schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     const uint32_t expected_leaf_capacity =
@@ -544,7 +545,8 @@ void verify_invariants(){
     pager_init("invariants.db");
     pager_begin_transaction();
     std::vector<ColumnInfo> schema = {{TYPE_INT64}};
-    BPlusTree tree = bp_create(TYPE_INT32, schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
+    bp_validate_tree(tree);
 
     Int64Record record = {10LL};
     int count = tree.leaf_max_keys;
@@ -576,7 +578,7 @@ void test_sequential_operations() {
   pager_begin_transaction();
 
   std::vector<ColumnInfo> schema = {{TYPE_INT64}};
-  BPlusTree tree = bp_create(TYPE_INT32, schema);
+  BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
 
   int count = tree.leaf_max_keys * 5;
   bp_init(tree);
@@ -689,7 +691,7 @@ void test_random_operations() {
   pager_begin_transaction();
 
   std::vector<ColumnInfo> schema = {{TYPE_INT32}};
-  BPlusTree tree = bp_create(TYPE_INT32, schema);
+  BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
   bp_init(tree);
 
   // Generate random keys
@@ -768,7 +770,7 @@ void test_update_operations() {
   pager_begin_transaction();
 
   std::vector<ColumnInfo> schema = {{TYPE_VARCHAR32}};
-  BPlusTree tree = bp_create(TYPE_INT32, schema);
+  BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
   bp_init(tree);
 
   // Initial insert
@@ -822,7 +824,7 @@ void test_persistence() {
     pager_begin_transaction();
 
     std::vector<ColumnInfo> schema = {{TYPE_INT32}, {TYPE_VARCHAR32}};
-    tree = bp_create(TYPE_INT32, schema);
+    tree = bp_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     struct Record {
@@ -884,7 +886,7 @@ void test_boundary_conditions() {
   pager_begin_transaction();
 
   std::vector<ColumnInfo> schema = {{TYPE_INT32}};
-  BPlusTree tree = bp_create(TYPE_INT32, schema);
+  BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
   bp_init(tree);
 
   // Test empty tree
@@ -926,7 +928,7 @@ void test_boundary_conditions() {
   pager_init("test_exact_capacity.db");
   pager_begin_transaction();
 
-  BPlusTree tree2 = bp_create(TYPE_INT32, schema);
+  BPlusTree tree2 = bp_create(TYPE_INT32, schema, BPLUS);
   bp_init(tree2);
 
   std::cout << "Leaf max keys: " << tree2.leaf_max_keys << std::endl;
@@ -963,7 +965,7 @@ void test_rollback_functionality() {
 
   const char *db_file = "test_rollback.db";
   std::vector<ColumnInfo> schema = {{TYPE_INT32}};
-  BPlusTree tree = bp_create(TYPE_INT32, schema);
+  BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
   // Test 1: Basic rollback after modifications
   {
     pager_init(db_file);
@@ -1049,7 +1051,7 @@ void test_rollback_functionality() {
     pager_begin_transaction();
 
     // std::vector<ColumnInfo> schema = {{TYPE_INT32}};
-    // BPlusTree tree = bp_create(TYPE_INT32, schema);
+    // BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
     // bp_init(tree);
 
     // Check that updates were rolled back
@@ -1099,7 +1101,7 @@ void test_rollback_functionality() {
   {
     pager_init("test_rollback_splits.db");
     pager_begin_transaction();
-    tree = bp_create(TYPE_INT32, schema);
+    tree = bp_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     // Insert enough data to cause splits, then rollback
@@ -1139,14 +1141,14 @@ void test_rollback_functionality() {
   // Test 6: Test partial transaction rollback (journal replay)
   {
     pager_init("test_partial_rollback.db");
-    tree = bp_create(TYPE_INT32, schema);
+    tree = bp_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     // Simulate a crash by not calling commit after modifications
     pager_begin_transaction();
 
     std::vector<ColumnInfo> schema = {{TYPE_VARCHAR32}};
-    BPlusTree tree = bp_create(TYPE_INT32, schema);
+    BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     for (int i = 0; i < 20; i++) {
