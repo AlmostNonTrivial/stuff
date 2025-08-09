@@ -892,10 +892,6 @@ BPTreeNode *bp_steal_from_left(BPlusTree &tree, BPTreeNode *node,
   return node;
 }
 
-
-
-
-
 /* Print Debug */
 void bp_debug_print_tree(BPlusTree &tree) {
   if (tree.root_page_index == 0) {
@@ -1399,7 +1395,6 @@ void bp_debug_node_layout(BPlusTree &tree, BPTreeNode *node,
   std::cout << "==========================" << std::endl;
 }
 
-
 void bp_print_node(BPlusTree &tree, BPTreeNode *node) {
   if (!node) {
     std::cout << "NULL node" << std::endl;
@@ -1412,18 +1407,18 @@ void bp_print_node(BPlusTree &tree, BPTreeNode *node) {
   // Print tree type and node type
   std::cout << "Tree Type: ";
   switch (tree.tree_type) {
-    case BTREE:
-      std::cout << "B-TREE";
-      break;
-    case BPLUS:
-      std::cout << "B+TREE";
-      break;
-    case INVALID:
-      std::cout << "INVALID";
-      break;
-    default:
-      std::cout << "UNKNOWN(" << tree.tree_type << ")";
-      break;
+  case BTREE:
+    std::cout << "B-TREE";
+    break;
+  case BPLUS:
+    std::cout << "B+TREE";
+    break;
+  case INVALID:
+    std::cout << "INVALID";
+    break;
+  default:
+    std::cout << "UNKNOWN(" << tree.tree_type << ")";
+    break;
   }
   std::cout << std::endl;
 
@@ -1437,21 +1432,29 @@ void bp_print_node(BPlusTree &tree, BPTreeNode *node) {
 
   // Print node metadata
   std::cout << "Page Index: " << node->index << std::endl;
-  std::cout << "Parent: " << (node->parent == 0 ? "ROOT" : std::to_string(node->parent)) << std::endl;
+  std::cout << "Parent: "
+            << (node->parent == 0 ? "ROOT" : std::to_string(node->parent))
+            << std::endl;
   std::cout << "Keys: " << node->num_keys;
 
   // Print capacity info based on node type
   if (node->is_leaf) {
-    std::cout << "/" << tree.leaf_max_keys << " (min: " << tree.leaf_min_keys << ")";
+    std::cout << "/" << tree.leaf_max_keys << " (min: " << tree.leaf_min_keys
+              << ")";
   } else {
-    std::cout << "/" << tree.internal_max_keys << " (min: " << tree.internal_min_keys << ")";
+    std::cout << "/" << tree.internal_max_keys
+              << " (min: " << tree.internal_min_keys << ")";
   }
   std::cout << std::endl;
 
   // Print sibling links for leaf nodes
   if (node->is_leaf) {
-    std::cout << "Previous: " << (node->previous == 0 ? "NULL" : std::to_string(node->previous)) << std::endl;
-    std::cout << "Next: " << (node->next == 0 ? "NULL" : std::to_string(node->next)) << std::endl;
+    std::cout << "Previous: "
+              << (node->previous == 0 ? "NULL" : std::to_string(node->previous))
+              << std::endl;
+    std::cout << "Next: "
+              << (node->next == 0 ? "NULL" : std::to_string(node->next))
+              << std::endl;
   }
 
   std::cout << "Record Size: " << tree.record_size << " bytes" << std::endl;
@@ -1460,7 +1463,8 @@ void bp_print_node(BPlusTree &tree, BPTreeNode *node) {
   uint32_t *keys = get_keys(node);
   std::cout << "Keys: [";
   for (uint32_t i = 0; i < node->num_keys; i++) {
-    if (i > 0) std::cout << ", ";
+    if (i > 0)
+      std::cout << ", ";
     std::cout << keys[i];
   }
   std::cout << "]" << std::endl;
@@ -1470,7 +1474,8 @@ void bp_print_node(BPlusTree &tree, BPTreeNode *node) {
     uint32_t *children = get_children(tree, node);
     std::cout << "Children: [";
     for (uint32_t i = 0; i <= node->num_keys; i++) {
-      if (i > 0) std::cout << ", ";
+      if (i > 0)
+        std::cout << ", ";
       std::cout << children[i];
     }
     std::cout << "]" << std::endl;
@@ -1488,7 +1493,8 @@ void bp_print_node(BPlusTree &tree, BPTreeNode *node) {
           for (uint32_t j = 0; j < bytes_to_show; j++) {
             std::cout << std::hex << std::setw(2) << std::setfill('0')
                       << static_cast<int>(record[j]);
-            if (j < bytes_to_show - 1) std::cout << " ";
+            if (j < bytes_to_show - 1)
+              std::cout << " ";
           }
           std::cout << std::dec;
 
@@ -1514,26 +1520,32 @@ void bp_print_node(BPlusTree &tree, BPTreeNode *node) {
   if (node->is_leaf) {
     uint32_t keys_size = tree.leaf_max_keys * tree.node_key_size;
     uint32_t records_size = tree.leaf_max_keys * tree.record_size;
-    std::cout << "  Keys area: " << keys_size << " bytes (used: "
-              << (node->num_keys * tree.node_key_size) << ")" << std::endl;
-    std::cout << "  Records area: " << records_size << " bytes (used: "
-              << (node->num_keys * tree.record_size) << ")" << std::endl;
-    std::cout << "  Total data: " << (keys_size + records_size)
-              << " / " << (PAGE_SIZE - NODE_HEADER_SIZE) << " bytes" << std::endl;
+    std::cout << "  Keys area: " << keys_size
+              << " bytes (used: " << (node->num_keys * tree.node_key_size)
+              << ")" << std::endl;
+    std::cout << "  Records area: " << records_size
+              << " bytes (used: " << (node->num_keys * tree.record_size) << ")"
+              << std::endl;
+    std::cout << "  Total data: " << (keys_size + records_size) << " / "
+              << (PAGE_SIZE - NODE_HEADER_SIZE) << " bytes" << std::endl;
   } else {
     uint32_t keys_size = tree.internal_max_keys * tree.node_key_size;
     uint32_t children_size = (tree.internal_max_keys + 1) * tree.node_key_size;
-    std::cout << "  Keys area: " << keys_size << " bytes (used: "
-              << (node->num_keys * tree.node_key_size) << ")" << std::endl;
-    std::cout << "  Children area: " << children_size << " bytes (used: "
-              << ((node->num_keys + 1) * tree.node_key_size) << ")" << std::endl;
-    std::cout << "  Total data: " << (keys_size + children_size)
-              << " / " << (PAGE_SIZE - NODE_HEADER_SIZE) << " bytes" << std::endl;
+    std::cout << "  Keys area: " << keys_size
+              << " bytes (used: " << (node->num_keys * tree.node_key_size)
+              << ")" << std::endl;
+    std::cout << "  Children area: " << children_size
+              << " bytes (used: " << ((node->num_keys + 1) * tree.node_key_size)
+              << ")" << std::endl;
+    std::cout << "  Total data: " << (keys_size + children_size) << " / "
+              << (PAGE_SIZE - NODE_HEADER_SIZE) << " bytes" << std::endl;
   }
 
   // For B-tree nodes, show that internal nodes also have records
   if (tree.tree_type == BTREE && !node->is_leaf) {
-    std::cout << "Note: B-TREE internal nodes also store records (not shown above)" << std::endl;
+    std::cout
+        << "Note: B-TREE internal nodes also store records (not shown above)"
+        << std::endl;
   }
 
   // Show different behavior for B+TREE vs BTREE
@@ -1541,10 +1553,12 @@ void bp_print_node(BPlusTree &tree, BPTreeNode *node) {
     if (node->is_leaf) {
       std::cout << "B+TREE: Only leaf nodes store actual records" << std::endl;
     } else {
-      std::cout << "B+TREE: Internal nodes store only keys and child pointers" << std::endl;
+      std::cout << "B+TREE: Internal nodes store only keys and child pointers"
+                << std::endl;
     }
   } else if (tree.tree_type == BTREE) {
-    std::cout << "B-TREE: Both internal and leaf nodes store records" << std::endl;
+    std::cout << "B-TREE: Both internal and leaf nodes store records"
+              << std::endl;
   }
 
   std::cout << "=====================" << std::endl;
@@ -1853,10 +1867,10 @@ static void validate_bplus_leaf_node(BPlusTree &tree, BPTreeNode *node) {
                           ? 1
                           : tree.leaf_min_keys; // Root can have as few as 1 key
   if (node->num_keys < min_keys) {
-      bp_print_node(tree, node);
-      bp_print_node(tree, bp_get_parent(node));
-    std::cout << node << "// Leaf node has too few keys: " << node->num_keys << " < "
-              << min_keys << std::endl;
+    bp_print_node(tree, node);
+    bp_print_node(tree, bp_get_parent(node));
+    std::cout << node << "// Leaf node has too few keys: " << node->num_keys
+              << " < " << min_keys << std::endl;
     exit(0);
   }
 
@@ -1949,8 +1963,6 @@ static void validate_bplus_internal_node(BPlusTree &tree, BPTreeNode *node) {
           ? 1
           : tree.internal_min_keys; // Root can have as few as 1 key
   if (node->num_keys < min_keys) {
-
-
 
     std::cout << "// Internal node has too few keys: " << node->num_keys
               << " < " << min_keys << std::endl;
@@ -2220,7 +2232,6 @@ static void verify_all_invariants(BPlusTree &tree) {
   verify_tree_height(tree, root, expected_height);
 }
 
-
 uint32_t random_u32() {
   static std::random_device rd;
   static std::mt19937 gen(rd());
@@ -2231,37 +2242,47 @@ uint32_t random_u32() {
 void test_tree_toplevel(bool single_node) {
   pager_init("test_large_records.db");
   pager_begin_transaction();
-  std::vector<ColumnInfo> schema = {{TYPE_VARCHAR256}};
-  BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
-  bp_init(tree);
-  validate_tree(tree);
+  for (auto type : {BPLUS}) {
 
-  int insert_count = single_node ? tree.leaf_max_keys : tree.leaf_max_keys * 5;
+    std::vector<ColumnInfo> schema = {{TYPE_INT32}};
+    BPlusTree tree = bp_create(TYPE_INT32, schema, type);
+    bp_init(tree);
+    validate_tree(tree);
 
-  std::set<uint32_t> keys;
-  std::set<uint32_t> deleted_keys;
-  while (keys.size() < insert_count) {
-    keys.insert(random_u32());
-  }
+    int insert_count =
+        single_node ? tree.leaf_max_keys : tree.leaf_max_keys * 5;
 
-  int inserted = 0;
-  for (uint32_t key : keys) {
-    uint8_t record[TYPE_INT32];
-    memcpy(record, &key, sizeof(key));
-    bp_insert_element(tree, key, record);
-    inserted++;
-    verify_all_invariants(tree);
-
-    if (key % 7 == 0 && deleted_keys.size()+ 1 != inserted) {
-      deleted_keys.insert(key);
-      bp_delete_element(tree, key);
-      verify_all_invariants(tree);
+    std::set<uint32_t> keys;
+    std::set<uint32_t> deleted_keys;
+    while (keys.size() < insert_count) {
+      keys.insert(random_u32());
     }
-  }
 
-  auto records = bp_print_leaves(tree);
-  if (records.size() != keys.size() - deleted_keys.size()) {
-    std::cout << "failed";
-    exit(1);
+    int inserted = 0;
+    int duplicated = 0;
+    for (uint32_t key : keys) {
+      uint8_t record[TYPE_INT32];
+      memcpy(record, &key, sizeof(key));
+      bp_insert_element(tree, key, record);
+      inserted++;
+      verify_all_invariants(tree);
+
+      if (key % 7 == 0 && deleted_keys.size() + 1 != inserted) {
+        deleted_keys.insert(key);
+        bp_delete_element(tree, key);
+        verify_all_invariants(tree);
+      } else if(key % 9 == 0) {
+          bp_insert_element(tree, key, record);
+          if(type == BTREE) {
+              duplicated++;
+          }
+      }
+    }
+
+    auto records = bp_print_leaves(tree);
+    if (records.size() != (keys.size() + duplicated) - deleted_keys.size()) {
+      std::cout << "Size wrong\n";
+      exit(1);
+    }
   }
 }
