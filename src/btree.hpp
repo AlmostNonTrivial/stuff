@@ -84,22 +84,15 @@ BPTreeNode* bp_create_node(BPlusTree& tree, bool is_leaf);
 void bp_destroy_node(BPTreeNode* node);
 void bp_mark_dirty(BPTreeNode* node);
 
+
+BPTreeNode* bp_get_root(BPlusTree& tree);
+BPTreeNode* bp_left_most(BPlusTree& tree);
 // Node navigation
 BPTreeNode* bp_get_parent(BPTreeNode* node);
 BPTreeNode* bp_get_child(BPlusTree& tree, BPTreeNode* node, uint32_t index);
+// B+only
 BPTreeNode* bp_get_next(BPTreeNode* node);
 BPTreeNode* bp_get_prev(BPTreeNode* node);
-
-// Node linking
-void bp_set_parent(BPTreeNode* node, uint32_t parent_index);
-void bp_set_child(BPlusTree& tree, BPTreeNode* node, uint32_t child_index, uint32_t node_index);
-void bp_set_next(BPTreeNode* node, uint32_t index);
-void bp_set_prev(BPTreeNode* node, uint32_t index);
-
-// Tree properties
-uint32_t bp_get_max_keys(BPlusTree& tree, BPTreeNode* node);
-uint32_t bp_get_min_keys(BPlusTree& tree, BPTreeNode* node);
-uint32_t bp_get_split_index(BPlusTree& tree, BPTreeNode* node);
 
 // Core operations - data is a buffer containing the record
 void bp_insert_element(BPlusTree& tree, uint32_t key, const uint8_t* data);
@@ -110,31 +103,14 @@ bool bp_find_element(BPlusTree& tree, uint32_t key);
 const uint8_t* bp_get(BPlusTree& tree, uint32_t key);
 BPTreeNode* bp_find_leaf_node(BPlusTree& tree, BPTreeNode* node, uint32_t key);
 
-// Tree traversal
-BPTreeNode* bp_get_root(BPlusTree& tree);
-BPTreeNode* bp_left_most(BPlusTree& tree);
 
 
-// Internal operations
-void bp_insert(BPlusTree& tree, BPTreeNode* node, uint32_t key, const uint8_t* data);
-void bp_insert_repair(BPlusTree& tree, BPTreeNode* node);
-BPTreeNode* bp_split(BPlusTree& tree, BPTreeNode* node);
-void bp_do_delete(BPlusTree& tree, BPTreeNode* node, uint32_t key);
-void bp_repair_after_delete(BPlusTree& tree, BPTreeNode* node);
-BPTreeNode* bp_merge_right(BPlusTree& tree, BPTreeNode* node);
-BPTreeNode* bp_steal_from_left(BPlusTree& tree, BPTreeNode* node, uint32_t parent_index);
-BPTreeNode* bp_steal_from_right(BPlusTree& tree, BPTreeNode* node, uint32_t parent_index);
-void bp_update_parent_keys(BPlusTree& tree, BPTreeNode* node, uint32_t deleted_key);
-
-// Debug operations
 
 uint64_t debug_hash_tree(BPlusTree& tree);
 
+uint32_t *get_keys(BPTreeNode *node);
 
-
-
+uint8_t *get_record_at(BPlusTree &tree, BPTreeNode *node, uint32_t index);
 uint32_t *get_key_at(BPlusTree & tree, BPTreeNode *node, uint32_t index);
-
-void test_tree_toplevel(bool single_node);
-
 void bp_print_tree(BPlusTree &tree);
+void bp_validate_all_invariants(BPlusTree &tree);

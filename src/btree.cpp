@@ -11,9 +11,23 @@
 #include <sys/types.h>
 #include <vector>
 
+#define PRINT(x,y) std::cout << x << y << "\n"
+
+void bp_set_next(BPTreeNode *node, uint32_t index);
+void bp_set_prev(BPTreeNode *node, uint32_t index);
+void bp_insert(BPlusTree& tree, BPTreeNode* node, uint32_t key, const uint8_t* data);
+void bp_insert_repair(BPlusTree& tree, BPTreeNode* node);
+BPTreeNode* bp_split(BPlusTree& tree, BPTreeNode* node);
+void bp_do_delete(BPlusTree& tree, BPTreeNode* node, uint32_t key);
+void bp_repair_after_delete(BPlusTree& tree, BPTreeNode* node);
+BPTreeNode* bp_merge_right(BPlusTree& tree, BPTreeNode* node);
+BPTreeNode* bp_steal_from_left(BPlusTree& tree, BPTreeNode* node, uint32_t parent_index);
+BPTreeNode* bp_steal_from_right(BPlusTree& tree, BPTreeNode* node, uint32_t parent_index);
+void bp_update_parent_keys(BPlusTree& tree, BPTreeNode* node, uint32_t deleted_key);
+
 void bp_print_node(BPlusTree &tree, BPTreeNode *node);
 // Helper functions to access arrays within the node's data area
-static uint32_t *get_keys(BPTreeNode *node) {
+uint32_t *get_keys(BPTreeNode *node) {
   return reinterpret_cast<uint32_t *>(node->data);
 }
 static uint32_t *get_children(BPlusTree &tree, BPTreeNode *node) {
@@ -30,12 +44,12 @@ static uint32_t *get_children(BPlusTree &tree, BPTreeNode *node) {
   }
 }
 
-static uint8_t *get_internal_record_data(BPlusTree &tree, BPTreeNode *node) {
+uint8_t *get_internal_record_data(BPlusTree &tree, BPTreeNode *node) {
   // For B-trees, records come after keys in internal nodes
   return node->data + tree.internal_max_keys * tree.node_key_size;
 }
 
-static uint8_t *get_internal_record_at(BPlusTree &tree, BPTreeNode *node,
+uint8_t *get_internal_record_at(BPlusTree &tree, BPTreeNode *node,
                                        uint32_t index) {
   if (node->is_leaf || index >= node->num_keys)
     return nullptr;
@@ -46,7 +60,7 @@ static uint8_t *get_record_data(BPlusTree &tree, BPTreeNode *node) {
   return node->data + tree.leaf_max_keys * tree.node_key_size;
 }
 
-static uint8_t *get_record_at(BPlusTree &tree, BPTreeNode *node,
+uint8_t *get_record_at(BPlusTree &tree, BPTreeNode *node,
                               uint32_t index) {
   if (index >= node->num_keys)
     return nullptr;
@@ -170,6 +184,7 @@ BPTreeNode *bp_create_node(BPlusTree &tree, bool is_leaf) {
   BPTreeNode *node = static_cast<BPTreeNode *>(pager_get(page_index));
 
   if (!node) {
+      PRINT("nah", "");
     return nullptr;
   }
 
@@ -708,8 +723,7 @@ BPTreeNode *bp_find_leaf_node(BPlusTree &tree, BPTreeNode *node, uint32_t key) {
   uint32_t *keys = get_keys(node);
   uint32_t i;
 
-  for (i = 0; i < node->num_keys && keys[i] < key; i++)
-    ;
+  for (i = 0; i < node->num_keys && keys[i] < key; i++);
 
   if (i == node->num_keys) {
     return bp_find_leaf_node(tree, bp_get_child(tree, node, node->num_keys),
@@ -1547,7 +1561,7 @@ uint64_t debug_hash_tree(BPlusTree &tree) {
 #include <random>
 #include <set>
 
-static void verify_key_separation(BPlusTree &tree, BPTreeNode *node) {
+static void validate_key_separation(BPlusTree &tree, BPTreeNode *node) {
   if (!node || node->is_leaf)
     return;
 
@@ -1610,11 +1624,11 @@ static void verify_key_separation(BPlusTree &tree, BPTreeNode *node) {
     }
 
     // Recursively check children
-    verify_key_separation(tree, child);
+    validate_key_separation(tree, child);
   }
 }
 
-static void verify_leaf_links(BPlusTree &tree) {
+static void validate_leaf_links(BPlusTree &tree) {
   BPTreeNode *current = bp_left_most(tree);
   BPTreeNode *prev = nullptr;
 
@@ -1646,7 +1660,7 @@ static void verify_leaf_links(BPlusTree &tree) {
   }
 }
 
-static void verify_tree_height(BPlusTree &tree, BPTreeNode *node,
+static void validate_tree_height(BPlusTree &tree, BPTreeNode *node,
                                int expected_height, int current_height = 0) {
   if (!node)
     return;
@@ -1663,22 +1677,10 @@ static void verify_tree_height(BPlusTree &tree, BPTreeNode *node,
     for (uint32_t i = 0; i <= node->num_keys; i++) {
       BPTreeNode *child = bp_get_child(tree, node, i);
       if (child) {
-        verify_tree_height(tree, child, expected_height, current_height + 1);
+        validate_tree_height(tree, child, expected_height, current_height + 1);
       }
     }
   }
-}
-
-static int calculate_tree_height(BPlusTree &tree) {
-  BPTreeNode *node = bp_get_root(tree);
-  int height = 0;
-
-  while (node && !node->is_leaf) {
-    node = bp_get_child(tree, node, 0);
-    height++;
-  }
-
-  return height;
 }
 
 static void validate_bplus_leaf_node(BPlusTree &tree, BPTreeNode *node) {
@@ -2022,13 +2024,17 @@ static void validate_btree_node(BPlusTree &tree, BPTreeNode *node) {
   }
 }
 
-static void verify_all_invariants(BPlusTree &tree) {
+void bp_validate_all_invariants(BPlusTree &tree) {
   BPTreeNode *root = bp_get_root(tree);
   if (!root)
     return;
 
-  // Calculate expected height
-  int expected_height = calculate_tree_height(tree);
+  int expected_height = 0;
+  while (root&& !root->is_leaf) {
+    root= bp_get_child(tree, root, 0);
+    expected_height++;
+  }
+
 
   // Verify all nodes
   std::queue<BPTreeNode *> to_visit;
@@ -2060,74 +2066,11 @@ static void verify_all_invariants(BPlusTree &tree) {
   }
   root = bp_get_root(tree);
   // Verify key separation
-  verify_key_separation(tree, root);
+  validate_key_separation(tree, root);
 
   // Verify leaf links
-  verify_leaf_links(tree);
+  validate_leaf_links(tree);
 
   // Verify uniform height
-  verify_tree_height(tree, root, expected_height);
-}
-
-uint32_t random_u32() {
-  static std::random_device rd;
-  static std::mt19937 gen(rd());
-  static std::uniform_int_distribution<uint32_t> dis(0 + 1, UINT32_MAX - 1);
-  return dis(gen);
-}
-
-void test_tree_toplevel(bool single_node) {
-  pager_init("test_large_records.db");
-
-  for (auto type : {BPLUS, BTREE}) {
-    pager_begin_transaction();
-    std::vector<ColumnInfo> schema = {{TYPE_INT32}};
-    BPlusTree tree = bp_create(TYPE_INT32, schema, type);
-    if (tree.tree_type == INVALID) {
-      std::cout << "invalid tree\n";
-      exit(1);
-    }
-    bp_init(tree);
-    // validate_tree(tree);
-
-    int insert_count =
-        single_node ? tree.leaf_max_keys : tree.leaf_max_keys * 8;
-
-    std::set<uint32_t> keys;
-    std::set<uint32_t> deleted_keys;
-    while (keys.size() < insert_count) {
-      keys.insert(random_u32());
-    }
-
-    int inserted = 0;
-    int duplicated = 0;
-    for (uint32_t key : keys) {
-      uint8_t record[TYPE_INT32];
-      memcpy(record, &key, sizeof(key));
-      bp_insert_element(tree, key, record);
-      inserted++;
-      verify_all_invariants(tree);
-
-      if (key % 7 == 0 && deleted_keys.size() + 1 != inserted) {
-        deleted_keys.insert(key);
-        bp_delete_element(tree, key);
-        verify_all_invariants(tree);
-
-      } else if (key % 9 == 0) {
-        bp_insert_element(tree, key, record);
-        if (type == BTREE) {
-          duplicated++;
-        }
-      }
-    }
-
-    for (uint32_t key : keys) {
-      bp_delete_element(tree, key);
-      verify_all_invariants(tree);
-    }
-
-    pager_rollback();
-  }
-
-  std::cout << "allpassed\n";
+  validate_tree_height(tree, root, expected_height);
 }
