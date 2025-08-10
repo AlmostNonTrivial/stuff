@@ -56,6 +56,7 @@ static struct {
 
   std::unordered_set<unsigned int> journaled_pages;
   std::unordered_set<unsigned int> new_pages_in_transaction;
+  std::unordered_set<unsigned int> pages_in_use;
 
   const char *data_file;
   char journal_file[256];
@@ -158,6 +159,13 @@ static int cache_evict_lru() {
   }
 
   pager.page_to_cache.erase(entry->page_index);
+
+  if(HAS(pages_in_use, entry->page_index)) {
+    printf("evicting page in use\n");
+    exit(1);
+  }
+
+
 
   lru_remove(slot);
 
@@ -384,6 +392,11 @@ void *pager_get(unsigned int page_index) {
     return nullptr;
   }
 
+  if(pager.in_transaction)
+  {
+      pager.pages_in_use.insert(page_index);
+  }
+
   auto it = pager.page_to_cache.find(page_index);
   if (it != pager.page_to_cache.end()) {
     int slot = it->second;
@@ -476,6 +489,7 @@ void pager_begin_transaction() {
 
   pager.journaled_pages.clear();
   pager.new_pages_in_transaction.clear();
+  pager.pages_in_use.clear();
 
   pager.journal_fd = os_file_open(pager.journal_file, true, true);
 
