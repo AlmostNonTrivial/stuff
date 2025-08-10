@@ -13,6 +13,10 @@
 
 #define PRINT(x,y) std::cout << x << y << "\n"
 
+// Node management
+BPTreeNode* bp_create_node(BPlusTree& tree, bool is_leaf);
+void bp_destroy_node(BPTreeNode* node);
+
 void bp_set_next(BPTreeNode *node, uint32_t index);
 void bp_set_prev(BPTreeNode *node, uint32_t index);
 void bp_insert(BPlusTree& tree, BPTreeNode* node, uint32_t key, const uint8_t* data);
@@ -86,17 +90,14 @@ A tree with n keys will have n+1 children
 
  */
 
-BPlusTree bp_create(DataType key, const std::vector<ColumnInfo> &schema,
+BPlusTree bp_create(DataType key, uint32_t record_size,
                     TreeType tree_type) {
   BPlusTree tree;
   tree.node_key_size = key;
   tree.tree_type = tree_type;
 
   // Calculate record size
-  uint32_t record_size = 0;
-  for (const auto &col : schema) {
-    record_size += col.type;
-  }
+
   tree.record_size = record_size;
 
   constexpr uint32_t USABLE_SPACE = PAGE_SIZE - NODE_HEADER_SIZE;
@@ -1436,7 +1437,7 @@ void bp_print_node(BPlusTree &tree, BPTreeNode *node) {
 
 #include <queue>
 
-void bp_print_tree(BPlusTree &tree) {
+void print_tree(BPlusTree &tree) {
   BPTreeNode *root = bp_get_root(tree);
   if (!root) {
     std::cout << "Tree is empty" << std::endl;

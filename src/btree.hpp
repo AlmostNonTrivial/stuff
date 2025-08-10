@@ -2,28 +2,13 @@
 #pragma once
 #include "pager.hpp"
 #include <vector>
-#include <cstdint>
-
-// Data type sizes in bytes
-enum DataType : uint32_t {
-    TYPE_INT32 = 4,      // 4-byte integer
-    TYPE_INT64 = 8,      // 8-byte integer
-    TYPE_VARCHAR32 = 32, // Variable char up to 32 bytes
-    TYPE_VARCHAR256 = 256 // Variable char up to 256 bytes
-};
+#include "defs.hpp"
 
 enum TreeType : uint32_t {
     BPLUS = 0,
     BTREE = 1,
     INVALID = 2
 };
-
-// Column information for schema
-struct ColumnInfo {
-    DataType type;
-};
-
-
 
 
 // B+Tree control structure
@@ -59,30 +44,10 @@ struct BPTreeNode {
     uint8_t data[PAGE_SIZE - NODE_HEADER_SIZE]; // Rest of the page (4064 bytes)
 };
 
-struct LeafDataEntry {
-    uint32_t key;
-    uint32_t node_page;  // Which leaf node this came from
-    std::vector<uint8_t> data;  // Copied record data
-};
-
 static_assert(sizeof(BPTreeNode) == PAGE_SIZE, "BTreeNode must be exactly PAGE_SIZE");
 
-// Capacity calculation
-
-
-
-
-// Tree management
-
-BPlusTree bp_create(DataType key, const std::vector<ColumnInfo> &schema,
-                    TreeType tree_type);
+BPlusTree bp_create(DataType key, uint32_t record_size, TreeType tree_type);
 void bp_init(BPlusTree& tree);
-void bp_reset(BPlusTree& tree);
-
-// Node management
-BPTreeNode* bp_create_node(BPlusTree& tree, bool is_leaf);
-void bp_destroy_node(BPTreeNode* node);
-void bp_mark_dirty(BPTreeNode* node);
 
 
 BPTreeNode* bp_get_root(BPlusTree& tree);
@@ -104,13 +69,7 @@ const uint8_t* bp_get(BPlusTree& tree, uint32_t key);
 BPTreeNode* bp_find_leaf_node(BPlusTree& tree, BPTreeNode* node, uint32_t key);
 
 
-
-
+// debug
 uint64_t debug_hash_tree(BPlusTree& tree);
-
-uint32_t *get_keys(BPTreeNode *node);
-
-uint8_t *get_record_at(BPlusTree &tree, BPTreeNode *node, uint32_t index);
-uint32_t *get_key_at(BPlusTree & tree, BPTreeNode *node, uint32_t index);
-void bp_print_tree(BPlusTree &tree);
+void print_tree(BPlusTree &tree);
 void bp_validate_all_invariants(BPlusTree &tree);
