@@ -60,8 +60,11 @@ void bp_destroy_node(BPTreeNode *node);
 
 void bp_set_next(BPTreeNode *node, uint32_t index);
 void bp_set_prev(BPTreeNode *node, uint32_t index);
-void bp_insert(BPlusTree &tree, BPTreeNode *node, const uint8_t *key,
+void bp_insert(BPlusTree &tree, BPTreeNode *node, uint8_t *key,
                const uint8_t *data);
+
+
+
 void bp_insert_repair(BPlusTree &tree, BPTreeNode *node);
 BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node);
 void bp_do_delete(BPlusTree &tree, BPTreeNode *node, const uint8_t *key);
@@ -205,7 +208,7 @@ BPlusTree bp_create(DataType key, uint32_t record_size, TreeType tree_type) {
     // Need space for n keys + n records + (n+1) child pointers
 
     uint32_t key_record_size = tree.node_key_size + record_size;
-    uint32_t child_ptr_size = tree.node_key_size;
+    uint32_t child_ptr_size = sizeof(uint32_t);
 
     // Calculate max keys for internal nodes
     // n*(key + record) + (n+1)*ptr <= USABLE_SPACE
@@ -245,7 +248,7 @@ BPlusTree bp_create(DataType key, uint32_t record_size, TreeType tree_type) {
     // so  n * 2 (key + child pointer), and usuable space - that extra key in
     // the n+1.
     tree.internal_max_keys =
-        (USABLE_SPACE - tree.node_key_size) / (2 * tree.node_key_size);
+        (USABLE_SPACE - sizeof(uint32_t)) / (tree.node_key_size + sizeof(uint32_t));
     tree.internal_max_keys =
         std::max(minimum_entry_count, tree.internal_max_keys);
     tree.internal_min_keys = tree.internal_max_keys / 2;
@@ -437,7 +440,11 @@ BPTreeNode *bp_get_root(BPlusTree &tree) {
   return static_cast<BPTreeNode *>(pager_get(tree.root_page_index));
 }
 
-void bp_insert_element(BPlusTree &tree, void *key,  const uint8_t *data) {
+void bp_insert_element(BPlusTree &tree, void *key, const uint8_t *data) {
+  // Use a properly sized buffer, not a fixed uint32_t
+  uint8_t key_bytes[tree.node_key_size];
+  memcpy(key_bytes, key, tree.node_key_size);
+
   BPTreeNode *root = bp_get_root(tree);
 
   if (root->num_keys == 0) {
@@ -445,11 +452,11 @@ void bp_insert_element(BPlusTree &tree, void *key,  const uint8_t *data) {
     uint8_t *keys = get_keys(root);
     uint8_t *record_data = get_record_data(tree, root);
 
-    memcpy(keys, key, tree.node_key_size);
+    memcpy(keys, key_bytes, tree.node_key_size);  // Copy from key_bytes, not &key_bytes
     memcpy(record_data, data, tree.record_size);
     root->num_keys = 1;
   } else {
-    bp_insert(tree, root, (const uint8_t*)key, data);
+    bp_insert(tree, root, key_bytes, data);  // Pass key_bytes, not (uint8_t*)&key_bytes
   }
 
   pager_sync();
@@ -467,7 +474,7 @@ void bp_insert_repair(BPlusTree &tree, BPTreeNode *node) {
   }
 }
 
-void bp_insert(BPlusTree &tree, BPTreeNode *node, const uint8_t *key,
+void bp_insert(BPlusTree &tree, BPTreeNode *node, uint8_t *key,
                const uint8_t *data) {
   if (node->is_leaf) {
     uint8_t *keys = get_keys(node);
@@ -1449,11 +1456,9 @@ void bp_print_node(BPlusTree &tree, BPTreeNode *node) {
   // Print keys (assuming they're uint32_t for display purposes)
   std::cout << "Keys: [";
   for (uint32_t i = 0; i < node->num_keys; i++) {
-
-
       if (tree.node_key_size == TYPE_INT64 ||
           tree.node_key_size == TYPE_INT32) {
-        std::cout << *get_key_at(tree, node, i);
+        std::cout << (uint64_t)*get_key_at(tree, node, i) << ",";
       } else {
         print_uint8_as_chars(get_key_at(tree, node, i), tree.node_key_size);
 
@@ -2409,6 +2414,9 @@ bool bt_cursor_seek(BtCursor* cursor, const void* key) {
     uint32_t pos = bp_binary_search(*cursor->tree, leaf, search_key);
 
     if (pos < leaf->num_keys) {
+
+        uint32_t xxx= (uint32_t)*get_key_at(*cursor->tree, leaf, pos);
+        uint32_t sdsds  = (uint32_t)*search_key;
         if (cmp(*cursor->tree, get_key_at(*cursor->tree, leaf, pos), search_key) == 0) {
             // Exact match
             cursor->current_index = pos;
