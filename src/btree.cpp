@@ -1456,14 +1456,15 @@ void bp_print_node(BPlusTree &tree, BPTreeNode *node) {
   // Print keys (assuming they're uint32_t for display purposes)
   std::cout << "Keys: [";
   for (uint32_t i = 0; i < node->num_keys; i++) {
-      if (tree.node_key_size == TYPE_INT64 ||
-          tree.node_key_size == TYPE_INT32) {
-        std::cout << (uint64_t)*get_key_at(tree, node, i) << ",";
+      if (tree.node_key_size == TYPE_INT32) {
+          std::cout << *reinterpret_cast<const uint32_t*>(get_key_at(tree, node, i)) << ",";
+      } else if (tree.node_key_size == TYPE_INT64) {
+          std::cout << *reinterpret_cast<const uint64_t*>(get_key_at(tree, node, i)) << ",";
       } else {
-        print_uint8_as_chars(get_key_at(tree, node, i), tree.node_key_size);
-
-    }
+          print_uint8_as_chars(get_key_at(tree, node, i), tree.node_key_size);
+      }
   }
+
   std::cout << "]" << std::endl;
 
   // Print children for internal nodes
