@@ -578,5 +578,10 @@ void pager_get_stats(unsigned int *total_pages, unsigned int *free_pages,
 
 void pager_close() {
   os_file_close(pager.data_fd);
+  // need to clear if we restart it in-process
+  pager.free_pages_set.clear();
+  pager.page_to_cache.clear();
+  pager.journaled_pages.clear();
+  pager.new_pages_in_transaction.clear();
   pager.data_fd = -1;
 }
