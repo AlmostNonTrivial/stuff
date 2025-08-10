@@ -1462,6 +1462,85 @@ void bp_print_tree(BPlusTree &tree) {
   }
 }
 
+/*------------- HASH -------------- */
+
+uint64_t debug_hash_tree(BPlusTree &tree) {
+  uint64_t hash = 0xcbf29ce484222325ULL;
+  const uint64_t prime = 0x100000001b3ULL;
+
+  // Hash tree metadata
+  hash ^= tree.root_page_index;
+  hash *= prime;
+  hash ^= tree.internal_max_keys;
+  hash *= prime;
+  hash ^= tree.leaf_max_keys;
+  hash *= prime;
+  hash ^= tree.record_size;
+  hash *= prime;
+
+  // Recursive node hashing function
+  std::function<void(BPTreeNode *, int)> hash_node = [&](BPTreeNode *node,
+                                                         int depth) {
+    if (!node)
+      return;
+
+    // Hash node metadata
+    hash ^= node->index;
+    hash *= prime;
+    hash ^= node->parent;
+    hash *= prime;
+    hash ^= node->next;
+    hash *= prime;
+    hash ^= node->previous;
+    hash *= prime;
+    hash ^= node->num_keys;
+    hash *= prime;
+    hash ^= (node->is_leaf ? 1 : 0) | (depth << 1);
+    hash *= prime;
+
+    // Hash keys
+    uint32_t *keys = get_keys(node);
+    for (uint32_t i = 0; i < node->num_keys; i++) {
+      hash ^= keys[i];
+      hash *= prime;
+    }
+
+    if (node->is_leaf) {
+      // Hash leaf node records
+      uint8_t *record_data = get_record_data(tree, node);
+      for (uint32_t i = 0; i < node->num_keys; i++) {
+        const uint8_t *record = record_data + i * tree.record_size;
+        uint32_t bytes_to_hash = std::min(8U, tree.record_size);
+        for (uint32_t j = 0; j < bytes_to_hash; j++) {
+          hash ^= record[j];
+          hash *= prime;
+        }
+      }
+    } else {
+      // Recursively hash children
+      uint32_t *children = get_children(tree, node);
+      for (uint32_t i = 0; i <= node->num_keys; i++) {
+        if (children[i] != 0) {
+          BPTreeNode *child = bp_get_child(tree, node, i);
+          if (child) {
+            hash_node(child, depth + 1);
+          }
+        }
+      }
+    }
+  };
+
+  // Hash the tree starting from root
+  if (tree.root_page_index != 0) {
+    BPTreeNode *root = bp_get_root(tree);
+    if (root) {
+      hash_node(root, 0);
+    }
+  }
+
+  return hash;
+}
+
 /* DBGINV */
 
 #include <cassert>
@@ -2051,83 +2130,4 @@ void test_tree_toplevel(bool single_node) {
   }
 
   std::cout << "allpassed\n";
-}
-
-/*------------- HASH -------------- */
-
-uint64_t debug_hash_tree(BPlusTree &tree) {
-  uint64_t hash = 0xcbf29ce484222325ULL;
-  const uint64_t prime = 0x100000001b3ULL;
-
-  // Hash tree metadata
-  hash ^= tree.root_page_index;
-  hash *= prime;
-  hash ^= tree.internal_max_keys;
-  hash *= prime;
-  hash ^= tree.leaf_max_keys;
-  hash *= prime;
-  hash ^= tree.record_size;
-  hash *= prime;
-
-  // Recursive node hashing function
-  std::function<void(BPTreeNode *, int)> hash_node = [&](BPTreeNode *node,
-                                                         int depth) {
-    if (!node)
-      return;
-
-    // Hash node metadata
-    hash ^= node->index;
-    hash *= prime;
-    hash ^= node->parent;
-    hash *= prime;
-    hash ^= node->next;
-    hash *= prime;
-    hash ^= node->previous;
-    hash *= prime;
-    hash ^= node->num_keys;
-    hash *= prime;
-    hash ^= (node->is_leaf ? 1 : 0) | (depth << 1);
-    hash *= prime;
-
-    // Hash keys
-    uint32_t *keys = get_keys(node);
-    for (uint32_t i = 0; i < node->num_keys; i++) {
-      hash ^= keys[i];
-      hash *= prime;
-    }
-
-    if (node->is_leaf) {
-      // Hash leaf node records
-      uint8_t *record_data = get_record_data(tree, node);
-      for (uint32_t i = 0; i < node->num_keys; i++) {
-        const uint8_t *record = record_data + i * tree.record_size;
-        uint32_t bytes_to_hash = std::min(8U, tree.record_size);
-        for (uint32_t j = 0; j < bytes_to_hash; j++) {
-          hash ^= record[j];
-          hash *= prime;
-        }
-      }
-    } else {
-      // Recursively hash children
-      uint32_t *children = get_children(tree, node);
-      for (uint32_t i = 0; i <= node->num_keys; i++) {
-        if (children[i] != 0) {
-          BPTreeNode *child = bp_get_child(tree, node, i);
-          if (child) {
-            hash_node(child, depth + 1);
-          }
-        }
-      }
-    }
-  };
-
-  // Hash the tree starting from root
-  if (tree.root_page_index != 0) {
-    BPTreeNode *root = bp_get_root(tree);
-    if (root) {
-      hash_node(root, 0);
-    }
-  }
-
-  return hash;
 }
