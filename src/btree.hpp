@@ -76,3 +76,46 @@ BPTreeNode *bp_find_leaf_node(BPlusTree &tree, BPTreeNode *node, const uint8_t* 
 uint64_t debug_hash_tree(BPlusTree& tree);
 void print_tree(BPlusTree &tree);
 void bp_validate_all_invariants(BPlusTree &tree);
+
+
+enum CursorState {
+    CURSOR_INVALID = 0,
+    CURSOR_VALID = 1,
+    CURSOR_REQUIRESEEK = 2,
+    CURSOR_FAULT = 3
+};
+
+struct BtCursor {
+    BPlusTree* tree;
+    uint32_t root_page;
+
+    // Stack tracking path from root to current position
+    uint32_t page_stack[16];   // Page indexes
+    uint32_t index_stack[16];  // Key indexes at each page
+    uint32_t stack_depth;
+
+    // Current position
+    uint32_t current_page;
+    uint32_t current_index;
+
+    CursorState state;
+    bool is_write_cursor;
+};
+
+// Add these function declarations to btree.hpp
+BtCursor* bt_cursor_create(BPlusTree* tree, bool write_cursor);
+void bt_cursor_destroy(BtCursor* cursor);
+void bt_cursor_clear(BtCursor* cursor);
+bool bt_cursor_first(BtCursor* cursor);
+bool bt_cursor_last(BtCursor* cursor);
+bool bt_cursor_next(BtCursor* cursor);
+bool bt_cursor_previous(BtCursor* cursor);
+bool bt_cursor_seek(BtCursor* cursor, const void* key);
+const uint8_t* bt_cursor_get_key(BtCursor* cursor);
+const uint8_t* bt_cursor_get_record(BtCursor* cursor);
+bool bt_cursor_is_valid(BtCursor* cursor);
+
+// Helper functions
+bool bt_cursor_move_to_leftmost_in_subtree(BtCursor* cursor, BPTreeNode* root);
+bool bt_cursor_move_to_rightmost_in_subtree(BtCursor* cursor, BPTreeNode* root);
+void bt_cursor_rebuild_stack_to_current(BtCursor* cursor);
