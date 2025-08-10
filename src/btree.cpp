@@ -1,4 +1,5 @@
 #include "btree.hpp"
+#include "defs.hpp"
 #include "pager.hpp"
 #include <algorithm>
 #include <cmath>
@@ -12,6 +13,31 @@
 #include <vector>
 
 #define PRINT(x,y) std::cout << x << y << "\n"
+
+static int cmp(BPlusTree& tree, const uint8_t* key1, const uint8_t* key2) {
+    switch (tree.node_key_size) {
+        case TYPE_INT32: {
+            uint32_t val1 = *reinterpret_cast<const uint32_t*>(key1);
+            uint32_t val2 = *reinterpret_cast<const uint32_t*>(key2);
+            if (val1 < val2) return -1;
+            if (val1 > val2) return 1;
+            return 0;
+        }
+        case TYPE_INT64: {
+            uint64_t val1 = *reinterpret_cast<const uint64_t*>(key1);
+            uint64_t val2 = *reinterpret_cast<const uint64_t*>(key2);
+            if (val1 < val2) return -1;
+            if (val1 > val2) return 1;
+            return 0;
+        }
+        case TYPE_VARCHAR32:
+        case TYPE_VARCHAR256: {
+            return memcmp(key1, key2, tree.node_key_size);
+        }
+    }
+}
+
+
 
 // Node management
 BPTreeNode* bp_create_node(BPlusTree& tree, bool is_leaf);

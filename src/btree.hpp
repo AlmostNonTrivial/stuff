@@ -21,7 +21,7 @@ struct BPlusTree {
     uint32_t internal_split_index;
     uint32_t leaf_split_index;
     uint32_t record_size;  // Total size of each record
-    uint32_t node_key_size;
+    DataType node_key_size;
     TreeType tree_type;
 };
 
