@@ -12,6 +12,17 @@
 #include <sys/types.h>
 #include <vector>
 
+
+
+
+
+
+
+
+
+
+
+
 #define PRINT(x, y) std::cout << x << y << "\n"
 
 static int cmp(BPlusTree &tree, const uint8_t *key1, const uint8_t *key2) {
@@ -426,11 +437,7 @@ BPTreeNode *bp_get_root(BPlusTree &tree) {
   return static_cast<BPTreeNode *>(pager_get(tree.root_page_index));
 }
 
-void bp_insert_element(BPlusTree &tree, void *key, const uint8_t *data) {
-  uint8_t
-      key_bytes[tree.node_key_size]; // Assuming max key size is 8 bytes for now
-  memcpy(key_bytes, key, tree.node_key_size);
-
+void bp_insert_element(BPlusTree &tree, void *key,  const uint8_t *data) {
   BPTreeNode *root = bp_get_root(tree);
 
   if (root->num_keys == 0) {
@@ -438,11 +445,11 @@ void bp_insert_element(BPlusTree &tree, void *key, const uint8_t *data) {
     uint8_t *keys = get_keys(root);
     uint8_t *record_data = get_record_data(tree, root);
 
-    memcpy(keys, key_bytes, tree.node_key_size);
+    memcpy(keys, key, tree.node_key_size);
     memcpy(record_data, data, tree.record_size);
     root->num_keys = 1;
   } else {
-    bp_insert(tree, root, key_bytes, data);
+    bp_insert(tree, root, (const uint8_t*)key, data);
   }
 
   pager_sync();
@@ -2235,15 +2242,16 @@ bool bt_cursor_next(BtCursor* cursor) {
     }
 
     // Case 2: B+ tree leaf - use sibling links
-    if (cursor->tree->tree_type == BPLUS && current_node->is_leaf && current_node->next != 0) {
-        cursor->current_page = current_node->next;
-        cursor->current_index = 0;
+    if (cursor->tree->tree_type == BPLUS && current_node->is_leaf) {
 
-        BPTreeNode* next_node = bp_get_next(current_node);
-        if (!next_node || next_node->num_keys == 0) {
+        if(0 == current_node->next) {
             cursor->state = CURSOR_INVALID;
             return false;
         }
+
+        cursor->current_page = current_node->next;
+        cursor->current_index = 0;
+
         return true;
     }
 

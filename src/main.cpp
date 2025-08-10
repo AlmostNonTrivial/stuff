@@ -16,6 +16,58 @@
 #include <string>
 #include <vector>
 
+
+
+
+void interpret(const uint8_t* record, DataType size)
+{
+        if(size == TYPE_INT32){
+            uint32_t x = (uint32_t)*record;
+            std::cout << x <<"\n";
+        } else if (size == TYPE_INT64) {
+            uint64_t x = (uint64_t)*record;
+            std::cout << x <<"\n";
+        } else {
+            std::string str_key(reinterpret_cast<const char *>(record), size);
+            std::cout << str_key << '\n';
+        }
+
+}
+
+
+
+
+int cursor_test()
+{
+    pager_init("file");
+    pager_begin_transaction();
+
+    BPlusTree tree = bp_create(TYPE_INT32, TYPE_INT32, BPLUS);
+    bp_init(tree);
+
+    BtCursor *cursor = bt_cursor_create(&tree, true);
+   const uint32_t k = 0;
+    for(uint32_t i = 0; i < 10; i++) {
+        bp_insert_element(tree, (void*)&i, (const uint8_t*)&k);
+    }
+
+    bool exists = bt_cursor_seek(cursor, &k);
+
+    do {
+      auto record = bt_cursor_get_record(cursor) ;
+      interpret(record, (DataType)tree.record_size);
+    } while(bt_cursor_next(cursor));
+
+
+
+   bt_cursor_destroy(cursor) ;
+   pager_close();
+}
+
+
+
+
+
 int main() {
   std::cout << "B+ Tree Test Suite" << std::endl;
   std::cout << "==================" << std::endl;
@@ -24,7 +76,9 @@ int main() {
 
     // large_records();
 
-    run_comprehensive_tests();
+
+    cursor_test();
+    // run_comprehensive_tests();
 
     // test_composite_records();
 
