@@ -1,6 +1,7 @@
 // btree.hpp
 #pragma once
 #include "pager.hpp"
+#include <cstdint>
 #include <vector>
 #include "defs.hpp"
 
@@ -60,13 +61,15 @@ BPTreeNode* bp_get_next(BPTreeNode* node);
 BPTreeNode* bp_get_prev(BPTreeNode* node);
 
 // Core operations - data is a buffer containing the record
-void bp_insert_element(BPlusTree& tree, uint32_t key, const uint8_t* data);
-void bp_delete_element(BPlusTree& tree, uint32_t key);
+void bp_insert_element(BPlusTree& tree, void*key, const uint8_t* data);
+void bp_delete_element(BPlusTree &tree, void*key);
 
 // Search operations - returns pointer to record data within node
-bool bp_find_element(BPlusTree& tree, uint32_t key);
-const uint8_t* bp_get(BPlusTree& tree, uint32_t key);
-BPTreeNode* bp_find_leaf_node(BPlusTree& tree, BPTreeNode* node, uint32_t key);
+bool bp_find_element(BPlusTree& tree, void* key);
+const uint8_t *bp_get(BPlusTree &tree, void* key);
+
+
+BPTreeNode *bp_find_leaf_node(BPlusTree &tree, BPTreeNode *node, const uint8_t* key);
 
 
 // debug
