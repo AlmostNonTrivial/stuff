@@ -2526,3 +2526,63 @@ void bt_cursor_rebuild_stack_to_current(BtCursor* cursor) {
 
     cursor->state = CURSOR_REQUIRESEEK;
 }
+
+bool bt_cursor_update(BtCursor* cursor, const uint8_t* record) {
+    if (!cursor || !cursor->tree || !record || cursor->state != CURSOR_VALID) {
+        return false;
+    }
+
+    BPTreeNode* node = static_cast<BPTreeNode*>(pager_get(cursor->current_page));
+    if (!node || cursor->current_index >= node->num_keys) {
+        return false;
+    }
+
+    // Mark page as dirty since we're modifying it
+    pager_mark_dirty(cursor->current_page);
+
+    // Get pointer to current record location
+    uint8_t* current_record = const_cast<uint8_t*>(get_record_at(*cursor->tree, node, cursor->current_index));
+    if (!current_record) {
+        return false;
+    }
+
+    // Overwrite the record in place
+    memcpy(current_record, record, cursor->tree->record_size);
+
+    return true;
+}
+
+bool bt_cursor_delete(BtCursor* cursor) {
+    if (!cursor || !cursor->tree || cursor->state != CURSOR_VALID) {
+        return false;
+    }
+
+    // Get the key to delete
+    const uint8_t* key_to_delete = bt_cursor_get_key(cursor);
+    if (!key_to_delete) {
+        return false;
+    }
+    BPTreeNode* node = static_cast<BPTreeNode*>(pager_get(cursor->current_page));
+    uint32_t keys_before = node->num_keys;
+    bp_delete_element(*cursor->tree, const_cast<uint8_t*>(key_to_delete));
+
+    node = static_cast<BPTreeNode*>(pager_get(cursor->current_page));
+
+    if (!node) {
+        cursor->state = CURSOR_INVALID;
+        return true; // Delete succeeded, but cursor is now invalid
+    }
+
+    // Check if we're still within bounds
+    if (cursor->current_index >= node->num_keys) {
+        // We were at the last element, now cursor is past end
+        cursor->state = CURSOR_INVALID;
+    } else {
+        // Cursor is still valid, now points to next record
+        cursor->state = CURSOR_VALID;
+    }
+
+
+    // if true, don't nessessarly call next
+    return node->num_keys < keys_before;
+}
