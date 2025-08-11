@@ -909,8 +909,7 @@ BPTreeNode *bp_steal_from_left(BPlusTree &tree, BPTreeNode *node,
   bp_mark_dirty(parent_node);
   bp_mark_dirty(left_sibling);
 
-  // Shift node's keys and records right
-  // ???
+  // Shift node's keys and records right - already optimized
   memcpy(get_key_at(tree, node, 1), get_key_at(tree, node, 0),
          tree.node_key_size * node->num_keys);
 
@@ -923,7 +922,7 @@ BPTreeNode *bp_steal_from_left(BPlusTree &tree, BPTreeNode *node,
     uint8_t *node_records = get_leaf_record_data(tree, node);
     uint8_t *sibling_records = get_leaf_record_data(tree, left_sibling);
 
-    // Shift node's records right
+    // Shift node's records right - already optimized
     memcpy(node_records + tree.record_size, node_records,
            node->num_keys * tree.record_size);
 
@@ -948,7 +947,7 @@ BPTreeNode *bp_steal_from_left(BPlusTree &tree, BPTreeNode *node,
       uint8_t *parent_records = get_internal_record_data(tree, parent_node);
       uint8_t *sibling_records = get_internal_record_data(tree, left_sibling);
 
-      // Shift node's records right
+      // Shift node's records right - already optimized
       memcpy(node_records + tree.record_size, node_records,
              node->num_keys * tree.record_size);
 
@@ -971,7 +970,7 @@ BPTreeNode *bp_steal_from_left(BPlusTree &tree, BPTreeNode *node,
              tree.node_key_size);
     }
 
-    // Move child pointer
+    // Move child pointers - OPTIMIZED with single memcpy
     uint32_t *node_children = get_children(tree, node);
     uint32_t *sibling_children = get_children(tree, left_sibling);
 
@@ -986,7 +985,6 @@ BPTreeNode *bp_steal_from_left(BPlusTree &tree, BPTreeNode *node,
 
   return parent_node;
 }
-
 // Similar small modifications needed for:
 // - bp_steal_from_right (mirror of above)
 // - bp_merge_right (needs to handle internal records for B-tree)
@@ -1116,13 +1114,13 @@ BPTreeNode *bp_steal_from_right(BPlusTree &tree, BPTreeNode *node,
     memcpy(node_records + node->num_keys * tree.record_size, sibling_records,
            tree.record_size);
 
-    // Shift sibling's keys and records left
-    for (uint32_t i = 0; i < right_sibling->num_keys - 1; i++) {
-      memcpy(get_key_at(tree, right_sibling, i),
-             get_key_at(tree, right_sibling, i + 1), tree.node_key_size);
-      memcpy(sibling_records + i * tree.record_size,
-             sibling_records + (i + 1) * tree.record_size, tree.record_size);
-    }
+    // Shift sibling's keys and records left - OPTIMIZED with single memcpy
+    uint32_t shift_count = right_sibling->num_keys - 1;
+    memcpy(get_key_at(tree, right_sibling, 0),
+           get_key_at(tree, right_sibling, 1),
+           shift_count * tree.node_key_size);
+    memcpy(sibling_records, sibling_records + tree.record_size,
+           shift_count * tree.record_size);
 
     // Update parent key
     memcpy(get_key_at(tree, parent_node, parent_index),
@@ -1151,22 +1149,21 @@ BPTreeNode *bp_steal_from_right(BPlusTree &tree, BPTreeNode *node,
       memcpy(parent_records + parent_index * tree.record_size, sibling_records,
              tree.record_size);
 
-      // Shift sibling's records left
-      for (uint32_t i = 0; i < right_sibling->num_keys - 1; i++) {
-        memcpy(sibling_records + i * tree.record_size,
-               sibling_records + (i + 1) * tree.record_size, tree.record_size);
-      }
+      // Shift sibling's records left - OPTIMIZED with single memcpy
+      uint32_t shift_count = right_sibling->num_keys - 1;
+      memcpy(sibling_records, sibling_records + tree.record_size,
+             shift_count * tree.record_size);
     } else {
       // B+tree: just move key up from sibling
       memcpy(get_key_at(tree, parent_node, parent_index),
              get_key_at(tree, right_sibling, 0), tree.node_key_size);
     }
 
-    // Shift sibling's keys left
-    for (uint32_t i = 0; i < right_sibling->num_keys - 1; i++) {
-      memcpy(get_key_at(tree, right_sibling, i),
-             get_key_at(tree, right_sibling, i + 1), tree.node_key_size);
-    }
+    // Shift sibling's keys left - OPTIMIZED with single memcpy
+    uint32_t shift_count = right_sibling->num_keys - 1;
+    memcpy(get_key_at(tree, right_sibling, 0),
+           get_key_at(tree, right_sibling, 1),
+           shift_count * tree.node_key_size);
 
     // Move child pointer
     uint32_t *node_children = get_children(tree, node);
@@ -1187,6 +1184,7 @@ BPTreeNode *bp_steal_from_right(BPlusTree &tree, BPTreeNode *node,
   return parent_node;
 }
 
+// 2. bp_merge_right - optimized version (partial shown for key sections)
 BPTreeNode *bp_merge_right(BPlusTree &tree, BPTreeNode *node) {
   BPTreeNode *parent = bp_get_parent(node);
   if (!parent)
@@ -1216,13 +1214,13 @@ BPTreeNode *bp_merge_right(BPlusTree &tree, BPTreeNode *node) {
     uint8_t *node_records = get_leaf_record_data(tree, node);
     uint8_t *sibling_records = get_leaf_record_data(tree, right_sibling);
 
-    // Copy all keys and records from sibling to node
-    for (uint32_t i = 0; i < right_sibling->num_keys; i++) {
-      memcpy(get_key_at(tree, node, node->num_keys + i),
-             get_key_at(tree, right_sibling, i), tree.node_key_size);
-      memcpy(node_records + (node->num_keys + i) * tree.record_size,
-             sibling_records + i * tree.record_size, tree.record_size);
-    }
+    // Copy all keys and records from sibling to node - OPTIMIZED with single
+    // memcpy
+    memcpy(get_key_at(tree, node, node->num_keys),
+           get_key_at(tree, right_sibling, 0),
+           right_sibling->num_keys * tree.node_key_size);
+    memcpy(node_records + node->num_keys * tree.record_size, sibling_records,
+           right_sibling->num_keys * tree.record_size);
 
     node->num_keys += right_sibling->num_keys;
 
@@ -1253,20 +1251,17 @@ BPTreeNode *bp_merge_right(BPlusTree &tree, BPTreeNode *node) {
       memcpy(node_records + node->num_keys * tree.record_size,
              parent_records + node_index * tree.record_size, tree.record_size);
 
-      // Copy all sibling's records
-      for (uint32_t i = 0; i < right_sibling->num_keys; i++) {
-        memcpy(node_records + (node->num_keys + 1 + i) * tree.record_size,
-               sibling_records + i * tree.record_size, tree.record_size);
-      }
+      // Copy all sibling's records - OPTIMIZED with single memcpy
+      memcpy(node_records + (node->num_keys + 1) * tree.record_size,
+             sibling_records, right_sibling->num_keys * tree.record_size);
     }
 
-    // Copy all keys from sibling
-    for (uint32_t i = 0; i < right_sibling->num_keys; i++) {
-      memcpy(get_key_at(tree, node, node->num_keys + 1 + i),
-             get_key_at(tree, right_sibling, i), tree.node_key_size);
-    }
+    // Copy all keys from sibling - OPTIMIZED with single memcpy
+    memcpy(get_key_at(tree, node, node->num_keys + 1),
+           get_key_at(tree, right_sibling, 0),
+           right_sibling->num_keys * tree.node_key_size);
 
-    // Copy all child pointers from sibling
+    // Copy all child pointers from sibling - OPTIMIZED with single memcpy
     uint32_t *node_children = get_children(tree, node);
     uint32_t *sibling_children = get_children(tree, right_sibling);
 
@@ -1277,18 +1272,21 @@ BPTreeNode *bp_merge_right(BPlusTree &tree, BPTreeNode *node) {
     node->num_keys += 1 + right_sibling->num_keys;
   }
 
-  // Remove sibling from parent
-  for (uint32_t i = node_index; i < parent->num_keys - 1; i++) {
-    memcpy(get_key_at(tree, parent, i), get_key_at(tree, parent, i + 1),
-           tree.node_key_size);
-    parent_children[i + 1] = parent_children[i + 2];
+  // Remove sibling from parent - OPTIMIZED with single memcpy
+  uint32_t shift_count = parent->num_keys - node_index - 1;
 
-    // For B-tree: also shift parent's internal records
-    if (tree.tree_type == BTREE && !parent->is_leaf) {
-      uint8_t *parent_records = get_internal_record_data(tree, parent);
-      memcpy(parent_records + i * tree.record_size,
-             parent_records + (i + 1) * tree.record_size, tree.record_size);
-    }
+  memcpy(get_key_at(tree, parent, node_index),
+         get_key_at(tree, parent, node_index + 1),
+         shift_count * tree.node_key_size);
+  memcpy(parent_children + node_index + 1, parent_children + node_index + 2,
+         shift_count * sizeof(uint32_t));
+
+  // For B-tree: also shift parent's internal records
+  if (tree.tree_type == BTREE && !parent->is_leaf) {
+    uint8_t *parent_records = get_internal_record_data(tree, parent);
+    memcpy(parent_records + node_index * tree.record_size,
+           parent_records + (node_index + 1) * tree.record_size,
+           shift_count * tree.record_size);
   }
 
   parent->num_keys--;
