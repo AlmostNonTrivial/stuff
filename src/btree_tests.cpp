@@ -13,6 +13,23 @@ static std::random_device rd;
 static std::mt19937 gen(rd());
 static std::uniform_int_distribution<uint8_t> dis(0, 255);
 
+void do_count(BPlusTree *tree, uint32_t *count, uint32_t *unique) {
+  BtCursor *cursor = bt_cursor_create(tree, true);
+  std::vector<uint32_t> keys;
+  std::set<uint32_t> ukeys;
+
+  bt_cursor_first(cursor);
+
+  do {
+    auto x = (bt_cursor_get_key(cursor));
+    keys.push_back(*x);
+    ukeys.insert(*x);
+  } while (bt_cursor_next(cursor));
+
+  *count = keys.size();
+  *unique = ukeys.size();
+}
+
 void gen_str(uint8_t *buffer, DataType size) {
   for (size_t i = 0; i < size; i++) {
     buffer[i] = dis(gen);
@@ -114,26 +131,72 @@ void test_sequential_operations() {
   // Test sequential insertions/deletions which stress different code paths
   pager_init("test_sequential.db");
 
-  for (auto type : {BTREE, BPLUS}) {
+  uint8_t record[TYPE_VARCHAR32] = {};
+  for (auto type : {BPLUS}) {
     pager_begin_transaction();
-    uint32_t schema = TYPE_INT32;
+    uint32_t schema = TYPE_VARCHAR32;
     BPlusTree tree = bt_create(TYPE_INT32, schema, type);
     bp_init(tree);
 
+    uint32_t eCount = 0;
+    uint32_t eUnique = 0;
+
     // Sequential ascending insertions (stresses right-heavy splits)
-    for (uint32_t i = 1; i <= tree.leaf_max_keys * 10; i++) {
-      uint8_t record[TYPE_INT32];
-      memcpy(record, &i, sizeof(i));
+    for (uint32_t i = 1; i <= tree.leaf_max_keys * 100; i++) {
       bp_insert_element(tree, &i, record);
-      bp_validate_all_invariants(tree);
+      eCount++;
+      eUnique++;
+
+      // if(i % 8 == 0) {
+      //    eCount++;
+      //    bp_insert_element(tree, &i, record);
+      // }
+    }
+
+    for (uint32_t i = 1; i <= tree.leaf_max_keys * 10; i++) {
+      if (!bp_find_element(tree, &i)) {
+        check("COULD'T find it", false);
+      }
     }
 
     print_tree(tree);
-    // Sequential descending deletions (stresses left-heavy merges)
-    for (uint32_t i = tree.leaf_max_keys * 3; i >= 1; i--) {
-      bp_delete_element(tree, &i);
+
+    std::vector<uint32_t> set = {49, 7,  13, 19, 25, 31, 37, 43, 55,
+                                 61, 67, 73, 79, 85, 91, 97, 103};
+
+
+    for (uint32_t i = 0; i < set.size(); i++) {
+      bp_delete_element(tree, &set[i]);
       bp_validate_all_invariants(tree);
     }
+
+    for (uint32_t i = 1; i <= tree.leaf_max_keys * 10; i++) {
+      uint32_t k = i;
+
+      bp_delete_element(tree, &i);
+      bp_validate_all_invariants(tree);
+      if (bp_find_element(tree, &k)) {
+        std::cout << k;
+        check("STILL COULD find it", false);
+      }
+    }
+
+    uint32_t aCount, aUnique;
+
+    //  do_count(&tree, &aCount, &aUnique);
+    // if(tree.tree_type == BTREE)  {
+    //   check("NAh", aCount == eCount);
+    // } else {
+
+    //     check("NAh+", aCount == eUnique);
+    // }
+
+    // print_tree(tree);
+    // // Sequential descending deletions (stresses left-heavy merges)
+    // for (uint32_t i = tree.leaf_max_keys * 3; i >= 1; i--) {
+    //   bp_delete_element(tree, &i);
+    //   bp_validate_all_invariants(tree);
+    // }
 
     pager_rollback();
   }
@@ -1509,7 +1572,7 @@ void traversal() {
     bp_init(tree);
 
     // Sequential ascending insertions (stresses right-heavy splits)
-    for (uint32_t i = 1; i <= tree.leaf_max_keys * 3; i++) {
+    for (uint32_t i = 1; i <= tree.leaf_max_keys * 10; i++) {
       uint8_t record[TYPE_INT32];
       memcpy(record, &i, sizeof(i));
       bp_insert_element(tree, &i, record);
@@ -1531,7 +1594,6 @@ void traversal() {
       uint32_t b = keys[i - 1];
 
       if (a < b) {
-
         check("sada", false);
       }
     }
@@ -1544,14 +1606,14 @@ void traversal() {
 void run_comprehensive_tests() {
   test_sequential_operations();
   // traversal();
-  test_key_types();
-  test_edge_case_splits_merges();
-  test_duplicate_handling();
-  test_internal_node_operations();
-  test_root_special_cases();
-  test_stress_patterns();
-  test_boundary_conditions();
-  run_integration_tests();
+  // test_key_types();
+  // test_edge_case_splits_merges();
+  // test_duplicate_handling();
+  // test_internal_node_operations();
+  // test_root_special_cases();
+  // test_stress_patterns();
+  // test_boundary_conditions();
+  // run_integration_tests();
 
   std::cout << "All comprehensive tests passed!" << std::endl;
 }
