@@ -59,7 +59,7 @@ void test_tree_toplevel(bool single_node) {
   for (auto type : {BPLUS, BTREE}) {
     pager_begin_transaction();
     uint32_t schema = TYPE_INT32;
-    BPlusTree tree = bp_create(TYPE_INT32, schema, type);
+    BPlusTree tree = bt_create(TYPE_INT32, schema, type);
     if (tree.tree_type == INVALID) {
       std::cout << "invalid tree\n";
       exit(1);
@@ -117,7 +117,7 @@ void test_sequential_operations() {
   for (auto type : {BPLUS, BTREE}) {
     pager_begin_transaction();
     uint32_t schema = TYPE_INT32;
-    BPlusTree tree = bp_create(TYPE_INT32, schema, type);
+    BPlusTree tree = bt_create(TYPE_INT32, schema, type);
     bp_init(tree);
 
     // Sequential ascending insertions (stresses right-heavy splits)
@@ -145,7 +145,7 @@ void test_edge_case_splits_merges() {
   for (auto type : {BPLUS, BTREE}) {
     pager_begin_transaction();
     uint32_t schema = TYPE_INT32;
-    BPlusTree tree = bp_create(TYPE_INT32, schema, type);
+    BPlusTree tree = bt_create(TYPE_INT32, schema, type);
     bp_init(tree);
 
     // Test minimum capacity scenarios
@@ -179,7 +179,7 @@ void test_duplicate_handling() {
   for (auto type : {BPLUS, BTREE}) {
     pager_begin_transaction();
     uint32_t schema = TYPE_INT32;
-    BPlusTree tree = bp_create(TYPE_INT32, schema, type);
+    BPlusTree tree = bt_create(TYPE_INT32, schema, type);
     bp_init(tree);
 
     uint32_t duplicate_key = 100;
@@ -221,7 +221,7 @@ void test_internal_node_operations() {
   for (auto type : {BPLUS, BTREE}) {
     pager_begin_transaction();
     uint32_t schema = TYPE_INT32;
-    BPlusTree tree = bp_create(TYPE_INT32, schema, type);
+    BPlusTree tree = bt_create(TYPE_INT32, schema, type);
     bp_init(tree);
 
     // Build a tree with internal nodes
@@ -257,7 +257,7 @@ void test_root_special_cases() {
   for (auto type : {BPLUS, BTREE}) {
     pager_begin_transaction();
     uint32_t schema = TYPE_INT32;
-    BPlusTree tree = bp_create(TYPE_INT32, schema, type);
+    BPlusTree tree = bt_create(TYPE_INT32, schema, type);
     bp_init(tree);
 
     // Insert single element
@@ -297,7 +297,7 @@ void test_stress_patterns() {
   for (auto type : {BPLUS, BTREE}) {
     pager_begin_transaction();
     uint32_t schema = TYPE_INT32;
-    BPlusTree tree = bp_create(TYPE_INT32, schema, type);
+    BPlusTree tree = bt_create(TYPE_INT32, schema, type);
     bp_init(tree);
 
     std::vector<uint32_t> keys;
@@ -343,7 +343,7 @@ void test_boundary_conditions() {
   for (auto type : {BPLUS, BTREE}) {
     pager_begin_transaction();
     uint32_t schema = TYPE_INT32;
-    BPlusTree tree = bp_create(TYPE_INT32, schema, type);
+    BPlusTree tree = bt_create(TYPE_INT32, schema, type);
     bp_init(tree);
 
     // Test with exactly min_keys, min_keys+1, max_keys-1, max_keys
@@ -444,7 +444,7 @@ void test_basic_persistence() {
     pager_begin_transaction();
 
     uint32_t schema = TYPE_INT32 + TYPE_VARCHAR32;
-    BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
+    BPlusTree tree = bt_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     // Insert test data
@@ -469,7 +469,7 @@ void test_basic_persistence() {
     pager_begin_transaction();
 
     uint32_t schema = TYPE_INT32 + TYPE_VARCHAR32;
-    BPlusTree tree = bp_create(TYPE_INT32, schema, BPLUS);
+    BPlusTree tree = bt_create(TYPE_INT32, schema, BPLUS);
     tree.root_page_index =
         saved_root_index; // In real system, this comes from catalog
 
@@ -509,7 +509,7 @@ void test_transaction_rollback() {
     pager_begin_transaction();
 
     uint32_t schema = TYPE_INT32;
-    tree = bp_create(TYPE_INT32, schema, BPLUS);
+    tree = bt_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     // Insert initial data
@@ -637,7 +637,7 @@ void test_multi_session_consistency() {
     pager_begin_transaction();
 
     uint32_t schema = TYPE_INT32 + TYPE_VARCHAR32;
-    tree = bp_create(TYPE_INT32, schema, BPLUS);
+    tree = bt_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     for (int i = 0; i < 15; i++) {
@@ -749,7 +749,7 @@ void test_crash_recovery_simulation() {
     pager_begin_transaction();
 
     uint32_t schema = TYPE_INT32;
-    tree = bp_create(TYPE_INT32, schema, BPLUS);
+    tree = bt_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     for (int i = 0; i < 10; i++) {
@@ -836,7 +836,7 @@ void test_large_transaction_rollback() {
     pager_begin_transaction();
 
     uint32_t schema = TYPE_INT32;
-    tree = bp_create(TYPE_INT32, schema, BPLUS);
+    tree = bt_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     // Insert enough data to cause multiple node splits
@@ -870,7 +870,7 @@ void test_large_transaction_rollback() {
     pager_begin_transaction();
 
     uint32_t schema = TYPE_INT32;
-    tree = bp_create(TYPE_INT32, schema, BPLUS);
+    tree = bt_create(TYPE_INT32, schema, BPLUS);
     bp_init(tree);
 
     uint32_t o = 0;
@@ -904,9 +904,9 @@ void test_multi_tree_isolation() {
     uint32_t orders_schema = TYPE_INT32 + TYPE_INT64;
     uint32_t products_schema = TYPE_VARCHAR32;
 
-    BPlusTree users_tree = bp_create(TYPE_INT32, users_schema, BPLUS);
-    BPlusTree orders_tree = bp_create(TYPE_INT32, orders_schema, BPLUS);
-    BPlusTree products_tree = bp_create(TYPE_INT32, products_schema, BPLUS);
+    BPlusTree users_tree = bt_create(TYPE_INT32, users_schema, BPLUS);
+    BPlusTree orders_tree = bt_create(TYPE_INT32, orders_schema, BPLUS);
+    BPlusTree products_tree = bt_create(TYPE_INT32, products_schema, BPLUS);
 
     bp_init(users_tree);
     bp_init(orders_tree);
@@ -968,8 +968,8 @@ void test_multi_tree_transactions() {
   uint32_t table1_schema = TYPE_INT32;
   uint32_t table2_schema = TYPE_INT32;
 
-  BPlusTree table1 = bp_create(TYPE_INT32, table1_schema, BPLUS);
-  BPlusTree table2 = bp_create(TYPE_INT32, table2_schema, BPLUS);
+  BPlusTree table1 = bt_create(TYPE_INT32, table1_schema, BPLUS);
+  BPlusTree table2 = bt_create(TYPE_INT32, table2_schema, BPLUS);
 
   // Setup: Create trees with initial data
   {
@@ -1084,9 +1084,9 @@ void test_multi_tree_page_sharing() {
     uint32_t schema = TYPE_INT32;
 
     // Create multiple trees
-    BPlusTree tree1 = bp_create(TYPE_INT32, schema, BPLUS);
-    BPlusTree tree2 = bp_create(TYPE_INT32, schema, BPLUS);
-    BPlusTree tree3 = bp_create(TYPE_INT32, schema, BPLUS);
+    BPlusTree tree1 = bt_create(TYPE_INT32, schema, BPLUS);
+    BPlusTree tree2 = bt_create(TYPE_INT32, schema, BPLUS);
+    BPlusTree tree3 = bt_create(TYPE_INT32, schema, BPLUS);
 
     bp_init(tree1);
     bp_init(tree2);
@@ -1150,8 +1150,8 @@ void test_mixed_tree_types() {
     uint32_t schema = TYPE_INT32;
 
     // Create both B+tree and B-tree in same database
-    BPlusTree bplus_tree = bp_create(TYPE_INT32, schema, BPLUS);
-    BPlusTree btree_tree = bp_create(TYPE_INT32, schema, BTREE);
+    BPlusTree bplus_tree = bt_create(TYPE_INT32, schema, BPLUS);
+    BPlusTree btree_tree = bt_create(TYPE_INT32, schema, BTREE);
 
     bp_init(bplus_tree);
     bp_init(btree_tree);
@@ -1205,8 +1205,8 @@ void test_concurrent_tree_operations() {
 
     uint32_t schema = TYPE_INT32;
 
-    BPlusTree log_tree = bp_create(TYPE_INT32, schema, BPLUS);
-    BPlusTree data_tree = bp_create(TYPE_INT32, schema, BPLUS);
+    BPlusTree log_tree = bt_create(TYPE_INT32, schema, BPLUS);
+    BPlusTree data_tree = bt_create(TYPE_INT32, schema, BPLUS);
 
     bp_init(log_tree);
     bp_init(data_tree);
@@ -1288,7 +1288,7 @@ void test_key_types() {
     pager_begin_transaction();
 
     uint32_t schema = TYPE_INT32;  // Records are uint32_t
-    BPlusTree tree = bp_create(TYPE_VARCHAR32, schema, BPLUS);
+    BPlusTree tree = bt_create(TYPE_VARCHAR32, schema, BPLUS);
     bp_init(tree);
 
     std::vector<std::string> string_keys;
@@ -1371,7 +1371,7 @@ void test_key_types() {
     pager_begin_transaction();
 
     uint32_t schema = TYPE_INT32;  // Records are uint32_t
-    BPlusTree tree = bp_create(TYPE_INT64, schema, BPLUS);
+    BPlusTree tree = bt_create(TYPE_INT64, schema, BPLUS);
     bp_init(tree);
 
     int insert_count = tree.leaf_max_keys * 3;
@@ -1433,9 +1433,9 @@ void test_key_types() {
     // Create trees with different key types, all with uint32_t records
     uint32_t int_schema = TYPE_INT32;
 
-    BPlusTree int32_tree = bp_create(TYPE_INT32, int_schema, BPLUS);
-    BPlusTree varchar_tree = bp_create(TYPE_VARCHAR32, int_schema, BPLUS);
-    BPlusTree int64_tree = bp_create(TYPE_INT64, int_schema, BPLUS);
+    BPlusTree int32_tree = bt_create(TYPE_INT32, int_schema, BPLUS);
+    BPlusTree varchar_tree = bt_create(TYPE_VARCHAR32, int_schema, BPLUS);
+    BPlusTree int64_tree = bt_create(TYPE_INT64, int_schema, BPLUS);
 
     bp_init(int32_tree);
     bp_init(varchar_tree);

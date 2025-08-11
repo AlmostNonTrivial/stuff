@@ -47,7 +47,7 @@ struct BPTreeNode {
 
 static_assert(sizeof(BPTreeNode) == PAGE_SIZE, "BTreeNode must be exactly PAGE_SIZE");
 
-BPlusTree bp_create(DataType key, uint32_t record_size, TreeType tree_type);
+BPlusTree bt_create(DataType key, uint32_t record_size, TreeType tree_type);
 void bp_init(BPlusTree& tree);
 
 
