@@ -69,7 +69,7 @@ bool bp_find_element(BPlusTree& tree, void* key);
 const uint8_t *bp_get(BPlusTree &tree, void* key);
 
 
-BPTreeNode *bp_find_leaf_node(BPlusTree &tree, BPTreeNode *node, const uint8_t* key);
+// BPTreeNode *bp_find_leaf_node(BPlusTree &tree, BPTreeNode *node, const uint8_t* key);
 
 
 // debug

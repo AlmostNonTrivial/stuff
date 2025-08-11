@@ -49,17 +49,19 @@ int cursor_test()
     bp_init(tree);
 
     BtCursor *cursor = bt_cursor_create(&tree, true);
-   const uint32_t k = 21;
-    for(uint32_t i = 0; i < tree.internal_max_keys; i++) {
+   const uint32_t k = 20;
+    for(uint32_t i = 0; i < tree.internal_max_keys + 1; i++) {
         if(i == tree.internal_max_keys) {
            print_tree(tree) ;
         }
         bp_insert_element(tree, &i, (const uint8_t*)&k);
     }
 
+
     print_tree(tree);
 
     bool exists = bt_cursor_seek(cursor, &k);
+    std::cout << exists;
 
     do {
       auto record = bt_cursor_get_record(cursor) ;
