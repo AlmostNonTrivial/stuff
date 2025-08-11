@@ -45,12 +45,12 @@ int cursor_test()
     pager_init("file");
     pager_begin_transaction();
 
-    BPlusTree tree = bt_create(TYPE_INT32, TYPE_INT32, BPLUS);
+    BPlusTree tree = bt_create(TYPE_INT32, TYPE_INT32, BTREE);
     bp_init(tree);
 
     BtCursor *cursor = bt_cursor_create(&tree, true);
    const uint32_t k = 21;
-    for(uint32_t i = 0; i < tree.internal_max_keys + 1; i++) {
+    for(uint32_t i = 0; i < tree.internal_max_keys; i++) {
         if(i == tree.internal_max_keys) {
            print_tree(tree) ;
         }
@@ -84,8 +84,8 @@ int main() {
 
     // large_records();
 
-    // run_comprehensive_tests();
-    cursor_test();
+    run_comprehensive_tests();
+    // cursor_test();
 
 
     // test_composite_records();

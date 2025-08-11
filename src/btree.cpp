@@ -426,10 +426,6 @@ BPTreeNode *bp_get_root(BPlusTree &tree) {
 }
 
 void bp_insert_element(BPlusTree &tree, void *key, const uint8_t *data) {
-  // Use a properly sized buffer, not a fixed uint32_t
-  uint8_t key_bytes[tree.node_key_size];
-  memcpy(key_bytes, key, tree.node_key_size);
-
   BPTreeNode *root = bp_get_root(tree);
 
   if (root->num_keys == 0) {
@@ -437,13 +433,13 @@ void bp_insert_element(BPlusTree &tree, void *key, const uint8_t *data) {
     uint8_t *keys = get_keys(root);
     uint8_t *record_data = get_record_data(tree, root);
 
-    memcpy(keys, key_bytes,
-           tree.node_key_size); // Copy from key_bytes, not &key_bytes
+    memcpy(keys, key,
+           tree.node_key_size);
     memcpy(record_data, data, tree.record_size);
     root->num_keys = 1;
   } else {
-    bp_insert(tree, root, key_bytes,
-              data); // Pass key_bytes, not (uint8_t*)&key_bytes
+    bp_insert(tree, root, (uint8_t*)key,
+              data);
   }
 
   pager_sync();
@@ -739,12 +735,8 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
 }
 
 bool bp_find_element(BPlusTree &tree, void *key) {
-  uint8_t
-      key_bytes[tree.node_key_size]; // Assuming max key size is 8 bytes for now
-  memcpy(key_bytes, key, tree.node_key_size);
-
   BPTreeNode *root = bp_get_root(tree);
-  return bp_find_in_tree(tree, root, key_bytes);
+  return bp_find_in_tree(tree, root, (uint8_t*)key);
 }
 
 static bool bp_find_in_tree(BPlusTree &tree, BPTreeNode *node,
@@ -781,18 +773,15 @@ static bool bp_find_in_tree(BPlusTree &tree, BPTreeNode *node,
 }
 
 const uint8_t *bp_get(BPlusTree &tree, void *key) {
-  uint8_t
-      key_bytes[tree.node_key_size]; // Assuming max key size is 8 bytes for now
-  memcpy(key_bytes, key, tree.node_key_size);
 
   BPTreeNode *root = bp_get_root(tree);
-  BPTreeNode *leaf_node = bp_find_leaf_node(tree, root, key_bytes);
+  BPTreeNode *leaf_node = bp_find_leaf_node(tree, root, (uint8_t*)key);
   if (!leaf_node)
     return nullptr;
 
-  uint32_t pos = bp_binary_search(tree, leaf_node, key_bytes);
+  uint32_t pos = bp_binary_search(tree, leaf_node, (uint8_t*)key);
   if (pos < leaf_node->num_keys &&
-      cmp(tree, get_key_at(tree, leaf_node, pos), key_bytes) == 0) {
+      cmp(tree, get_key_at(tree, leaf_node, pos), (uint8_t*)key) == 0) {
     return get_record_at(tree, leaf_node, pos);
   }
 
@@ -867,15 +856,11 @@ static void bp_delete_internal_btree(BPlusTree &tree, BPTreeNode *node,
 }
 
 void bp_delete_element(BPlusTree &tree, void *key) {
-  uint8_t
-      key_bytes[tree.node_key_size]; // Assuming max key size is 8 bytes for now
-  memcpy(key_bytes, key, tree.node_key_size);
-
   BPTreeNode *root = bp_get_root(tree);
   if (!root)
     return;
 
-  bp_do_delete(tree, root, key_bytes);
+  bp_do_delete(tree, root, (uint8_t*)key);
 
   if (root->num_keys == 0 && !root->is_leaf) {
     BPTreeNode *old_root = root;
