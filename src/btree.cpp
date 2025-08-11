@@ -14,7 +14,8 @@
 
 #define PRINT(x, y) std::cout << x << y << "\n"
 
-BPTreeNode* bp_find_containing_node(BPlusTree&tree, BPTreeNode*node, const uint8_t*key);
+BPTreeNode *bp_find_containing_node(BPlusTree &tree, BPTreeNode *node,
+                                    const uint8_t *key);
 static int cmp(BPlusTree &tree, const uint8_t *key1, const uint8_t *key2) {
   switch (tree.node_key_size) {
   case TYPE_INT32: {
@@ -122,16 +123,16 @@ static bool bp_find_in_tree(BPlusTree &tree, BPTreeNode *node,
                             const uint8_t *key);
 
 std::vector<uint32_t> db_get_keys(BPlusTree &tree, BPTreeNode *n) {
-    std::vector<uint32_t> result;
-    result.reserve(n->num_keys);
+  std::vector<uint32_t> result;
+  result.reserve(n->num_keys);
 
-    for (size_t i = 0; i < n->num_keys; ++i) {
-        uint32_t value;
-        // Use memcpy to avoid undefined behavior due to alignment or aliasing
-        std::memcpy(&value, n->data + i * sizeof(uint32_t), sizeof(uint32_t));
-        result.push_back(value);
-    }
-    return result;
+  for (size_t i = 0; i < n->num_keys; ++i) {
+    uint32_t value;
+    // Use memcpy to avoid undefined behavior due to alignment or aliasing
+    std::memcpy(&value, n->data + i * sizeof(uint32_t), sizeof(uint32_t));
+    result.push_back(value);
+  }
+  return result;
 }
 // Combined btree.cpp functions - calculate_capacity and create merged
 
@@ -160,13 +161,13 @@ static uint32_t bp_binary_search(BPlusTree &tree, BPTreeNode *node,
       // Found exact match - handle based on node type and tree type
 
       // Btree: return found internal or leaf
-      if(tree.tree_type == BTREE) {
-          return mid;
+      if (tree.tree_type == BTREE) {
+        return mid;
       }
       // B+tree leaf
-      if(node->is_leaf) {
-          // Leaf node: return exact position regardless of tree type
-         return mid;
+      if (node->is_leaf) {
+        // Leaf node: return exact position regardless of tree type
+        return mid;
       }
 
       // B+tree internal: equal keys in internal nodes are separators
@@ -217,8 +218,6 @@ BPlusTree bt_create(DataType key, uint32_t record_size, TreeType tree_type) {
     uint32_t max_keys =
         (USABLE_SPACE - child_ptr_size) / (key_record_size + child_ptr_size);
 
-
-
     max_keys = std::max(minimum_entry_count, max_keys);
 
     uint32_t min_keys = max_keys / 2;
@@ -242,8 +241,10 @@ BPlusTree bt_create(DataType key, uint32_t record_size, TreeType tree_type) {
 
     uint32_t child_ptr_size = TYPE_INT32;
     // Internal nodes: [keys][children] (no records)
-    uint32_t internal_max_entries = (USABLE_SPACE - child_ptr_size) / (tree.node_key_size + child_ptr_size);
-    tree.internal_max_keys = std::max(minimum_entry_count, internal_max_entries);
+    uint32_t internal_max_entries =
+        (USABLE_SPACE - child_ptr_size) / (tree.node_key_size + child_ptr_size);
+    tree.internal_max_keys =
+        std::max(minimum_entry_count, internal_max_entries);
     tree.internal_min_keys = tree.internal_max_keys / 2;
     tree.internal_split_index = tree.internal_max_keys / 2;
   } else {
@@ -441,14 +442,12 @@ void bp_insert_element(BPlusTree &tree, void *key, const uint8_t *data) {
     uint8_t *keys = get_keys(root);
     uint8_t *record_data = get_record_data(tree, root);
 
-    memcpy(keys, key,
-           tree.node_key_size);
+    memcpy(keys, key, tree.node_key_size);
     memcpy(record_data, data, tree.record_size);
     root->num_keys = 1;
   } else {
     auto ss = db_get_keys(tree, root);
-    bp_insert(tree, root, (uint8_t*)key,
-              data);
+    bp_insert(tree, root, (uint8_t *)key, data);
   }
 
   pager_sync();
@@ -472,31 +471,27 @@ void bp_insert(BPlusTree &tree, BPTreeNode *node, uint8_t *key,
     uint8_t *keys = get_keys(node);
     uint8_t *record_data = get_record_data(tree, node);
 
+    uint32_t insert_index = bp_binary_search(tree, node, key);
+
     // B+tree: check for existing key to update
     // B-tree: allow duplicates
-    if (tree.tree_type == BPLUS) {
-      uint32_t existing_pos = bp_binary_search(tree, node, key);
-      if (existing_pos < node->num_keys &&
-          cmp(tree, get_key_at(tree, node, existing_pos), key) == 0) {
-        bp_mark_dirty(node);
-        memcpy(record_data + existing_pos * tree.record_size, data,
-               tree.record_size);
-        return;
-      }
+    if (tree.tree_type == BPLUS && insert_index < node->num_keys &&
+        cmp(tree, get_key_at(tree, node, insert_index), key) == 0) {
+      bp_mark_dirty(node);
+      memcpy(record_data + insert_index * tree.record_size, data,
+             tree.record_size);
+      return;
     }
 
     // Check if split needed
     if (node->num_keys >= tree.leaf_max_keys) {
       bp_insert_repair(tree, node);
-      bp_insert(tree, bp_find_containing_node(tree, bp_get_root(tree), key), key,
-                data);
+      bp_insert(tree, bp_find_containing_node(tree, bp_get_root(tree), key),
+                key, data);
       return;
     }
 
     bp_mark_dirty(node);
-
-    // Find insertion position using binary search
-    uint32_t insert_index = bp_binary_search(tree, node, key);
 
     // For B-tree duplicates: insert after existing equal keys
     if (tree.tree_type == BTREE) {
@@ -506,20 +501,24 @@ void bp_insert(BPlusTree &tree, BPTreeNode *node, uint8_t *key,
       }
     }
 
-    // Shift elements right from insert_index
-    for (uint32_t i = node->num_keys; i > insert_index; i--) {
-      memcpy(get_key_at(tree, node, i), get_key_at(tree, node, i - 1),
-             tree.node_key_size);
-      memcpy(record_data + i * tree.record_size,
-             record_data + (i - 1) * tree.record_size, tree.record_size);
-    }
+    uint32_t num_to_shift = node->num_keys - insert_index;
+
+    // Shift keys right by one position
+    memcpy(get_key_at(tree, node, insert_index + 1),
+           get_key_at(tree, node, insert_index),
+           num_to_shift * tree.node_key_size);
+
+    // Shift records right by one position
+    memcpy(record_data + (insert_index + 1) * tree.record_size,
+           record_data + insert_index * tree.record_size,
+           num_to_shift * tree.record_size);
 
     // Insert new key and record
     memcpy(get_key_at(tree, node, insert_index), key, tree.node_key_size);
     memcpy(record_data + insert_index * tree.record_size, data,
            tree.record_size);
-    node->num_keys++;
 
+    node->num_keys++;
   } else {
     // Internal node - use binary search to find child
     uint32_t child_index = bp_binary_search(tree, node, key);
@@ -745,7 +744,7 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
 
 bool bp_find_element(BPlusTree &tree, void *key) {
   BPTreeNode *root = bp_get_root(tree);
-  return bp_find_in_tree(tree, root, (uint8_t*)key);
+  return bp_find_in_tree(tree, root, (uint8_t *)key);
 }
 
 static bool bp_find_in_tree(BPlusTree &tree, BPTreeNode *node,
@@ -784,49 +783,35 @@ static bool bp_find_in_tree(BPlusTree &tree, BPTreeNode *node,
 const uint8_t *bp_get(BPlusTree &tree, void *key) {
 
   BPTreeNode *root = bp_get_root(tree);
-  BPTreeNode *leaf_node = bp_find_containing_node(tree, root, (uint8_t*)key);
+  BPTreeNode *leaf_node = bp_find_containing_node(tree, root, (uint8_t *)key);
   if (!leaf_node)
     return nullptr;
 
-  uint32_t pos = bp_binary_search(tree, leaf_node, (uint8_t*)key);
+  uint32_t pos = bp_binary_search(tree, leaf_node, (uint8_t *)key);
   if (pos < leaf_node->num_keys &&
-      cmp(tree, get_key_at(tree, leaf_node, pos), (uint8_t*)key) == 0) {
+      cmp(tree, get_key_at(tree, leaf_node, pos), (uint8_t *)key) == 0) {
     return get_record_at(tree, leaf_node, pos);
   }
 
   return nullptr;
 }
 
-// BPTreeNode *bp_find_leaf_node(BPlusTree &tree, BPTreeNode *node,
-//                               const uint8_t *key) {
-//   if (node->is_leaf) {
-//     return const_cast<BPTreeNode *>(node);
-//   }
+BPTreeNode *bp_find_containing_node(BPlusTree &tree, BPTreeNode *node,
+                                    const uint8_t *key) {
+  if (node->is_leaf) {
+    return const_cast<BPTreeNode *>(node);
+  }
 
-//   uint32_t child_index = bp_binary_search(tree, node, key);
-//   return bp_find_leaf_node(tree, bp_get_child(tree, node, child_index), key);
-// }
-
-BPTreeNode* bp_find_containing_node(BPlusTree&tree, BPTreeNode*node, const uint8_t*key)
-{
-    if(node->is_leaf) {
-        return const_cast<BPTreeNode *>(node);
+  uint32_t child_or_key_index = bp_binary_search(tree, node, key);
+  if (tree.tree_type == BTREE) {
+    if (cmp(tree, key, get_key_at(tree, node, child_or_key_index)) == 0) {
+      return const_cast<BPTreeNode *>(node);
     }
+  }
 
-    uint32_t child_or_key_index = bp_binary_search(tree, node, key);
-    if(tree.tree_type == BTREE)
-    {
-        if(cmp(tree, key, get_key_at(tree, node, child_or_key_index)) == 0){
-            return const_cast<BPTreeNode *>(node);
-        }
-
-        return bp_find_containing_node(tree, bp_get_child(tree, node, child_or_key_index), key);
-    }
-
-    return bp_find_containing_node(tree, bp_get_child(tree, node, child_or_key_index), key);
+  return bp_find_containing_node(
+      tree, bp_get_child(tree, node, child_or_key_index), key);
 }
-
-
 
 BPTreeNode *bp_left_most(BPlusTree &tree) {
   BPTreeNode *temp = bp_get_root(tree);
@@ -890,7 +875,7 @@ void bp_delete_element(BPlusTree &tree, void *key) {
   if (!root)
     return;
 
-  bp_do_delete(tree, root, (uint8_t*)key);
+  bp_do_delete(tree, root, (uint8_t *)key);
 
   if (root->num_keys == 0 && !root->is_leaf) {
     BPTreeNode *old_root = root;

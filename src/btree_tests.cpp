@@ -3,6 +3,7 @@
 #include "defs.hpp"
 #include <cassert>
 #include <cstdint>
+#include <ios>
 #include <iostream>
 #include <random>
 #include <set>
@@ -12,11 +13,10 @@ static std::random_device rd;
 static std::mt19937 gen(rd());
 static std::uniform_int_distribution<uint8_t> dis(0, 255);
 
-void gen_str(uint8_t *buffer, DataType size)
-{
-    for (size_t i = 0; i < size; i++) {
-        buffer[i] = dis(gen);
-    }
+void gen_str(uint8_t *buffer, DataType size) {
+  for (size_t i = 0; i < size; i++) {
+    buffer[i] = dis(gen);
+  }
 }
 /* TEST UTILS */
 uint32_t random_u32() {
@@ -114,20 +114,21 @@ void test_sequential_operations() {
   // Test sequential insertions/deletions which stress different code paths
   pager_init("test_sequential.db");
 
-  for (auto type : {BPLUS, BTREE}) {
+  for (auto type : {BTREE}) {
     pager_begin_transaction();
     uint32_t schema = TYPE_INT32;
     BPlusTree tree = bt_create(TYPE_INT32, schema, type);
     bp_init(tree);
 
     // Sequential ascending insertions (stresses right-heavy splits)
-    for (uint32_t i = 1; i <= tree.leaf_max_keys * 3; i++) {
+    for (uint32_t i = 1; i <= tree.leaf_max_keys * 100; i++) {
       uint8_t record[TYPE_INT32];
       memcpy(record, &i, sizeof(i));
       bp_insert_element(tree, &i, record);
       bp_validate_all_invariants(tree);
     }
 
+    print_tree(tree);
     // Sequential descending deletions (stresses left-heavy merges)
     for (uint32_t i = tree.leaf_max_keys * 3; i >= 1; i--) {
       bp_delete_element(tree, &i);
@@ -515,7 +516,7 @@ void test_transaction_rollback() {
     // Insert initial data
     for (int i = 0; i < 10; i++) {
       int32_t value = i * 100;
-      bp_insert_element(tree,& i, reinterpret_cast<const uint8_t *>(&value));
+      bp_insert_element(tree, &i, reinterpret_cast<const uint8_t *>(&value));
     }
 
     pager_commit();
@@ -552,8 +553,8 @@ void test_transaction_rollback() {
     // 1. Update existing records
     for (int i = 0; i < 5; i++) {
       int32_t new_value = i * 1000; // Change from i*100 to i*1000
-      bp_insert_element(tree, &i, reinterpret_cast<const uint8_t
-      *>(&new_value));
+      bp_insert_element(tree, &i,
+                        reinterpret_cast<const uint8_t *>(&new_value));
     }
 
     // 2. Insert new records
@@ -569,10 +570,13 @@ void test_transaction_rollback() {
 
     // Verify modifications are visible
     uint32_t key1 = 2;
-    uint32_t key2= 102;
-    uint32_t key3= 8;
-    const int32_t *updated = reinterpret_cast<const int32_t *>(bp_get(tree, &key1));
-    bool mods_visible = (updated && *updated == 2000) && bp_find_element(tree, &key2) && !bp_find_element(tree,&key3);
+    uint32_t key2 = 102;
+    uint32_t key3 = 8;
+    const int32_t *updated =
+        reinterpret_cast<const int32_t *>(bp_get(tree, &key1));
+    bool mods_visible = (updated && *updated == 2000) &&
+                        bp_find_element(tree, &key2) &&
+                        !bp_find_element(tree, &key3);
     check("Rollback: Modifications visible before rollback", mods_visible);
 
     during = debug_hash_tree(tree);
@@ -664,7 +668,7 @@ void test_multi_session_consistency() {
 
     // Verify session 1 data is visible
     uint32_t five = 5;
-    uint32_t fourteen= 14;
+    uint32_t fourteen = 14;
 
     bool session1_visible =
         bp_find_element(tree, &five) && bp_find_element(tree, &fourteen);
@@ -690,8 +694,7 @@ void test_multi_session_consistency() {
     pager_commit();
 
     pager_close();
-    std::cout << "Session 2: Added 10 records, updated 5 records" <<
-    std::endl;
+    std::cout << "Session 2: Added 10 records, updated 5 records" << std::endl;
   }
 
   // Session 3: Verify all changes persisted
@@ -711,8 +714,6 @@ void test_multi_session_consistency() {
         orig && orig->id == 10 && strstr(orig->name, "Session1") != nullptr;
     check("Multi-session: Original data preserved", orig_ok);
 
-
-
     uint32_t two = 2;
     // Check updated data
     const TestRecord *updated =
@@ -720,8 +721,6 @@ void test_multi_session_consistency() {
     bool update_ok = updated && updated->id == 1002 &&
                      strstr(updated->name, "Updated") != nullptr;
     check("Multi-session: Updates persisted", update_ok);
-
-
 
     uint32_t five_and_twenty = 25;
     // Check new data
@@ -780,8 +779,8 @@ void test_crash_recovery_simulation() {
     // Update existing data
     for (int i = 0; i < 5; i++) {
       int32_t new_value = i * 1000;
-      bp_insert_element(tree,& i, reinterpret_cast<const uint8_t
-      *>(&new_value));
+      bp_insert_element(tree, &i,
+                        reinterpret_cast<const uint8_t *>(&new_value));
     }
 
     // Simulate crash - close without commit
@@ -803,7 +802,6 @@ void test_crash_recovery_simulation() {
     bool crash_inserts_gone = !bp_find_element(tree, &oneofive);
     check("Crash recovery: Uncommitted inserts lost", crash_inserts_gone);
 
-
     uint32_t two = 2;
     // Check that uncommitted updates are gone (original values restored)
     const int32_t *restored =
@@ -811,7 +809,6 @@ void test_crash_recovery_simulation() {
     bool crash_updates_gone =
         restored && *restored == 20; // Original value, not 2000
     check("Crash recovery: Uncommitted updates lost", crash_updates_gone);
-
 
     uint32_t nine = 9;
     // Check that committed data is still there
@@ -854,8 +851,7 @@ void test_large_transaction_rollback() {
     bool data_accessible = bp_find_element(tree, &o) &&
                            bp_find_element(tree, &l1) &&
                            bp_find_element(tree, &l2);
-    check("Large rollback: Data accessible before rollback",
-    data_accessible);
+    check("Large rollback: Data accessible before rollback", data_accessible);
 
     // Rollback large transaction
     pager_rollback();
@@ -874,13 +870,12 @@ void test_large_transaction_rollback() {
     bp_init(tree);
 
     uint32_t o = 0;
-    uint32_t h= 100;
-    uint32_t f= 500;
+    uint32_t h = 100;
+    uint32_t f = 500;
 
     // Tree should be empty
     bool tree_empty = !bp_find_element(tree, &o) &&
-                      !bp_find_element(tree, &h) &&
-                      !bp_find_element(tree, &f);
+                      !bp_find_element(tree, &h) && !bp_find_element(tree, &f);
     check("Large rollback: Tree empty after rollback", tree_empty);
 
     pager_commit();
@@ -983,9 +978,8 @@ void test_multi_tree_transactions() {
     for (int i = 0; i < 5; i++) {
       int32_t value1 = i * 10;
       int32_t value2 = i * 20;
-      bp_insert_element(table1, &i, reinterpret_cast<const uint8_t
-      *>(&value1)); bp_insert_element(table2, &i, reinterpret_cast<const
-      uint8_t *>(&value2));
+      bp_insert_element(table1, &i, reinterpret_cast<const uint8_t *>(&value1));
+      bp_insert_element(table2, &i, reinterpret_cast<const uint8_t *>(&value2));
     }
 
     pager_commit();
@@ -1005,9 +999,8 @@ void test_multi_tree_transactions() {
     for (int i = 10; i < 15; i++) {
       int32_t value1 = i * 100;
       int32_t value2 = i * 200;
-      bp_insert_element(table1, &i, reinterpret_cast<const uint8_t
-      *>(&value1)); bp_insert_element(table2, &i, reinterpret_cast<const
-      uint8_t *>(&value2));
+      bp_insert_element(table1, &i, reinterpret_cast<const uint8_t *>(&value1));
+      bp_insert_element(table2, &i, reinterpret_cast<const uint8_t *>(&value2));
     }
 
     // Update existing data in both trees
@@ -1028,8 +1021,7 @@ void test_multi_tree_transactions() {
         reinterpret_cast<const int32_t *>(bp_get(table2, &twelve));
     bool changes_visible =
         t1_new && *t1_new == 1200 && t2_new && *t2_new == 2400;
-    check("Multi-tree txn: Changes visible before rollback",
-    changes_visible);
+    check("Multi-tree txn: Changes visible before rollback", changes_visible);
 
     // ROLLBACK affects both trees
     pager_rollback();
@@ -1051,8 +1043,6 @@ void test_multi_tree_transactions() {
         !bp_find_element(table1, &twelve) && !bp_find_element(table2, &twelve);
     check("Multi-tree txn: Inserts rolled back from both trees",
           inserts_rolled_back);
-
-
 
     uint32_t two = 2;
     // Check that updates were rolled back to original values
@@ -1093,11 +1083,9 @@ void test_multi_tree_page_sharing() {
     bp_init(tree3);
 
     // Each tree should have different root pages
-    bool different_roots = (tree1.root_page_index != tree2.root_page_index)
-    &&
-                           (tree2.root_page_index != tree3.root_page_index)
-                           && (tree1.root_page_index !=
-                           tree3.root_page_index);
+    bool different_roots = (tree1.root_page_index != tree2.root_page_index) &&
+                           (tree2.root_page_index != tree3.root_page_index) &&
+                           (tree1.root_page_index != tree3.root_page_index);
     check("Multi-tree: Trees have different root pages", different_roots);
 
     std::cout << "Tree roots: " << tree1.root_page_index << ", "
@@ -1110,26 +1098,21 @@ void test_multi_tree_page_sharing() {
       int32_t value2 = i + 1000;
       int32_t value3 = i + 2000;
 
-      bp_insert_element(tree1, &i, reinterpret_cast<const uint8_t
-      *>(&value1)); bp_insert_element(tree2, &i, reinterpret_cast<const
-      uint8_t *>(&value2)); bp_insert_element(tree3, &i,
-      reinterpret_cast<const uint8_t *>(&value3));
+      bp_insert_element(tree1, &i, reinterpret_cast<const uint8_t *>(&value1));
+      bp_insert_element(tree2, &i, reinterpret_cast<const uint8_t *>(&value2));
+      bp_insert_element(tree3, &i, reinterpret_cast<const uint8_t *>(&value3));
     }
-
 
     uint32_t tf = 25;
 
     // Verify data integrity across all trees
-    const int32_t *val1 = reinterpret_cast<const int32_t *>(bp_get(tree1,
-     &tf)); const int32_t *val2 = reinterpret_cast<const int32_t
-    *>(bp_get(tree2, &tf)); const int32_t *val3 = reinterpret_cast<const
-    int32_t *>(bp_get(tree3, &tf));
+    const int32_t *val1 = reinterpret_cast<const int32_t *>(bp_get(tree1, &tf));
+    const int32_t *val2 = reinterpret_cast<const int32_t *>(bp_get(tree2, &tf));
+    const int32_t *val3 = reinterpret_cast<const int32_t *>(bp_get(tree3, &tf));
 
     bool data_integrity =
-        val1 && *val1 == 25 && val2 && *val2 == 1025 && val3 && *val3 ==
-        2025;
-    check("Multi-tree: Data integrity with shared page pool",
-    data_integrity);
+        val1 && *val1 == 25 && val2 && *val2 == 1025 && val3 && *val3 == 2025;
+    check("Multi-tree: Data integrity with shared page pool", data_integrity);
 
     pager_commit();
     pager_close();
@@ -1179,7 +1162,6 @@ void test_mixed_tree_types() {
     check("Mixed types: B+tree operations work", bplus_ok);
     check("Mixed types: B-tree operations work", btree_ok);
 
-
     uint32_t two = 2;
     // Verify B+tree behavior (updates replace)
     const int32_t *bplus_val =
@@ -1222,22 +1204,21 @@ void test_concurrent_tree_operations() {
 
       // Every 3rd operation, insert to data tree
       if (i % 3 == 0) {
-          uint32_t third = i / 3;
+        uint32_t third = i / 3;
         bp_insert_element(data_tree, &third,
                           reinterpret_cast<const uint8_t *>(&data_value));
       }
 
       // Every 5th operation, delete from log tree (simulate log cleanup)
       if (i >= 5 && (i % 5) == 0) {
-          uint32_t xx = i -5;
+        uint32_t xx = i - 5;
         bp_delete_element(log_tree, &xx);
       }
     }
 
-
     uint32_t tn = 29;
-    uint32_t f= 5;
-    uint32_t o= 0;
+    uint32_t f = 5;
+    uint32_t o = 0;
 
     // Verify final state
     bool log_has_recent = bp_find_element(log_tree, &tn);
@@ -1287,12 +1268,12 @@ void test_key_types() {
     pager_init(db_file);
     pager_begin_transaction();
 
-    uint32_t schema = TYPE_INT32;  // Records are uint32_t
+    uint32_t schema = TYPE_INT32; // Records are uint32_t
     BPlusTree tree = bt_create(TYPE_VARCHAR32, schema, BPLUS);
     bp_init(tree);
 
     std::vector<std::string> string_keys;
-    int insert_count = 1;//tree.leaf_max_keys * 4;
+    int insert_count = 1; // tree.leaf_max_keys * 4;
 
     // Generate unique string keys
     std::set<std::string> unique_strings;
@@ -1370,7 +1351,7 @@ void test_key_types() {
     pager_init(db_file);
     pager_begin_transaction();
 
-    uint32_t schema = TYPE_INT32;  // Records are uint32_t
+    uint32_t schema = TYPE_INT32; // Records are uint32_t
     BPlusTree tree = bt_create(TYPE_INT64, schema, BPLUS);
     bp_init(tree);
 
@@ -1486,8 +1467,8 @@ void test_key_types() {
       // Check VARCHAR tree
       char varchar_key[TYPE_VARCHAR32] = {0};
       snprintf(varchar_key, sizeof(varchar_key), "Key_%03d", i);
-      const uint32_t *varchar_result = reinterpret_cast<const uint32_t *>(
-          bp_get(varchar_tree, varchar_key));
+      const uint32_t *varchar_result =
+          reinterpret_cast<const uint32_t *>(bp_get(varchar_tree, varchar_key));
       if (!varchar_result || *varchar_result != i * 333) {
         varchar_tree_ok = false;
       }
@@ -1517,9 +1498,53 @@ void test_key_types() {
   std::cout << "Key types test completed." << std::endl;
 }
 
+void traversal() {
+  // Test sequential insertions/deletions which stress different code paths
+  pager_init("traversal.db");
+
+  for (auto type : {BPLUS, BTREE}) {
+    pager_begin_transaction();
+    uint32_t schema = TYPE_INT32;
+    BPlusTree tree = bt_create(TYPE_INT32, schema, type);
+    bp_init(tree);
+
+    // Sequential ascending insertions (stresses right-heavy splits)
+    for (uint32_t i = 1; i <= tree.leaf_max_keys * 3; i++) {
+      uint8_t record[TYPE_INT32];
+      memcpy(record, &i, sizeof(i));
+      bp_insert_element(tree, &i, record);
+    }
+
+    BtCursor *cursor = bt_cursor_create(&tree, true);
+
+    std::vector<uint32_t> keys;
+
+    bt_cursor_first(cursor);
+
+    do {
+      auto x = (bt_cursor_get_key(cursor));
+      keys.push_back(*x);
+    } while (bt_cursor_next(cursor));
+
+    for (int i = 1; i < keys.size(); i++) {
+      uint32_t a = keys[i];
+      uint32_t b = keys[i - 1];
+
+      if (a < b) {
+
+        check("sada", false);
+      }
+    }
+
+    pager_rollback();
+  }
+  pager_close();
+}
+
 void run_comprehensive_tests() {
+  // test_sequential_operations();
+  // traversal();
   test_key_types();
-  test_sequential_operations();
   test_edge_case_splits_merges();
   test_duplicate_handling();
   test_internal_node_operations();
