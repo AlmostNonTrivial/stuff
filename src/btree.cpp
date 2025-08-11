@@ -890,81 +890,99 @@ void bp_delete_element(BPlusTree &tree, void *key) {
   pager_sync();
 }
 
-// Simplified B-tree deletion that reuses existing logic
-void bp_do_delete(BPlusTree &tree, BPTreeNode *node, const uint8_t *key) {
-  if (!node)
-    return;
-
-  uint32_t i;
-
-  // Find position of key
-  for (i = 0;
-       i < node->num_keys && cmp(tree, get_key_at(tree, node, i), key) < 0; i++)
-    ;
-
-  if (tree.tree_type == BTREE) {
-    // B-tree specific handling
-    if (i < node->num_keys && cmp(tree, get_key_at(tree, node, i), key) == 0) {
-      // Found key in this node
-      if (node->is_leaf) {
-        // Delete from leaf - same as B+tree leaf deletion
-        bp_mark_dirty(node);
-        uint8_t *record_data = get_record_data(tree, node);
-
-        // Shift left
-        for (uint32_t j = i; j < node->num_keys - 1; j++) {
-          memcpy(get_key_at(tree, node, j), get_key_at(tree, node, j + 1),
-                 tree.node_key_size);
-          memcpy(record_data + j * tree.record_size,
-                 record_data + (j + 1) * tree.record_size, tree.record_size);
-        }
-        node->num_keys--;
-
-        // Use existing repair logic
-        bp_repair_after_delete(tree, node);
-      } else {
-        // Delete from internal node - use predecessor/successor replacement
-        // This is the only truly new logic needed
-        bp_delete_internal_btree(tree, node, i);
-      }
-    } else if (!node->is_leaf) {
-      // Not in this node, recurse to appropriate child
-      if (i < node->num_keys && cmp(tree, get_key_at(tree, node, i), key) > 0) {
-        bp_do_delete(tree, bp_get_child(tree, node, i), key);
-      } else {
-        bp_do_delete(tree, bp_get_child(tree, node, i), key);
-      }
-    }
-  } else {
-    // B+tree - existing logic unchanged
-    if (i == node->num_keys) {
-      if (!node->is_leaf) {
-        bp_do_delete(tree, bp_get_child(tree, node, node->num_keys), key);
-      }
-    } else if (!node->is_leaf &&
-               cmp(tree, get_key_at(tree, node, i), key) == 0) {
-      bp_do_delete(tree, bp_get_child(tree, node, i + 1), key);
-    } else if (!node->is_leaf) {
-      bp_do_delete(tree, bp_get_child(tree, node, i), key);
-    } else if (node->is_leaf &&
-               cmp(tree, get_key_at(tree, node, i), key) == 0) {
+void bp_do_delete_btree(BPlusTree &tree, BPTreeNode *node, const uint8_t *key) {
+  uint32_t i = bp_binary_search(tree, node, key);
+  // B-tree specific handling
+  if (i < node->num_keys && cmp(tree, get_key_at(tree, node, i), key) == 0) {
+    // Found key in this node
+    if (node->is_leaf) {
+      // Delete from leaf - same as B+tree leaf deletion
       bp_mark_dirty(node);
       uint8_t *record_data = get_record_data(tree, node);
 
-      for (uint32_t j = i; j < node->num_keys - 1; j++) {
-        memcpy(get_key_at(tree, node, j), get_key_at(tree, node, j + 1),
-               tree.node_key_size);
-        memcpy(record_data + j * tree.record_size,
-               record_data + (j + 1) * tree.record_size, tree.record_size);
-      }
+      uint32_t shift_count = node->num_keys - i - 1;
+
+      // Shift left
+        memcpy(
+            get_key_at(tree, node, i),
+            get_key_at(tree, node, i + 1),
+            tree.node_key_size * shift_count
+        );
+        memcpy(
+            record_data + i * tree.record_size,
+            record_data + (i + 1) * tree.record_size,
+            tree.record_size * shift_count
+        );
+
       node->num_keys--;
 
-      if (i == 0 && node->parent != 0) {
-        bp_update_parent_keys(tree, node, key);
-      }
-
+      // Use existing repair logic
       bp_repair_after_delete(tree, node);
+    } else {
+      // Delete from internal node - use predecessor/successor replacement
+      // This is the only truly new logic needed
+      bp_delete_internal_btree(tree, node, i);
     }
+  } else if (!node->is_leaf) {
+    // Not in this node, recurse to appropriate child, which will eventually null out and return
+    if (i < node->num_keys && cmp(tree, get_key_at(tree, node, i), key) > 0) {
+      bp_do_delete(tree, bp_get_child(tree, node, i), key);
+    } else {
+      bp_do_delete(tree, bp_get_child(tree, node, i), key);
+    }
+  }
+}
+
+void bp_do_delete_bplus(BPlusTree &tree, BPTreeNode *node, const uint8_t *key) {
+
+  uint32_t i = bp_binary_search(tree, node, key);
+
+  // B+tree - existing logic unchanged
+  if (i == node->num_keys) {
+    if (!node->is_leaf) {
+      bp_do_delete(tree, bp_get_child(tree, node, node->num_keys), key);
+    }
+  } else if (!node->is_leaf && cmp(tree, get_key_at(tree, node, i), key) == 0) {
+    bp_do_delete(tree, bp_get_child(tree, node, i + 1), key);
+  } else if (!node->is_leaf) {
+    bp_do_delete(tree, bp_get_child(tree, node, i), key);
+  } else if (node->is_leaf && cmp(tree, get_key_at(tree, node, i), key) == 0) {
+    bp_mark_dirty(node);
+
+    uint8_t *record_data = get_record_data(tree, node);
+    uint32_t shift_count = node->num_keys - i - 1;
+
+    // Shift left
+      memcpy(
+          get_key_at(tree, node, i),
+          get_key_at(tree, node, i + 1),
+          tree.node_key_size * shift_count
+      );
+      memcpy(
+          record_data + i * tree.record_size,
+          record_data + (i + 1) * tree.record_size,
+          tree.record_size * shift_count
+      );
+
+    node->num_keys--;
+
+    if (i == 0 && node->parent != 0) {
+      bp_update_parent_keys(tree, node, key);
+    }
+
+    bp_repair_after_delete(tree, node);
+  }
+}
+
+void bp_do_delete(BPlusTree &tree, BPTreeNode *node, const uint8_t *key) {
+  if (!node) {
+    return;
+  }
+
+  if (tree.tree_type == BTREE) {
+    bp_do_delete_btree(tree, node, key);
+  } else {
+    bp_do_delete_bplus(tree, node, key);
   }
 }
 

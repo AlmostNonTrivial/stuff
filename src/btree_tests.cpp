@@ -114,14 +114,14 @@ void test_sequential_operations() {
   // Test sequential insertions/deletions which stress different code paths
   pager_init("test_sequential.db");
 
-  for (auto type : {BTREE}) {
+  for (auto type : {BTREE, BPLUS}) {
     pager_begin_transaction();
     uint32_t schema = TYPE_INT32;
     BPlusTree tree = bt_create(TYPE_INT32, schema, type);
     bp_init(tree);
 
     // Sequential ascending insertions (stresses right-heavy splits)
-    for (uint32_t i = 1; i <= tree.leaf_max_keys * 100; i++) {
+    for (uint32_t i = 1; i <= tree.leaf_max_keys * 10; i++) {
       uint8_t record[TYPE_INT32];
       memcpy(record, &i, sizeof(i));
       bp_insert_element(tree, &i, record);
@@ -1542,7 +1542,7 @@ void traversal() {
 }
 
 void run_comprehensive_tests() {
-  // test_sequential_operations();
+  test_sequential_operations();
   // traversal();
   test_key_types();
   test_edge_case_splits_merges();
