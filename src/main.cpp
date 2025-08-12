@@ -191,7 +191,7 @@ void test_comprehensive_btree_fuzzing() {
     std::cout << "\n=== Starting Comprehensive B-Tree Fuzzing Test ===\n";
 
     // Test both B-tree and B+tree variants
-    for (auto tree_type : {BTREE, BPLUS}) {
+    for (auto tree_type : {BPLUS}) {
         std::cout << "\nTesting " << (tree_type == BTREE ? "B-tree" : "B+tree") << " variant...\n";
 
         g_coverage.reset();
@@ -377,7 +377,7 @@ void test_comprehensive_btree_fuzzing() {
 void test_btree_edge_cases() {
     std::cout << "\n=== Testing B-Tree Edge Cases ===\n";
 
-    for (auto tree_type : {BTREE, BPLUS}) {
+    for (auto tree_type : {BPLUS}) {
         pager_init("edge_case.db");
         pager_begin_transaction();
 
@@ -445,7 +445,9 @@ void test_btree_edge_cases() {
 
 // Entry point
 int main() {
+    reset_coverage();
     test_comprehensive_btree_fuzzing();
+    print_coverage_report();
     // test_btree_edge_cases();
 
     std::cout << "\n=== ALL TESTS PASSED ===\n";

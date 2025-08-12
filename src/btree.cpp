@@ -1815,7 +1815,6 @@ static bool validate_btree_node(BPlusTree &tree, BPTreeNode *node) {
 }
 
 bool bp_validate_all_invariants(BPlusTree &tree) {
-    return true;
   BPTreeNode *root = bp_get_root(tree);
   if (!root)
     return T;
