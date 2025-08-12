@@ -2422,7 +2422,7 @@ void bp_repair_after_delete(BPlusTree &tree, BPTreeNode *node) {
     bp_repair_after_delete(tree, parent_node);
   }
 
-  if (left_sibling) {
+  else if (left_sibling) {
     bp_merge_right(tree, left_sibling);
     bp_repair_after_delete(tree, parent_node);
   }
@@ -2442,6 +2442,16 @@ void bp_delete_element(BPlusTree &tree, void *key) {
   }
 
   bp_do_delete(tree, root, (uint8_t *)key);
+
+  BPTreeNode *leaf = bp_find_containing_node(tree, root, (uint8_t *)key);
+
+  // Now repair from the leaf upward
+  BPTreeNode *current = leaf;
+  while (current && current->num_keys < bp_get_min_keys(tree, current)) {
+    BPTreeNode *parent = bp_get_parent(current);
+    bp_repair_after_delete(tree, current);
+    current = parent;
+  }
 
   if (root->num_keys == 0 && !root->is_leaf) {
     BPTreeNode *old_root = root;
