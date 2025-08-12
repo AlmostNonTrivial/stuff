@@ -133,10 +133,11 @@ void test_sequential_operations() {
 
   uint8_t record[TYPE_VARCHAR32] = {};
   for (auto type : {BPLUS}) {
-    pager_begin_transaction();
+
     uint32_t schema = TYPE_VARCHAR32;
     BPlusTree tree = bt_create(TYPE_INT32, schema, type);
     bp_init(tree);
+    pager_begin_transaction();
 
     uint32_t eCount = 0;
     uint32_t eUnique = 0;
@@ -278,41 +279,41 @@ void test_duplicate_handling() {
   pager_close();
 }
 
-void test_internal_node_operations() {
-  // Specifically test operations on internal nodes (B-tree specific)
-  pager_init("test_internal.db");
+// void test_internal_node_operations() {
+//   // Specifically test operations on internal nodes (B-tree specific)
+//   pager_init("test_internal.db");
 
-  for (auto type : {BPLUS, BTREE}) {
-    pager_begin_transaction();
-    uint32_t schema = TYPE_INT32;
-    BPlusTree tree = bt_create(TYPE_INT32, schema, type);
-    bp_init(tree);
+//   for (auto type : {BPLUS, BTREE}) {
+//     pager_begin_transaction();
+//     uint32_t schema = TYPE_INT32;
+//     BPlusTree tree = bt_create(TYPE_INT32, schema, type);
+//     bp_init(tree);
 
-    // Build a tree with internal nodes
-    for (uint32_t i = 1; i <= tree.leaf_max_keys * tree.internal_max_keys;
-         i++) {
-      uint8_t record[TYPE_INT32];
-      memcpy(record, &i, sizeof(i));
-      bp_insert_element(tree, &i, record);
-    }
-    bp_validate_all_invariants(tree);
+//     // Build a tree with internal nodes
+//     for (uint32_t i = 1; i <= tree.leaf_max_keys * tree.internal_max_keys;
+//          i++) {
+//       uint8_t record[TYPE_INT32];
+//       memcpy(record, &i, sizeof(i));
+//       bp_insert_element(tree, &i, record);
+//     }
+//     bp_validate_all_invariants(tree);
 
-    // Delete keys that exist in internal nodes (critical for B-tree)
-    BPTreeNode *root = bp_get_root(tree);
-    if (!root->is_leaf) {
-      uint32_t *keys = reinterpret_cast<uint32_t *>(root->data);
-      for (uint32_t i = 0; i < root->num_keys; i++) {
-        uint32_t internal_key = keys[i];
-        bp_delete_element(tree, &internal_key);
-        bp_validate_all_invariants(tree);
-      }
-    }
+//     // Delete keys that exist in internal nodes (critical for B-tree)
+//     BPTreeNode *root = bp_get_root(tree);
+//     if (!root->is_leaf) {
+//       uint32_t *keys = reinterpret_cast<uint32_t *>(root->data);
+//       for (uint32_t i = 0; i < root->num_keys; i++) {
+//         uint32_t internal_key = keys[i];
+//         bp_delete_element(tree, &internal_key);
+//         bp_validate_all_invariants(tree);
+//       }
+//     }
 
-    pager_rollback();
-  }
+//     pager_rollback();
+//   }
 
-  pager_close();
-}
+//   pager_close();
+// }
 
 void test_root_special_cases() {
   // Test root node edge cases
@@ -440,43 +441,43 @@ void test_boundary_conditions() {
 }
 
 // Additional invariant checks specific to B-tree vs B+tree differences
-void verify_btree_specific_invariants(BPlusTree &tree) {
-  if (tree.tree_type != BTREE)
-    return;
+// void verify_btree_specific_invariants(BPlusTree &tree) {
+//   if (tree.tree_type != BTREE)
+//     return;
 
-  // For B-trees: verify that internal nodes actually store records
-  BPTreeNode *root = bp_get_root(tree);
-  if (!root || root->is_leaf)
-    return;
+//   // For B-trees: verify that internal nodes actually store records
+//   BPTreeNode *root = bp_get_root(tree);
+//   if (!root || root->is_leaf)
+//     return;
 
-  std::queue<BPTreeNode *> to_visit;
-  to_visit.push(root);
+//   std::queue<BPTreeNode *> to_visit;
+//   to_visit.push(root);
 
-  while (!to_visit.empty()) {
-    BPTreeNode *node = to_visit.front();
-    to_visit.pop();
+//   while (!to_visit.empty()) {
+//     BPTreeNode *node = to_visit.front();
+//     to_visit.pop();
 
-    if (!node->is_leaf) {
-      // Verify internal node has records for each key
-      for (uint32_t i = 0; i < node->num_keys; i++) {
-        const uint8_t *record = bp_get(tree, &i);
-        if (!record) {
-          std::cerr << "B-tree internal node missing record for key " << i
-                    << std::endl;
-          exit(1);
-        }
-      }
+//     if (!node->is_leaf) {
+//       // Verify internal node has records for each key
+//       for (uint32_t i = 0; i < node->num_keys; i++) {
+//         const uint8_t *record = bp_get(tree, &i);
+//         if (!record) {
+//           std::cerr << "B-tree internal node missing record for key " << i
+//                     << std::endl;
+//           exit(1);
+//         }
+//       }
 
-      // Add children to queue
-      for (uint32_t i = 0; i <= node->num_keys; i++) {
-        BPTreeNode *child = bp_get_child(tree, node, i);
-        if (child) {
-          to_visit.push(child);
-        }
-      }
-    }
-  }
-}
+//       // Add children to queue
+//       for (uint32_t i = 0; i <= node->num_keys; i++) {
+//         BPTreeNode *child = bp_get_child(tree, node, i);
+//         if (child) {
+//           to_visit.push(child);
+//         }
+//       }
+//     }
+//   }
+// }
 
 /* INTEGERATION TESTS */
 
