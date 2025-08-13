@@ -299,6 +299,7 @@ static void add_to_free_list(unsigned int page_index) {
 }
 
 static unsigned int take_from_free_list() {
+
   if (pager.root.free_page == PAGE_INVALID || pager.free_pages_set.empty()) {
     return PAGE_INVALID;
   }

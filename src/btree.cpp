@@ -6,10 +6,10 @@
 #include <vector>
 
 // Global set of uncovered points - starts with all points
-std::unordered_set<std::string> __uncovered_points = {"bp_delete_element_entry", "bp_destroy_node_entry", "bp_do_delete_bplus_entry", "bp_do_delete_btree_entry", "bp_do_delete_entry", "bp_find_element_entry", "bp_get_min_keys_entry", "bp_get_split_index_entry", "bp_init_entry", "bp_insert_element_entry", "bp_insert_repair_entry", "bp_mark_dirty_entry", "bp_print_node_entry", "bp_repair_after_delete_entry", "bp_set_next_entry", "bp_set_prev_entry", "bt_create_entry", "case_TYPE_INT32_1", "cmp_entry", "else_10", "else_110", "else_12", "else_16", "else_18", "else_19", "else_29", "else_40", "else_50", "else_55", "else_58", "else_62", "else_65", "else_67", "else_76", "else_79", "else_81", "else_83", "else_89", "else_91", "else_95", "else_97", "else_99", "get_internal_record_data_entry", "get_keys_entry", "get_leaf_record_at_entry", "get_leaf_record_data_entry", "get_record_at_entry", "if_100", "if_101", "if_102", "if_103", "if_104", "if_105", "if_106", "if_107", "if_108", "if_109", "if_11", "if_111", "if_112", "if_113", "if_13", "if_14", "if_15", "if_17", "if_2", "if_20", "if_21", "if_22", "if_23", "if_24", "if_25", "if_26", "if_27", "if_28", "if_3", "if_30", "if_31", "if_32", "if_33", "if_34", "if_35", "if_36", "if_37", "if_38", "if_39", "if_4", "if_41", "if_42", "if_43", "if_44", "if_45", "if_46", "if_47", "if_48", "if_49", "if_5", "if_51", "if_52", "if_53", "if_54", "if_56", "if_57", "if_59", "if_6", "if_60", "if_61", "if_63", "if_64", "if_66", "if_68", "if_69", "if_7", "if_70", "if_71", "if_72", "if_73", "if_74", "if_75", "if_77", "if_78", "if_8", "if_80", "if_82", "if_84", "if_85", "if_86", "if_87", "if_88", "if_9", "if_90", "if_92", "if_93", "if_94", "if_96", "if_98", "if_entry", "if_entry", "if_entry", "if_entry", "if_entry", "memcmp_entry"};
+std::unordered_set<std::string> __uncovered_points = {"bp_delete_element_entry", "bp_destroy_node_entry", "bp_do_delete_bplus_entry", "bp_do_delete_btree_entry", "bp_do_delete_entry", "bp_find_element_entry", "bp_get_min_keys_entry", "bp_get_split_index_entry", "bp_init_entry", "bp_insert_element_entry", "bp_insert_repair_entry", "bp_mark_dirty_entry", "bp_print_node_entry", "bp_repair_after_delete_entry", "bp_set_next_entry", "bp_set_prev_entry", "bt_create_entry", "case_TYPE_INT32_1", "cmp_entry", "else_10", "else_101", "else_112", "else_12", "else_16", "else_18", "else_19", "else_29", "else_39", "else_49", "else_54", "else_57", "else_61", "else_64", "else_66", "else_75", "else_78", "else_80", "else_82", "else_91", "else_93", "else_97", "else_99", "get_internal_record_data_entry", "get_keys_entry", "get_leaf_record_at_entry", "get_leaf_record_data_entry", "get_record_at_entry", "if_100", "if_102", "if_103", "if_104", "if_105", "if_106", "if_107", "if_108", "if_109", "if_11", "if_110", "if_111", "if_113", "if_114", "if_115", "if_13", "if_14", "if_15", "if_17", "if_2", "if_20", "if_21", "if_22", "if_23", "if_24", "if_25", "if_26", "if_27", "if_28", "if_3", "if_30", "if_31", "if_32", "if_33", "if_34", "if_35", "if_36", "if_37", "if_38", "if_4", "if_40", "if_41", "if_42", "if_43", "if_44", "if_45", "if_46", "if_47", "if_48", "if_5", "if_50", "if_51", "if_52", "if_53", "if_55", "if_56", "if_58", "if_59", "if_6", "if_60", "if_62", "if_63", "if_65", "if_67", "if_68", "if_69", "if_7", "if_70", "if_71", "if_72", "if_73", "if_74", "if_76", "if_77", "if_79", "if_8", "if_81", "if_83", "if_84", "if_85", "if_86", "if_87", "if_88", "if_89", "if_9", "if_90", "if_92", "if_94", "if_95", "if_96", "if_98", "if_entry", "if_entry", "if_entry", "if_entry", "if_entry", "memcmp_entry"};
 
 // Total number of coverage points
-const size_t __total_points = 142;
+const size_t __total_points = 144;
 
 // Function to mark coverage - removes from uncovered set
 void COVER(const std::string& point) {
@@ -47,6 +47,9 @@ struct CoverageReporter {
 CoverageReporter __coverage_reporter;
 
 // ===== END COVERAGE TRACKING =====
+
+
+
 
 
 
@@ -187,7 +190,7 @@ uint8_t *get_leaf_record_at(BPlusTree &tree, BPTreeNode *node, uint32_t index) {
 uint8_t *get_records(BPlusTree &tree, BPTreeNode *node) {
   COVER("get_leaf_record_data_entry");
   return node->is_leaf ? get_leaf_record_data(tree, node)
-                       : get_leaf_record_data(tree, node);
+                       : get_internal_record_data(tree, node);
 }
 
 uint8_t *get_record_at(BPlusTree &tree, BPTreeNode *node, uint32_t index) {
@@ -340,10 +343,10 @@ void bp_init(BPlusTree &tree) {
   COVER("bp_init_entry");
   if (tree.root_page_index == 0) {
     COVER("if_20");
-    pager_begin_transaction();
+
     BPTreeNode *root = bp_create_node(tree, true);
     tree.root_page_index = root->index;
-    pager_commit();
+
   }
 }
 
@@ -375,10 +378,10 @@ BPTreeNode *bp_get_child(BPlusTree &tree, BPTreeNode *node, uint32_t index) {
   }
 
   uint32_t *children = get_children(tree, node);
-  if (index >= node->num_keys + 1 || children[index] == 0) {
-    COVER("if_23");
-    return nullptr;
-  }
+  // if (index >= node->num_keys + 1 || children[index] == 0) {
+  //   COVER("if_23");
+  //   return nullptr;
+  // }
 
   return static_cast<BPTreeNode *>(pager_get(children[index]));
 }
@@ -398,8 +401,10 @@ BPTreeNode *bp_get_prev(BPTreeNode *node) {
 
 void bp_set_parent(BPTreeNode *node, uint32_t parent_index) {
   COVER("if_25");
-  if (!node)
-    return;
+  if (!node) {
+     return;
+  }
+
 
   bp_mark_dirty(node);
   node->parent = parent_index;
@@ -412,8 +417,10 @@ void bp_set_parent(BPTreeNode *node, uint32_t parent_index) {
 
 void bp_set_child(BPlusTree &tree, BPTreeNode *node, uint32_t child_index,
                   uint32_t node_index) {
-  if (!node || node->is_leaf)
-    return;
+  if (!node || node->is_leaf) {
+     return;
+  }
+
 
   bp_mark_dirty(node);
   uint32_t *children = get_children(tree, node);
@@ -427,8 +434,6 @@ void bp_set_child(BPlusTree &tree, BPTreeNode *node, uint32_t child_index,
 
       bp_set_parent(child_node, node->index);
     }
-  } else {
-  COVER("else_29");
   }
 }
 
@@ -477,13 +482,7 @@ BPTreeNode *bp_find_containing_node(BPlusTree &tree, BPTreeNode *node,
       return const_cast<BPTreeNode *>(node);
     }
   }
-  if (iter > 100) {
-    COVER("if_38");
-    bp_print_node(tree, node);
-    // print_tree(tree);
-    std::cout << "stack overflow\n";
-    exit(0);
-  }
+
 
   return bp_find_containing_node(
       tree, bp_get_child(tree, node, child_or_key_index), key, iter + 1);
@@ -501,13 +500,15 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
   uint32_t parent_index = 0;
 
   if (!parent) {
-    COVER("if_39");
+    COVER("if_38");
+
     parent = bp_create_node(tree, false);
     bp_mark_dirty(parent);
     tree.root_page_index = parent->index;
     bp_set_child(tree, parent, 0, node->index);
+
   } else {
-    COVER("else_40");
+    COVER("else_39");
 
     bp_mark_dirty(parent);
 
@@ -524,7 +525,8 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
            (parent->num_keys - parent_index) * tree.node_key_size);
 
     if (tree.tree_type == BTREE) {
-      COVER("if_41");
+    COVER("if_40");
+
       uint8_t *parent_records = get_internal_record_data(tree, parent);
       memcpy(parent_records + (parent_index + 1) * tree.record_size,
              parent_records + parent_index * tree.record_size,
@@ -538,7 +540,8 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
   parent->num_keys++;
 
   if (tree.tree_type == BTREE) {
-    COVER("if_42");
+    COVER("if_41");
+
     uint8_t *parent_records = get_internal_record_data(tree, parent);
     uint8_t *source_records = get_records(tree, node);
     memcpy(parent_records + parent_index * tree.record_size,
@@ -546,7 +549,8 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
   }
 
   if (node->is_leaf && tree.tree_type == BPLUS) {
-    COVER("if_43");
+    COVER("if_42");
+
     right_node->num_keys = node->num_keys - split_index;
     memcpy(get_keys(right_node), rising_key,
            tree.node_key_size * right_node->num_keys);
@@ -557,21 +561,22 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
     right_node->next = node->next;
     right_node->previous = node->index;
     if (node->next != 0) {
-      COVER("if_44");
+      COVER("if_43");
       BPTreeNode *next = bp_get_next(node);
       if (next)
         bp_set_prev(next, right_node->index);
     }
     node->next = right_node->index;
   } else {
-    COVER("if_45");
+    COVER("if_44");
 
     right_node->num_keys = node->num_keys - split_index - 1;
     memcpy(get_keys(right_node), get_key_at(tree, node, split_index + 1),
            right_node->num_keys * tree.node_key_size);
 
     if (tree.tree_type == BTREE) {
-      COVER("if_46");
+    COVER("if_45");
+
       uint8_t *src_records = get_records(tree, node);
       uint8_t *dst_records = get_records(tree, right_node);
       memcpy(dst_records, src_records + (split_index + 1) * tree.record_size,
@@ -579,12 +584,13 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
     }
 
     if (!node->is_leaf) {
-      COVER("if_47");
+    COVER("if_46");
+
       uint32_t *src_children = get_children(tree, node);
       for (uint32_t i = 0; i <= right_node->num_keys; i++) {
         uint32_t child = src_children[split_index + 1 + i];
         if (child) {
-    COVER("if_48");
+    COVER("if_47");
 
           bp_set_child(tree, right_node, i, child);
           src_children[split_index + 1 + i] = 0;
@@ -593,6 +599,7 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
     }
   }
 
+
   node->num_keys = split_index;
   return parent;
 }
@@ -600,14 +607,15 @@ BPTreeNode *bp_split(BPlusTree &tree, BPTreeNode *node) {
 void bp_insert_repair(BPlusTree &tree, BPTreeNode *node) {
   COVER("bp_insert_repair_entry");
   if (node->num_keys < bp_get_max_keys(tree, node)) {
-    COVER("if_49");
+    COVER("if_48");
     return;
   } else if (node->parent == 0) {
     COVER("if_entry");
     BPTreeNode *new_root = bp_split(tree, node);
+
     tree.root_page_index = new_root->index;
   } else {
-    COVER("else_50");
+    COVER("else_49");
 
     BPTreeNode *new_node = bp_split(tree, node);
     bp_insert_repair(tree, new_node);
@@ -617,7 +625,7 @@ void bp_insert_repair(BPlusTree &tree, BPTreeNode *node) {
 void bp_insert(BPlusTree &tree, BPTreeNode *node, uint8_t *key,
                const uint8_t *data) {
   if (node->is_leaf) {
-    COVER("if_51");
+    COVER("if_50");
     uint8_t *keys = get_keys(node);
     uint8_t *record_data = get_leaf_record_data(tree, node);
 
@@ -625,7 +633,7 @@ void bp_insert(BPlusTree &tree, BPTreeNode *node, uint8_t *key,
 
     if (tree.tree_type == BPLUS && insert_index < node->num_keys &&
         cmp(tree, get_key_at(tree, node, insert_index), key) == 0) {
-      COVER("if_52");
+      COVER("if_51");
       bp_mark_dirty(node);
       memcpy(record_data + insert_index * tree.record_size, data,
              tree.record_size);
@@ -633,7 +641,7 @@ void bp_insert(BPlusTree &tree, BPTreeNode *node, uint8_t *key,
     }
 
     if (node->num_keys >= tree.leaf_max_keys) {
-      COVER("if_53");
+      COVER("if_52");
       bp_insert_repair(tree, node);
       bp_insert(tree, bp_find_containing_node(tree, bp_get_root(tree), key),
                 key, data);
@@ -643,7 +651,7 @@ void bp_insert(BPlusTree &tree, BPTreeNode *node, uint8_t *key,
     bp_mark_dirty(node);
 
     if (tree.tree_type == BTREE) {
-      COVER("if_54");
+      COVER("if_53");
       while (insert_index < node->num_keys &&
              cmp(tree, get_key_at(tree, node, insert_index), key) == 0) {
         insert_index++;
@@ -666,13 +674,13 @@ void bp_insert(BPlusTree &tree, BPTreeNode *node, uint8_t *key,
 
     node->num_keys++;
   } else {
-    COVER("else_55");
+    COVER("else_54");
 
     uint32_t child_index = bp_binary_search(tree, node, key);
 
     BPTreeNode *child_node = bp_get_child(tree, node, child_index);
     if (child_node) {
-      COVER("if_56");
+      COVER("if_55");
       bp_insert(tree, child_node, key, data);
     }
   }
@@ -683,7 +691,7 @@ void bp_insert_element(BPlusTree &tree, void *key, const uint8_t *data) {
   BPTreeNode *root = bp_get_root(tree);
 
   if (root->num_keys == 0) {
-    COVER("if_57");
+    COVER("if_56");
     bp_mark_dirty(root);
     uint8_t *keys = get_keys(root);
     uint8_t *record_data = get_leaf_record_data(tree, root);
@@ -692,7 +700,7 @@ void bp_insert_element(BPlusTree &tree, void *key, const uint8_t *data) {
     memcpy(record_data, data, tree.record_size);
     root->num_keys = 1;
   } else {
-    COVER("else_58");
+    COVER("else_57");
     bp_insert(tree, root, (uint8_t *)key, data);
   }
 
@@ -719,7 +727,7 @@ const uint8_t *bp_get(BPlusTree &tree, void *key) {
   uint32_t pos = bp_binary_search(tree, leaf_node, (uint8_t *)key);
   if (pos < leaf_node->num_keys &&
       cmp(tree, get_key_at(tree, leaf_node, pos), (uint8_t *)key) == 0) {
-    COVER("if_59");
+    COVER("if_58");
     return get_record_at(tree, leaf_node, pos);
   }
 
@@ -778,9 +786,9 @@ void bp_do_delete_btree(BPlusTree &tree, BPTreeNode *node, const uint8_t *key) {
       i < node->num_keys && cmp(tree, get_key_at(tree, node, i), key) == 0;
 
   if (found_in_this_node) {
-    COVER("if_60");
+    COVER("if_59");
     if (node->is_leaf) {
-      COVER("if_61");
+      COVER("if_60");
       bp_mark_dirty(node);
       uint8_t *record_data = get_leaf_record_data(tree, node);
 
@@ -795,7 +803,7 @@ void bp_do_delete_btree(BPlusTree &tree, BPTreeNode *node, const uint8_t *key) {
       node->num_keys--;
       bp_repair_after_delete(tree, node);
     } else {
-    COVER("else_62");
+    COVER("else_61");
 
       bp_delete_internal_btree(tree, node, i);
     }
@@ -818,23 +826,23 @@ void bp_update_parent_keys(BPlusTree &tree, BPTreeNode *node,
     ;
 
   if (node->num_keys == 0) {
-    COVER("if_63");
+    COVER("if_62");
     if (parent_index == parent_node->num_keys) {
-    COVER("if_64");
+    COVER("if_63");
 
       next_smallest = nullptr;
     } else {
-      COVER("else_65");
+      COVER("else_64");
       BPTreeNode *next_sibling =
           bp_get_child(tree, parent_node, parent_index + 1);
       if (next_sibling) {
-    COVER("if_66");
+    COVER("if_65");
 
         next_smallest = get_key_at(tree, next_sibling, 0);
       }
     }
   } else {
-    COVER("else_67");
+    COVER("else_66");
     next_smallest = get_key_at(tree, node, 0);
   }
 
@@ -843,10 +851,10 @@ void bp_update_parent_keys(BPlusTree &tree, BPTreeNode *node,
     if (parent_index > 0 &&
         cmp(tree, get_key_at(tree, current_parent, parent_index - 1),
             deleted_key) == 0) {
-      COVER("if_68");
+      COVER("if_67");
       bp_mark_dirty(current_parent);
       if (next_smallest) {
-    COVER("if_69");
+    COVER("if_68");
 
         memcpy(get_key_at(tree, current_parent, parent_index - 1),
                next_smallest, tree.node_key_size);
@@ -855,7 +863,7 @@ void bp_update_parent_keys(BPlusTree &tree, BPTreeNode *node,
 
     BPTreeNode *grandparent = bp_get_parent(current_parent);
     if (grandparent) {
-      COVER("if_70");
+      COVER("if_69");
       uint32_t *grandparent_children = get_children(tree, grandparent);
       for (parent_index = 0;
            grandparent_children[parent_index] != current_parent->index;
@@ -872,7 +880,7 @@ void bp_do_delete_bplus(BPlusTree &tree, BPTreeNode *node, const uint8_t *key) {
 
   bool traverse_right = i == node->num_keys && !node->is_leaf;
   if (traverse_right) {
-    COVER("if_71");
+    COVER("if_70");
     bp_do_delete_bplus(tree, bp_get_child(tree, node, node->num_keys), key);
     return;
   }
@@ -880,19 +888,19 @@ void bp_do_delete_bplus(BPlusTree &tree, BPTreeNode *node, const uint8_t *key) {
   bool key_match = cmp(tree, get_key_at(tree, node, i), key) == 0;
 
   if (!node->is_leaf && key_match) {
-    COVER("if_72");
+    COVER("if_71");
     bp_do_delete_bplus(tree, bp_get_child(tree, node, i + 1), key);
     return;
   }
 
   if (!node->is_leaf) {
-    COVER("if_73");
+    COVER("if_72");
     bp_do_delete_bplus(tree, bp_get_child(tree, node, i), key);
     return;
   }
 
   if (node->is_leaf && key_match) {
-    COVER("if_74");
+    COVER("if_73");
     bp_mark_dirty(node);
 
     uint8_t *record_data = get_leaf_record_data(tree, node);
@@ -907,29 +915,29 @@ void bp_do_delete_bplus(BPlusTree &tree, BPTreeNode *node, const uint8_t *key) {
     node->num_keys--;
 
     if (i == 0 && node->parent != 0) {
-    COVER("if_75");
+    COVER("if_74");
 
       bp_update_parent_keys(tree, node, key);
     }
 
     bp_repair_after_delete(tree, node);
   } else {
-  COVER("else_76");
+  COVER("else_75");
   }
 }
 
 void bp_do_delete(BPlusTree &tree, BPTreeNode *node, const uint8_t *key) {
   COVER("bp_do_delete_entry");
   if (!node) {
-    COVER("if_77");
+    COVER("if_76");
     return;
   }
 
   if (tree.tree_type == BTREE) {
-    COVER("if_78");
+    COVER("if_77");
     bp_do_delete_btree(tree, node, key);
   } else {
-    COVER("else_79");
+    COVER("else_78");
     bp_do_delete_bplus(tree, node, key);
   }
 }
@@ -944,7 +952,7 @@ BPTreeNode *bp_steal_from_right(BPlusTree &tree, BPTreeNode *node,
   bp_mark_dirty(right_sibling);
 
   if (node->is_leaf) {
-    COVER("if_80");
+    COVER("if_79");
     memcpy(get_key_at(tree, node, node->num_keys),
            get_key_at(tree, right_sibling, 0), tree.node_key_size);
 
@@ -964,12 +972,12 @@ BPTreeNode *bp_steal_from_right(BPlusTree &tree, BPTreeNode *node,
     memcpy(get_key_at(tree, parent_node, parent_index),
            get_key_at(tree, right_sibling, 0), tree.node_key_size);
   } else {
-    COVER("else_81");
+    COVER("else_80");
     memcpy(get_key_at(tree, node, node->num_keys),
            get_key_at(tree, parent_node, parent_index), tree.node_key_size);
 
     if (tree.tree_type == BTREE) {
-      COVER("if_82");
+      COVER("if_81");
       uint8_t *node_records = get_internal_record_data(tree, node);
       uint8_t *parent_records = get_internal_record_data(tree, parent_node);
       uint8_t *sibling_records = get_internal_record_data(tree, right_sibling);
@@ -987,7 +995,7 @@ BPTreeNode *bp_steal_from_right(BPlusTree &tree, BPTreeNode *node,
       memcpy(sibling_records, sibling_records + tree.record_size,
              shift_count * tree.record_size);
     } else {
-    COVER("else_83");
+    COVER("else_82");
 
       memcpy(get_key_at(tree, parent_node, parent_index),
              get_key_at(tree, right_sibling, 0), tree.node_key_size);
@@ -1023,21 +1031,24 @@ BPTreeNode *bp_merge_right(BPlusTree &tree, BPTreeNode *node) {
 
   uint32_t node_index = 0;
   for (; node_index <= parent->num_keys; node_index++) {
+    COVER("if_83");
 
     if (parent_children[node_index] == node->index) {
-            COVER("if_84");
+       COVER("if_84");
        break;
     }
 
   }
 
   if (node_index >= parent->num_keys) {
+     COVER("if_85");
      return node;
   }
 
 
   BPTreeNode *right_sibling = bp_get_child(tree, parent, node_index + 1);
   if (!right_sibling) {
+     COVER("if_86");
      return node;
   }
 
@@ -1046,7 +1057,7 @@ BPTreeNode *bp_merge_right(BPlusTree &tree, BPTreeNode *node) {
   bp_mark_dirty(parent);
 
   if (node->is_leaf) {
-    COVER("if_85");
+    COVER("if_87");
     uint8_t *node_records = get_leaf_record_data(tree, node);
     uint8_t *sibling_records = get_leaf_record_data(tree, right_sibling);
 
@@ -1059,26 +1070,26 @@ BPTreeNode *bp_merge_right(BPlusTree &tree, BPTreeNode *node) {
     node->num_keys += right_sibling->num_keys;
 
     if (tree.tree_type == BPLUS) {
-      COVER("if_86");
+      COVER("if_88");
       bp_set_next(node, right_sibling->next);
       if (right_sibling->next != 0) {
-    COVER("if_87");
+    COVER("if_89");
 
         BPTreeNode *next_node = bp_get_next(right_sibling);
         if (next_node) {
-    COVER("if_88");
+    COVER("if_90");
 
           bp_set_prev(next_node, node->index);
         }
       }
     }
   } else {
-    COVER("else_89");
+    COVER("else_91");
     memcpy(get_key_at(tree, node, node->num_keys),
            get_key_at(tree, parent, node_index), tree.node_key_size);
 
     if (tree.tree_type == BTREE) {
-      COVER("if_90");
+      COVER("if_92");
       uint8_t *node_records = get_internal_record_data(tree, node);
       uint8_t *parent_records = get_internal_record_data(tree, parent);
       uint8_t *sibling_records = get_internal_record_data(tree, right_sibling);
@@ -1089,7 +1100,7 @@ BPTreeNode *bp_merge_right(BPlusTree &tree, BPTreeNode *node) {
       memcpy(node_records + (node->num_keys + 1) * tree.record_size,
              sibling_records, right_sibling->num_keys * tree.record_size);
     } else {
-    COVER("else_91");
+    COVER("else_93");
     }
 
     memcpy(get_key_at(tree, node, node->num_keys + 1),
@@ -1115,7 +1126,7 @@ BPTreeNode *bp_merge_right(BPlusTree &tree, BPTreeNode *node) {
          shift_count * sizeof(uint32_t));
 
   if (tree.tree_type == BTREE && !parent->is_leaf) {
-    COVER("if_92");
+    COVER("if_94");
     uint8_t *parent_records = get_internal_record_data(tree, parent);
     memcpy(parent_records + node_index * tree.record_size,
            parent_records + (node_index + 1) * tree.record_size,
@@ -1127,15 +1138,15 @@ BPTreeNode *bp_merge_right(BPlusTree &tree, BPTreeNode *node) {
   bp_destroy_node(right_sibling);
 
   if (parent->num_keys < bp_get_min_keys(tree, parent)) {
-    COVER("if_93");
+    COVER("if_95");
     if (parent->parent == 0 && parent->num_keys == 0) {
-      COVER("if_94");
+      COVER("if_96");
       tree.root_page_index = node->index;
       bp_set_parent(node, 0);
       bp_destroy_node(parent);
       return node;
     } else {
-    COVER("else_95");
+    COVER("else_97");
 
       bp_repair_after_delete(tree, parent);
     }
@@ -1157,7 +1168,7 @@ BPTreeNode *bp_steal_from_left(BPlusTree &tree, BPTreeNode *node,
          tree.node_key_size * node->num_keys);
 
   if (node->is_leaf) {
-    COVER("if_96");
+    COVER("if_98");
     memcpy(get_key_at(tree, node, 0),
            get_key_at(tree, left_sibling, left_sibling->num_keys - 1),
            tree.node_key_size);
@@ -1175,12 +1186,12 @@ BPTreeNode *bp_steal_from_left(BPlusTree &tree, BPTreeNode *node,
     memcpy(get_key_at(tree, parent_node, parent_index - 1),
            get_key_at(tree, node, 0), tree.node_key_size);
   } else {
-    COVER("else_97");
+    COVER("else_99");
     memcpy(get_key_at(tree, node, 0),
            get_key_at(tree, parent_node, parent_index - 1), tree.node_key_size);
 
     if (tree.tree_type == BTREE) {
-      COVER("if_98");
+      COVER("if_100");
       uint8_t *node_records = get_internal_record_data(tree, node);
       uint8_t *parent_records = get_internal_record_data(tree, parent_node);
       uint8_t *sibling_records = get_internal_record_data(tree, left_sibling);
@@ -1199,7 +1210,7 @@ BPTreeNode *bp_steal_from_left(BPlusTree &tree, BPTreeNode *node,
              sibling_records + (left_sibling->num_keys - 1) * tree.record_size,
              tree.record_size);
     } else {
-    COVER("else_99");
+    COVER("else_101");
 
       memcpy(get_key_at(tree, parent_node, parent_index - 1),
              get_key_at(tree, left_sibling, left_sibling->num_keys - 1),
@@ -1224,17 +1235,17 @@ BPTreeNode *bp_steal_from_left(BPlusTree &tree, BPTreeNode *node,
 void bp_repair_after_delete(BPlusTree &tree, BPTreeNode *node) {
   COVER("bp_repair_after_delete_entry");
   if (node->num_keys >= bp_get_min_keys(tree, node)) {
-    COVER("if_100");
+    COVER("if_102");
     return;
   }
 
   if (node->parent == 0) {
-    COVER("if_101");
+    COVER("if_103");
     if (node->num_keys == 0 && !node->is_leaf) {
-      COVER("if_102");
+      COVER("if_104");
       BPTreeNode *only_child = bp_get_child(tree, node, 0);
       if (only_child) {
-    COVER("if_103");
+    COVER("if_105");
 
         tree.root_page_index = only_child->index;
         bp_set_parent(only_child, 0);
@@ -1254,40 +1265,38 @@ void bp_repair_after_delete(BPlusTree &tree, BPTreeNode *node) {
   }
 
   if (node_index > 0) {
-    COVER("if_104");
+    COVER("if_106");
     BPTreeNode *left_sibling = bp_get_child(tree, parent, node_index - 1);
     if (left_sibling &&
         left_sibling->num_keys > bp_get_min_keys(tree, left_sibling)) {
-      COVER("if_105");
+      COVER("if_107");
       bp_steal_from_left(tree, node, node_index);
       return;
     }
   }
 
   if (node_index < parent->num_keys) {
-    COVER("if_106");
+    COVER("if_108");
     BPTreeNode *right_sibling = bp_get_child(tree, parent, node_index + 1);
     if (right_sibling &&
         right_sibling->num_keys > bp_get_min_keys(tree, right_sibling)) {
-      COVER("if_107");
+      COVER("if_109");
       bp_steal_from_right(tree, node, node_index);
       return;
     }
   }
 
   if (node_index < parent->num_keys) {
-    COVER("if_108");
+    COVER("if_110");
     bp_merge_right(tree, node);
   } else if (node_index > 0) {
     COVER("if_entry");
     BPTreeNode *left_sibling = bp_get_child(tree, parent, node_index - 1);
     if (left_sibling) {
-    COVER("if_109");
+    COVER("if_111");
 
       bp_merge_right(tree, left_sibling);
     }
-  } else {
-  COVER("else_110");
   }
 }
 
@@ -1300,7 +1309,7 @@ void bp_delete_element(BPlusTree &tree, void *key) {
   /* 0 or 1 key in a root && leaf node is a special case
    */
   if (root->num_keys <= 1 && root->is_leaf) {
-    COVER("if_111");
+    COVER("if_113");
     bp_mark_dirty(root);
     root->num_keys = 0;
     return;
@@ -1311,11 +1320,11 @@ void bp_delete_element(BPlusTree &tree, void *key) {
   BPTreeNode *leaf = bp_find_containing_node(tree, root, (uint8_t *)key);
 
   if (root->num_keys == 0 && !root->is_leaf) {
-    COVER("if_112");
+    COVER("if_114");
     BPTreeNode *old_root = root;
     BPTreeNode *new_root = bp_get_child(tree, root, 0);
     if (new_root) {
-      COVER("if_113");
+      COVER("if_115");
       tree.root_page_index = new_root->index;
       bp_set_parent(new_root, 0);
     }

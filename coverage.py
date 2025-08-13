@@ -7,6 +7,8 @@ Inserts COVER() calls after opening braces in functions, if/else blocks, and swi
 import sys
 import re
 import argparse
+import shutil
+import os
 
 class SimpleCoverageInstrumenter:
     def __init__(self, source_code, debug=False):
@@ -308,9 +310,9 @@ def remove_coverage(source_code):
 def main():
     parser = argparse.ArgumentParser(description='Simple C++ coverage instrumenter using regex')
     parser.add_argument('input_file', help='Input C++ file')
-    parser.add_argument('-o', '--output', help='Output file (default: <input>_instrumented.cpp or <input>_clean.cpp)')
+    parser.add_argument('-o', '--output', help='Output file (default: overwrites input file)')
     parser.add_argument('--header-only', action='store_true', help='Only output the coverage header')
-    parser.add_argument('--remove', action='store_true', help='Remove coverage instrumentation instead of adding it')
+    parser.add_argument('--remove', action='store_true', help='Remove coverage instrumentation only')
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
 
     args = parser.parse_args()
@@ -324,24 +326,31 @@ def main():
         sys.exit(1)
 
     if args.remove:
-        # Remove coverage mode
+        # Remove coverage mode only
         output = remove_coverage(source_code)
 
-        # Write output
+        # Determine output file
         if args.output:
             output_file = args.output
         else:
-            output_file = args.input_file.replace('.cpp', '_clean.cpp')
-            if '_instrumented' in args.input_file:
-                output_file = args.input_file.replace('_instrumented.cpp', '_clean.cpp')
+            output_file = args.input_file  # Overwrite input file
+
+        # Create backup before overwriting
+        if output_file == args.input_file:
+            backup_file = args.input_file + '.bak'
+            shutil.copy2(args.input_file, backup_file)
+            print(f"Backup created: {backup_file}")
 
         with open(output_file, 'w') as f:
             f.write(output)
 
-        print(f"Coverage removed. Clean code written to: {output_file}")
+        print(f"Coverage removed. Output written to: {output_file}")
     else:
-        # Instrument the code
-        instrumenter = SimpleCoverageInstrumenter(source_code, debug=args.debug)
+        # First remove any existing coverage
+        clean_code = remove_coverage(source_code)
+
+        # Then instrument the clean code
+        instrumenter = SimpleCoverageInstrumenter(clean_code, debug=args.debug)
         instrumented_code = instrumenter.instrument()
 
         # Generate output
@@ -350,11 +359,17 @@ def main():
         else:
             output = instrumenter.generate_coverage_header() + instrumented_code
 
-        # Write output
+        # Determine output file
         if args.output:
             output_file = args.output
         else:
-            output_file = args.input_file.replace('.cpp', '_instrumented.cpp')
+            output_file = args.input_file  # Overwrite input file
+
+        # Create backup before overwriting
+        if output_file == args.input_file:
+            backup_file = args.input_file + '.bak'
+            shutil.copy2(args.input_file, backup_file)
+            print(f"Backup created: {backup_file}")
 
         with open(output_file, 'w') as f:
             f.write(output)

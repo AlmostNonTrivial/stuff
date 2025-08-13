@@ -137,8 +137,9 @@ void test_sequential_operations() {
 
     uint32_t schema = TYPE_VARCHAR32;
     BPlusTree tree = bt_create(TYPE_INT32, schema, type);
-    bp_init(tree);
     pager_begin_transaction();
+    bp_init(tree);
+
 
     uint32_t eCount = 0;
     uint32_t eUnique = 0;
