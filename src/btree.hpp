@@ -72,12 +72,7 @@ uint32_t bp_get_min_keys(BPlusTree &tree, BPTreeNode *node);
 // BPTreeNode *bp_find_leaf_node(BPlusTree &tree, BPTreeNode *node, const
 // uint8_t* key);
 
-// debug
-uint64_t debug_hash_tree(BPlusTree &tree);
-void print_tree(BPlusTree &tree);
 
-
-bool bp_validate_all_invariants(BPlusTree &tree) ;
 
 
 
@@ -122,3 +117,12 @@ struct BtCursor {
 // bool bt_cursor_move_to_leftmost_in_subtree(BtCursor *cursor, BPTreeNode *root);
 // bool bt_cursor_move_to_rightmost_in_subtree(BtCursor *cursor, BPTreeNode *root);
 // void bt_cursor_rebuild_stack_to_current(BtCursor *cursor);
+
+uint32_t *get_children(BPlusTree &tree, BPTreeNode *node);
+
+BPTreeNode *bp_get_next(BPTreeNode *node);
+BPTreeNode *bp_get_prev(BPTreeNode *node);
+
+BPTreeNode *bp_left_most(BPlusTree &tree);
+
+uint8_t *get_leaf_record_data(BPlusTree &tree, BPTreeNode *node);

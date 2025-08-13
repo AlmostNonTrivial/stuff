@@ -1,201 +1,203 @@
 #!/usr/bin/env python3
 """
-C++ Code Coverage Instrumenter
-Inserts COVER() calls at function definitions, if statements, and else statements.
+Simple C++ Code Coverage Instrumenter using regex
+Inserts COVER() calls after opening braces in functions, if/else blocks, and switch cases.
 """
 
 import sys
+import re
 import argparse
-from tree_sitter import Language, Parser
-import tree_sitter_cpp as tscpp
 
-class CppCoverageInstrumenter:
-    def __init__(self, source_code):
+class SimpleCoverageInstrumenter:
+    def __init__(self, source_code, debug=False):
         self.source_code = source_code
         self.lines = source_code.split('\n')
         self.counter = 0
         self.coverage_points = []
-        self.insertions = []  # List of (line_number, column, text) tuples
-        self.current_function = None  # Track current function name
+        self.debug = debug
 
-        # Initialize tree-sitter parser
-        CPP_LANGUAGE = Language(tscpp.language())
-        self.parser = Parser(CPP_LANGUAGE)
-
-    def get_next_id(self):
+    def get_next_id(self, prefix="point"):
         self.counter += 1
-        prefix = self.current_function if self.current_function else "global"
         return f"{prefix}_{self.counter}"
 
-    def find_insertion_point(self, node):
-        """Find the line and column to insert COVER() after the opening brace"""
-        text = node.text.decode('utf-8')
-
-        # Find the first '{' in the node
-        brace_pos = text.find('{')
-        if brace_pos == -1:
-            return None
-
-        # Calculate absolute position
-        start_byte = node.start_byte + brace_pos + 1
-
-        # Convert byte position to line/column
-        current_byte = 0
-        for line_num, line in enumerate(self.lines):
-            line_bytes = len(line) + 1  # +1 for newline
-            if current_byte + line_bytes > start_byte:
-                column = start_byte - current_byte
-                return (line_num, column)
-            current_byte += line_bytes
-
+    def find_opening_brace(self, start_line):
+        """Look for opening brace starting from start_line"""
+        for i in range(start_line, min(start_line + 10, len(self.lines))):
+            if '{' in self.lines[i]:
+                return i
         return None
 
-    def process_node(self, node, context=""):
-        """Recursively process AST nodes"""
-
-        # Function definitions
-        if node.type == 'function_definition':
-            # Get function name first
-            func_name = "unknown"
-            for c in node.children:
-                if c.type == 'function_declarator':
-                    for cc in c.children:
-                        if cc.type == 'identifier':
-                            func_name = cc.text.decode('utf-8')
-                            break
-
-            # Set current function context
-            old_function = self.current_function
-            self.current_function = func_name
-
-            # Find the compound_statement (function body)
-            for child in node.children:
-                if child.type == 'compound_statement':
-                    insertion_point = self.find_insertion_point(child)
-                    if insertion_point:
-                        cover_id = self.get_next_id()
-                        line_num, col = insertion_point
-
-                        self.coverage_points.append({
-                            'id': cover_id,
-                            'type': 'function',
-                            'name': func_name,
-                            'line': line_num + 1
-                        })
-
-                        # Check if line after brace is empty or just whitespace
-                        if line_num + 1 < len(self.lines):
-                            next_line = self.lines[line_num + 1]
-                            if next_line.strip() == '':
-                                # Insert on the empty line
-                                indent = '    '  # Default 4 spaces
-                                # Try to detect indentation from next non-empty line
-                                for check_line in self.lines[line_num + 2:]:
-                                    if check_line.strip():
-                                        indent = len(check_line) - len(check_line.lstrip())
-                                        indent = check_line[:indent]
-                                        break
-                                self.insertions.append((line_num + 1, 0, f'{indent}COVER("{cover_id}");'))
-                            else:
-                                # Insert at the beginning of the next line with proper indentation
-                                indent = len(next_line) - len(next_line.lstrip())
-                                self.insertions.append((line_num + 1, 0, f'{next_line[:indent]}COVER("{cover_id}");\n'))
-
-            # Process children (including nested functions)
-            for child in node.children:
-                self.process_node(child)
-
-            # Restore previous function context
-            self.current_function = old_function
-            return  # Don't process children again
-
-        # If statements
-        elif node.type == 'if_statement':
-            # Process the 'then' branch (consequence)
-            for child in node.children:
-                if child.type == 'compound_statement':
-                    insertion_point = self.find_insertion_point(child)
-                    if insertion_point:
-                        cover_id = self.get_next_id()
-                        line_num, col = insertion_point
-
-                        self.coverage_points.append({
-                            'id': cover_id,
-                            'type': 'if_branch',
-                            'line': line_num + 1
-                        })
-
-                        # Similar insertion logic as functions
-                        if line_num + 1 < len(self.lines):
-                            next_line = self.lines[line_num + 1]
-                            if next_line.strip() == '':
-                                indent = '    '
-                                for check_line in self.lines[line_num + 2:]:
-                                    if check_line.strip():
-                                        indent = len(check_line) - len(check_line.lstrip())
-                                        indent = check_line[:indent]
-                                        break
-                                self.insertions.append((line_num + 1, 0, f'{indent}COVER("{cover_id}");'))
-                            else:
-                                indent = len(next_line) - len(next_line.lstrip())
-                                self.insertions.append((line_num + 1, 0, f'{next_line[:indent]}COVER("{cover_id}");\n'))
-
-            # Look for else clause
-            else_found = False
-            for i, child in enumerate(node.children):
-                if child.type == 'else':
-                    else_found = True
-                elif else_found and child.type == 'compound_statement':
-                    insertion_point = self.find_insertion_point(child)
-                    if insertion_point:
-                        cover_id = self.get_next_id()
-                        line_num, col = insertion_point
-
-                        self.coverage_points.append({
-                            'id': cover_id,
-                            'type': 'else_branch',
-                            'line': line_num + 1
-                        })
-
-                        if line_num + 1 < len(self.lines):
-                            next_line = self.lines[line_num + 1]
-                            if next_line.strip() == '':
-                                indent = '    '
-                                for check_line in self.lines[line_num + 2:]:
-                                    if check_line.strip():
-                                        indent = len(check_line) - len(check_line.lstrip())
-                                        indent = check_line[:indent]
-                                        break
-                                self.insertions.append((line_num + 1, 0, f'{indent}COVER("{cover_id}");'))
-                            else:
-                                indent = len(next_line) - len(next_line.lstrip())
-                                self.insertions.append((line_num + 1, 0, f'{next_line[:indent]}COVER("{cover_id}");\n'))
-
-        # Recursively process children
-        for child in node.children:
-            self.process_node(child)
-
     def instrument(self):
-        """Parse and instrument the C++ code"""
-        tree = self.parser.parse(bytes(self.source_code, 'utf-8'))
-        self.process_node(tree.root_node)
+        """Instrument the C++ code using simple regex patterns"""
+        instrumented_lines = []
+        i = 0
+        skip_until = -1  # Skip lines until this index when we've already processed them
 
-        # Sort insertions by line number (reverse order to maintain positions)
-        self.insertions.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        while i < len(self.lines):
+            if i < skip_until:
+                instrumented_lines.append(self.lines[i])
+                i += 1
+                continue
 
-        # Apply insertions to create instrumented code
-        instrumented_lines = self.lines.copy()
-        for line_num, col, text in self.insertions:
-            if col == 0:
-                # Insert as new line or at beginning
-                if instrumented_lines[line_num].strip() == '':
-                    instrumented_lines[line_num] = text
+            line = self.lines[i]
+
+            # Skip coverage header sections
+            if '===== COVERAGE TRACKING CODE =====' in line:
+                while i < len(self.lines) and '===== END COVERAGE TRACKING =====' not in self.lines[i]:
+                    instrumented_lines.append(self.lines[i])
+                    i += 1
+                if i < len(self.lines):
+                    instrumented_lines.append(self.lines[i])
+                i += 1
+                continue
+
+            # Skip existing COVER calls
+            if 'COVER(' in line:
+                instrumented_lines.append(line)
+                i += 1
+                continue
+
+            # Function definitions - look for function-like pattern
+            func_match = re.match(r'^[^/]*\b\w+\s+(\w+)\s*\([^)]*\)', line)
+            if func_match and not re.match(r'^\s*(if|while|for|switch)\s*\(', line):
+                func_name = func_match.group(1)
+                # Find the opening brace
+                brace_line = self.find_opening_brace(i)
+                if brace_line is not None:
+                    # Add all lines up to and including the brace
+                    for j in range(i, brace_line + 1):
+                        instrumented_lines.append(self.lines[j])
+
+                    # Add coverage point
+                    cover_id = f"{func_name}_entry"
+                    self.coverage_points.append(cover_id)
+
+                    # Determine indentation for next line
+                    indent = '    '
+                    if brace_line + 1 < len(self.lines):
+                        next_line = self.lines[brace_line + 1]
+                        if next_line.strip():
+                            indent = ' ' * (len(next_line) - len(next_line.lstrip()))
+
+                    instrumented_lines.append(f'{indent}COVER("{cover_id}");')
+                    skip_until = brace_line + 1
+                    i = brace_line + 1
+                    continue
+
+            # Look for else if
+            elif_match = re.search(r'\belse\s+if\s*\(', line)
+            if elif_match:
+                # Find the opening brace
+                brace_line = self.find_opening_brace(i)
+                if brace_line is not None:
+                    # Add all lines up to and including the brace
+                    for j in range(i, brace_line + 1):
+                        instrumented_lines.append(self.lines[j])
+
+                    # Add coverage point
+                    cover_id = self.get_next_id("else")
+                    self.coverage_points.append(cover_id)
+
+                    # Determine indentation
+                    indent = '    '
+                    if brace_line + 1 < len(self.lines):
+                        next_line = self.lines[brace_line + 1]
+                        if next_line.strip():
+                            indent = ' ' * (len(next_line) - len(next_line.lstrip()))
+
+                    instrumented_lines.append(f'{indent}COVER("{cover_id}");')
+                    skip_until = brace_line + 1
+                    i = brace_line + 1
+                    continue
+
+            # Look for plain else (but not else if)
+            else_match = re.search(r'\belse\b(?!\s+if)', line)
+            if else_match:
+                # Find the opening brace
+                brace_line = self.find_opening_brace(i)
+                if brace_line is not None:
+                    # Add all lines up to and including the brace
+                    for j in range(i, brace_line + 1):
+                        instrumented_lines.append(self.lines[j])
+
+                    # Add coverage point
+                    cover_id = self.get_next_id("else")
+                    self.coverage_points.append(cover_id)
+
+                    # Determine indentation
+                    indent = '    '
+                    if brace_line + 1 < len(self.lines):
+                        next_line = self.lines[brace_line + 1]
+                        if next_line.strip():
+                            indent = ' ' * (len(next_line) - len(next_line.lstrip()))
+
+                    instrumented_lines.append(f'{indent}COVER("{cover_id}");')
+                    skip_until = brace_line + 1
+                    i = brace_line + 1
+                    continue
+
+            # Look for if (but not else if)
+            if_match = re.search(r'(?<!\belse\s)\bif\s*\(', line)
+            if if_match:
+                # Find the opening brace
+                brace_line = self.find_opening_brace(i)
+                if brace_line is not None:
+                    # Add all lines up to and including the brace
+                    for j in range(i, brace_line + 1):
+                        instrumented_lines.append(self.lines[j])
+
+                    # Add coverage point
+                    cover_id = self.get_next_id("if")
+                    self.coverage_points.append(cover_id)
+
+                    # Determine indentation
+                    indent = '    '
+                    if brace_line + 1 < len(self.lines):
+                        next_line = self.lines[brace_line + 1]
+                        if next_line.strip():
+                            indent = ' ' * (len(next_line) - len(next_line.lstrip()))
+
+                    instrumented_lines.append(f'{indent}COVER("{cover_id}");')
+                    skip_until = brace_line + 1
+                    i = brace_line + 1
+                    continue
+
+            # Switch case statements
+            case_match = re.match(r'^(\s*)case\s+([^:]+):', line)
+            if case_match:
+                indent = case_match.group(1)
+                case_value = case_match.group(2).strip()
+                # Sanitize case value for ID
+                case_value = re.sub(r'[^a-zA-Z0-9_]', '_', case_value)
+                cover_id = self.get_next_id(f"case_{case_value}")
+                self.coverage_points.append(cover_id)
+                instrumented_lines.append(line)
+
+                # Check if there's a statement on the same line after the colon
+                if line.split(':', 1)[1].strip() and not line.split(':', 1)[1].strip().startswith('{'):
+                    # Statement on same line, insert before it
+                    parts = line.split(':', 1)
+                    instrumented_lines[-1] = f"{parts[0]}: COVER(\"{cover_id}\"); {parts[1].strip()}"
                 else:
-                    instrumented_lines[line_num] = text + '\n' + instrumented_lines[line_num]
-            else:
-                # Insert at specific column
-                line = instrumented_lines[line_num]
-                instrumented_lines[line_num] = line[:col] + text + line[col:]
+                    # Add on next line
+                    instrumented_lines.append(f'{indent}    COVER("{cover_id}");')
+                i += 1
+                continue
+
+            # Default case
+            default_match = re.match(r'^(\s*)default\s*:', line)
+            if default_match:
+                indent = default_match.group(1)
+                cover_id = self.get_next_id("default")
+                self.coverage_points.append(cover_id)
+                instrumented_lines.append(line)
+                instrumented_lines.append(f'{indent}    COVER("{cover_id}");')
+                i += 1
+                continue
+
+            # No match, keep the line as is
+            instrumented_lines.append(line)
+            i += 1
 
         return '\n'.join(instrumented_lines)
 
@@ -211,8 +213,11 @@ class CppCoverageInstrumenter:
 // Global set of uncovered points - starts with all points
 std::unordered_set<std::string> __uncovered_points = {"""
 
+        # Sort coverage points alphabetically
+        sorted_points = sorted(self.coverage_points)
+
         # Add all coverage points
-        points_list = ', '.join([f'"{p["id"]}"' for p in self.coverage_points])
+        points_list = ', '.join([f'"{p}"' for p in sorted_points])
         header += points_list
 
         header += """};
@@ -237,8 +242,11 @@ void print_coverage_report() {
     if (__uncovered_points.empty()) {
         std::cout << "✓ All paths covered!\\n";
     } else {
-        std::cout << "Uncovered points:\\n";
-        for (const auto& point : __uncovered_points) {
+        std::cout << "Uncovered points (alphabetical):\\n";
+        // Sort uncovered points for display
+        std::vector<std::string> uncovered_sorted(__uncovered_points.begin(), __uncovered_points.end());
+        std::sort(uncovered_sorted.begin(), uncovered_sorted.end());
+        for (const auto& point : uncovered_sorted) {
             std::cout << "  ✗ " << point << "\\n";
         }
     }
@@ -257,11 +265,53 @@ CoverageReporter __coverage_reporter;
 """
         return header
 
+
+def remove_coverage(source_code):
+    """Remove coverage instrumentation from C++ code"""
+    lines = source_code.split('\n')
+    cleaned_lines = []
+    in_coverage_header = False
+
+    for line in lines:
+        # Check for coverage header start
+        if '===== COVERAGE TRACKING CODE =====' in line:
+            in_coverage_header = True
+            continue
+
+        # Check for coverage header end
+        if '===== END COVERAGE TRACKING =====' in line:
+            in_coverage_header = False
+            continue
+
+        # Skip lines in coverage header
+        if in_coverage_header:
+            continue
+
+        # Remove COVER() calls
+        if 'COVER(' in line:
+            # Check if it's a standalone COVER line
+            if re.match(r'^\s*COVER\([^)]+\);\s*$', line):
+                continue  # Skip the entire line
+            else:
+                # Remove inline COVER calls
+                line = re.sub(r'\s*COVER\([^)]+\);\s*', '', line)
+
+        cleaned_lines.append(line)
+
+    # Remove any trailing empty lines that were left
+    while cleaned_lines and cleaned_lines[-1].strip() == '':
+        cleaned_lines.pop()
+
+    return '\n'.join(cleaned_lines)
+
+
 def main():
-    parser = argparse.ArgumentParser(description='Instrument C++ code for coverage tracking')
+    parser = argparse.ArgumentParser(description='Simple C++ coverage instrumenter using regex')
     parser.add_argument('input_file', help='Input C++ file')
-    parser.add_argument('-o', '--output', help='Output file (default: <input>_instrumented.cpp)')
+    parser.add_argument('-o', '--output', help='Output file (default: <input>_instrumented.cpp or <input>_clean.cpp)')
     parser.add_argument('--header-only', action='store_true', help='Only output the coverage header')
+    parser.add_argument('--remove', action='store_true', help='Remove coverage instrumentation instead of adding it')
+    parser.add_argument('--debug', action='store_true', help='Enable debug output')
 
     args = parser.parse_args()
 
@@ -273,30 +323,49 @@ def main():
         print(f"Error: File '{args.input_file}' not found")
         sys.exit(1)
 
-    # Instrument the code
-    instrumenter = CppCoverageInstrumenter(source_code)
-    instrumented_code = instrumenter.instrument()
+    if args.remove:
+        # Remove coverage mode
+        output = remove_coverage(source_code)
 
-    # Generate output
-    if args.header_only:
-        output = instrumenter.generate_coverage_header()
+        # Write output
+        if args.output:
+            output_file = args.output
+        else:
+            output_file = args.input_file.replace('.cpp', '_clean.cpp')
+            if '_instrumented' in args.input_file:
+                output_file = args.input_file.replace('_instrumented.cpp', '_clean.cpp')
+
+        with open(output_file, 'w') as f:
+            f.write(output)
+
+        print(f"Coverage removed. Clean code written to: {output_file}")
     else:
-        output = instrumenter.generate_coverage_header() + instrumented_code
+        # Instrument the code
+        instrumenter = SimpleCoverageInstrumenter(source_code, debug=args.debug)
+        instrumented_code = instrumenter.instrument()
 
-    # Write output
-    if args.output:
-        output_file = args.output
-    else:
-        output_file = args.input_file.replace('.cpp', '_instrumented.cpp')
+        # Generate output
+        if args.header_only:
+            output = instrumenter.generate_coverage_header()
+        else:
+            output = instrumenter.generate_coverage_header() + instrumented_code
 
-    with open(output_file, 'w') as f:
-        f.write(output)
+        # Write output
+        if args.output:
+            output_file = args.output
+        else:
+            output_file = args.input_file.replace('.cpp', '_instrumented.cpp')
 
-    print(f"Instrumented code written to: {output_file}")
-    print(f"Total coverage points added: {instrumenter.counter}")
-    print("\nCoverage points:")
-    for point in instrumenter.coverage_points:
-        print(f"  {point['id']}: {point['type']} at line {point['line']}")
+        with open(output_file, 'w') as f:
+            f.write(output)
+
+        print(f"Instrumented code written to: {output_file}")
+        print(f"Total coverage points added: {len(instrumenter.coverage_points)}")
+
+        # Display coverage points
+        print("\nCoverage points added:")
+        for point in sorted(instrumenter.coverage_points):
+            print(f"  {point}")
 
 if __name__ == '__main__':
     main()

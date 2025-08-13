@@ -1,5 +1,6 @@
 
 #include "btree.hpp"
+#include "btree_debug.hpp"
 #include "defs.hpp"
 #include <cassert>
 #include <cstdint>
