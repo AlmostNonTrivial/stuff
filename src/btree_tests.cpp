@@ -13,22 +13,22 @@ static std::random_device rd;
 static std::mt19937 gen(rd());
 static std::uniform_int_distribution<uint8_t> dis(0, 255);
 
-void do_count(BPlusTree *tree, uint32_t *count, uint32_t *unique) {
-  BtCursor *cursor = bt_cursor_create(tree, true);
-  std::vector<uint32_t> keys;
-  std::set<uint32_t> ukeys;
+// void do_count(BPlusTree *tree, uint32_t *count, uint32_t *unique) {
+//   BtCursor *cursor = bt_cursor_create(tree, true);
+//   std::vector<uint32_t> keys;
+//   std::set<uint32_t> ukeys;
 
-  bt_cursor_first(cursor);
+//   bt_cursor_first(cursor);
 
-  do {
-    auto x = (bt_cursor_get_key(cursor));
-    keys.push_back(*x);
-    ukeys.insert(*x);
-  } while (bt_cursor_next(cursor));
+//   do {
+//     auto x = (bt_cursor_get_key(cursor));
+//     keys.push_back(*x);
+//     ukeys.insert(*x);
+//   } while (bt_cursor_next(cursor));
 
-  *count = keys.size();
-  *unique = ukeys.size();
-}
+//   *count = keys.size();
+//   *unique = ukeys.size();
+// }
 
 void gen_str(uint8_t *buffer, DataType size) {
   for (size_t i = 0; i < size; i++) {
@@ -1562,47 +1562,47 @@ void test_key_types() {
   std::cout << "Key types test completed." << std::endl;
 }
 
-void traversal() {
-  // Test sequential insertions/deletions which stress different code paths
-  pager_init("traversal.db");
+// void traversal() {
+//   // Test sequential insertions/deletions which stress different code paths
+//   pager_init("traversal.db");
 
-  for (auto type : {BPLUS, BTREE}) {
-    pager_begin_transaction();
-    uint32_t schema = TYPE_INT32;
-    BPlusTree tree = bt_create(TYPE_INT32, schema, type);
-    bp_init(tree);
+//   for (auto type : {BPLUS, BTREE}) {
+//     pager_begin_transaction();
+//     uint32_t schema = TYPE_INT32;
+//     BPlusTree tree = bt_create(TYPE_INT32, schema, type);
+//     bp_init(tree);
 
-    // Sequential ascending insertions (stresses right-heavy splits)
-    for (uint32_t i = 1; i <= tree.leaf_max_keys * 10; i++) {
-      uint8_t record[TYPE_INT32];
-      memcpy(record, &i, sizeof(i));
-      bp_insert_element(tree, &i, record);
-    }
+//     // Sequential ascending insertions (stresses right-heavy splits)
+//     for (uint32_t i = 1; i <= tree.leaf_max_keys * 10; i++) {
+//       uint8_t record[TYPE_INT32];
+//       memcpy(record, &i, sizeof(i));
+//       bp_insert_element(tree, &i, record);
+//     }
 
-    BtCursor *cursor = bt_cursor_create(&tree, true);
+//     BtCursor *cursor = bt_cursor_create(&tree, true);
 
-    std::vector<uint32_t> keys;
+//     std::vector<uint32_t> keys;
 
-    bt_cursor_first(cursor);
+//     bt_cursor_first(cursor);
 
-    do {
-      auto x = (bt_cursor_get_key(cursor));
-      keys.push_back(*x);
-    } while (bt_cursor_next(cursor));
+//     do {
+//       auto x = (bt_cursor_get_key(cursor));
+//       keys.push_back(*x);
+//     } while (bt_cursor_next(cursor));
 
-    for (int i = 1; i < keys.size(); i++) {
-      uint32_t a = keys[i];
-      uint32_t b = keys[i - 1];
+//     for (int i = 1; i < keys.size(); i++) {
+//       uint32_t a = keys[i];
+//       uint32_t b = keys[i - 1];
 
-      if (a < b) {
-        check("sada", false);
-      }
-    }
+//       if (a < b) {
+//         check("sada", false);
+//       }
+//     }
 
-    pager_rollback();
-  }
-  pager_close();
-}
+//     pager_rollback();
+//   }
+//   pager_close();
+// }
 
 void run_comprehensive_tests() {
   test_sequential_operations();

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <vector>
 
+
 enum TreeType : uint32_t { BPLUS = 0, BTREE = 1, INVALID = 2 };
 
 // B+Tree control structure
@@ -104,119 +105,20 @@ struct BtCursor {
   bool is_write_cursor;
 };
 
-// Add these function declarations to btree.hpp
-BtCursor *bt_cursor_create(BPlusTree *tree, bool write_cursor);
-void bt_cursor_destroy(BtCursor *cursor);
-void bt_cursor_clear(BtCursor *cursor);
-bool bt_cursor_first(BtCursor *cursor);
-bool bt_cursor_last(BtCursor *cursor);
-bool bt_cursor_next(BtCursor *cursor);
-bool bt_cursor_previous(BtCursor *cursor);
-bool bt_cursor_seek(BtCursor *cursor, const void *key);
-const uint8_t *bt_cursor_get_key(BtCursor *cursor);
-const uint8_t *bt_cursor_get_record(BtCursor *cursor);
-bool bt_cursor_is_valid(BtCursor *cursor);
+// // Add these function declarations to btree.hpp
+// BtCursor *bt_cursor_create(BPlusTree *tree, bool write_cursor);
+// void bt_cursor_destroy(BtCursor *cursor);
+// void bt_cursor_clear(BtCursor *cursor);
+// bool bt_cursor_first(BtCursor *cursor);
+// bool bt_cursor_last(BtCursor *cursor);
+// bool bt_cursor_next(BtCursor *cursor);
+// bool bt_cursor_previous(BtCursor *cursor);
+// bool bt_cursor_seek(BtCursor *cursor, const void *key);
+// const uint8_t *bt_cursor_get_key(BtCursor *cursor);
+// const uint8_t *bt_cursor_get_record(BtCursor *cursor);
+// bool bt_cursor_is_valid(BtCursor *cursor);
 
-// Helper functions
-bool bt_cursor_move_to_leftmost_in_subtree(BtCursor *cursor, BPTreeNode *root);
-bool bt_cursor_move_to_rightmost_in_subtree(BtCursor *cursor, BPTreeNode *root);
-void bt_cursor_rebuild_stack_to_current(BtCursor *cursor);
-
-struct BPTreePathCoverage {
-    // Binary search paths
-    bool bs_leaf_exact_match;
-    bool bs_leaf_no_match;
-    bool bs_internal_exact_match_btree;
-    bool bs_internal_exact_match_bplus;
-    bool bs_internal_no_match;
-    bool bs_while_less;
-    bool bs_while_greater;
-
-    // Tree creation paths
-    bool create_btree;
-    bool create_bplus;
-    bool create_invalid_record_size;
-    bool create_invalid_type;
-
-    // Insert paths
-    bool insert_empty_root;
-    bool insert_leaf_update_existing_bplus;
-    bool insert_leaf_new_key;
-    bool insert_leaf_needs_split;
-    bool insert_leaf_btree_duplicate_handling;
-    bool insert_internal_traverse;
-
-    // Insert repair paths
-    bool repair_no_split_needed;
-    bool repair_split_root;
-    bool repair_split_non_root;
-
-    // Split paths
-    bool split_new_root_created;
-    bool split_existing_parent;
-    bool split_leaf_bplus;
-    bool split_internal_or_btree_leaf;
-    bool split_move_children;
-    bool split_btree_record_copy;
-
-    // Delete paths (B+tree)
-    bool delete_bplus_traverse_right;
-    bool delete_bplus_internal_match;
-    bool delete_bplus_internal_no_match;
-    bool delete_bplus_leaf_found;
-    bool delete_bplus_leaf_not_found;
-    bool delete_bplus_update_parent_keys;
-
-    // Delete paths (B-tree)
-    bool delete_btree_leaf_found;
-    bool delete_btree_internal_found;
-    bool delete_btree_not_found;
-    bool delete_btree_predecessor_replacement;
-
-    // Repair after delete paths
-    bool repair_no_underflow;
-    bool repair_root_empty;
-    bool repair_steal_left;
-    bool repair_steal_right;
-    bool repair_merge_right;
-    bool repair_merge_no_siblings;
-
-    // Steal from left paths
-    bool steal_left_leaf;
-    bool steal_left_internal_btree;
-    bool steal_left_internal_bplus;
-
-    // Steal from right paths
-    bool steal_right_leaf;
-    bool steal_right_internal_btree;
-    bool steal_right_internal_bplus;
-
-    // Merge paths
-    bool merge_leaf;
-    bool merge_leaf_update_links;
-    bool merge_internal_btree;
-    bool merge_internal_bplus;
-    bool merge_parent_becomes_empty_root;
-    bool merge_parent_needs_repair;
-
-    // Find/Get paths
-    bool find_containing_leaf;
-    bool find_containing_internal_btree;
-    bool find_containing_internal_bplus;
-    bool get_found;
-    bool get_not_found;
-
-    // Helper paths
-    bool cmp_int32;
-    bool cmp_int64;
-    bool cmp_varchar;
-    bool get_parent_null;
-    bool get_parent_exists;
-    bool get_child_null;
-    bool get_child_valid;
-    bool set_child_null;
-    bool set_child_valid;
-};
-void print_coverage_report();
-
-void reset_coverage();
+// // Helper functions
+// bool bt_cursor_move_to_leftmost_in_subtree(BtCursor *cursor, BPTreeNode *root);
+// bool bt_cursor_move_to_rightmost_in_subtree(BtCursor *cursor, BPTreeNode *root);
+// void bt_cursor_rebuild_stack_to_current(BtCursor *cursor);

@@ -1,4 +1,10 @@
 
+Deletion is easier in a btree, because the keys in b+Trees internal nodes don't need correspond to actual
+records, they are just guides, so we don't NEED to update them right
+away, but there is more obviously.
 
 
-Is there a cleaner way to shift?
+
+BTREE delete
+
+- algorithm such that we we call delete, the node has at least t keys,
