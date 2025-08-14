@@ -106,9 +106,9 @@ struct BtCursor {
   uint32_t current_index;
 
   CursorState state;
-  bool is_write_cursor;
+
 };
-BtCursor *bt_cursor_create(BPlusTree *tree, bool write_cursor);
+BtCursor bt_cursor_create(BPlusTree *tree);
 
 bool bt_cursor_seek(BtCursor *cursor, const void *key);
 bool bt_cursor_previous(BtCursor *cursor);

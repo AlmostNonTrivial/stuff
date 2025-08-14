@@ -1084,16 +1084,16 @@ struct CursorSaveState {
 };
 
 // Create a new cursor
-BtCursor *bt_cursor_create(BPlusTree *tree, bool write_cursor) {
-  BtCursor *cursor = ARENA_ALLOC(BtCursor);
+BtCursor bt_cursor_create(BPlusTree *tree) {
 
-  cursor->tree = tree;
-  cursor->stack.stack_depth = 0;
-  cursor->current_page = 0;
-  cursor->current_index = 0;
-  cursor->state = CURSOR_INVALID;
-  cursor->is_write_cursor = write_cursor;
-  return cursor;
+  return {.tree = tree,
+          .stack =
+              {.stack_depth = 0},
+          .current_index = 0,
+          .current_page = 0,
+          .state = CURSOR_INVALID
+
+  };
 }
 
 // Destroy cursor
@@ -1164,7 +1164,7 @@ bool bt_cursor_seek(BtCursor *cursor, const void *key) {
 
 // Delete at cursor position
 bool bt_cursor_delete(BtCursor *cursor) {
-  if (cursor->state != CURSOR_VALID || !cursor->is_write_cursor) {
+  if (cursor->state != CURSOR_VALID) {
     return false;
   }
 
@@ -1203,9 +1203,6 @@ bool bt_cursor_delete(BtCursor *cursor) {
 // Insert at cursor position
 bool bt_cursor_insert(BtCursor *cursor, const void *key,
                       const uint8_t *record) {
-  if (!cursor->is_write_cursor) {
-    return false;
-  }
 
   // Insert uses the regular insert function
   bp_insert_element(*cursor->tree, (void *)key, record);
@@ -1216,7 +1213,7 @@ bool bt_cursor_insert(BtCursor *cursor, const void *key,
 
 // Update record at cursor position (update is just insert for existing key)
 bool bt_cursor_update(BtCursor *cursor, const uint8_t *record) {
-  if (cursor->state != CURSOR_VALID || !cursor->is_write_cursor) {
+  if (cursor->state != CURSOR_VALID) {
     return false;
   }
 
@@ -1225,7 +1222,6 @@ bool bt_cursor_update(BtCursor *cursor, const uint8_t *record) {
 
   return true;
 }
-
 
 enum SeekOp { SEEK_GE, SEEK_GT, SEEK_LE, SEEK_LT };
 

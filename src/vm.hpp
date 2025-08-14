@@ -2,6 +2,7 @@
 #include "btree.hpp"
 #include "defs.hpp"
 #include <cstddef>
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
@@ -9,15 +10,8 @@
 // Tagged union for VM values
 struct VMValue {
     DataType type;
-    union {
-        nullptr_t n;
-        int32_t i32;
-        int64_t i64;
-        uint32_t u32;
-        uint64_t u64;
-        char str32[TYPE_VARCHAR32];
-        char str256[TYPE_VARCHAR256];
-    };
+    // instead of a union
+    uint8_t data[TYPE_VARCHAR256];
 };
 
 enum OpCode : uint8_t {
@@ -92,8 +86,14 @@ struct ColumnInfo {
 };
 
 struct TableSchema {
-    char table_name[64];
+    std::string table_name;
     std::vector<ColumnInfo> columns;
+    uint32_t record_size;
+
+    DataType key() {
+        return columns[0].type;
+    }
+
 };
 
 
@@ -105,44 +105,16 @@ struct Table {
 struct Index {
     BPlusTree tree;
     uint32_t column_index;
-    char name[64];
+    std::string name;
     uint32_t root_page;
 };
 
 #define REGISTER_COUNT 20
 
-struct VM {
-    // Execution state
-    std::vector<VMInstruction> program;
-    uint32_t pc;
-    bool halted;
-
-    // Registers
-    VMValue registers[REGISTER_COUNT];
-
-    std::unordered_map<uint32_t, BtCursor> cursors;
-    std::unordered_map<uint32_t, Table> tables;
-    std::unordered_map<uint32_t, Index> indexes;
 
 
-    int32_t compare_result;
-
-    void (*result_callback)(VMValue**, uint32_t);
-    bool in_transaction;
-};
-
-// VM lifecycle
-VM* vm_create(uint32_t max_registers, uint32_t max_cursors);
-void vm_destroy(VM* vm);
-void vm_reset(VM* vm);
 
 // Program control
-void vm_load_program(VM* vm, VMInstruction* instructions, uint32_t count);
-bool vm_execute(VM* vm);
-bool vm_step(VM* vm);
 
-// Table/Index management
-bool vm_create_table(VM* vm, TableSchema* schema);
-bool vm_create_index(VM* vm, const char* table_name, uint32_t column_index);
-Table* vm_get_table(VM* vm, const char* name);
-Index* vm_get_index(VM* vm, const char* name);
+bool vm_execute(VMInstruction* instructions, uint32_t count);
+bool vm_step();
