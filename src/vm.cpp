@@ -3,15 +3,68 @@
 #include "btree.hpp"
 #include "defs.hpp"
 #include "pager.hpp"
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <functional>
 #include <iostream>
 #include <vector>
+#include <cmath>
 
 #define HAS(map, val) (VM.map.find(val) != VM.map.end())
 #define GET(map, val) (VM.map.find(val)->second)
+
+// Single aggregator structure
+struct Aggregator {
+  enum Type { NONE = 0, COUNT = 1, SUM = 2, MIN = 3, MAX = 4, AVG  = 5};
+  Type type;
+  double accumulator;
+  uint32_t count;
+
+  void reset(Type t) {
+    type = t;
+    accumulator = (t == MIN) ? INFINITY : (t == MAX) ? -INFINITY : 0;
+    count = 0;
+  }
+
+  void step(VMValue* value) {
+    if (type == COUNT) {
+      accumulator++;
+      count++;
+    } else if (value && value->type == TYPE_INT32) {
+      uint32_t val = *(uint32_t*)value->data;
+      switch (type) {
+      case SUM:
+      case AVG:
+        accumulator += val;
+        count++;
+        break;
+      case MAX:
+        if (count == 0 || val > accumulator) {
+          accumulator = val;
+        }
+        count++;
+        break;
+      case MIN:
+        if (count == 0 || val < accumulator) {
+          accumulator = val;
+        }
+        count++;
+        break;
+      default:
+        break;
+      }
+    }
+  }
+
+  uint32_t finalize() {
+    if (type == AVG && count > 0) {
+      return (uint32_t)(accumulator / count);
+    }
+    return (uint32_t)accumulator;
+  }
+};
 
 static struct {
   // Execution state
@@ -29,8 +82,11 @@ static struct {
   // Comparison result for Jump opcode
   int32_t compare_result;
 
-  // Result callback
-  void (*result_callback)(VMValue **, uint32_t);
+  // Output buffer - just a vector of result rows
+  std::vector<std::vector<VMValue*>> output_buffer;
+
+  // Single aggregator (since we don't support GROUP BY yet)
+  Aggregator aggregator;
 
   // Transaction state
   bool in_transaction;
@@ -44,11 +100,12 @@ uint8_t *VmCursor::column(uint32_t col_index) {
   }
 
   uint8_t *record = bt_cursor_read(&bt_cursor);
-
   return record + this->column_offsets[col_index];
 }
 
-const uint8_t *VmCursor::key() { return bt_cursor_get_key(&bt_cursor); }
+const uint8_t *VmCursor::key() {
+  return bt_cursor_get_key(&bt_cursor);
+}
 
 // Helper to allocate and copy data to arena
 static uint8_t *arena_copy_data(const uint8_t *src, uint32_t size) {
@@ -71,7 +128,8 @@ void vm_init() {
   VM.halted = false;
   VM.compare_result = 0;
   VM.in_transaction = false;
-  VM.result_callback = nullptr;
+  VM.output_buffer.clear();
+  VM.aggregator.reset(Aggregator::NONE);
 }
 
 void vm_reset() {
@@ -88,8 +146,19 @@ void vm_reset() {
   // Close all cursors
   VM.cursors.clear();
 
+  // Clear output buffer
+  VM.output_buffer.clear();
+
+  // Reset aggregator
+  VM.aggregator.reset(Aggregator::NONE);
+
   // Reset arena for next execution
   arena_reset();
+}
+
+// Get results from buffer
+std::vector<std::vector<VMValue*>> vm_get_results() {
+  return VM.output_buffer;
 }
 
 bool vm_execute(std::vector<VMInstruction> &instructions) {
@@ -133,11 +202,12 @@ bool vm_step() {
 
   case OP_String: {
     const char *str = (const char *)inst->p4;
-    uint32_t size = inst->p3;
+    uint32_t size = inst->p1;
     vm_set_value(&VM.registers[inst->p1], (DataType)size, str);
     VM.pc++;
     return true;
   }
+
   case OP_Copy:
     VM.registers[inst->p2] = VM.registers[inst->p1];
     VM.pc++;
@@ -164,11 +234,8 @@ bool vm_step() {
 
     VmCursor &cursor = VM.cursors[cursor_id];
 
-    // Initialize column_offsets with proper size
-    cursor.column_offsets.resize(table->schema.columns.size());
     cursor.record_size = 0;
-
-    // column 0 is key, so start from 1
+    // column 0 is key
     for (uint32_t i = 1; i < table->schema.columns.size(); i++) {
       cursor.column_offsets[i] = cursor.record_size;
       cursor.record_size += table->schema.columns[i].type;
@@ -181,6 +248,7 @@ bool vm_step() {
     VM.pc++;
     return true;
   }
+
   case OP_Close:
     VM.cursors.erase(inst->p1);
     VM.pc++;
@@ -455,13 +523,63 @@ bool vm_step() {
   }
 
   case OP_ResultRow: {
-    if (VM.result_callback) {
-      VMValue **row = ARENA_ALLOC_ARRAY(VMValue *, inst->p2);
-      for (int i = 0; i < inst->p2; i++) {
-        row[i] = &VM.registers[inst->p1 + i];
-      }
-      VM.result_callback(row, inst->p2);
+    // Add row to output buffer
+    std::vector<VMValue*> row;
+    for (int i = 0; i < inst->p2; i++) {
+      row.push_back(&VM.registers[inst->p1 + i]);
     }
+    VM.output_buffer.push_back(row);
+    VM.pc++;
+    return true;
+  }
+
+  case Op_Sort: {
+    // P1 = column index to sort by
+    // P2 = 0 for ASC, 1 for DESC
+    uint32_t col = inst->p1;
+    bool desc = inst->p2;
+
+    std::sort(VM.output_buffer.begin(),
+              VM.output_buffer.end(),
+              [col, desc](const auto& a, const auto& b) {
+                  int cmp_result = cmp(a[col]->type, a[col]->data, b[col]->data);
+                  return desc ? (cmp_result > 0) : (cmp_result < 0);
+              });
+    VM.pc++;
+    return true;
+  }
+
+  case Op_Flush: {
+    // Clear the output buffer
+    VM.output_buffer.clear();
+    VM.pc++;
+    return true;
+  }
+
+  case OP_AggReset: {
+    Aggregator::Type type = Aggregator::Type(inst->p1);
+    VM.aggregator.reset(type);
+    VM.pc++;
+    return true;
+  }
+
+  case OP_AggStep: {
+    // P1 = value register (or -1 for COUNT)
+    if (inst->p1 >= 0) {
+      VM.aggregator.step(&VM.registers[inst->p1]);
+    } else {
+      // For COUNT, just pass nullptr
+      VM.aggregator.step(nullptr);
+    }
+    VM.pc++;
+    return true;
+  }
+
+  case OP_AggFinal: {
+    // P1 = output register
+    uint32_t result = VM.aggregator.finalize();
+    vm_set_value(&VM.registers[inst->p1], TYPE_INT32, &result);
+    VM.aggregator.reset(Aggregator::NONE);
     VM.pc++;
     return true;
   }
@@ -485,70 +603,67 @@ bool vm_step() {
     VM.pc++;
     return true;
   }
-  case OP_DropIndex:
+
   case OP_DropTable: {
+    char *table_name = (char *)inst->p4;
+
+    if (!HAS(tables, table_name)) {
+      return false;
+    }
+
+    Table *table = &GET(tables, table_name);
+    bt_clear(&table->tree);
+
+    for (auto [col, index] : table->indexes) {
+      bt_clear(&index.tree);
+    }
+
+    VM.tables.erase(table_name);
+    VM.pc++;
+    return true;
+  }
+
+  case OP_CreateIndex: {
+    char *table_name = (char *)inst->p4;
+    uint32_t column = inst->p1;
+
+    if (VM.tables.find(table_name) == VM.tables.end()) {
+      return false;
+    }
+
+    Table *table = &VM.tables[table_name];
+
+    if (table->indexes.find(column) != table->indexes.end()) {
+      return false;
+    }
+
+    ColumnInfo columnInfo = table->schema.columns.at(column);
+
+    Index index;
+    index.tree = bt_create(columnInfo.type, table->schema.key_type(), BTREE);
+
+    table->indexes[column] = index;
+    VM.pc++;
+    return true;
+  }
+
+  case OP_DropIndex: {
     char *table_name = (char *)inst->p4;
     uint32_t column = inst->p1;
 
     if (!HAS(tables, table_name)) {
       return false;
     }
+
     Table *table = &GET(tables, table_name);
-    if (column != 0) {
-      if (table->indexes.find(column) == table->indexes.end()) {
-        return false;
-      }
 
-      Index *index = &table->indexes[column];
-      // will need to clear index/table memory cache
-      table->indexes.erase(column);
-      return bt_clear(&index->tree);
-    }
-
-
-
-    for (auto [col, index] : table->indexes) {
-        table->indexes.erase(col);
-      bt_clear(&index.tree);
-    }
-
-    bt_clear(&table->tree);
-    VM.tables.erase(table_name);
-
-    return true;
-  }
-  case OP_CreateIndex: {
-
-    const char *table_name = (const char *)inst->p3; // Table name in P3
-    uint32_t column = inst->p1;                      // Column index in P1
-
-    auto table_it = VM.tables.find(table_name);
-    if (table_it == VM.tables.end()) {
-      return false; // Table doesn't exist
-    }
-
-    Table *table = &table_it->second;
-
-    // Check if column index is valid
-    if (column >= table->schema.columns.size()) {
+    if (table->indexes.find(column) == table->indexes.end()) {
       return false;
     }
 
-    // Check if index already exists on this column
-    if (table->indexes.find(column) != table->indexes.end()) {
-      return false; // Index already exists on this column
-    }
-
-    ColumnInfo &columnInfo = table->schema.columns[column];
-
-    Index new_index;
-
-    // Create B-tree index: key is indexed column type, record is primary key
-    // type
-    new_index.tree =
-        bt_create(columnInfo.type, table->schema.key_type(), BTREE);
-
-    table->indexes[column] = new_index;
+    Index *index = &table->indexes[column];
+    bt_clear(&index->tree);
+    table->indexes.erase(column);
 
     VM.pc++;
     return true;
@@ -576,8 +691,4 @@ bool vm_step() {
     printf("Unknown opcode: %d\n", inst->opcode);
     return false;
   }
-}
-
-void vm_set_result_callback(void (*callback)(VMValue **, uint32_t)) {
-  VM.result_callback = callback;
 }
