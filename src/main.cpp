@@ -20,6 +20,13 @@ int main() {
   arena_init(PAGE_SIZE);
 
 
+
+
+
+
+
+
+
   arena_shutdown();
   return 0;
 }
