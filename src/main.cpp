@@ -1,7 +1,6 @@
 // main.cpp - Enhanced fuzzer for complete btree coverage
 #include "arena.hpp"
 #include "btree.hpp"
-#include "btree_debug.hpp"
 #include "defs.hpp"
 #include "pager.hpp"
 #include <algorithm>
