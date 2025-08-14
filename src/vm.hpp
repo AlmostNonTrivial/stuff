@@ -6,115 +6,162 @@
 #include <unordered_map>
 #include <vector>
 
-
-// Tagged union for VM values
+// VM value - uses arena allocation for data
 struct VMValue {
-    DataType type;
-    // instead of a union
-    uint8_t data[TYPE_VARCHAR256];
+  DataType type;
+  uint8_t *data; // Points to arena-allocated memory
+
+  // Helper to get size based on type
+  static uint32_t get_size(DataType t) { return static_cast<uint32_t>(t); }
 };
 
 enum OpCode : uint8_t {
-    // Control flow
-    OP_Trace = 0,
-    OP_Goto = 1,
-    OP_Halt = 2,
-    OP_If = 3,
-    OP_IfNot = 4,
+  // Control flow
+  OP_Trace = 0,
+  OP_Goto = 1,
+  OP_Halt = 2,
+  OP_If = 3,
+  OP_IfNot = 4,
+  OP_IfNull = 5,
+  OP_IfNotNull = 6,
 
-    // Cursor operations
-    OP_OpenRead = 5,
-    OP_OpenWrite = 6,
-    OP_Close = 7,
-    OP_Rewind = 8,
-    OP_Next = 9,
-    OP_Prev = 10,
-    OP_SeekGE = 11,
-    OP_SeekGT = 12,
-    OP_SeekLE = 13,
-    OP_SeekLT = 14,
-    OP_SeekEQ = 15,
-    OP_Found = 16,
-    OP_NotFound = 17,
+  // Cursor operations
+  OP_OpenRead = 10,
+  OP_OpenWrite = 11,
+  OP_Close = 12,
+  OP_Rewind = 13,
+  OP_Next = 14,
+  OP_Prev = 15,
+  OP_First = 16,
+  OP_Last = 17,
 
-    // Data operations
-    OP_Column = 18,
-    OP_Rowid = 19,
-    OP_MakeRecord = 20,
-    OP_Insert = 21,
-    OP_Delete = 22,
-    OP_NewRowid = 23,
+  // Seek operations
+  OP_SeekGE = 20,
+  OP_SeekGT = 21,
+  OP_SeekLE = 22,
+  OP_SeekLT = 23,
+  OP_SeekEQ = 24,
+  OP_Found = 25,
+  OP_NotFound = 26,
 
-    // Register operations
-    OP_Integer = 24,
-    OP_String = 25,
-    OP_Copy = 28,
-    OP_Move = 29,
+  // Data operations
+  OP_Column = 30,
+  OP_Key = 31,
+  OP_MakeRecord = 32,
+  OP_MakeKey = 33,
+  OP_Insert = 34,
+  OP_Delete = 35,
+  OP_Update = 36,
+  OP_NewRowid = 37,
 
-    // Comparison
-    OP_Compare = 30,
-    OP_Jump = 31,
+  // Register operations
+  OP_Integer = 40,
+  OP_String = 41,
+  OP_Null = 42,
+  OP_Copy = 43,
+  OP_Move = 44,
+  OP_SCopy = 45, // Shallow copy
 
-    // Results
-    OP_ResultRow = 32,
+  // Comparison and arithmetic
+  OP_Add = 50,
+  OP_Subtract = 51,
+  OP_Multiply = 52,
+  OP_Divide = 53,
+  OP_Remainder = 54,
+  OP_Compare = 55,
+  OP_Jump = 56,
+  OP_Eq = 57,
+  OP_Ne = 58,
+  OP_Lt = 59,
+  OP_Le = 60,
+  OP_Gt = 61,
+  OP_Ge = 62,
 
-    // Schema operations
-    OP_CreateTable = 33,
-    OP_DropTable = 34,
-    OP_CreateIndex = 35,
-    OP_DropIndex = 36,
+  // Results
+  OP_ResultRow = 70,
 
-    // Transactions
-    OP_Begin = 59,
-    OP_Commit = 60,
-    OP_Rollback = 61,
+  // Schema operations
+  OP_CreateTable = 80,
+  OP_DropTable = 81,
+  OP_CreateIndex = 82,
+  OP_DropIndex = 83,
+
+  // Transactions
+  OP_Begin = 90,
+  OP_Commit = 91,
+  OP_Rollback = 92,
 };
 
 struct VMInstruction {
-    OpCode opcode;
-    int32_t p1;
-    int32_t p2;
-    int32_t p3;
-    void* p4;
-    uint8_t p5;
+  OpCode opcode;
+  int32_t p1;
+  int32_t p2;
+  int32_t p3;
+  void *p4;
+  uint8_t p5;
 };
 
-
 struct ColumnInfo {
-    char name[32];
-    DataType type;
+  char name[32];
+  DataType type;
 };
 
 struct TableSchema {
-    std::string table_name;
-    std::vector<ColumnInfo> columns;
-    uint32_t record_size;
+  std::string table_name;
+  std::vector<ColumnInfo> columns;
 
-    DataType key() {
-        return columns[0].type;
+  DataType key_type() const { return columns[0].type; }
+
+  uint32_t record_size() const {
+    uint32_t size = 0;
+    // Skip key (column 0), only count record columns
+    for (size_t i = 1; i < columns.size(); i++) {
+      size += columns[i].type;
     }
-
+    return size;
+  }
 };
 
 
-struct Table {
-    TableSchema schema;
-    BPlusTree tree;
-};
 
 struct Index {
-    BPlusTree tree;
-    uint32_t column_index;
-    std::string name;
-    uint32_t root_page;
+  std::string name;
+  std::string table_name;
+  uint32_t indexed_column;
+  BPlusTree tree;
 };
 
-#define REGISTER_COUNT 20
+struct Table {
+  TableSchema schema;
+  BPlusTree tree;
+  std::unordered_map<uint32_t, Index> indexes;
+};
 
+// VM cursor wraps btree cursor with schema info
+struct VmCursor {
+  BtCursor bt_cursor;
+  TableSchema *schema;
+  std::vector<uint32_t> column_offsets;
+  uint32_t record_size;
+  bool is_index;
 
+  // Get column data from record (non-key columns)
+  uint8_t *column(uint32_t col_index);
 
+  // Get key data
+  const uint8_t *key();
 
-// Program control
+  // Get column type
+  DataType column_type(uint32_t col_index) const {
+    return schema->columns[col_index].type;
+  }
+};
 
-bool vm_execute(VMInstruction* instructions, uint32_t count);
+#define REGISTER_COUNT 100
+
+// VM execution
+void vm_init();
+void vm_reset();
+bool vm_execute(std::vector<VMInstruction> &instructions);
 bool vm_step();
+void vm_set_result_callback(void (*callback)(VMValue **, uint32_t));

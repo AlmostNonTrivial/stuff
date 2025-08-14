@@ -44,11 +44,12 @@ static_assert(sizeof(BPTreeNode) == PAGE_SIZE,
               "BTreeNode must be exactly PAGE_SIZE");
 
 BPlusTree bt_create(DataType key, uint32_t record_size, TreeType tree_type);
-void bp_init(BPlusTree &tree);
+
 
 // // Core operations - data is a buffer containing the record
 void bp_insert_element(BPlusTree &tree, void *key, const uint8_t *data);
 
+bool bt_clear(BPlusTree* tree);
 
 uint8_t *get_key_at(BPlusTree &tree, BPTreeNode *node, uint32_t index);
 

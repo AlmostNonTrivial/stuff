@@ -8,6 +8,7 @@
 #include <cstring>
 #include <ios>
 #include <iostream>
+#include <queue>
 #include <sys/types.h>
 
 struct FindResult {
@@ -205,14 +206,6 @@ BPTreeNode *bp_create_node(BPlusTree &tree, bool is_leaf) {
 
   pager_mark_dirty(page_index);
   return node;
-}
-
-void bp_init(BPlusTree &tree) {
-  if (tree.root_page_index == 0) {
-
-    BPTreeNode *root = bp_create_node(tree, true);
-    tree.root_page_index = root->index;
-  }
 }
 
 void bp_set_next(BPTreeNode *node, uint32_t index) {
@@ -556,9 +549,15 @@ bool bp_insert(BPlusTree &tree, BPTreeNode *node, uint8_t *key,
       return bp_insert(tree, child_node, key, data);
     }
   }
+  return false;
 }
 
 void bp_insert_element(BPlusTree &tree, void *key, const uint8_t *data) {
+  if (tree.root_page_index == 0) {
+    BPTreeNode *root = bp_create_node(tree, true);
+    tree.root_page_index = root->index;
+  }
+
   BPTreeNode *root = bp_get_root(tree);
 
   if (root->num_keys == 0) {
@@ -1044,6 +1043,35 @@ void bp_repair_after_delete(BPlusTree &tree, BPTreeNode *node) {
   }
 }
 
+bool bt_clear(BPlusTree *tree) {
+  if (tree->root_page_index == 0) {
+    return false;
+  }
+  std::queue<uint32_t> bfs;
+  bfs.push(tree->root_page_index);
+
+  while (bfs.size()) {
+    uint32_t index = bfs.front();
+    bfs.pop();
+
+    auto node = (BPTreeNode *)pager_get(index);
+    if (!node) {
+      return false;
+    }
+
+    if (!node->is_leaf) {
+      uint32_t *children = get_children(*tree, node);
+      for (int i = 0; i < node->num_keys + 1; i++) {
+        bfs.push(children[i]);
+      }
+    }
+
+    pager_delete(node->index);
+  }
+
+  return true;
+}
+
 /* ------ CURSOR ----------- */
 // Add to btree.cpp - B-tree/B+tree Cursor Implementation
 
@@ -1087,8 +1115,7 @@ struct CursorSaveState {
 BtCursor bt_cursor_create(BPlusTree *tree) {
 
   return {.tree = tree,
-          .stack =
-              {.stack_depth = 0},
+          .stack = {.stack_depth = 0},
           .current_index = 0,
           .current_page = 0,
           .state = CURSOR_INVALID
