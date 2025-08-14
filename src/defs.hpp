@@ -12,3 +12,8 @@ enum DataType : uint32_t {
 };
 
 int cmp(DataType key_size, const uint8_t *key1, const uint8_t *key2) ;
+
+#define NL '\n'
+#define END << '\n'
+#define PRINT std::cout <<
+#define COMMA << ", " <<
