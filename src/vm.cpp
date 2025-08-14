@@ -133,7 +133,7 @@ bool vm_step() {
 
   case OP_String: {
     const char *str = (const char *)inst->p4;
-    uint32_t size = inst->p1;
+    uint32_t size = inst->p3;
     vm_set_value(&VM.registers[inst->p1], (DataType)size, str);
     VM.pc++;
     return true;
@@ -164,8 +164,11 @@ bool vm_step() {
 
     VmCursor &cursor = VM.cursors[cursor_id];
 
+    // Initialize column_offsets with proper size
+    cursor.column_offsets.resize(table->schema.columns.size());
     cursor.record_size = 0;
-    // column 0 is key
+
+    // column 0 is key, so start from 1
     for (uint32_t i = 1; i < table->schema.columns.size(); i++) {
       cursor.column_offsets[i] = cursor.record_size;
       cursor.record_size += table->schema.columns[i].type;
@@ -178,7 +181,6 @@ bool vm_step() {
     VM.pc++;
     return true;
   }
-
   case OP_Close:
     VM.cursors.erase(inst->p1);
     VM.pc++;
@@ -499,42 +501,57 @@ bool vm_step() {
 
       Index *index = &table->indexes[column];
       // will need to clear index/table memory cache
+      table->indexes.erase(column);
       return bt_clear(&index->tree);
     }
 
-    bt_clear(&table->tree);
+
 
     for (auto [col, index] : table->indexes) {
+        table->indexes.erase(col);
       bt_clear(&index.tree);
     }
+
+    bt_clear(&table->tree);
+    VM.tables.erase(table_name);
 
     return true;
   }
   case OP_CreateIndex: {
 
-    char *table_name = (char *)inst->p4;
-    uint32_t column = inst->p1;
+    const char *table_name = (const char *)inst->p3; // Table name in P3
+    uint32_t column = inst->p1;                      // Column index in P1
 
-    if (VM.tables.find(table_name) == VM.tables.end()) {
+    auto table_it = VM.tables.find(table_name);
+    if (table_it == VM.tables.end()) {
+      return false; // Table doesn't exist
+    }
+
+    Table *table = &table_it->second;
+
+    // Check if column index is valid
+    if (column >= table->schema.columns.size()) {
       return false;
     }
 
-    if (VM.indexes.find(table_name) != VM.indexes.end()) {
-      return false;
+    // Check if index already exists on this column
+    if (table->indexes.find(column) != table->indexes.end()) {
+      return false; // Index already exists on this column
     }
 
-    Table *table = &VM.tables[table_name];
-    ColumnInfo columnInfo = table->schema.columns.at(column);
+    ColumnInfo &columnInfo = table->schema.columns[column];
 
-    Index index = {0};
-    index.tree = bt_create(columnInfo.type, table->schema.key_type(), BTREE);
-    index.indexed_column = column;
-    index.table_name = table_name;
-    index.name = columnInfo.name + table_name;
+    Index new_index;
 
-    VM.indexes[index]
+    // Create B-tree index: key is indexed column type, record is primary key
+    // type
+    new_index.tree =
+        bt_create(columnInfo.type, table->schema.key_type(), BTREE);
 
-        return true;
+    table->indexes[column] = new_index;
+
+    VM.pc++;
+    return true;
   }
 
   case OP_Begin:

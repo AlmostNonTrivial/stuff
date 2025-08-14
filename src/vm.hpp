@@ -48,26 +48,26 @@ enum OpCode : uint8_t {
   OP_Column = 30,
   OP_Key = 31,
   OP_MakeRecord = 32,
-  OP_MakeKey = 33,
+  // OP_MakeKey = 33,
   OP_Insert = 34,
   OP_Delete = 35,
   OP_Update = 36,
-  OP_NewRowid = 37,
+  // OP_NewRowid = 37,
 
   // Register operations
   OP_Integer = 40,
   OP_String = 41,
-  OP_Null = 42,
+  // OP_Null = 42,
   OP_Copy = 43,
   OP_Move = 44,
-  OP_SCopy = 45, // Shallow copy
+  // OP_SCopy = 45, // Shallow copy
 
   // Comparison and arithmetic
-  OP_Add = 50,
-  OP_Subtract = 51,
-  OP_Multiply = 52,
-  OP_Divide = 53,
-  OP_Remainder = 54,
+  // OP_Add = 50,
+  // OP_Subtract = 51,
+  // OP_Multiply = 52,
+  // OP_Divide = 53,
+  // OP_Remainder = 54,
   OP_Compare = 55,
   OP_Jump = 56,
   OP_Eq = 57,
@@ -90,6 +90,17 @@ enum OpCode : uint8_t {
   OP_Begin = 90,
   OP_Commit = 91,
   OP_Rollback = 92,
+
+
+  OP_AggReset = 93,
+  OP_AggStep = 94,
+  OP_AggFinal = 95,
+
+  // Sorting
+  Op_Sort = 96,
+  Op_Flush = 97,
+
+OP_Analyize = 98,
 };
 
 struct VMInstruction {
@@ -122,12 +133,7 @@ struct TableSchema {
   }
 };
 
-
-
 struct Index {
-  std::string name;
-  std::string table_name;
-  uint32_t indexed_column;
   BPlusTree tree;
 };
 
