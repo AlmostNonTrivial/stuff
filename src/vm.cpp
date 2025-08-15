@@ -4,108 +4,72 @@
 #include "defs.hpp"
 #include "pager.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <functional>
-#include <iostream>
+#include <ios>
 #include <vector>
-#include <cmath>
 
-#define HAS(map, val) (VM.map.find(val) != VM.map.end())
-#define GET(map, val) (VM.map.find(val)->second)
+/*------------VMCURSOR---------------- */
+
+struct VmCursor {
+  BtCursor bt_cursor;
+  TableSchema *schema;
+  bool is_index;
+};
+
+DataType vb_column_type(VmCursor *vb, uint32_t col_index) {
+  return vb->schema->columns[col_index].type;
+}
+DataType vb_key_type(VmCursor *vb) { return vb->schema->columns[0].type; }
+
+uint8_t *vb_column(VmCursor *vb, uint32_t col_index) {
+  if (col_index == 0) {
+    return bt_cursor_key(&vb->bt_cursor);
+  }
+
+  uint8_t *record = bt_cursor_record(&vb->bt_cursor);
+  return record + vb->schema->column_offsets[col_index];
+}
+
+uint8_t *vb_key(VmCursor *vb) { return vb_column(vb, 0); }
+
+/*------------VMCURSOR---------------- */
 
 // Single aggregator structure
 struct Aggregator {
-  enum Type { NONE = 0, COUNT = 1, SUM = 2, MIN = 3, MAX = 4, AVG  = 5};
+  enum Type { NONE = 0, COUNT = 1, SUM = 2, MIN = 3, MAX = 4, AVG = 5 };
   Type type;
   double accumulator;
   uint32_t count;
 
-  void reset(Type t) {
-    type = t;
-    accumulator = (t == MIN) ? INFINITY : (t == MAX) ? -INFINITY : 0;
+  void reset() {
+    type = Aggregator::NONE;
+    accumulator = 0;
     count = 0;
-  }
-
-  void step(VMValue* value) {
-    if (type == COUNT) {
-      accumulator++;
-      count++;
-    } else if (value && value->type == TYPE_INT32) {
-      uint32_t val = *(uint32_t*)value->data;
-      switch (type) {
-      case SUM:
-      case AVG:
-        accumulator += val;
-        count++;
-        break;
-      case MAX:
-        if (count == 0 || val > accumulator) {
-          accumulator = val;
-        }
-        count++;
-        break;
-      case MIN:
-        if (count == 0 || val < accumulator) {
-          accumulator = val;
-        }
-        count++;
-        break;
-      default:
-        break;
-      }
-    }
-  }
-
-  uint32_t finalize() {
-    if (type == AVG && count > 0) {
-      return (uint32_t)(accumulator / count);
-    }
-    return (uint32_t)accumulator;
   }
 };
 
 static struct {
-  // Execution state
+
   std::vector<VMInstruction> program;
   uint32_t pc;
   bool halted;
 
-  // Registers
   VMValue registers[REGISTER_COUNT];
 
-  // Cursors and schema
   std::unordered_map<uint32_t, VmCursor> cursors;
   std::unordered_map<std::string, Table> tables;
 
-  // Comparison result for Jump opcode
   int32_t compare_result;
 
-  // Output buffer - just a vector of result rows
-  std::vector<std::vector<VMValue*>> output_buffer;
+  std::vector<std::vector<VMValue *>> output_buffer;
 
-  // Single aggregator (since we don't support GROUP BY yet)
   Aggregator aggregator;
 
-  // Transaction state
   bool in_transaction;
 } VM = {};
-
-// VmCursor implementation
-uint8_t *VmCursor::column(uint32_t col_index) {
-  if (col_index == 0) {
-    // Column 0 is the key, caller should use key() instead
-    return nullptr;
-  }
-
-  uint8_t *record = bt_cursor_read(&bt_cursor);
-  return record + this->column_offsets[col_index];
-}
-
-const uint8_t *VmCursor::key() {
-  return bt_cursor_get_key(&bt_cursor);
-}
 
 // Helper to allocate and copy data to arena
 static uint8_t *arena_copy_data(const uint8_t *src, uint32_t size) {
@@ -129,7 +93,7 @@ void vm_init() {
   VM.compare_result = 0;
   VM.in_transaction = false;
   VM.output_buffer.clear();
-  VM.aggregator.reset(Aggregator::NONE);
+  VM.aggregator.reset();
 }
 
 void vm_reset() {
@@ -150,14 +114,14 @@ void vm_reset() {
   VM.output_buffer.clear();
 
   // Reset aggregator
-  VM.aggregator.reset(Aggregator::NONE);
+  VM.aggregator.reset();
 
   // Reset arena for next execution
   arena_reset();
 }
 
 // Get results from buffer
-std::vector<std::vector<VMValue*>> vm_get_results() {
+std::vector<std::vector<VMValue *>> vm_get_results() {
   return VM.output_buffer;
 }
 
@@ -234,14 +198,7 @@ bool vm_step() {
 
     VmCursor &cursor = VM.cursors[cursor_id];
 
-    cursor.record_size = 0;
-    // column 0 is key
-    for (uint32_t i = 1; i < table->schema.columns.size(); i++) {
-      cursor.column_offsets[i] = cursor.record_size;
-      cursor.record_size += table->schema.columns[i].type;
-    }
-
-    cursor.bt_cursor = bt_cursor_create(&table->tree);
+    cursor.bt_cursor.tree = &table->tree;
     cursor.schema = &table->schema;
     cursor.is_index = false;
 
@@ -349,17 +306,10 @@ bool vm_step() {
     VmCursor *cursor = &it->second;
     uint32_t col_index = inst->p2;
 
-    if (col_index == 0) {
-      // Column 0 is the key
-      const uint8_t *key_data = cursor->key();
-      DataType type = cursor->column_type(0);
-      vm_set_value(&VM.registers[inst->p3], type, key_data);
-    } else {
-      // Other columns come from record
-      uint8_t *col_data = cursor->column(col_index);
-      DataType type = cursor->column_type(col_index);
-      vm_set_value(&VM.registers[inst->p3], type, col_data);
-    }
+    // Other columns come from record
+    uint8_t *col_data = vb_column(cursor, col_index);
+    DataType type = vb_column_type(cursor, col_index);
+    vm_set_value(&VM.registers[inst->p3], type, col_data);
 
     VM.pc++;
     return true;
@@ -372,8 +322,8 @@ bool vm_step() {
     }
 
     VmCursor *cursor = &it->second;
-    const uint8_t *key_data = cursor->key();
-    DataType type = cursor->column_type(0);
+    const uint8_t *key_data = vb_key(cursor);
+    DataType type = vb_key_type(cursor);
     vm_set_value(&VM.registers[inst->p2], type, key_data);
 
     VM.pc++;
@@ -524,7 +474,7 @@ bool vm_step() {
 
   case OP_ResultRow: {
     // Add row to output buffer
-    std::vector<VMValue*> row;
+    std::vector<VMValue *> row;
     for (int i = 0; i < inst->p2; i++) {
       row.push_back(&VM.registers[inst->p1 + i]);
     }
@@ -539,11 +489,10 @@ bool vm_step() {
     uint32_t col = inst->p1;
     bool desc = inst->p2;
 
-    std::sort(VM.output_buffer.begin(),
-              VM.output_buffer.end(),
-              [col, desc](const auto& a, const auto& b) {
-                  int cmp_result = cmp(a[col]->type, a[col]->data, b[col]->data);
-                  return desc ? (cmp_result > 0) : (cmp_result < 0);
+    std::sort(VM.output_buffer.begin(), VM.output_buffer.end(),
+              [col, desc](const auto &a, const auto &b) {
+                int cmp_result = cmp(a[col]->type, a[col]->data, b[col]->data);
+                return desc ? (cmp_result > 0) : (cmp_result < 0);
               });
     VM.pc++;
     return true;
@@ -556,35 +505,70 @@ bool vm_step() {
     return true;
   }
 
-  case OP_AggReset: {
-    Aggregator::Type type = Aggregator::Type(inst->p1);
-    VM.aggregator.reset(type);
-    VM.pc++;
-    return true;
-  }
-
   case OP_AggStep: {
     // P1 = value register (or -1 for COUNT)
+    VMValue *value = nullptr;
     if (inst->p1 >= 0) {
-      VM.aggregator.step(&VM.registers[inst->p1]);
-    } else {
-      // For COUNT, just pass nullptr
-      VM.aggregator.step(nullptr);
+      value = (&VM.registers[inst->p1]);
     }
+    Aggregator &aggr = VM.aggregator;
+
+    if (aggr.type == Aggregator::COUNT) {
+      aggr.accumulator++;
+      aggr.count++;
+    } else if (value && value->type == TYPE_INT32) {
+      uint32_t val = *(uint32_t *)value->data;
+      switch (aggr.type) {
+      case Aggregator::SUM:
+      case Aggregator::AVG:
+        aggr.accumulator += val;
+        aggr.count++;
+        break;
+      case Aggregator::MAX:
+        if (aggr.count == 0 || val > aggr.accumulator) {
+          aggr.accumulator = val;
+        }
+        aggr.count++;
+        break;
+      case Aggregator::MIN:
+        if (aggr.count == 0 || val < aggr.accumulator) {
+          aggr.accumulator = val;
+        }
+        aggr.count++;
+        break;
+      default:
+
+        break;
+      }
+    }
+
     VM.pc++;
     return true;
   }
 
   case OP_AggFinal: {
     // P1 = output register
-    uint32_t result = VM.aggregator.finalize();
+
+    uint32_t result;
+    if (VM.aggregator.type == Aggregator::AVG && VM.aggregator.count > 0) {
+      result = (uint32_t)(VM.aggregator.accumulator / VM.aggregator.count);
+    } else {
+      result = (uint32_t)VM.aggregator.accumulator;
+    }
+
     vm_set_value(&VM.registers[inst->p1], TYPE_INT32, &result);
-    VM.aggregator.reset(Aggregator::NONE);
+
+    VM.aggregator.type = Aggregator::NONE;
+    VM.aggregator.accumulator = 0;
+    VM.aggregator.count = 0;
+
     VM.pc++;
     return true;
   }
 
-  case OP_CreateTable: {
+  case OP_CreateTable:
+
+  {
     TableSchema *schema = (TableSchema *)inst->p4;
 
     if (VM.tables.find(schema->table_name) != VM.tables.end()) {
@@ -595,30 +579,17 @@ bool vm_step() {
     Table new_table;
     new_table.schema = *schema;
 
-    uint32_t record_size = new_table.schema.record_size();
+    new_table.schema.record_size = 0;
+    // column 0 is key
+    for (uint32_t i = 1; i < new_table.schema.columns.size(); i++) {
+      new_table.schema.column_offsets[i] = new_table.schema.record_size = 0;
+      new_table.schema.record_size += new_table.schema.columns[i].type;
+    }
 
-    new_table.tree = bt_create(schema->key_type(), record_size, BPLUS);
+    new_table.tree = bt_create(new_table.schema.key_type(),
+                               new_table.schema.record_size, BPLUS);
 
     VM.tables[schema->table_name] = new_table;
-    VM.pc++;
-    return true;
-  }
-
-  case OP_DropTable: {
-    char *table_name = (char *)inst->p4;
-
-    if (!HAS(tables, table_name)) {
-      return false;
-    }
-
-    Table *table = &GET(tables, table_name);
-    bt_clear(&table->tree);
-
-    for (auto [col, index] : table->indexes) {
-      bt_clear(&index.tree);
-    }
-
-    VM.tables.erase(table_name);
     VM.pc++;
     return true;
   }
@@ -647,23 +618,29 @@ bool vm_step() {
     return true;
   }
 
+  case OP_DropTable:
   case OP_DropIndex: {
     char *table_name = (char *)inst->p4;
     uint32_t column = inst->p1;
 
-    if (!HAS(tables, table_name)) {
+    if (VM.tables.find(table_name) != VM.tables.end()) {
       return false;
     }
+    Table *table = &VM.tables[table_name];
+    if (column == 0) {
+      bt_clear(&table->tree);
+      for (auto [col, index] : table->indexes) {
+        bt_clear(&index.tree);
+      }
+    } else {
+      if (table->indexes.find(column) == table->indexes.end()) {
+        return false;
+      }
 
-    Table *table = &GET(tables, table_name);
-
-    if (table->indexes.find(column) == table->indexes.end()) {
-      return false;
+      Index *index = &table->indexes[column];
+      bt_clear(&index->tree);
+      table->indexes.erase(column);
     }
-
-    Index *index = &table->indexes[column];
-    bt_clear(&index->tree);
-    table->indexes.erase(column);
 
     VM.pc++;
     return true;

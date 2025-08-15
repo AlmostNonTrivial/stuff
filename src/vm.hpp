@@ -119,50 +119,23 @@ struct ColumnInfo {
 
 struct TableSchema {
   std::string table_name;
+  uint32_t record_size;
   std::vector<ColumnInfo> columns;
+  std::vector<uint32_t> column_offsets;
 
   DataType key_type() const { return columns[0].type; }
 
-  uint32_t record_size() const {
-    uint32_t size = 0;
-    // Skip key (column 0), only count record columns
-    for (size_t i = 1; i < columns.size(); i++) {
-      size += columns[i].type;
-    }
-    return size;
-  }
 };
 
 struct Index {
-  BPlusTree tree;
+  BTree tree;
 };
 
 struct Table {
   TableSchema schema;
-  BPlusTree tree;
+  BTree tree;
   std::unordered_map<uint32_t, Index> indexes;
 };
-
-// VM cursor wraps btree cursor with schema info
-struct VmCursor {
-  BtCursor bt_cursor;
-  TableSchema *schema;
-  std::vector<uint32_t> column_offsets;
-  uint32_t record_size;
-  bool is_index;
-
-  // Get column data from record (non-key columns)
-  uint8_t *column(uint32_t col_index);
-
-  // Get key data
-  const uint8_t *key();
-
-  // Get column type
-  DataType column_type(uint32_t col_index) const {
-    return schema->columns[col_index].type;
-  }
-};
-
 #define REGISTER_COUNT 100
 
 // VM execution
@@ -170,4 +143,3 @@ void vm_init();
 void vm_reset();
 bool vm_execute(std::vector<VMInstruction> &instructions);
 bool vm_step();
-void vm_set_result_callback(void (*callback)(VMValue **, uint32_t));
