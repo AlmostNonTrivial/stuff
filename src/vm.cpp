@@ -231,6 +231,7 @@ bool vm_step() {
   case OP_OpenRead:
   case OP_OpenWrite: {
     const char *table_name = (const char *)inst->p4;
+    uint32_t index_column = inst->p3; // 0 if on table;
 
     auto it = VM.tables.find(table_name);
     if (it == VM.tables.end()) {
@@ -238,11 +239,21 @@ bool vm_step() {
     }
 
     Table *table = &it->second;
-    uint32_t cursor_id = inst->p2; // CHANGED from p1 to p2
-
+    uint32_t cursor_id = inst->p2;
     VmCursor &cursor = VM.cursors[cursor_id];
 
-    cursor.btree_cursor.tree = &table->tree;
+    if (index_column != 0) {
+      if (table->indexes.find(index_column) == table->indexes.end()) {
+        return false;
+      }
+
+      cursor.btree_cursor.tree = &table->indexes[index_column].tree;
+
+    } else {
+      cursor.btree_cursor.tree = &table->tree;
+    }
+
+    // NEED to have a schema for the index
     cursor.schema = &table->schema;
     cursor.is_index = false;
 
@@ -365,11 +376,13 @@ bool vm_step() {
 
   case OP_MakeRecord: {
     // P1 = starting register
-    // P2 = number of columns (excluding key)
+    // P2 = number of columns (including key)
     // P3 = destination register
 
+
+    // start at i == 1, so we don't include the key
     uint32_t total_size = 0;
-    for (int i = 0; i < inst->p2; i++) {
+    for (int i = 1; i < inst->p2; i++) {
       VMValue *val = &VM.registers[inst->p1 + i];
       total_size += VMValue::get_size(val->type);
     }
@@ -378,15 +391,13 @@ bool vm_step() {
 
     uint32_t offset = 0;
 
-    for (int i = 0; i < inst->p2; i++) {
+    for (int i = 1; i < inst->p2; i++) {
       VMValue *val = &VM.registers[inst->p1 + i];
-      // debug_type(val->data, val->type);
       uint32_t size = VMValue::get_size(val->type);
       memcpy(record + offset, val->data, size);
       offset += size;
     }
 
-    // print_record(record, &VM.tables["Master"].schema);
 
     VM.registers[inst->p3].type = TYPE_INT32; // Store as blob
     VM.registers[inst->p3].data = record;

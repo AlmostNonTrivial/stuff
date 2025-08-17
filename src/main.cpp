@@ -60,7 +60,7 @@ int main() {
 
   const char *commit = "COMMIT;";
 
-  const char *select = "SELECT * FROM Master;";
+  const char *select = "SELECT * FROM Master WHERE name = 'nike';";
 
   arena_reset();
 
