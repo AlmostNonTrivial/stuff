@@ -19,27 +19,7 @@ struct BTree {
   TreeType tree_type;
 };
 
-#define NODE_HEADER_SIZE 24
 
-// B+Tree node structure - fits in a single page
-struct BTreeNode {
-  // Node header (24 bytes)
-  uint32_t index;     // Page index
-  uint32_t parent;    // Parent page index (0 if root)
-  uint32_t next;      // Next sibling (for leaf nodes)
-  uint32_t previous;  // Previous sibling (for leaf nodes)
-  uint32_t num_keys;  // Number of keys in this node
-  uint8_t is_leaf;    // 1 if leaf, 0 if internal
-  uint8_t padding[3]; // Alignment padding (increased due to max_keys removal)
-  // 24 bytes ^
-  // Data area - stores keys, children pointers, and data
-  // Layout for internal nodes: [keys][children]
-  // Layout for leaf nodes: [keys][records]
-  uint8_t data[PAGE_SIZE - NODE_HEADER_SIZE]; // Rest of the page (4064 bytes)
-};
-
-static_assert(sizeof(BTreeNode) == PAGE_SIZE,
-              "BTreeNode must be exactly PAGE_SIZE");
 
 BTree bt_create(DataType key, uint32_t record_size, TreeType tree_type);
 bool bt_clear(BTree *tree);
@@ -51,11 +31,12 @@ enum CursorState : uint32_t {
   CURSOR_FAULT = 3
 };
 
+#define MAX_BTREE_DEPTH 16
 
 struct CursorPath {
-    uint32_t page_stack[16];  // Page indexes
-    uint32_t index_stack[16]; // Key indexes within each page
-    uint32_t child_stack[16]; // Child position we came from
+    uint32_t page_stack[MAX_BTREE_DEPTH];  // Page indexes
+    uint32_t index_stack[MAX_BTREE_DEPTH]; // Key indexes within each page
+    uint32_t child_stack[MAX_BTREE_DEPTH]; // Child position we came from
     uint32_t stack_depth;
     uint32_t current_page;
     uint32_t current_index;
