@@ -634,10 +634,14 @@ std::vector<VMInstruction> parse_sql(const char* sql) {
         // && parser.current_type != TOK_EOF
         ) {
         parser.error_msg = "Expected semicolon";
+        PRINT "FAILED";
+        exit(1);
         return {};
     }
 
     if (parser.error_msg) {
+
+        PRINT "FAILED";
         // Could add error reporting here
         return {};
     }

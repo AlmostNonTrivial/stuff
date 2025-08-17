@@ -173,8 +173,7 @@ std::vector<VMInstruction> build_drop_index(const std::string &index_name) {
   char *name = (char *)arena_alloc(index_name.size() + 1);
   strcpy(name, index_name.c_str());
 
-  // NOTE: VM mismatch - DropIndex expects column_index in P1 but we're using it for table name
-  return {{OP_DropIndex, 0, 0, 0, name, 0}, make_halt()};
+  return {make_drop_index(0, name), make_halt()};
 }
 
 // Create index
@@ -191,12 +190,9 @@ std::vector<VMInstruction> build_create_index(const std::string &table_name,
   char *table_name_str = (char *)arena_alloc(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
-  // NOTE: VM mismatch - CreateIndex params don't match expected format
-  instructions.push_back({OP_CreateIndex, 0, (int32_t)column_index, (int32_t)key_type, table_name_str, 0});
-
-  // NOTE: VM mismatch - OpenRead expects cursor_id in P1 but builder puts it in P2
-  instructions.push_back({OP_OpenRead, 0, table_cursor_id, 0, table_name_str, 0});
-  instructions.push_back({OP_OpenWrite, 0, index_cursor_id, (int32_t)column_index, table_name_str, 0});
+  instructions.push_back(make_create_index(column_index, table_name_str));
+  instructions.push_back(make_open_read(table_cursor_id, table_name_str));
+  instructions.push_back(make_open_write(index_cursor_id, table_name_str, column_index));
 
   instructions.push_back(make_rewind_label(table_cursor_id, "end"));
 
@@ -244,12 +240,11 @@ std::vector<VMInstruction> build_insert(const std::string &table_name,
   char *table_name_str = (char *)arena_alloc(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
-  // NOTE: VM mismatch - OpenWrite expects cursor_id in P1 but we're using P2 format
-  instructions.push_back({OP_OpenWrite, 0, table_cursor_id, 0, table_name_str, 0});
+  instructions.push_back(make_open_write(table_cursor_id, table_name_str));
 
   // Open index cursors
   for (const auto &[col_idx, idx_pair] : indexes_to_insert) {
-    instructions.push_back({OP_OpenWrite, 0, idx_pair.second, (int32_t)col_idx, table_name_str, 0});
+    instructions.push_back(make_open_write(idx_pair.second, table_name_str, col_idx));
   }
 
   // Load values
@@ -353,8 +348,7 @@ aggregate(const std::string &table_name, const char *agg_func,
   char *table_name_str = (char *)arena_alloc(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
-  // NOTE: VM mismatch - OpenRead expects cursor_id in P1
-  instructions.push_back({OP_OpenRead, 0, cursor_id, 0, table_name_str, 0});
+  instructions.push_back(make_open_read(cursor_id, table_name_str));
   instructions.push_back(make_agg_reset(agg_func));
 
   int rewind_jump = 6 + (strcmp(agg_func, "COUNT") == 0 ? 0 : 1);
@@ -613,10 +607,11 @@ std::vector<VMInstruction> build_full_table_scan_operation(
   char *table_name_str = (char *)arena_alloc(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
-  // NOTE: VM mismatch - OpenRead/OpenWrite expect cursor_id in P1
-  OpCode open_op = (operation == UnifiedOptions::SELECT ||
-                    operation == UnifiedOptions::AGGREGATE) ? OP_OpenRead : OP_OpenWrite;
-  instructions.push_back({open_op, 0, cursor_id, 0, table_name_str, 0});
+  if (operation == UnifiedOptions::SELECT || operation == UnifiedOptions::AGGREGATE) {
+    instructions.push_back(make_open_read(cursor_id, table_name_str));
+  } else {
+    instructions.push_back(make_open_write(cursor_id, table_name_str));
+  }
 
   // Initialize aggregate if needed
   int agg_reg = -1;
@@ -729,10 +724,11 @@ std::vector<VMInstruction> build_direct_rowid_operation(
   char *table_name_str = (char *)arena_alloc(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
-  // NOTE: VM mismatch - OpenRead/OpenWrite expect cursor_id in P1
-  OpCode open_op = (operation == UnifiedOptions::SELECT ||
-                    operation == UnifiedOptions::AGGREGATE) ? OP_OpenRead : OP_OpenWrite;
-  instructions.push_back({open_op, 0, cursor_id, 0, table_name_str, 0});
+  if (operation == UnifiedOptions::SELECT || operation == UnifiedOptions::AGGREGATE) {
+    instructions.push_back(make_open_read(cursor_id, table_name_str));
+  } else {
+    instructions.push_back(make_open_write(cursor_id, table_name_str));
+  }
 
   int agg_reg = -1;
   if (operation == UnifiedOptions::AGGREGATE) {
@@ -749,15 +745,14 @@ std::vector<VMInstruction> build_direct_rowid_operation(
     }
 
     for (const auto &[ci, idx_pair] : indexes_to_update) {
-      instructions.push_back({OP_OpenWrite, 0, idx_pair.second, (int32_t)ci, table_name_str, 0});
+      instructions.push_back(make_open_write(idx_pair.second, table_name_str, ci));
     }
   }
 
   int rowid_reg = regs.get("rowid_value");
   load_value(instructions, primary_condition.value, rowid_reg);
 
-  // NOTE: VM mismatch - SeekEQ expects key in P3 not P2
-  instructions.push_back({OP_SeekEQ, cursor_id, rowid_reg, -1, (void*)"end", 0});
+  instructions.push_back(make_seek_eq_label(cursor_id, rowid_reg, "end"));
 
   build_where_checks(instructions, cursor_id, remaining_conditions, "end", regs);
 
@@ -801,8 +796,7 @@ std::vector<VMInstruction> build_direct_rowid_operation(
 
       if (indexes_to_update.find(i) != indexes_to_update.end()) {
         const auto &idx_pair = indexes_to_update[i];
-        // NOTE: VM mismatch - SeekEQ expects key in P3
-        instructions.push_back({OP_SeekEQ, idx_pair.second, col_reg, -1, (void*)"end", 0});
+        instructions.push_back(make_seek_eq_label(idx_pair.second, col_reg, "end"));
       }
     }
 
@@ -864,11 +858,13 @@ std::vector<VMInstruction> build_index_scan_operation(
   char *table_name_str = (char *)arena_alloc(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
-  // NOTE: VM mismatch - OpenRead/OpenWrite expect cursor_id in P1
-  OpCode open_op = (operation == UnifiedOptions::SELECT ||
-                    operation == UnifiedOptions::AGGREGATE) ? OP_OpenRead : OP_OpenWrite;
-  instructions.push_back({open_op, 0, index_cursor_id, (int32_t)index_condition.column_index, table_name_str, 0});
-  instructions.push_back({open_op, 0, table_cursor_id, 0, table_name_str, 0});
+  if (operation == UnifiedOptions::SELECT || operation == UnifiedOptions::AGGREGATE) {
+    instructions.push_back(make_open_read(index_cursor_id, table_name_str));
+    instructions.push_back(make_open_read(table_cursor_id, table_name_str));
+  } else {
+    instructions.push_back(make_open_write(index_cursor_id, table_name_str, index_condition.column_index));
+    instructions.push_back(make_open_write(table_cursor_id, table_name_str));
+  }
 
   int agg_reg = -1;
   if (operation == UnifiedOptions::AGGREGATE) {
@@ -885,8 +881,7 @@ std::vector<VMInstruction> build_index_scan_operation(
       auto info = table.schema.columns[column];
       if (column != index_col) {
         indexes_to_update[column] = {index, ii++};
-        instructions.push_back({OP_OpenWrite, 0, indexes_to_update[column].second,
-                               (int32_t)column, table_name_str, 0});
+        instructions.push_back(make_open_write(indexes_to_update[column].second, table_name_str, column));
       }
     }
   }
@@ -894,25 +889,25 @@ std::vector<VMInstruction> build_index_scan_operation(
   int index_key_reg = regs.get("index_key");
   load_value(instructions, index_condition.value, index_key_reg);
 
-  // Build seek based on operator type - NOTE: VM mismatch with key position
+  // Build seek based on operator type
   switch(index_condition.operator_type) {
     case EQ:
-      instructions.push_back({OP_SeekEQ, index_cursor_id, index_key_reg, -1, (void*)"end", 0});
+      instructions.push_back(make_seek_eq_label(index_cursor_id, index_key_reg, "end"));
       break;
     case GE:
-      instructions.push_back({OP_SeekGE, index_cursor_id, index_key_reg, -1, (void*)"end", 0});
+      instructions.push_back(make_seek_ge_label(index_cursor_id, index_key_reg, "end"));
       break;
     case GT:
-      instructions.push_back({OP_SeekGT, index_cursor_id, index_key_reg, -1, (void*)"end", 0});
+      instructions.push_back(make_seek_gt_label(index_cursor_id, index_key_reg, "end"));
       break;
     case LE:
-      instructions.push_back({OP_SeekLE, index_cursor_id, index_key_reg, -1, (void*)"end", 0});
+      instructions.push_back(make_seek_le_label(index_cursor_id, index_key_reg, "end"));
       break;
     case LT:
-      instructions.push_back({OP_SeekLT, index_cursor_id, index_key_reg, -1, (void*)"end", 0});
+      instructions.push_back(make_seek_lt_label(index_cursor_id, index_key_reg, "end"));
       break;
     default:
-      instructions.push_back({OP_SeekEQ, index_cursor_id, index_key_reg, -1, (void*)"end", 0});
+      instructions.push_back(make_seek_eq_label(index_cursor_id, index_key_reg, "end"));
   }
 
   labels["loop_start"] = instructions.size();
@@ -945,8 +940,7 @@ std::vector<VMInstruction> build_index_scan_operation(
   int rowid_reg = regs.get("rowid");
   instructions.push_back(make_column(index_cursor_id, 0, rowid_reg));
 
-  // NOTE: VM mismatch - SeekEQ expects key in P3
-  instructions.push_back({OP_SeekEQ, table_cursor_id, rowid_reg, -1, (void*)"next_iteration", 0});
+  instructions.push_back(make_seek_eq_label(table_cursor_id, rowid_reg, "next_iteration"));
 
   build_where_checks(instructions, table_cursor_id, remaining_conditions, "next_iteration", regs);
 
@@ -991,8 +985,7 @@ std::vector<VMInstruction> build_index_scan_operation(
       if (indexes_to_update.find(i) != indexes_to_update.end()) {
         const auto &idx_pair = indexes_to_update[i];
         if (idx_pair.second != index_cursor_id) {
-          // NOTE: VM mismatch - SeekEQ expects key in P3
-          instructions.push_back({OP_SeekEQ, idx_pair.second, col_reg, -1, (void*)"end", 0});
+          instructions.push_back(make_seek_eq_label(idx_pair.second, col_reg, "end"));
         }
       }
     }
