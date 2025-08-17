@@ -12,11 +12,10 @@
 #include <unordered_map>
 #include <vector>
 
-
-void prec(std::vector<VMValue*> x) {
-    for(auto y : x)  {
-        print_ptr(y->data,  y->type);
-    }
+void prec(std::vector<VMValue *> x) {
+  for (auto y : x) {
+    print_ptr(y->data, y->type);
+  }
 }
 
 /*------------VMCURSOR---------------- */
@@ -39,13 +38,11 @@ uint8_t *vb_column(VmCursor *vb, uint32_t col_index) {
 
   uint8_t *record = btree_cursor_record(&vb->btree_cursor);
 
+  auto col = record + vb->schema->column_offsets[col_index];
 
-auto col = record + vb->schema->column_offsets[col_index];
+  // debug_type(col, vb->schema->columns[col_index].type);
 
-// debug_type(col, vb->schema->columns[col_index].type);
-
-
-return col;
+  return col;
 }
 
 uint8_t *vb_key(VmCursor *vb) { return vb_column(vb, 0); }
@@ -79,28 +76,27 @@ static struct {
 
   int32_t compare_result;
 
-  std::vector<std::vector<VMValue >> output_buffer;
+  std::vector<std::vector<VMValue>> output_buffer;
 
   Aggregator aggregator;
 
   bool in_transaction;
 } VM = {};
 
-
-
-Table& vm_get_table(const std::string&name){
-   if(VM.tables.find(name)!= VM.tables.end())  {
-       return VM.tables[name];
-   }
-   exit(1);
+Table &vm_get_table(const std::string &name) {
+  if (VM.tables.find(name) != VM.tables.end()) {
+    return VM.tables[name];
+  }
+  exit(1);
 }
 
 std::unordered_map<uint32_t, Index> empty_map;
-std::unordered_map<uint32_t, Index>& vm_get_table_indexes(const std::string&name) {
-    if(VM.tables.find(name)!= VM.tables.end())  {
-        return VM.tables[name].indexes;
-    }
-   return empty_map;
+std::unordered_map<uint32_t, Index> &
+vm_get_table_indexes(const std::string &name) {
+  if (VM.tables.find(name) != VM.tables.end()) {
+    return VM.tables[name].indexes;
+  }
+  return empty_map;
 }
 
 // Helper to allocate and copy data to arena
@@ -119,14 +115,15 @@ static void vm_set_value(VMValue *val, DataType type, const void *data) {
   uint32_t size = VMValue::get_size(type);
 
   // Allocate full size for the type
-  val->data = (uint8_t*)arena_alloc(size);
+  val->data = (uint8_t *)arena_alloc(size);
 
   if (data) {
     if (type == TYPE_VARCHAR32 || type == TYPE_VARCHAR256) {
       // For strings, zero-fill first then copy what we have
       memset(val->data, 0, size);
 
-      // Copy up to size bytes (data should already be properly sized from parser)
+      // Copy up to size bytes (data should already be properly sized from
+      // parser)
       memcpy(val->data, data, size);
     } else {
       // For fixed-size types, just copy
@@ -139,7 +136,7 @@ static void vm_set_value(VMValue *val, DataType type, const void *data) {
 }
 
 void vm_init() {
-    pager_init("db");
+  pager_init("db");
   VM.pc = 0;
   VM.halted = false;
   VM.compare_result = 0;
@@ -167,13 +164,10 @@ void vm_reset() {
 
   // Reset aggregator
   VM.aggregator.reset();
-
 }
 
 // Get results from buffer
-std::vector<std::vector<VMValue >> vm_get_results() {
-  return VM.output_buffer;
-}
+std::vector<std::vector<VMValue>> vm_get_results() { return VM.output_buffer; }
 
 bool vm_execute(std::vector<VMInstruction> &instructions) {
   vm_reset();
@@ -270,8 +264,9 @@ bool vm_step() {
     }
     VmCursor *cursor = &it->second;
 
-    bool valid = inst->opcode == OP_Last ? btree_cursor_last(&cursor->btree_cursor)
-                                         : btree_cursor_first(&cursor->btree_cursor);
+    bool valid = inst->opcode == OP_Last
+                     ? btree_cursor_last(&cursor->btree_cursor)
+                     : btree_cursor_first(&cursor->btree_cursor);
 
     if (!valid) {
       if (inst->p2 > 0) {
@@ -298,7 +293,7 @@ bool vm_step() {
                         : btree_cursor_previous(&cursor->btree_cursor);
 
     if (has_more && inst->p2 > 0) {
-        VM.pc = inst->p2;
+      VM.pc = inst->p2;
     } else {
       VM.pc++;
     }
@@ -354,17 +349,17 @@ bool vm_step() {
     VmCursor *cursor = &it->second;
     uint32_t col_index = inst->p2;
 
-    if(col_index == 0) {
-        const uint8_t *key_data = vb_key(cursor);
-        DataType type = vb_key_type(cursor);
-        vm_set_value(&VM.registers[inst->p3], type, key_data);
+    if (col_index == 0) {
+      const uint8_t *key_data = vb_key(cursor);
+      DataType type = vb_key_type(cursor);
+      vm_set_value(&VM.registers[inst->p3], type, key_data);
+    } else {
+
+      // Other columns come from record
+      uint8_t *col_data = vb_column(cursor, col_index);
+      DataType type = vb_column_type(cursor, col_index);
+      vm_set_value(&VM.registers[inst->p3], type, col_data);
     }
-
-    // Other columns come from record
-    uint8_t *col_data = vb_column(cursor, col_index);
-    DataType type = vb_column_type(cursor, col_index);
-    vm_set_value(&VM.registers[inst->p3], type, col_data);
-
     VM.pc++;
     return true;
   }
@@ -380,11 +375,7 @@ bool vm_step() {
       total_size += VMValue::get_size(val->type);
     }
 
-
     uint8_t *record = (uint8_t *)arena_alloc(total_size);
-
-
-
 
     uint32_t offset = 0;
 
@@ -395,7 +386,6 @@ bool vm_step() {
       memcpy(record + offset, val->data, size);
       offset += size;
     }
-
 
     // print_record(record, &VM.tables["Master"].schema);
 
@@ -522,17 +512,15 @@ bool vm_step() {
 
   case OP_ResultRow: {
     // Add row to output buffer
-    std::vector<VMValue > row;
+    std::vector<VMValue> row;
     for (int i = 0; i < inst->p2; i++) {
-        VMValue copy;
-               copy.type = VM.registers[inst->p1 + i].type;
-               uint32_t size = VMValue::get_size(copy.type);
-               copy.data = (uint8_t*)arena_alloc(size);
-               memcpy(copy.data, VM.registers[inst->p1 + i].data, size);
-               row.push_back(copy);
-
+      VMValue copy;
+      copy.type = VM.registers[inst->p1 + i].type;
+      uint32_t size = VMValue::get_size(copy.type);
+      copy.data = (uint8_t *)arena_alloc(size);
+      memcpy(copy.data, VM.registers[inst->p1 + i].data, size);
+      row.push_back(copy);
     }
-
 
     VM.output_buffer.push_back(row);
     VM.pc++;
@@ -555,12 +543,12 @@ bool vm_step() {
   }
 
   case Op_Flush: {
-      for(auto x : VM.output_buffer) {
-         for(auto y : x)  {
-             print_ptr(y.data,  y.type);
-         }
-         std::cout << "\n";
+    for (auto x : VM.output_buffer) {
+      for (auto y : x) {
+        print_ptr(y.data, y.type);
       }
+      std::cout << "\n";
+    }
     // Clear the output buffer
     VM.output_buffer.clear();
     VM.pc++;
@@ -608,10 +596,9 @@ bool vm_step() {
     return true;
   }
 
-
   case OP_AggReset: {
-      VM.aggregator.reset();
-      return true;
+    VM.aggregator.reset();
+    return true;
   }
 
   case OP_AggFinal: {
@@ -655,7 +642,7 @@ bool vm_step() {
     }
 
     new_table.tree = btree_create(new_table.schema.key_type(),
-                               new_table.schema.record_size, BPLUS);
+                                  new_table.schema.record_size, BPLUS);
 
     VM.tables[schema->table_name] = new_table;
     VM.pc++;
