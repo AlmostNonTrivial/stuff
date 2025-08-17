@@ -414,11 +414,17 @@ bool vm_step() {
     VMValue *key = &VM.registers[inst->p2];
     VMValue *record = &VM.registers[inst->p3];
 
+    bool current_root = cursor->btree_cursor.tree->root_page_index;
+
     bool success =
         btree_cursor_insert(&cursor->btree_cursor, key->data, record->data);
     if (!success) {
       return false;
     }
+
+    bool root_changed =
+        cursor->btree_cursor.tree->root_page_index != current_root;
+    // need to update Master table
 
     VM.pc++;
     return true;
@@ -429,11 +435,15 @@ bool vm_step() {
     if (it == VM.cursors.end()) {
       return false;
     }
-
     VmCursor *cursor = &it->second;
-    if (!btree_cursor_delete(&cursor->btree_cursor)) {
-      return false;
-    }
+
+    uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
+
+    btree_cursor_delete(&cursor->btree_cursor);
+
+    bool root_changed =
+        cursor->btree_cursor.tree->root_page_index != current_root;
+    // need to update Master table
 
     VM.pc++;
     return true;
@@ -448,9 +458,7 @@ bool vm_step() {
     VmCursor *cursor = &it->second;
     VMValue *record = &VM.registers[inst->p2];
 
-    if (!btree_cursor_update(&cursor->btree_cursor, record->data)) {
-      return false;
-    }
+    btree_cursor_update(&cursor->btree_cursor, record->data);
 
     VM.pc++;
     return true;
@@ -704,6 +712,9 @@ bool vm_step() {
     if (VM.tables.find(table_name) != VM.tables.end()) {
       return false;
     }
+
+    // also need to update master table
+
     Table *table = &VM.tables[table_name];
     if (column == 0) {
       btree_clear(&table->tree);

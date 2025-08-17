@@ -3,6 +3,7 @@
 #include "defs.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <unordered_map>
 #include <vector>
 #include "schema.hpp"

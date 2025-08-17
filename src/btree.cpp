@@ -475,6 +475,8 @@ static bool insert(BTree &tree, BTreeNode *node, uint8_t *key,
 }
 
 static void insert_element(BTree &tree, void *key, const uint8_t *data) {
+
+
   if (tree.root_page_index == 0) {
     BTreeNode *root = create_node(tree, true);
     tree.root_page_index = root->index;
@@ -495,6 +497,7 @@ static void insert_element(BTree &tree, void *key, const uint8_t *data) {
       insert(tree, get_root(tree), static_cast<uint8_t *>(key), data);
     }
   }
+
 }
 
 static void do_delete_btree(BTree &tree, BTreeNode *node, const uint8_t *key,
@@ -1236,8 +1239,9 @@ bool btree_cursor_delete(BtCursor *cursor) {
 
 bool btree_cursor_insert(BtCursor *cursor, const void *key,
                       const uint8_t *record) {
+
   insert_element(*cursor->tree, const_cast<void *>(key), record);
-  return btree_cursor_seek(cursor, key);
+  return true;
 }
 
 bool btree_cursor_update(BtCursor *cursor, const uint8_t *record) {
@@ -1481,7 +1485,7 @@ bool btree_cursor_has_previous(BtCursor *cursor) {
 
 // wrap pager
 
-void btree_init(const char*filename) {pager_init(filename);}
+bool btree_init(const char*filename) {return pager_init(filename);}
 void btree_begin_transaction() { pager_begin_transaction(); }
 void btree_commit() { pager_commit(); }
 void btree_rollback() { pager_rollback(); }

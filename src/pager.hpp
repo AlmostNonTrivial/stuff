@@ -10,7 +10,7 @@ struct PagerMeta {
   uint32_t total_pages, cached_pages, dirty_pages, free_pages;
 };
 
-void pager_init(const char *filename);
+bool pager_init(const char *filename);
 
 void *pager_get(uint32_t page_index);
 

@@ -360,7 +360,7 @@ static void build_free_pages_set() {
 }
 
 // Public API implementation
-void pager_init(const char *filename) {
+bool pager_init(const char *filename) {
   pager.data_file = filename;
 
   snprintf(pager.journal_file, sizeof(pager.journal_file), "%s-journal",
@@ -386,6 +386,8 @@ void pager_init(const char *filename) {
     pager.root_dirty = true;
     save_root();
   }
+
+  return exists;
 }
 
 void *pager_get(uint32_t page_index) {
