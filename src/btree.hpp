@@ -24,6 +24,12 @@ struct BTree {
 BTree btree_create(DataType key, uint32_t record_size, TreeType tree_type);
 bool btree_clear(BTree *tree);
 
+void btree_init(const char*filename);
+void btree_begin_transaction() ;
+void btree_commit();
+void btree_rollback() ;
+void btree_close();
+
 enum CursorState : uint32_t {
   CURSOR_INVALID = 0,
   CURSOR_VALID = 1,

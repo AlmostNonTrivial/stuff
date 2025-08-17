@@ -74,7 +74,7 @@ static struct {
 
 
 
-Table& vm_get_table(std::string&name){
+Table& vm_get_table(const std::string&name){
    if(VM.tables.find(name)!= VM.tables.end())  {
        return VM.tables[name];
    }
@@ -106,6 +106,7 @@ static void vm_set_value(VMValue *val, DataType type, const void *data) {
 }
 
 void vm_init() {
+    pager_init("db");
   VM.pc = 0;
   VM.halted = false;
   VM.compare_result = 0;
@@ -134,8 +135,6 @@ void vm_reset() {
   // Reset aggregator
   VM.aggregator.reset();
 
-  // Reset arena for next execution
-  arena_reset();
 }
 
 // Get results from buffer
@@ -600,7 +599,7 @@ bool vm_step() {
     new_table.schema.record_size = 0;
     // column 0 is key
     for (uint32_t i = 1; i < new_table.schema.columns.size(); i++) {
-      new_table.schema.column_offsets[i] = new_table.schema.record_size = 0;
+      new_table.schema.column_offsets[i] = new_table.schema.record_size;
       new_table.schema.record_size += new_table.schema.columns[i].type;
     }
 

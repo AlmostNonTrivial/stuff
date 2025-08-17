@@ -139,7 +139,7 @@ static uint32_t binary_search(BTree &tree, BTreeNode *node,
 }
 
 BTree btree_create(DataType key, uint32_t record_size, TreeType tree_type) {
-  BTree tree;
+  BTree tree = {0};
   tree.node_key_size = key;
   tree.tree_type = tree_type;
   tree.record_size = record_size;
@@ -147,6 +147,7 @@ BTree btree_create(DataType key, uint32_t record_size, TreeType tree_type) {
   constexpr uint32_t USABLE_SPACE = PAGE_SIZE - NODE_HEADER_SIZE;
 
   if ((record_size * MIN_ENTRY_COUNT) > USABLE_SPACE) {
+    exit(0);
     tree.tree_type = INVALID;
     return tree;
   }
@@ -1480,8 +1481,8 @@ bool btree_cursor_has_previous(BtCursor *cursor) {
 
 // wrap pager
 
+void btree_init(const char*filename) {pager_init(filename);}
 void btree_begin_transaction() { pager_begin_transaction(); }
 void btree_commit() { pager_commit(); }
-
 void btree_rollback() { pager_rollback(); }
 void btree_close() { pager_close(); }

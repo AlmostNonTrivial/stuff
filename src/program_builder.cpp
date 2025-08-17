@@ -4,6 +4,34 @@
 #include <algorithm>
 #include <cstring>
 
+std::vector<VMInstruction> build_direct_rowid_operation(
+    const std::string &table_name, const std::vector<ColumnInfo> &schema,
+    const std::vector<Pair> &set_columns,
+    const WhereCondition &primary_condition,
+    const std::vector<WhereCondition> &remaining_conditions,
+    RegisterAllocator &regs, UnifiedOptions::Operation operation,
+    bool implicit_begin, std::vector<uint32_t> *select_columns,
+    const char *aggregate_func, uint32_t *aggregate_column);
+
+std::vector<VMInstruction> build_index_scan_operation(
+    const std::string &table_name, const std::vector<ColumnInfo> &schema,
+    const std::vector<Pair> &set_columns, const WhereCondition &index_condition,
+    const std::vector<WhereCondition> &remaining_conditions, uint32_t index_col,
+    RegisterAllocator &regs, UnifiedOptions::Operation operation,
+    bool implicit_begin, std::vector<uint32_t> *select_columns,
+    const char *aggregate_func, uint32_t *aggregate_column);
+
+std::vector<VMInstruction> build_full_table_scan_operation(
+
+    const std::string &table_name, const std::vector<ColumnInfo> &schema,
+    const std::vector<Pair> &set_columns,
+    const std::vector<WhereCondition> &conditions, RegisterAllocator &regs,
+    UnifiedOptions::Operation operation, bool implicit_begin,
+    std::vector<uint32_t> *select_columns, const char *aggregate_func,
+    uint32_t *aggregate_column);
+
+std::vector<VMInstruction>
+update_or_delete_or_select(const UnifiedOptions &options, bool implicit_begin);
 // RegisterAllocator implementation
 int RegisterAllocator::get(const std::string &name) {
   auto it = name_to_register.find(name);
@@ -139,6 +167,7 @@ build_creat_table(const std::string &table_name,
   TableSchema *schema = ARENA_ALLOC(TableSchema);
   schema->table_name = table_name;
   schema->columns = columns;
+  schema->column_offsets.resize(columns.size());
 
   return {{OP_CreateTable, 0, 0, 0, schema, 0}, {OP_Halt, 0, 0, 0, nullptr, 0}};
 }
@@ -185,14 +214,14 @@ std::vector<VMInstruction> build_create_index(const std::string &table_name,
                           .p2 = table_cursor_id,
                           .p3 = 0,
                           .p4 = table_name_str,
-                          .p5 = set_p5(0, P5_CURSOR_TABLE)});
+                          .p5 = 0});
 
   instructions.push_back({.opcode = OP_OpenWrite,
                           .p1 = 0,
                           .p2 = index_cursor_id,
                           .p3 = (int32_t)column_index,
                           .p4 = table_name_str,
-                          .p5 = set_p5(0, P5_CURSOR_INDEX)});
+                          .p5 = 0});
 
   instructions.push_back({.opcode = OP_Rewind,
                           .p1 = table_cursor_id,
@@ -224,7 +253,7 @@ std::vector<VMInstruction> build_create_index(const std::string &table_name,
                           .p2 = column_reg,
                           .p3 = rowid_reg,
                           .p4 = nullptr,
-                          .p5 = set_p5(0, P5_INSERT_INDEX)});
+                          .p5 = 0});
 
   instructions.push_back({.opcode = OP_Next,
                           .p1 = table_cursor_id,
@@ -285,7 +314,7 @@ std::vector<VMInstruction> build_insert(const std::string &table_name,
                           .p2 = table_cursor_id,
                           .p3 = 0,
                           .p4 = table_name_str,
-                          .p5 = set_p5(0, P5_CURSOR_TABLE)});
+                          .p5 = 0});
 
   // Open index cursors
   for (const auto &[col_idx, idx_pair] : indexes_to_insert) {
@@ -294,7 +323,7 @@ std::vector<VMInstruction> build_insert(const std::string &table_name,
                             .p2 = idx_pair.second,
                             .p3 = (int32_t)col_idx,
                             .p4 = table_name_str,
-                            .p5 = set_p5(0, P5_CURSOR_INDEX)});
+                            .p5 = 0});
   }
 
   // Load values
@@ -314,7 +343,7 @@ std::vector<VMInstruction> build_insert(const std::string &table_name,
                               .p2 = reg,
                               .p3 = 0,
                               .p4 = nullptr,
-                              .p5 = set_p5(0, P5_INSERT_INDEX)});
+                              .p5 = 0});
     }
   }
 
@@ -491,8 +520,8 @@ aggregate(const std::string &table_name, const char *agg_func,
 
   if (where_conditions.size() > 0) {
     auto table = vm_get_table(table_name);
-    if (!table)
-      return {};
+    // if (!table)
+    //   return {};
 
     UnifiedOptions options = {.table_name = table_name,
                               .schema = table.schema.columns,
@@ -522,7 +551,7 @@ aggregate(const std::string &table_name, const char *agg_func,
                           .p2 = cursor_id,
                           .p3 = 0,
                           .p4 = table_name_str,
-                          .p5 = P5_CURSOR_TABLE});
+                          .p5 = 0});
 
   instructions.push_back({.opcode = OP_AggReset,
                           .p1 = agg_reg,
@@ -730,7 +759,8 @@ std::vector<VMInstruction> build_delete(const UpdateOptions &options,
 // Build operation implementations (I'll include the full_table_scan as example,
 // others follow similar pattern)
 std::vector<VMInstruction> build_full_table_scan_operation(
-    const std::string &table_name, const std::vector<ColumnInfo> &schema,
+    const std::string &table_name,
+    const std::vector<ColumnInfo> &schema,
     const std::vector<Pair> &set_columns,
     const std::vector<WhereCondition> &conditions, RegisterAllocator &regs,
     UnifiedOptions::Operation operation, bool implicit_begin,
@@ -757,7 +787,7 @@ std::vector<VMInstruction> build_full_table_scan_operation(
                           .p2 = cursor_id,
                           .p3 = 0,
                           .p4 = table_name_str,
-                          .p5 = set_p5(0, P5_CURSOR_TABLE)});
+                          .p5 = 0});
 
   // Initialize aggregate if needed
   int agg_reg = -1;
@@ -969,8 +999,7 @@ std::vector<VMInstruction> build_direct_rowid_operation(
                           .p2 = cursor_id,
                           .p3 = 0,
                           .p4 = table_name_str,
-                          ,
-                          .p5 = set_p5(0, P5_CURSOR_TABLE)});
+                          .p5 = 0});
 
   // Initialize aggregate if needed
   int agg_reg = -1;
@@ -999,7 +1028,7 @@ std::vector<VMInstruction> build_direct_rowid_operation(
                               .p2 = idx_pair.second,
                               .p3 = (int32_t)ci,
                               .p4 = table_name_str,
-                              .p5 = set_p5(0, P5_CURSOR_INDEX)});
+                              .p5 = 0});
     }
   }
 
@@ -1127,14 +1156,14 @@ std::vector<VMInstruction> build_direct_rowid_operation(
                                 .p2 = 0,
                                 .p3 = 0,
                                 .p4 = nullptr,
-                                .p5 = set_p5(0, P5_INSERT_INDEX)});
+                                .p5 = 0});
         // Insert new index entry
         instructions.push_back({.opcode = OP_Insert,
                                 .p1 = idx_pair.second,
                                 .p2 = current_regs[set_col.column_index],
                                 .p3 = rowid_reg,
                                 .p4 = nullptr,
-                                .p5 = set_p5(0, P5_INSERT_INDEX)});
+                                .p5 = 0});
       }
     }
 
@@ -1227,7 +1256,7 @@ std::vector<VMInstruction> build_index_scan_operation(
                           .p2 = index_cursor_id,
                           .p3 = (int32_t)index_condition.column_index,
                           .p4 = table_name_str,
-                          .p5 = set_p5(0, P5_CURSOR_INDEX)});
+                          .p5 = 0});
 
   // Open table cursor
   instructions.push_back({.opcode = (operation == UnifiedOptions::SELECT ||
@@ -1238,7 +1267,7 @@ std::vector<VMInstruction> build_index_scan_operation(
                           .p2 = table_cursor_id,
                           .p3 = 0,
                           .p4 = table_name_str,
-                          .p5 = set_p5(0, P5_CURSOR_TABLE)});
+                          .p5 = 0});
 
   // Initialize aggregate if needed
   int agg_reg = -1;
@@ -1267,7 +1296,7 @@ std::vector<VMInstruction> build_index_scan_operation(
                                 .p2 = indexes_to_update[column].second,
                                 .p3 = (int32_t)column,
                                 .p4 = table_name_str,
-                                .p5 = set_p5(0, P5_CURSOR_INDEX)});
+                                .p5 = 0});
       }
     }
   }
@@ -1436,14 +1465,14 @@ std::vector<VMInstruction> build_index_scan_operation(
                                 .p2 = 0,
                                 .p3 = 0,
                                 .p4 = nullptr,
-                                .p5 = set_p5(0, P5_INSERT_INDEX)});
+                                .p5 = 0});
         // Insert new index entry
         instructions.push_back({.opcode = OP_Insert,
                                 .p1 = idx_pair.second,
                                 .p2 = current_regs[set_col.column_index],
                                 .p3 = rowid_reg,
                                 .p4 = nullptr,
-                                .p5 = set_p5(0, P5_INSERT_INDEX)});
+                                .p5 = 0});
       }
     }
 

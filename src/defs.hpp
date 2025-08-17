@@ -2,7 +2,7 @@
 
 #include <iostream>
 #include <cstdint>
-#define PAGE_SIZE 512
+#define PAGE_SIZE 1024
 
 enum DataType : uint32_t {
 

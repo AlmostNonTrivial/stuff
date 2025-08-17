@@ -1,305 +1,627 @@
-// src/parser.cpp
+
 #include "parser.hpp"
+#include "program_builder.hpp"
 #include "arena.hpp"
+#include "vm.hpp"
 #include <cstring>
 #include <cctype>
 
-static Token next_token(Parser* p);
+// Forward declarations
 static void advance(Parser* p);
 static bool expect(Parser* p, TokenType type);
-static SelectStmt* parse_select(Parser* p);
-static InsertStmt* parse_insert(Parser* p);
-static UpdateStmt* parse_update(Parser* p);
-static DeleteStmt* parse_delete(Parser* p);
-static CreateTableStmt* parse_create_table(Parser* p);
-static Expr* parse_expression(Parser* p);
-static Expr* parse_or_expr(Parser* p);
-static Expr* parse_and_expr(Parser* p);
-static Expr* parse_comparison(Parser* p);
-static Expr* parse_primary(Parser* p);
+static bool match(Parser* p, TokenType type);
+static std::vector<VMInstruction> parse_statement(Parser* p);
+static std::vector<VMInstruction> parse_select(Parser* p);
+static std::vector<VMInstruction> parse_insert(Parser* p);
+static std::vector<VMInstruction> parse_update(Parser* p);
+static std::vector<VMInstruction> parse_delete(Parser* p);
+static std::vector<VMInstruction> parse_create(Parser* p);
+static WhereCondition parse_condition(Parser* p);
+static std::vector<WhereCondition> parse_where_clause(Parser* p);
 
-void parser_init(Parser* p, const char* sql) {
-    p->input = sql;
-    p->pos = 0;
-    p->len = strlen(sql);
-    p->current = next_token(p);
-    p->lookahead = next_token(p);
-}
 
-ParsedSQL* parse_sql(Parser* p) {
-    ParsedSQL* result = ARENA_ALLOC(ParsedSQL);
 
-    switch (p->current.type) {
-    case TOK_SELECT:
-        result->type = STMT_SELECT;
-        result->stmt = parse_select(p);
-        break;
-    case TOK_INSERT:
-        result->type = STMT_INSERT;
-        result->stmt = parse_insert(p);
-        break;
-    case TOK_UPDATE:
-        result->type = STMT_UPDATE;
-        result->stmt = parse_update(p);
-        break;
-    case TOK_DELETE:
-        result->type = STMT_DELETE;
-        result->stmt = parse_delete(p);
-        break;
-    case TOK_CREATE:
-        advance(p);
-        if (p->current.type == TOK_TABLE) {
-            result->type = STMT_CREATE_TABLE;
-            result->stmt = parse_create_table(p);
-        } else if (p->current.type == TOK_INDEX) {
-            result->type = STMT_CREATE_INDEX;
-            result->stmt = parse_create_index(p);
-        }
-        break;
-    case TOK_BEGIN:
-        result->type = STMT_BEGIN;
-        result->stmt = nullptr;
-        advance(p);
-        break;
-    case TOK_COMMIT:
-        result->type = STMT_COMMIT;
-        result->stmt = nullptr;
-        advance(p);
-        break;
-    case TOK_ROLLBACK:
-        result->type = STMT_ROLLBACK;
-        result->stmt = nullptr;
-        advance(p);
-        break;
-    }
 
-    expect(p, TOK_SEMICOLON);
-    return result;
-}
 
-static SelectStmt* parse_select(Parser* p) {
-    SelectStmt* stmt = ARENA_ALLOC(SelectStmt);
-    memset(stmt, 0, sizeof(SelectStmt));
 
-    expect(p, TOK_SELECT);
+// Token lookup table for keywords
+struct Keyword {
+    const char* str;
+    TokenType type;
+};
 
-    // Check for aggregate or columns
-    if (is_aggregate(p->current.type)) {
-        stmt->aggregate = p->current.start;
-        advance(p);
-        expect(p, TOK_LPAREN);
-        expect(p, TOK_STAR);
-        expect(p, TOK_RPAREN);
-    } else if (p->current.type == TOK_STAR) {
-        advance(p);
-        stmt->columns = nullptr;  // SELECT *
-    } else {
-        // Parse column list
-        uint32_t capacity = 8;
-        stmt->columns = ARENA_ALLOC_ARRAY(ColumnRef, capacity);
-        stmt->column_count = 0;
+static const Keyword keywords[] = {
+    {"SELECT", TOK_SELECT}, {"FROM", TOK_FROM}, {"WHERE", TOK_WHERE},
+    {"ORDER", TOK_ORDER}, {"BY", TOK_BY}, {"INSERT", TOK_INSERT},
+    {"INTO", TOK_INTO}, {"VALUES", TOK_VALUES}, {"UPDATE", TOK_UPDATE},
+    {"SET", TOK_SET}, {"DELETE", TOK_DELETE}, {"CREATE", TOK_CREATE},
+    {"TABLE", TOK_TABLE}, {"INDEX", TOK_INDEX}, {"ON", TOK_ON},
+    {"BEGIN", TOK_BEGIN}, {"COMMIT", TOK_COMMIT}, {"ROLLBACK", TOK_ROLLBACK},
+    {"AND", TOK_AND}, {"OR", TOK_OR}, {"ASC", TOK_ASC}, {"DESC", TOK_DESC},
+    {"COUNT", TOK_COUNT}, {"MIN", TOK_MIN}, {"MAX", TOK_MAX},
+    {"SUM", TOK_SUM}, {"AVG", TOK_AVG},
+    {nullptr, TOK_EOF}
+};
 
-        do {
-            if (stmt->column_count >= capacity) {
-                // In real code, would need to handle reallocation
-                break;
-            }
-
-            if (p->current.type != TOK_IDENTIFIER) break;
-
-            stmt->columns[stmt->column_count].name = p->current.start;
-            stmt->columns[stmt->column_count].name_len = p->current.length;
-            stmt->column_count++;
-            advance(p);
-
-            if (p->current.type == TOK_COMMA) {
-                advance(p);
-            } else {
-                break;
-            }
-        } while (true);
-    }
-
-    expect(p, TOK_FROM);
-
-    if (p->current.type != TOK_IDENTIFIER) {
-        return nullptr;  // Error
-    }
-
-    stmt->table = p->current.start;
-    stmt->table_len = p->current.length;
-    advance(p);
-
-    // Optional WHERE
-    if (p->current.type == TOK_WHERE) {
-        advance(p);
-        stmt->where = parse_expression(p);
-    }
-
-    // Optional ORDER BY
-    if (p->current.type == TOK_ORDER) {
-        advance(p);
-        expect(p, TOK_BY);
-
-        if (p->current.type != TOK_IDENTIFIER) {
-            return nullptr;
-        }
-
-        stmt->order_by_column = p->current.start;
-        stmt->order_by_len = p->current.length;
-        advance(p);
-
-        stmt->order_asc = true;
-        if (p->current.type == TOK_DESC) {
-            stmt->order_asc = false;
-            advance(p);
-        } else if (p->current.type == TOK_ASC) {
-            advance(p);
-        }
-    }
-
-    return stmt;
-}
-
-static Expr* parse_primary(Parser* p) {
-    Expr* expr = ARENA_ALLOC(Expr);
-
-    switch (p->current.type) {
-    case TOK_IDENTIFIER:
-        expr->type = EXPR_COLUMN;
-        expr->column.name = p->current.start;
-        expr->column.name_len = p->current.length;
-        advance(p);
-        break;
-
-    case TOK_INTEGER:
-        expr->type = EXPR_LITERAL_INT;
-        expr->int_lit.value = p->current.int_value;
-        advance(p);
-        break;
-
-    case TOK_STRING:
-        expr->type = EXPR_LITERAL_STRING;
-        expr->str_lit.value = p->current.start;
-        expr->str_lit.len = p->current.length;
-        advance(p);
-        break;
-
-    case TOK_LPAREN:
-        advance(p);
-        expr = parse_expression(p);
-        expect(p, TOK_RPAREN);
-        break;
-
-    default:
-        return nullptr;
-    }
-
-    return expr;
-}
-
-static Expr* parse_comparison(Parser* p) {
-    Expr* left = parse_primary(p);
-    if (!left) return nullptr;
-
-    BinaryOp op;
-    bool is_comparison = true;
-
-    switch (p->current.type) {
-    case TOK_EQ: op = OP_EQ; break;
-    case TOK_NE: op = OP_NE; break;
-    case TOK_LT: op = OP_LT; break;
-    case TOK_LE: op = OP_LE; break;
-    case TOK_GT: op = OP_GT; break;
-    case TOK_GE: op = OP_GE; break;
-    default:
-        is_comparison = false;
-    }
-
-    if (!is_comparison) {
-        return left;
-    }
-
-    advance(p);
-    Expr* right = parse_primary(p);
-    if (!right) return nullptr;
-
-    Expr* result = ARENA_ALLOC(Expr);
-    result->type = EXPR_BINARY_OP;
-    result->binary.op = op;
-    result->binary.left = left;
-    result->binary.right = right;
-
-    return result;
-}
-
-// Helper to skip whitespace
 static void skip_whitespace(Parser* p) {
     while (p->pos < p->len && isspace(p->input[p->pos])) {
         p->pos++;
     }
 }
 
-static Token next_token(Parser* p) {
+static TokenType check_keyword(const char* start, size_t len) {
+    for (const Keyword* k = keywords; k->str; k++) {
+        if (strlen(k->str) == len && strncasecmp(start, k->str, len) == 0) {
+            return k->type;
+        }
+    }
+    return TOK_IDENTIFIER;
+}
+
+static void scan_token(Parser* p) {
     skip_whitespace(p);
 
+    p->current_start = &p->input[p->pos];
+
     if (p->pos >= p->len) {
-        return {TOK_EOF, nullptr, 0, 0};
+        p->current_type = TOK_EOF;
+        p->current_len = 0;
+        return;
     }
 
-    Token tok;
-    tok.start = &p->input[p->pos];
-    tok.int_value = 0;
+    char c = p->input[p->pos];
 
-    // Handle operators and single chars
-    char ch = p->input[p->pos];
-    char next_ch = (p->pos + 1 < p->len) ? p->input[p->pos + 1] : '\0';
-
-    if (ch == '=' && next_ch == '=') {
-        tok.type = TOK_EQ;
-        tok.length = 2;
-        p->pos += 2;
-        return tok;
+    // Single character tokens
+    switch (c) {
+        case '(': p->current_type = TOK_LPAREN; p->current_len = 1; p->pos++; return;
+        case ')': p->current_type = TOK_RPAREN; p->current_len = 1; p->pos++; return;
+        case ',': p->current_type = TOK_COMMA; p->current_len = 1; p->pos++; return;
+        case ';': p->current_type = TOK_SEMICOLON; p->current_len = 1; p->pos++; return;
+        case '*': p->current_type = TOK_STAR; p->current_len = 1; p->pos++; return;
     }
 
-    // ... handle other operators ...
+    // Comparison operators
+    if (c == '=') {
+        if (p->pos + 1 < p->len && p->input[p->pos + 1] == '=') {
+            p->current_type = TOK_EQ;
+            p->current_len = 2;
+            p->pos += 2;
+            return;
+        }
+        p->current_type = TOK_EQ;
+        p->current_len = 1;
+        p->pos++;
+        return;
+    }
 
-    // Handle identifiers and keywords
-    if (isalpha(ch) || ch == '_') {
-        uint32_t start = p->pos;
+    if (c == '!') {
+        if (p->pos + 1 < p->len && p->input[p->pos + 1] == '=') {
+            p->current_type = TOK_NE;
+            p->current_len = 2;
+            p->pos += 2;
+            return;
+        }
+    }
+
+    if (c == '<') {
+        if (p->pos + 1 < p->len && p->input[p->pos + 1] == '=') {
+            p->current_type = TOK_LE;
+            p->current_len = 2;
+            p->pos += 2;
+            return;
+        }
+        if (p->pos + 1 < p->len && p->input[p->pos + 1] == '>') {
+            p->current_type = TOK_NE;
+            p->current_len = 2;
+            p->pos += 2;
+            return;
+        }
+        p->current_type = TOK_LT;
+        p->current_len = 1;
+        p->pos++;
+        return;
+    }
+
+    if (c == '>') {
+        if (p->pos + 1 < p->len && p->input[p->pos + 1] == '=') {
+            p->current_type = TOK_GE;
+            p->current_len = 2;
+            p->pos += 2;
+            return;
+        }
+        p->current_type = TOK_GT;
+        p->current_len = 1;
+        p->pos++;
+        return;
+    }
+
+    // String literals
+    if (c == '\'' || c == '"') {
+        char quote = c;
+        p->pos++;
+        size_t start = p->pos;
+        while (p->pos < p->len && p->input[p->pos] != quote) {
+            if (p->input[p->pos] == '\\' && p->pos + 1 < p->len) {
+                p->pos += 2;
+            } else {
+                p->pos++;
+            }
+        }
+        p->current_type = TOK_STRING;
+        p->current_start = &p->input[start];
+        p->current_len = p->pos - start;
+        if (p->pos < p->len) p->pos++; // Skip closing quote
+        return;
+    }
+
+    // Numbers
+    if (isdigit(c) || (c == '-' && p->pos + 1 < p->len && isdigit(p->input[p->pos + 1]))) {
+        size_t start = p->pos;
+        if (c == '-') p->pos++;
+
+        while (p->pos < p->len && isdigit(p->input[p->pos])) {
+            p->pos++;
+        }
+
+        if (p->pos < p->len && p->input[p->pos] == '.') {
+            p->pos++;
+            while (p->pos < p->len && isdigit(p->input[p->pos])) {
+                p->pos++;
+            }
+            p->current_type = TOK_FLOAT;
+            // Parse float value
+            char buffer[64];
+            size_t len = p->pos - start;
+            if (len >= sizeof(buffer)) len = sizeof(buffer) - 1;
+            memcpy(buffer, &p->input[start], len);
+            buffer[len] = '\0';
+            p->current_value.float_val = atof(buffer);
+        } else {
+            p->current_type = TOK_INTEGER;
+            // Parse integer value
+            p->current_value.int_val = 0;
+            size_t i = start;
+            int sign = 1;
+            if (p->input[i] == '-') {
+                sign = -1;
+                i++;
+            }
+            while (i < p->pos) {
+                p->current_value.int_val = p->current_value.int_val * 10 + (p->input[i] - '0');
+                i++;
+            }
+            p->current_value.int_val *= sign;
+        }
+        p->current_len = p->pos - start;
+        return;
+    }
+
+    // Identifiers and keywords
+    if (isalpha(c) || c == '_') {
+        size_t start = p->pos;
         while (p->pos < p->len && (isalnum(p->input[p->pos]) || p->input[p->pos] == '_')) {
             p->pos++;
         }
+        p->current_len = p->pos - start;
+        p->current_type = check_keyword(p->current_start, p->current_len);
+        return;
+    }
 
-        tok.length = p->pos - start;
+    // Unknown token
+    p->error_msg = "Unexpected character";
+    p->error_pos = p->pos;
+    p->current_type = TOK_EOF;
+}
 
-        // Check keywords (would use a table in real code)
-        if (strncasecmp(tok.start, "SELECT", tok.length) == 0) {
-            tok.type = TOK_SELECT;
-        } else if (strncasecmp(tok.start, "FROM", tok.length) == 0) {
-            tok.type = TOK_FROM;
+static void advance(Parser* p) {
+    scan_token(p);
+}
+
+static bool match(Parser* p, TokenType type) {
+    if (p->current_type == type) {
+        advance(p);
+        return true;
+    }
+    return false;
+}
+
+static bool expect(Parser* p, TokenType type) {
+    if (p->current_type != type) {
+        p->error_msg = "Unexpected token";
+        p->error_pos = p->pos;
+        return false;
+    }
+    advance(p);
+    return true;
+}
+
+static char* copy_identifier(Parser* p) {
+    char* result = (char*)arena_alloc(p->current_len + 1);
+    memcpy(result, p->current_start, p->current_len);
+    result[p->current_len] = '\0';
+    return result;
+}
+
+static VMValue parse_value(Parser* p) {
+    VMValue value;
+
+    if (p->current_type == TOK_INTEGER) {
+        value.type = TYPE_INT32;
+        uint32_t val = (uint32_t)p->current_value.int_val;
+        value.data = (uint8_t*)arena_alloc(sizeof(uint32_t));
+        memcpy(value.data, &val, sizeof(uint32_t));
+        advance(p);
+    } else if (p->current_type == TOK_STRING) {
+        size_t len = p->current_len;
+        if (len > 256) len = 256;
+        value.type = (len <= 32) ? TYPE_VARCHAR32 : TYPE_VARCHAR256;
+        value.data = (uint8_t*)arena_alloc(len + 1);
+        memcpy(value.data, p->current_start, len);
+        value.data[len] = '\0';
+        advance(p);
+    } else {
+        value.type = TYPE_NULL;
+        value.data = nullptr;
+    }
+
+    return value;
+}
+
+static CompareOp token_to_compare_op(TokenType type) {
+    switch (type) {
+        case TOK_EQ: return EQ;
+        case TOK_NE: return NE;
+        case TOK_LT: return LT;
+        case TOK_LE: return LE;
+        case TOK_GT: return GT;
+        case TOK_GE: return GE;
+        default: return EQ;
+    }
+}
+
+static WhereCondition parse_condition(Parser* p) {
+    WhereCondition cond;
+
+    // Get column name
+    char* column_name = copy_identifier(p);
+    advance(p);
+
+    // Get operator
+    cond.operator_type = token_to_compare_op(p->current_type);
+    advance(p);
+
+    // Get value
+    cond.value = parse_value(p);
+
+    // Column index will be resolved later with schema
+    cond.column_index = 0; // Placeholder
+
+    return cond;
+}
+
+static std::vector<WhereCondition> parse_where_clause(Parser* p) {
+    std::vector<WhereCondition> conditions;
+
+    if (!match(p, TOK_WHERE)) {
+        return conditions;
+    }
+
+    conditions.push_back(parse_condition(p));
+
+    while (match(p, TOK_AND)) {
+        conditions.push_back(parse_condition(p));
+    }
+
+    // Note: OR support would require expression tree
+
+    return conditions;
+}
+
+static std::vector<VMInstruction> parse_select(Parser* p) {
+    expect(p, TOK_SELECT);
+
+    bool is_aggregate = false;
+    const char* agg_func = nullptr;
+    uint32_t* agg_column = nullptr;
+    std::vector<uint32_t>* select_columns = nullptr;
+
+    // Check for aggregate function
+    if (p->current_type == TOK_COUNT || p->current_type == TOK_MIN ||
+        p->current_type == TOK_MAX || p->current_type == TOK_SUM ||
+        p->current_type == TOK_AVG) {
+
+        is_aggregate = true;
+        agg_func = copy_identifier(p);
+        advance(p);
+        expect(p, TOK_LPAREN);
+
+        if (p->current_type == TOK_STAR) {
+            advance(p);
+            // COUNT(*) - no column
+        } else if (p->current_type == TOK_IDENTIFIER) {
+            // Get column for aggregate
+            char* col_name = copy_identifier(p);
+            advance(p);
+            agg_column = (uint32_t*)arena_alloc(sizeof(uint32_t));
+            *agg_column = 0; // Will be resolved with schema
+        }
+
+        expect(p, TOK_RPAREN);
+
+    } else if (match(p, TOK_STAR)) {
+        // SELECT * - all columns
+        select_columns = nullptr;
+    } else {
+        // Column list
+        select_columns = (std::vector<uint32_t>*)arena_alloc(sizeof(std::vector<uint32_t>));
+        new (select_columns) std::vector<uint32_t>();
+
+        do {
+            if (p->current_type == TOK_IDENTIFIER) {
+                char* col_name = copy_identifier(p);
+                advance(p);
+                select_columns->push_back(0); // Will be resolved with schema
+            }
+        } while (match(p, TOK_COMMA));
+    }
+
+    expect(p, TOK_FROM);
+
+    char* table_name = copy_identifier(p);
+    advance(p);
+
+    std::vector<WhereCondition> conditions = parse_where_clause(p);
+
+    OrderBy* order_by = nullptr;
+    if (match(p, TOK_ORDER)) {
+        expect(p, TOK_BY);
+        order_by = (OrderBy*)arena_alloc(sizeof(OrderBy));
+        char* order_col = copy_identifier(p);
+        advance(p);
+        order_by->column_index = 0; // Will be resolved with schema
+
+        if (match(p, TOK_DESC)) {
+            order_by->direction = "DESC";
         } else {
-            tok.type = TOK_IDENTIFIER;
+            match(p, TOK_ASC); // Optional
+            order_by->direction = "ASC";
         }
-
-        return tok;
     }
 
-    // Handle numbers
-    if (isdigit(ch)) {
-        int64_t value = 0;
-        uint32_t start = p->pos;
-        while (p->pos < p->len && isdigit(p->input[p->pos])) {
-            value = value * 10 + (p->input[p->pos] - '0');
-            p->pos++;
-        }
-        tok.type = TOK_INTEGER;
-        tok.length = p->pos - start;
-        tok.int_value = value;
-        return tok;
+    if (is_aggregate) {
+        return aggregate(table_name, agg_func, agg_column, conditions);
+    } else {
+
+
+        auto table = vm_get_table(table_name);
+        // Mock schema - in reality would look up from table
+
+
+        SelectOptions opts;
+        opts.table_name = table_name;
+        opts.schema = table.schema.columns;
+        opts.column_indices = select_columns;
+        opts.where_conditions = conditions;
+        opts.order_by = order_by;
+
+        return build_select(opts);
+    }
+}
+
+static std::vector<VMInstruction> parse_insert(Parser* p) {
+    expect(p, TOK_INSERT);
+    expect(p, TOK_INTO);
+
+    char* table_name = copy_identifier(p);
+    advance(p);
+
+    expect(p, TOK_VALUES);
+    expect(p, TOK_LPAREN);
+
+    std::vector<Pair> values;
+    uint32_t col_index = 0;
+
+    do {
+        VMValue val = parse_value(p);
+        values.push_back({col_index++, val});
+    } while (match(p, TOK_COMMA));
+
+    expect(p, TOK_RPAREN);
+
+    return build_insert(table_name, values, false);
+}
+
+static std::vector<VMInstruction> parse_update(Parser* p) {
+    expect(p, TOK_UPDATE);
+
+    char* table_name = copy_identifier(p);
+    advance(p);
+
+    expect(p, TOK_SET);
+
+    std::vector<Pair> set_columns;
+
+    do {
+        char* col_name = copy_identifier(p);
+        advance(p);
+        expect(p, TOK_EQ);
+        VMValue val = parse_value(p);
+
+        // Column index will be resolved with schema
+        set_columns.push_back({0, val});
+    } while (match(p, TOK_COMMA));
+
+    std::vector<WhereCondition> conditions = parse_where_clause(p);
+
+    // Mock schema
+    std::vector<ColumnInfo> schema;
+
+    UpdateOptions opts;
+    opts.table_name = table_name;
+    opts.schema = schema;
+    opts.set_columns = set_columns;
+    opts.where_conditions = conditions;
+
+    return build_update(opts, false);
+}
+
+static std::vector<VMInstruction> parse_delete(Parser* p) {
+    expect(p, TOK_DELETE);
+    expect(p, TOK_FROM);
+
+    char* table_name = copy_identifier(p);
+    advance(p);
+
+    std::vector<WhereCondition> conditions = parse_where_clause(p);
+
+    // Mock schema
+    std::vector<ColumnInfo> schema;
+
+    UpdateOptions opts;
+    opts.table_name = table_name;
+    opts.schema = schema;
+    opts.set_columns = {};
+    opts.where_conditions = conditions;
+
+    return build_delete(opts, false);
+}
+
+static std::vector<VMInstruction> parse_create(Parser* p) {
+    expect(p, TOK_CREATE);
+
+    if (match(p, TOK_TABLE)) {
+        char* table_name = copy_identifier(p);
+        advance(p);
+
+        expect(p, TOK_LPAREN);
+
+        std::vector<ColumnInfo> columns;
+        bool first_column = true;
+
+        do {
+            ColumnInfo col;
+
+            // Parse type
+            if (p->current_type == TOK_IDENTIFIER) {
+                char* type_str = copy_identifier(p);
+                advance(p);
+
+                // Simple type mapping
+                if (strcasecmp(type_str, "INT") == 0) {
+                    col.type = TYPE_INT32;
+                } else if (strcasecmp(type_str, "VARCHAR") == 0) {
+                    col.type = TYPE_VARCHAR256;
+                } else {
+                    col.type = TYPE_VARCHAR32;
+                }
+            }
+
+            // Parse column name (might have KEY modifier for primary key)
+            if (p->current_type == TOK_IDENTIFIER) {
+                char* col_name = copy_identifier(p);
+                if (strcasecmp(col_name, "KEY") == 0 && first_column) {
+                    // This is primary key designation
+                    advance(p);
+                    col_name = copy_identifier(p);
+                }
+                advance(p);
+
+                size_t len = strlen(col_name);
+                if (len > 31) len = 31;
+                memcpy(col.name, col_name, len);
+                col.name[len] = '\0';
+            }
+
+            columns.push_back(col);
+            first_column = false;
+
+        } while (match(p, TOK_COMMA));
+
+        expect(p, TOK_RPAREN);
+
+        return build_creat_table(table_name, columns);
+
+    } else if (match(p, TOK_INDEX)) {
+        char* index_name = copy_identifier(p);
+        advance(p);
+
+        expect(p, TOK_ON);
+
+        char* table_name = copy_identifier(p);
+        advance(p);
+
+        expect(p, TOK_LPAREN);
+        char* column_name = copy_identifier(p);
+        advance(p);
+        expect(p, TOK_RPAREN);
+
+        // Would need schema to resolve column index and type
+        return build_create_index(table_name, 0, TYPE_INT32);
     }
 
-    // ... handle strings ...
+    return {};
+}
 
-    return tok;
+static std::vector<VMInstruction> parse_statement(Parser* p) {
+    std::vector<VMInstruction> instructions;
+
+
+
+    switch (p->current_type) {
+        case TOK_SELECT:
+            return parse_select(p);
+        case TOK_INSERT:
+            return parse_insert(p);
+        case TOK_UPDATE:
+            return parse_update(p);
+        case TOK_DELETE:
+            return parse_delete(p);
+        case TOK_CREATE:
+            return parse_create(p);
+        case TOK_BEGIN:
+            advance(p);
+            instructions.push_back({OP_Begin, 0, 0, 0, nullptr, 0});
+            instructions.push_back({OP_Halt, 0, 0, 0, nullptr, 0});
+            return instructions;
+        case TOK_COMMIT:
+            advance(p);
+            instructions.push_back({OP_Commit, 0, 0, 0, nullptr, 0});
+            instructions.push_back({OP_Halt, 0, 0, 0, nullptr, 0});
+            return instructions;
+        case TOK_ROLLBACK:
+            advance(p);
+            instructions.push_back({OP_Rollback, 0, 0, 0, nullptr, 0});
+            instructions.push_back({OP_Halt, 0, 0, 0, nullptr, 0});
+            return instructions;
+        default:
+            p->error_msg = "Expected statement";
+            p->error_pos = p->pos;
+            return {};
+    }
+}
+
+std::vector<VMInstruction> parse_sql(const char* sql) {
+    Parser parser = {};
+    parser.input = sql;
+    parser.len = strlen(sql);
+    parser.pos = 0;
+
+    advance(&parser);
+
+    std::vector<VMInstruction> result = parse_statement(&parser);
+
+    // Expect semicolon or EOF
+    if (parser.current_type != TOK_SEMICOLON
+        // && parser.current_type != TOK_EOF
+        ) {
+        parser.error_msg = "Expected semicolon";
+        return {};
+    }
+
+    if (parser.error_msg) {
+        // Could add error reporting here
+        return {};
+    }
+
+    return result;
 }
