@@ -354,25 +354,16 @@ bool vm_step() {
     VmCursor *cursor = &it->second;
     uint32_t col_index = inst->p2;
 
+    if(col_index == 0) {
+        const uint8_t *key_data = vb_key(cursor);
+        DataType type = vb_key_type(cursor);
+        vm_set_value(&VM.registers[inst->p3], type, key_data);
+    }
+
     // Other columns come from record
     uint8_t *col_data = vb_column(cursor, col_index);
     DataType type = vb_column_type(cursor, col_index);
     vm_set_value(&VM.registers[inst->p3], type, col_data);
-
-    VM.pc++;
-    return true;
-  }
-
-  case OP_Key: {
-    auto it = VM.cursors.find(inst->p1);
-    if (it == VM.cursors.end()) {
-      return false;
-    }
-
-    VmCursor *cursor = &it->second;
-    const uint8_t *key_data = vb_key(cursor);
-    DataType type = vb_key_type(cursor);
-    vm_set_value(&VM.registers[inst->p2], type, key_data);
 
     VM.pc++;
     return true;
@@ -615,6 +606,12 @@ bool vm_step() {
 
     VM.pc++;
     return true;
+  }
+
+
+  case OP_AggReset: {
+      VM.aggregator.reset();
+      return true;
   }
 
   case OP_AggFinal: {

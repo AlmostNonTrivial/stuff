@@ -448,28 +448,36 @@ static std::vector<VMInstruction> parse_update(Parser* p) {
     char* table_name = copy_identifier(p);
     advance(p);
 
+    // Get actual table schema
+    auto table = vm_get_table(table_name);
+
     expect(p, TOK_SET);
 
     std::vector<Pair> set_columns;
-
     do {
         char* col_name = copy_identifier(p);
         advance(p);
         expect(p, TOK_EQ);
         VMValue val = parse_value(p);
 
-        // Column index will be resolved with schema
-        set_columns.push_back({0, val});
+        // Find actual column index
+        uint32_t col_index = 0;
+        for (size_t i = 0; i < table.schema.columns.size(); i++) {
+            if (strcmp(table.schema.columns[i].name, col_name) == 0) {
+                col_index = i;
+                break;
+            }
+        }
+
+        set_columns.push_back({col_index, val});
     } while (match(p, TOK_COMMA));
 
     std::vector<WhereCondition> conditions = parse_where_clause(p);
-
-    // Mock schema
-    std::vector<ColumnInfo> schema;
+    // Also need to resolve WHERE column indices...
 
     UpdateOptions opts;
     opts.table_name = table_name;
-    opts.schema = schema;
+    opts.schema = table.schema.columns;
     opts.set_columns = set_columns;
     opts.where_conditions = conditions;
 

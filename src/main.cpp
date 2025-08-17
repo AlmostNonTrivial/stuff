@@ -53,6 +53,11 @@ int main() {
    "id, "
    "INT type, VAR32 name, INT root, VARCHAR sql);');";
 
+
+   const char * update_master=
+   "UPDATE Master SET name = 'nike' WHERE id = 1;";
+
+
   const char *commit = "COMMIT;";
 
   const char *select = "SELECT * FROM Master;";
@@ -69,6 +74,10 @@ int main() {
   vm_execute(program);
   vm_execute(insert);
   vm_execute(insert2);
+ auto update = parse_sql(update_master);
+  vm_execute(update);
+
+
   vm_execute(end);
   auto s = parse_sql(select); // NEEDs to be after when schema is cached
 vm_execute(s);

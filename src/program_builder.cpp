@@ -97,7 +97,7 @@ void load_value(std::vector<VMInstruction> &instructions, const VMValue &value,
                             .p5 = 0});
   } else {
     instructions.push_back({.opcode = OP_String,
-                            .p1 = target_reg,
+                        .p1 = target_reg,
                             .p2 = (int32_t)value.type,
                             .p3 = 0,
                             .p4 = value.data,
