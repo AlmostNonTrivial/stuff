@@ -12,6 +12,13 @@
 #include <unordered_map>
 #include <vector>
 
+
+void prec(std::vector<VMValue*> x) {
+    for(auto y : x)  {
+        print_ptr(y->data,  y->type);
+    }
+}
+
 /*------------VMCURSOR---------------- */
 
 struct VmCursor {
@@ -31,7 +38,14 @@ uint8_t *vb_column(VmCursor *vb, uint32_t col_index) {
   }
 
   uint8_t *record = btree_cursor_record(&vb->btree_cursor);
-  return record + vb->schema->column_offsets[col_index];
+
+
+auto col = record + vb->schema->column_offsets[col_index];
+
+// debug_type(col, vb->schema->columns[col_index].type);
+
+
+return col;
 }
 
 uint8_t *vb_key(VmCursor *vb) { return vb_column(vb, 0); }
@@ -99,10 +113,29 @@ static uint8_t *arena_copy_data(const uint8_t *src, uint32_t size) {
 }
 
 // Helper to create a VMValue
+// Helper to create a VMValue
 static void vm_set_value(VMValue *val, DataType type, const void *data) {
   val->type = type;
   uint32_t size = VMValue::get_size(type);
-  val->data = arena_copy_data((const uint8_t *)data, size);
+
+  // Allocate full size for the type
+  val->data = (uint8_t*)arena_alloc(size);
+
+  if (data) {
+    if (type == TYPE_VARCHAR32 || type == TYPE_VARCHAR256) {
+      // For strings, zero-fill first then copy what we have
+      memset(val->data, 0, size);
+
+      // Copy up to size bytes (data should already be properly sized from parser)
+      memcpy(val->data, data, size);
+    } else {
+      // For fixed-size types, just copy
+      memcpy(val->data, data, size);
+    }
+  } else {
+    // No data provided, zero-fill
+    memset(val->data, 0, size);
+  }
 }
 
 void vm_init() {
@@ -183,7 +216,7 @@ bool vm_step() {
 
   case OP_String: {
     const char *str = (const char *)inst->p4;
-    uint32_t size = inst->p1;
+    uint32_t size = inst->p2;
     vm_set_value(&VM.registers[inst->p1], (DataType)size, str);
     VM.pc++;
     return true;
@@ -264,10 +297,8 @@ bool vm_step() {
                         ? btree_cursor_next(&cursor->btree_cursor)
                         : btree_cursor_previous(&cursor->btree_cursor);
 
-    if (has_more) {
-      VM.pc++;
-    } else if (inst->p2 > 0) {
-      VM.pc = inst->p2;
+    if (has_more && inst->p2 > 0) {
+        VM.pc = inst->p2;
     } else {
       VM.pc++;
     }
@@ -355,18 +386,28 @@ bool vm_step() {
     uint32_t total_size = 0;
     for (int i = 0; i < inst->p2; i++) {
       VMValue *val = &VM.registers[inst->p1 + i];
+      print_ptr(val->data, val->type);
       total_size += VMValue::get_size(val->type);
     }
 
+
     uint8_t *record = (uint8_t *)arena_alloc(total_size);
+
+
+
+
     uint32_t offset = 0;
 
     for (int i = 0; i < inst->p2; i++) {
       VMValue *val = &VM.registers[inst->p1 + i];
+      // debug_type(val->data, val->type);
       uint32_t size = VMValue::get_size(val->type);
       memcpy(record + offset, val->data, size);
       offset += size;
     }
+
+
+    // print_record(record, &VM.tables["Master"].schema);
 
     VM.registers[inst->p3].type = TYPE_INT32; // Store as blob
     VM.registers[inst->p3].data = record;
@@ -516,6 +557,12 @@ bool vm_step() {
   }
 
   case Op_Flush: {
+      // for(auto x : VM.output_buffer) {
+      //    for(auto y : x)  {
+      //        print_ptr(y->data,  y->type);
+      //    }
+      //    std::cout << "\n";
+      // }
     // Clear the output buffer
     VM.output_buffer.clear();
     VM.pc++;

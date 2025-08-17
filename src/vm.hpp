@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
+#include "schema.hpp"
 
 // VM value - uses arena allocation for data
 struct VMValue {
@@ -112,20 +113,7 @@ struct VMInstruction {
   uint8_t p5;
 };
 
-struct ColumnInfo {
-  char name[32];
-  DataType type;
-};
 
-struct TableSchema {
-  std::string table_name;
-  uint32_t record_size;
-  std::vector<ColumnInfo> columns;
-  std::vector<uint32_t> column_offsets;
-
-  DataType key_type() const { return columns[0].type; }
-
-};
 
 struct Index {
   BTree tree;

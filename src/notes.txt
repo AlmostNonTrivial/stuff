@@ -1,7 +1,6 @@
 
 
 
-Do we actually need registers, or can we just use
+- Do we actually need registers, or can we just use
 the arena?
-
-
+- the label resoluion sucks

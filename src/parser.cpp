@@ -254,10 +254,21 @@ static VMValue parse_value(Parser* p) {
     } else if (p->current_type == TOK_STRING) {
         size_t len = p->current_len;
         if (len > 256) len = 256;
+
+        // Determine type based on length
         value.type = (len <= 32) ? TYPE_VARCHAR32 : TYPE_VARCHAR256;
-        value.data = (uint8_t*)arena_alloc(len + 1);
+
+        // Always allocate the full size for the type
+        uint32_t alloc_size = VMValue::get_size(value.type);
+        value.data = (uint8_t*)arena_alloc(alloc_size);
+
+        // Zero-fill the entire allocation
+        memset(value.data, 0, alloc_size);
+
+        // Copy the actual string data (without null terminator from source)
         memcpy(value.data, p->current_start, len);
-        value.data[len] = '\0';
+        // The null terminator is already there from memset
+
         advance(p);
     } else {
         value.type = TYPE_NULL;

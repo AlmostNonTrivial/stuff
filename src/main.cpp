@@ -64,7 +64,7 @@ int main() {
   vm_execute(insert);
   vm_execute(end);
   auto s = parse_sql(select); // NEEDs to be after when schema is cached
-  vm_execute(s);
+vm_execute(s);
 
   arena_reset();
 
