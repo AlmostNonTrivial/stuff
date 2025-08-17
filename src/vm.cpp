@@ -36,8 +36,8 @@ uint8_t *vb_column(VmCursor *vb, uint32_t col_index) {
     return btree_cursor_key(&vb->btree_cursor);
   }
 
-  if(vb->is_index) {
-     return btree_cursor_record(&vb->btree_cursor);
+  if (vb->is_index) {
+    return btree_cursor_record(&vb->btree_cursor);
   }
 
   uint8_t *record = btree_cursor_record(&vb->btree_cursor);
@@ -248,16 +248,15 @@ bool vm_step() {
       }
 
       cursor.btree_cursor.tree = &table->indexes[index_column].tree;
-    cursor.is_index = false;
+      cursor.is_index = false;
 
     } else {
       cursor.btree_cursor.tree = &table->tree;
-          cursor.is_index = false;
+      cursor.is_index = false;
     }
 
     //
     cursor.schema = &table->schema;
-
 
     VM.pc++;
     return true;
@@ -381,7 +380,6 @@ bool vm_step() {
     // P2 = number of columns (including key)
     // P3 = destination register
 
-
     // start at i == 1, so we don't include the key
     uint32_t total_size = 0;
     for (int i = 1; i < inst->p2; i++) {
@@ -399,7 +397,6 @@ bool vm_step() {
       memcpy(record + offset, val->data, size);
       offset += size;
     }
-
 
     VM.registers[inst->p3].type = TYPE_INT32; // Store as blob
     VM.registers[inst->p3].data = record;
@@ -610,6 +607,20 @@ bool vm_step() {
 
   case OP_AggReset: {
     VM.aggregator.reset();
+    const char *function_name = (char *)inst->p4;
+    if (strcmp("COUNT", function_name)) {
+      VM.aggregator.type = Aggregator::COUNT;
+    } else if (strcmp("MIN", function_name)) {
+      VM.aggregator.type = Aggregator::MIN;
+    } else if (strcmp("AVG", function_name)) {
+      VM.aggregator.type = Aggregator::AVG;
+    } else if (strcmp("MAX", function_name)) {
+      VM.aggregator.type = Aggregator::MAX;
+    } else if (strcmp("SUM", function_name)) {
+      VM.aggregator.type = Aggregator::SUM;
+    }
+
+    VM.pc++;
     return true;
   }
 

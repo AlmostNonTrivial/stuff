@@ -59,8 +59,9 @@ int main() {
 
 
   const char *commit = "COMMIT;";
-
-  const char *select = "SELECT * FROM Master WHERE name = 'nike';";
+  const char *del= "DELETE FROM Master WHERE name = 'Master';";
+  const char *select = "SELECT * FROM Master;";
+  const char * count = "SELECT COUNT(*) FROM Master;";
 
   arena_reset();
 
@@ -68,6 +69,7 @@ int main() {
   auto program = parse_sql(create_master);
   auto insert = parse_sql(insert_master);
  auto insert2 = parse_sql(insert_master2) ;
+
   auto end = parse_sql(commit);
 
   vm_execute(b);
@@ -75,12 +77,15 @@ int main() {
   vm_execute(insert);
   vm_execute(insert2);
  auto update = parse_sql(update_master);
+ auto counta = parse_sql(count);
+ auto d= parse_sql(del);
   vm_execute(update);
 
-
+  // vm_execute(d);
   vm_execute(end);
   auto s = parse_sql(select); // NEEDs to be after when schema is cached
-vm_execute(s);
+// vm_execute(s);
+vm_execute(counta);
 
   arena_reset();
 

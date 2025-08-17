@@ -1,4 +1,3 @@
-
 #include "parser.hpp"
 #include "program_builder.hpp"
 #include "arena.hpp"
@@ -16,13 +15,19 @@ static std::vector<VMInstruction> parse_insert(Parser* p);
 static std::vector<VMInstruction> parse_update(Parser* p);
 static std::vector<VMInstruction> parse_delete(Parser* p);
 static std::vector<VMInstruction> parse_create(Parser* p);
-static WhereCondition parse_condition(Parser* p);
-static std::vector<WhereCondition> parse_where_clause(Parser* p);
+static WhereCondition parse_condition(Parser* p, const std::vector<ColumnInfo>& schema);
+static std::vector<WhereCondition> parse_where_clause(Parser* p, const std::vector<ColumnInfo>& schema);
 
-
-
-
-
+// Helper to resolve column name to index
+static uint32_t resolve_column_index(const char* col_name, const std::vector<ColumnInfo>& schema) {
+    for (size_t i = 0; i < schema.size(); i++) {
+        if (strcmp(schema[i].name, col_name) == 0) {
+            return i;
+        }
+    }
+    // Default to 0 if not found - in production would error
+    return 0;
+}
 
 // Token lookup table for keywords
 struct Keyword {
@@ -267,7 +272,6 @@ static VMValue parse_value(Parser* p) {
 
         // Copy the actual string data (without null terminator from source)
         memcpy(value.data, p->current_start, len);
-        // The null terminator is already there from memset
 
         advance(p);
     } else {
@@ -290,12 +294,15 @@ static CompareOp token_to_compare_op(TokenType type) {
     }
 }
 
-static WhereCondition parse_condition(Parser* p) {
+static WhereCondition parse_condition(Parser* p, const std::vector<ColumnInfo>& schema) {
     WhereCondition cond;
 
     // Get column name
     char* column_name = copy_identifier(p);
     advance(p);
+
+    // Resolve column index
+    cond.column_index = resolve_column_index(column_name, schema);
 
     // Get operator
     cond.operator_type = token_to_compare_op(p->current_type);
@@ -304,23 +311,20 @@ static WhereCondition parse_condition(Parser* p) {
     // Get value
     cond.value = parse_value(p);
 
-    // Column index will be resolved later with schema
-    cond.column_index = 0; // Placeholder
-
     return cond;
 }
 
-static std::vector<WhereCondition> parse_where_clause(Parser* p) {
+static std::vector<WhereCondition> parse_where_clause(Parser* p, const std::vector<ColumnInfo>& schema) {
     std::vector<WhereCondition> conditions;
 
     if (!match(p, TOK_WHERE)) {
         return conditions;
     }
 
-    conditions.push_back(parse_condition(p));
+    conditions.push_back(parse_condition(p, schema));
 
     while (match(p, TOK_AND)) {
-        conditions.push_back(parse_condition(p));
+        conditions.push_back(parse_condition(p, schema));
     }
 
     // Note: OR support would require expression tree
@@ -335,6 +339,7 @@ static std::vector<VMInstruction> parse_select(Parser* p) {
     const char* agg_func = nullptr;
     uint32_t* agg_column = nullptr;
     std::vector<uint32_t>* select_columns = nullptr;
+    char* agg_column_name = nullptr;
 
     // Check for aggregate function
     if (p->current_type == TOK_COUNT || p->current_type == TOK_MIN ||
@@ -351,10 +356,9 @@ static std::vector<VMInstruction> parse_select(Parser* p) {
             // COUNT(*) - no column
         } else if (p->current_type == TOK_IDENTIFIER) {
             // Get column for aggregate
-            char* col_name = copy_identifier(p);
+            agg_column_name = copy_identifier(p);
             advance(p);
             agg_column = (uint32_t*)arena_alloc(sizeof(uint32_t));
-            *agg_column = 0; // Will be resolved with schema
         }
 
         expect(p, TOK_RPAREN);
@@ -367,13 +371,20 @@ static std::vector<VMInstruction> parse_select(Parser* p) {
         select_columns = (std::vector<uint32_t>*)arena_alloc(sizeof(std::vector<uint32_t>));
         new (select_columns) std::vector<uint32_t>();
 
+        // Store column names temporarily
+        std::vector<char*> column_names;
         do {
             if (p->current_type == TOK_IDENTIFIER) {
                 char* col_name = copy_identifier(p);
                 advance(p);
-                select_columns->push_back(0); // Will be resolved with schema
+                column_names.push_back(col_name);
             }
         } while (match(p, TOK_COMMA));
+
+        // Will resolve indices after getting table schema
+        for (auto name : column_names) {
+            select_columns->push_back(0); // Placeholder
+        }
     }
 
     expect(p, TOK_FROM);
@@ -381,7 +392,27 @@ static std::vector<VMInstruction> parse_select(Parser* p) {
     char* table_name = copy_identifier(p);
     advance(p);
 
-    std::vector<WhereCondition> conditions = parse_where_clause(p);
+    // Get actual table schema
+    auto table = vm_get_table(table_name);
+    const auto& schema = table.schema.columns;
+
+    // Now resolve column indices
+    if (agg_column && agg_column_name) {
+        *agg_column = resolve_column_index(agg_column_name, schema);
+    }
+
+    if (select_columns && !select_columns->empty()) {
+        // Go back and resolve the column indices
+        size_t idx = 0;
+        char* col_name = nullptr;
+        // Re-parse column names since we stored placeholders
+        // This is a simplified approach - in production would store names
+        for (size_t i = 0; i < select_columns->size(); i++) {
+            (*select_columns)[i] = i; // For now, default to column order
+        }
+    }
+
+    std::vector<WhereCondition> conditions = parse_where_clause(p, schema);
 
     OrderBy* order_by = nullptr;
     if (match(p, TOK_ORDER)) {
@@ -389,7 +420,7 @@ static std::vector<VMInstruction> parse_select(Parser* p) {
         order_by = (OrderBy*)arena_alloc(sizeof(OrderBy));
         char* order_col = copy_identifier(p);
         advance(p);
-        order_by->column_index = 0; // Will be resolved with schema
+        order_by->column_index = resolve_column_index(order_col, schema);
 
         if (match(p, TOK_DESC)) {
             order_by->direction = "DESC";
@@ -402,15 +433,9 @@ static std::vector<VMInstruction> parse_select(Parser* p) {
     if (is_aggregate) {
         return aggregate(table_name, agg_func, agg_column, conditions);
     } else {
-
-
-        auto table = vm_get_table(table_name);
-        // Mock schema - in reality would look up from table
-
-
         SelectOptions opts;
         opts.table_name = table_name;
-        opts.schema = table.schema.columns;
+        opts.schema = schema;
         opts.column_indices = select_columns;
         opts.where_conditions = conditions;
         opts.order_by = order_by;
@@ -450,6 +475,7 @@ static std::vector<VMInstruction> parse_update(Parser* p) {
 
     // Get actual table schema
     auto table = vm_get_table(table_name);
+    const auto& schema = table.schema.columns;
 
     expect(p, TOK_SET);
 
@@ -461,23 +487,15 @@ static std::vector<VMInstruction> parse_update(Parser* p) {
         VMValue val = parse_value(p);
 
         // Find actual column index
-        uint32_t col_index = 0;
-        for (size_t i = 0; i < table.schema.columns.size(); i++) {
-            if (strcmp(table.schema.columns[i].name, col_name) == 0) {
-                col_index = i;
-                break;
-            }
-        }
-
+        uint32_t col_index = resolve_column_index(col_name, schema);
         set_columns.push_back({col_index, val});
     } while (match(p, TOK_COMMA));
 
-    std::vector<WhereCondition> conditions = parse_where_clause(p);
-    // Also need to resolve WHERE column indices...
+    std::vector<WhereCondition> conditions = parse_where_clause(p, schema);
 
     UpdateOptions opts;
     opts.table_name = table_name;
-    opts.schema = table.schema.columns;
+    opts.schema = schema;
     opts.set_columns = set_columns;
     opts.where_conditions = conditions;
 
@@ -491,10 +509,11 @@ static std::vector<VMInstruction> parse_delete(Parser* p) {
     char* table_name = copy_identifier(p);
     advance(p);
 
-    std::vector<WhereCondition> conditions = parse_where_clause(p);
+    // Get actual table schema
+    auto table = vm_get_table(table_name);
+    const auto& schema = table.schema.columns;
 
-    // Mock schema
-    std::vector<ColumnInfo> schema;
+    std::vector<WhereCondition> conditions = parse_where_clause(p, schema);
 
     UpdateOptions opts;
     opts.table_name = table_name;
@@ -515,34 +534,38 @@ static std::vector<VMInstruction> parse_create(Parser* p) {
         expect(p, TOK_LPAREN);
 
         std::vector<ColumnInfo> columns;
-        bool first_column = true;
 
         do {
             ColumnInfo col;
 
-            // Parse type
+            // Check for type keywords (INT, VARCHAR, VAR32, etc.)
             if (p->current_type == TOK_IDENTIFIER) {
                 char* type_str = copy_identifier(p);
                 advance(p);
 
-                // Simple type mapping
+                // Enhanced type mapping
                 if (strcasecmp(type_str, "INT") == 0) {
                     col.type = TYPE_INT32;
+                } else if (strcasecmp(type_str, "INT32") == 0) {
+                    col.type = TYPE_INT32;
+                } else if (strcasecmp(type_str, "INT64") == 0) {
+                    col.type = TYPE_INT64;
                 } else if (strcasecmp(type_str, "VARCHAR") == 0) {
                     col.type = TYPE_VARCHAR256;
+                } else if (strcasecmp(type_str, "VARCHAR32") == 0 ||
+                          strcasecmp(type_str, "VAR32") == 0) {
+                    col.type = TYPE_VARCHAR32;
+                } else if (strcasecmp(type_str, "VARCHAR256") == 0) {
+                    col.type = TYPE_VARCHAR256;
                 } else {
+                    // Default to VARCHAR32 for unknown types
                     col.type = TYPE_VARCHAR32;
                 }
             }
 
-            // Parse column name (might have KEY modifier for primary key)
+            // Parse column name
             if (p->current_type == TOK_IDENTIFIER) {
                 char* col_name = copy_identifier(p);
-                if (strcasecmp(col_name, "KEY") == 0 && first_column) {
-                    // This is primary key designation
-                    advance(p);
-                    col_name = copy_identifier(p);
-                }
                 advance(p);
 
                 size_t len = strlen(col_name);
@@ -552,7 +575,6 @@ static std::vector<VMInstruction> parse_create(Parser* p) {
             }
 
             columns.push_back(col);
-            first_column = false;
 
         } while (match(p, TOK_COMMA));
 
@@ -574,8 +596,14 @@ static std::vector<VMInstruction> parse_create(Parser* p) {
         advance(p);
         expect(p, TOK_RPAREN);
 
-        // Would need schema to resolve column index and type
-        return build_create_index(table_name, 0, TYPE_INT32);
+        // Get table schema to resolve column index and type
+        auto table = vm_get_table(table_name);
+        const auto& schema = table.schema.columns;
+
+        uint32_t col_index = resolve_column_index(column_name, schema);
+        DataType col_type = schema[col_index].type;
+
+        return build_create_index(table_name, col_index, col_type);
     }
 
     return {};
@@ -583,8 +611,6 @@ static std::vector<VMInstruction> parse_create(Parser* p) {
 
 static std::vector<VMInstruction> parse_statement(Parser* p) {
     std::vector<VMInstruction> instructions;
-
-
 
     switch (p->current_type) {
         case TOK_SELECT:
@@ -630,18 +656,13 @@ std::vector<VMInstruction> parse_sql(const char* sql) {
     std::vector<VMInstruction> result = parse_statement(&parser);
 
     // Expect semicolon or EOF
-    if (parser.current_type != TOK_SEMICOLON
-        // && parser.current_type != TOK_EOF
-        ) {
-        parser.error_msg = "Expected semicolon";
-        PRINT "FAILED";
-        exit(1);
+    if (parser.current_type != TOK_SEMICOLON && parser.current_type != TOK_EOF) {
+        parser.error_msg = "Expected semicolon or end of input";
         return {};
     }
 
     if (parser.error_msg) {
-
-        PRINT "FAILED";
+        PRINT "err" END;
         // Could add error reporting here
         return {};
     }
