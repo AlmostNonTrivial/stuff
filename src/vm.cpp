@@ -36,13 +36,13 @@ uint8_t *vb_column(VmCursor *vb, uint32_t col_index) {
     return btree_cursor_key(&vb->btree_cursor);
   }
 
+  if(vb->is_index) {
+     return btree_cursor_record(&vb->btree_cursor);
+  }
+
   uint8_t *record = btree_cursor_record(&vb->btree_cursor);
 
-  auto col = record + vb->schema->column_offsets[col_index];
-
-  // debug_type(col, vb->schema->columns[col_index].type);
-
-  return col;
+  return record + vb->schema->column_offsets[col_index];
 }
 
 uint8_t *vb_key(VmCursor *vb) { return vb_column(vb, 0); }
@@ -248,14 +248,16 @@ bool vm_step() {
       }
 
       cursor.btree_cursor.tree = &table->indexes[index_column].tree;
+    cursor.is_index = false;
 
     } else {
       cursor.btree_cursor.tree = &table->tree;
+          cursor.is_index = false;
     }
 
-    // NEED to have a schema for the index
+    //
     cursor.schema = &table->schema;
-    cursor.is_index = false;
+
 
     VM.pc++;
     return true;
