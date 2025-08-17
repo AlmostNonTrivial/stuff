@@ -238,7 +238,7 @@ bool vm_step() {
     }
 
     Table *table = &it->second;
-    uint32_t cursor_id = inst->p1;
+    uint32_t cursor_id = inst->p2; // CHANGED from p1 to p2
 
     VmCursor &cursor = VM.cursors[cursor_id];
 
@@ -311,7 +311,7 @@ bool vm_step() {
     }
 
     VmCursor *cursor = &it->second;
-    VMValue *key = &VM.registers[inst->p3];
+    VMValue *key = &VM.registers[inst->p2]; // CHANGED from p3 to p2
 
     bool found = false;
     switch (inst->opcode) {
@@ -332,14 +332,13 @@ bool vm_step() {
       break;
     }
 
-    if (!found && inst->p2 > 0) {
-      VM.pc = inst->p2;
+    if (!found && inst->p3 > 0) { // CHANGED from p2 to p3
+      VM.pc = inst->p3;           // CHANGED from p2 to p3
     } else {
       VM.pc++;
     }
     return true;
   }
-
   case OP_Column: {
     auto it = VM.cursors.find(inst->p1);
     if (it == VM.cursors.end()) {
@@ -651,7 +650,7 @@ bool vm_step() {
 
   case OP_CreateIndex: {
     char *table_name = (char *)inst->p4;
-    uint32_t column = inst->p1;
+    uint32_t column = inst->p1; // Column index in P1 as documented
 
     if (VM.tables.find(table_name) == VM.tables.end()) {
       return false;
@@ -676,7 +675,7 @@ bool vm_step() {
   case OP_DropTable:
   case OP_DropIndex: {
     char *table_name = (char *)inst->p4;
-    uint32_t column = inst->p1;
+    uint32_t column = inst->p1; // Keep as p1 for column index
 
     if (VM.tables.find(table_name) != VM.tables.end()) {
       return false;
