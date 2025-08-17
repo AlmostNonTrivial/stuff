@@ -33,20 +33,27 @@
 
  */
 
+
+
+// char * master_create_table() {
+// char sql[512];
+// snprintf(sql, sizeof(sql),
+//     "INSERT INTO sqlite_master VALUES (%d, 0, '%s', %d, '%s');",
+//     new_id, schema->table_name, root_page, create_sql);
+// }
+
+
+
+
+
+
 int main() {
 
   vm_init();
   arena_init(PAGE_SIZE * 10);
+  // create_master_table();
 
   const char *begin = "BEGIN;";
-
-  const char *create_master = "CREATE TABLE Master (INT id, INT type, VAR32 "
-                              "name, INT root, VARCHAR sql);";
-
-  const char *insert_master =
-      "INSERT INTO Master VALUES (0, 0, 'Master', 1, 'CREATE TABLE Master (INT "
-      "id, "
-      "INT type, VAR32 name, INT root, VARCHAR sql);');";
 
    const char * insert_master2 =
    "INSERT INTO Master VALUES (1, 0, 'tablue', 1, 'CREATE TABLE tablue (INT "
@@ -66,15 +73,15 @@ int main() {
   arena_reset();
 
   auto b = parse_sql(begin);
-  auto program = parse_sql(create_master);
-  auto insert = parse_sql(insert_master);
+  // auto program = parse_sql(create_master);
+  // auto insert = parse_sql(insert_master);
  auto insert2 = parse_sql(insert_master2) ;
 
   auto end = parse_sql(commit);
 
   vm_execute(b);
-  vm_execute(program);
-  vm_execute(insert);
+  // vm_execute(program);
+  // vm_execute(insert);
   vm_execute(insert2);
  auto update = parse_sql(update_master);
  auto counta = parse_sql(count);
