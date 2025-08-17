@@ -134,7 +134,7 @@ bool ascending(CompareOp op) { return op == GE || op == GT || op == EQ; }
 
 // Create table
 std::vector<VMInstruction>
-create_table(const std::string &table_name,
+build_creat_table(const std::string &table_name,
              const std::vector<ColumnInfo> &columns) {
   TableSchema *schema = ARENA_ALLOC(TableSchema);
   schema->table_name = table_name;
@@ -144,7 +144,7 @@ create_table(const std::string &table_name,
 }
 
 // Drop table
-std::vector<VMInstruction> drop_table(const std::string &table_name) {
+std::vector<VMInstruction> build_drop_table(const std::string &table_name) {
   char *name = (char *)arena_alloc(table_name.size() + 1);
   strcpy(name, table_name.c_str());
 
@@ -152,7 +152,7 @@ std::vector<VMInstruction> drop_table(const std::string &table_name) {
 }
 
 // Drop index
-std::vector<VMInstruction> drop_index(const std::string &index_name) {
+std::vector<VMInstruction> build_drop_index(const std::string &index_name) {
   char *name = (char *)arena_alloc(index_name.size() + 1);
   strcpy(name, index_name.c_str());
 
@@ -160,7 +160,7 @@ std::vector<VMInstruction> drop_index(const std::string &index_name) {
 }
 
 // Create index
-std::vector<VMInstruction> create_index(const std::string &table_name,
+std::vector<VMInstruction> build_create_index(const std::string &table_name,
                                         uint32_t column_index,
                                         DataType key_type) {
   RegisterAllocator regs;
@@ -257,7 +257,7 @@ std::vector<VMInstruction> create_index(const std::string &table_name,
 }
 
 // Insert
-std::vector<VMInstruction> insert(const std::string &table_name,
+std::vector<VMInstruction> build_insert(const std::string &table_name,
                                   const std::vector<Pair> &values,
                                   bool implicit_begin) {
   RegisterAllocator regs;
@@ -395,14 +395,10 @@ optimize_where_conditions(const std::vector<WhereCondition> &conditions,
                 return false;
 
               auto indexes = vm_get_table_indexes(table_name);
-              bool a_indexed =
-                  indexes.find(
-                      a.column_index) != indexes.end() &&
-                  a.operator_type == EQ;
-              bool b_indexed =
-                  indexes.find(
-                      b.column_index) != indexes.end() &&
-                  b.operator_type == EQ;
+              bool a_indexed = indexes.find(a.column_index) != indexes.end() &&
+                               a.operator_type == EQ;
+              bool b_indexed = indexes.find(b.column_index) != indexes.end() &&
+                               b.operator_type == EQ;
 
               if (a_indexed && !b_indexed)
                 return true;
@@ -438,20 +434,18 @@ AccessMethod choose_access_method(const std::vector<WhereCondition> &conditions,
   auto indexes = vm_get_table_indexes(table_name);
   for (auto &cond : sorted_conditions) {
 
-
-
     if (indexes.find(cond.column_index) != indexes.end()) {
       return {.type = AccessMethod::INDEX_SCAN,
               .primary_condition = nullptr,
               .index_condition = const_cast<WhereCondition *>(&cond),
-              .index_col= cond.column_index};
+              .index_col = cond.column_index};
     }
   }
 
   return {.type = AccessMethod::FULL_TABLE_SCAN,
           .primary_condition = nullptr,
           .index_condition = nullptr,
-        .index_col =0 };
+          .index_col = 0};
 }
 
 void build_where_checks(std::vector<VMInstruction> &instructions, int cursor_id,
@@ -485,9 +479,10 @@ void build_where_checks(std::vector<VMInstruction> &instructions, int cursor_id,
 }
 
 // Generate aggregate instructions
-std::vector<VMInstruction> generate_aggregate_instructions(
-    const std::string &table_name, const char *agg_func, uint32_t *column_index,
-    const std::vector<WhereCondition> &where_conditions) {
+std::vector<VMInstruction>
+aggregate(const std::string &table_name, const char *agg_func,
+          uint32_t *column_index,
+          const std::vector<WhereCondition> &where_conditions) {
 
   if (strcmp(agg_func, "COUNT") != 0 && column_index == nullptr) {
     // Error: non-COUNT aggregates need a column
@@ -688,7 +683,7 @@ update_or_delete_or_select(const UnifiedOptions &options, bool implicit_begin) {
 }
 
 // Public wrapper functions
-std::vector<VMInstruction> select(const SelectOptions &options) {
+std::vector<VMInstruction> build_select(const SelectOptions &options) {
   UnifiedOptions unified = {.table_name = options.table_name,
                             .schema = options.schema,
                             .set_columns = {},
@@ -702,8 +697,8 @@ std::vector<VMInstruction> select(const SelectOptions &options) {
   return update_or_delete_or_select(unified, false);
 }
 
-std::vector<VMInstruction> update(const UpdateOptions &options,
-                                  bool implicit_begin) {
+std::vector<VMInstruction> build_update(const UpdateOptions &options,
+                                        bool implicit_begin) {
   UnifiedOptions unified = {.table_name = options.table_name,
                             .schema = options.schema,
                             .set_columns = options.set_columns,
@@ -717,8 +712,8 @@ std::vector<VMInstruction> update(const UpdateOptions &options,
   return update_or_delete_or_select(unified, implicit_begin);
 }
 
-std::vector<VMInstruction> _delete(const UpdateOptions &options,
-                                   bool implicit_begin) {
+std::vector<VMInstruction> build_delete(const UpdateOptions &options,
+                                        bool implicit_begin) {
   UnifiedOptions unified = {.table_name = options.table_name,
                             .schema = options.schema,
                             .set_columns = {},
@@ -1206,12 +1201,10 @@ std::vector<VMInstruction> build_direct_rowid_operation(
 std::vector<VMInstruction> build_index_scan_operation(
     const std::string &table_name, const std::vector<ColumnInfo> &schema,
     const std::vector<Pair> &set_columns, const WhereCondition &index_condition,
-    const std::vector<WhereCondition> &remaining_conditions,
-   uint32_t index_col,
-    RegisterAllocator &regs,
-    UnifiedOptions::Operation operation, bool implicit_begin,
-    std::vector<uint32_t> *select_columns, const char *aggregate_func,
-    uint32_t *aggregate_column) {
+    const std::vector<WhereCondition> &remaining_conditions, uint32_t index_col,
+    RegisterAllocator &regs, UnifiedOptions::Operation operation,
+    bool implicit_begin, std::vector<uint32_t> *select_columns,
+    const char *aggregate_func, uint32_t *aggregate_column) {
 
   std::vector<VMInstruction> instructions;
   std::unordered_map<std::string, int> labels;
