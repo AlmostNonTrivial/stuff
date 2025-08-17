@@ -1,33 +1,33 @@
-#ifndef PAGER_HPP
-#define PAGER_HPP
+#pragma once
 
+#include <cstdint>
 #define PAGE_INVALID 0
 #define PAGE_ROOT 0
 
+#define MAX_CACHE_ENTRIES 100
 
-#define MAX_CACHE_ENTRIES 1000
-#define FREE_PAGES_PER_FREE_PAGE ((PAGE_SIZE - (sizeof(unsigned int) * 4)) / 4)
-#include "defs.hpp"
+
+
+struct PagerMeta {
+    uint32_t total_pages, cached_pages, dirty_pages, free_pages;
+};
+
 
 void pager_init(const char *filename);
 
-void *pager_get(unsigned int page_index);
+void *pager_get(uint32_t page_index);
 
-unsigned int pager_new();
+uint32_t pager_new();
 
-void pager_mark_dirty(unsigned int page_index);
+void pager_mark_dirty(uint32_t page_index);
 
-void pager_delete(unsigned int page_index);
-
+void pager_delete(uint32_t page_index);
 void pager_begin_transaction();
 void pager_commit();
 void pager_rollback();
 
 void pager_sync();
 
-void pager_get_stats(unsigned int *total_pages, unsigned int *free_pages,
-                     unsigned int *cached_pages, unsigned int *dirty_pages);
+PagerMeta pager_get_stats();
 
 void pager_close();
-
-#endif

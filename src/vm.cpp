@@ -14,7 +14,7 @@
 /*------------VMCURSOR---------------- */
 
 struct VmCursor {
-  BtCursor bt_cursor;
+  BtCursor btree_cursor;
   TableSchema *schema;
   bool is_index;
 };
@@ -26,10 +26,10 @@ DataType vb_key_type(VmCursor *vb) { return vb->schema->columns[0].type; }
 
 uint8_t *vb_column(VmCursor *vb, uint32_t col_index) {
   if (col_index == 0) {
-    return bt_cursor_key(&vb->bt_cursor);
+    return btree_cursor_key(&vb->btree_cursor);
   }
 
-  uint8_t *record = bt_cursor_record(&vb->bt_cursor);
+  uint8_t *record = btree_cursor_record(&vb->btree_cursor);
   return record + vb->schema->column_offsets[col_index];
 }
 
@@ -198,7 +198,7 @@ bool vm_step() {
 
     VmCursor &cursor = VM.cursors[cursor_id];
 
-    cursor.bt_cursor.tree = &table->tree;
+    cursor.btree_cursor.tree = &table->tree;
     cursor.schema = &table->schema;
     cursor.is_index = false;
 
@@ -220,8 +220,8 @@ bool vm_step() {
     }
     VmCursor *cursor = &it->second;
 
-    bool valid = inst->opcode == OP_Last ? bt_cursor_last(&cursor->bt_cursor)
-                                         : bt_cursor_first(&cursor->bt_cursor);
+    bool valid = inst->opcode == OP_Last ? btree_cursor_last(&cursor->btree_cursor)
+                                         : btree_cursor_first(&cursor->btree_cursor);
 
     if (!valid) {
       if (inst->p2 > 0) {
@@ -244,8 +244,8 @@ bool vm_step() {
 
     VmCursor *cursor = &it->second;
     bool has_more = (inst->opcode == OP_Next)
-                        ? bt_cursor_next(&cursor->bt_cursor)
-                        : bt_cursor_previous(&cursor->bt_cursor);
+                        ? btree_cursor_next(&cursor->btree_cursor)
+                        : btree_cursor_previous(&cursor->btree_cursor);
 
     if (has_more) {
       VM.pc++;
@@ -273,19 +273,19 @@ bool vm_step() {
     bool found = false;
     switch (inst->opcode) {
     case OP_SeekGE:
-      found = bt_cursor_seek_ge(&cursor->bt_cursor, key->data);
+      found = btree_cursor_seek_ge(&cursor->btree_cursor, key->data);
       break;
     case OP_SeekGT:
-      found = bt_cursor_seek_gt(&cursor->bt_cursor, key->data);
+      found = btree_cursor_seek_gt(&cursor->btree_cursor, key->data);
       break;
     case OP_SeekLE:
-      found = bt_cursor_seek_le(&cursor->bt_cursor, key->data);
+      found = btree_cursor_seek_le(&cursor->btree_cursor, key->data);
       break;
     case OP_SeekLT:
-      found = bt_cursor_seek_lt(&cursor->bt_cursor, key->data);
+      found = btree_cursor_seek_lt(&cursor->btree_cursor, key->data);
       break;
     case OP_SeekEQ:
-      found = bt_cursor_seek(&cursor->bt_cursor, key->data);
+      found = btree_cursor_seek(&cursor->btree_cursor, key->data);
       break;
     }
 
@@ -368,7 +368,7 @@ bool vm_step() {
     VMValue *record = &VM.registers[inst->p3];
 
     bool success =
-        bt_cursor_insert(&cursor->bt_cursor, key->data, record->data);
+        btree_cursor_insert(&cursor->btree_cursor, key->data, record->data);
     if (!success) {
       return false;
     }
@@ -384,7 +384,7 @@ bool vm_step() {
     }
 
     VmCursor *cursor = &it->second;
-    if (!bt_cursor_delete(&cursor->bt_cursor)) {
+    if (!btree_cursor_delete(&cursor->btree_cursor)) {
       return false;
     }
 
@@ -401,7 +401,7 @@ bool vm_step() {
     VmCursor *cursor = &it->second;
     VMValue *record = &VM.registers[inst->p2];
 
-    if (!bt_cursor_update(&cursor->bt_cursor, record->data)) {
+    if (!btree_cursor_update(&cursor->btree_cursor, record->data)) {
       return false;
     }
 
@@ -586,7 +586,7 @@ bool vm_step() {
       new_table.schema.record_size += new_table.schema.columns[i].type;
     }
 
-    new_table.tree = bt_create(new_table.schema.key_type(),
+    new_table.tree = btree_create(new_table.schema.key_type(),
                                new_table.schema.record_size, BPLUS);
 
     VM.tables[schema->table_name] = new_table;
@@ -611,7 +611,7 @@ bool vm_step() {
     ColumnInfo columnInfo = table->schema.columns.at(column);
 
     Index index;
-    index.tree = bt_create(columnInfo.type, table->schema.key_type(), BTREE);
+    index.tree = btree_create(columnInfo.type, table->schema.key_type(), BTREE);
 
     table->indexes[column] = index;
     VM.pc++;
@@ -628,9 +628,9 @@ bool vm_step() {
     }
     Table *table = &VM.tables[table_name];
     if (column == 0) {
-      bt_clear(&table->tree);
+      btree_clear(&table->tree);
       for (auto [col, index] : table->indexes) {
-        bt_clear(&index.tree);
+        btree_clear(&index.tree);
       }
     } else {
       if (table->indexes.find(column) == table->indexes.end()) {
@@ -638,7 +638,7 @@ bool vm_step() {
       }
 
       Index *index = &table->indexes[column];
-      bt_clear(&index->tree);
+      btree_clear(&index->tree);
       table->indexes.erase(column);
     }
 

@@ -21,8 +21,8 @@ struct BTree {
 
 
 
-BTree bt_create(DataType key, uint32_t record_size, TreeType tree_type);
-bool bt_clear(BTree *tree);
+BTree btree_create(DataType key, uint32_t record_size, TreeType tree_type);
+bool btree_clear(BTree *tree);
 
 enum CursorState : uint32_t {
   CURSOR_INVALID = 0,
@@ -49,26 +49,26 @@ struct BtCursor {
   CursorState state;
 };
 
-bool bt_cursor_seek(BtCursor *cursor, const void *key);
-bool bt_cursor_previous(BtCursor *cursor);
-bool bt_cursor_next(BtCursor *cursor);
-bool bt_cursor_last(BtCursor *cursor);
-bool bt_cursor_first(BtCursor *cursor);
-bool bt_cursor_is_end(BtCursor *cursor);
-bool bt_cursor_is_start(BtCursor *cursor);
-bool bt_cursor_update(BtCursor *cursor, const uint8_t *record);
-bool bt_cursor_insert(BtCursor *cursor, const void *key, const uint8_t *record);
-bool bt_cursor_delete(BtCursor *cursor);
+bool btree_cursor_seek(BtCursor *cursor, const void *key);
+bool btree_cursor_previous(BtCursor *cursor);
+bool btree_cursor_next(BtCursor *cursor);
+bool btree_cursor_last(BtCursor *cursor);
+bool btree_cursor_first(BtCursor *cursor);
+bool btree_cursor_is_end(BtCursor *cursor);
+bool btree_cursor_is_start(BtCursor *cursor);
+bool btree_cursor_update(BtCursor *cursor, const uint8_t *record);
+bool btree_cursor_insert(BtCursor *cursor, const void *key, const uint8_t *record);
+bool btree_cursor_delete(BtCursor *cursor);
 
-uint8_t *bt_cursor_key(BtCursor *cursor);
-uint8_t *bt_cursor_record(BtCursor *cursor);
+uint8_t *btree_cursor_key(BtCursor *cursor);
+uint8_t *btree_cursor_record(BtCursor *cursor);
 
-bool bt_cursor_seek_ge(BtCursor *cursor, const void *key);
-bool bt_cursor_seek_gt(BtCursor *cursor, const void *key);
-bool bt_cursor_seek_le(BtCursor *cursor, const void *key);
-bool bt_cursor_seek_lt(BtCursor *cursor, const void *key);
+bool btree_cursor_seek_ge(BtCursor *cursor, const void *key);
+bool btree_cursor_seek_gt(BtCursor *cursor, const void *key);
+bool btree_cursor_seek_le(BtCursor *cursor, const void *key);
+bool btree_cursor_seek_lt(BtCursor *cursor, const void *key);
 
-bool bt_cursor_is_valid(BtCursor *cursor);
+bool btree_cursor_is_valid(BtCursor *cursor);
 
-bool bt_cursor_has_next(BtCursor *cursor);
-bool bt_cursor_has_previous(BtCursor *cursor);
+bool btree_cursor_has_next(BtCursor *cursor);
+bool btree_cursor_has_previous(BtCursor *cursor);
