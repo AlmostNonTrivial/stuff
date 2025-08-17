@@ -13,6 +13,16 @@ enum DataType : uint32_t {
     TYPE_VARCHAR256 = 256 // Variable char up to 256 bytes
 };
 
+
+enum CompareOp {
+    EQ = 0,
+    NE = 1,
+    LT = 2,
+    LE = 3,
+    GT = 4,
+    GE = 5
+};
+
 int cmp(DataType key_size, const uint8_t *key1, const uint8_t *key2) ;
 
 #define NL '\n'

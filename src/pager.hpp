@@ -6,12 +6,9 @@
 
 #define MAX_CACHE_ENTRIES 100
 
-
-
 struct PagerMeta {
-    uint32_t total_pages, cached_pages, dirty_pages, free_pages;
+  uint32_t total_pages, cached_pages, dirty_pages, free_pages;
 };
-
 
 void pager_init(const char *filename);
 

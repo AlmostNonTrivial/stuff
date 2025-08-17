@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ios>
+#include <unordered_map>
 #include <vector>
 
 /*------------VMCURSOR---------------- */
@@ -70,6 +71,23 @@ static struct {
 
   bool in_transaction;
 } VM = {};
+
+
+
+Table& vm_get_table(std::string&name){
+   if(VM.tables.find(name)!= VM.tables.end())  {
+       return VM.tables[name];
+   }
+   exit(1);
+}
+
+std::unordered_map<uint32_t, Index> empty_map;
+std::unordered_map<uint32_t, Index>& vm_get_table_indexes(const std::string&name) {
+    if(VM.tables.find(name)!= VM.tables.end())  {
+        return VM.tables[name].indexes;
+    }
+   return empty_map;
+}
 
 // Helper to allocate and copy data to arena
 static uint8_t *arena_copy_data(const uint8_t *src, uint32_t size) {

@@ -143,3 +143,6 @@ void vm_init();
 void vm_reset();
 bool vm_execute(std::vector<VMInstruction> &instructions);
 bool vm_step();
+
+Table& vm_get_table(const std::string&name);
+std::unordered_map<uint32_t, Index>& vm_get_table_indexes(const std::string&name);
