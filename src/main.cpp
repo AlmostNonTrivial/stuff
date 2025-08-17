@@ -48,6 +48,11 @@ int main() {
       "id, "
       "INT type, VAR32 name, INT root, VARCHAR sql);');";
 
+   const char * insert_master2 =
+   "INSERT INTO Master VALUES (1, 0, 'tablue', 1, 'CREATE TABLE tablue (INT "
+   "id, "
+   "INT type, VAR32 name, INT root, VARCHAR sql);');";
+
   const char *commit = "COMMIT;";
 
   const char *select = "SELECT * FROM Master;";
@@ -57,11 +62,13 @@ int main() {
   auto b = parse_sql(begin);
   auto program = parse_sql(create_master);
   auto insert = parse_sql(insert_master);
+ auto insert2 = parse_sql(insert_master2) ;
   auto end = parse_sql(commit);
 
   vm_execute(b);
   vm_execute(program);
   vm_execute(insert);
+  vm_execute(insert2);
   vm_execute(end);
   auto s = parse_sql(select); // NEEDs to be after when schema is cached
 vm_execute(s);

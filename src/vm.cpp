@@ -79,7 +79,7 @@ static struct {
 
   int32_t compare_result;
 
-  std::vector<std::vector<VMValue *>> output_buffer;
+  std::vector<std::vector<VMValue >> output_buffer;
 
   Aggregator aggregator;
 
@@ -171,7 +171,7 @@ void vm_reset() {
 }
 
 // Get results from buffer
-std::vector<std::vector<VMValue *>> vm_get_results() {
+std::vector<std::vector<VMValue >> vm_get_results() {
   return VM.output_buffer;
 }
 
@@ -386,7 +386,6 @@ bool vm_step() {
     uint32_t total_size = 0;
     for (int i = 0; i < inst->p2; i++) {
       VMValue *val = &VM.registers[inst->p1 + i];
-      print_ptr(val->data, val->type);
       total_size += VMValue::get_size(val->type);
     }
 
@@ -532,10 +531,18 @@ bool vm_step() {
 
   case OP_ResultRow: {
     // Add row to output buffer
-    std::vector<VMValue *> row;
+    std::vector<VMValue > row;
     for (int i = 0; i < inst->p2; i++) {
-      row.push_back(&VM.registers[inst->p1 + i]);
+        VMValue copy;
+               copy.type = VM.registers[inst->p1 + i].type;
+               uint32_t size = VMValue::get_size(copy.type);
+               copy.data = (uint8_t*)arena_alloc(size);
+               memcpy(copy.data, VM.registers[inst->p1 + i].data, size);
+               row.push_back(copy);
+
     }
+
+
     VM.output_buffer.push_back(row);
     VM.pc++;
     return true;
@@ -549,7 +556,7 @@ bool vm_step() {
 
     std::sort(VM.output_buffer.begin(), VM.output_buffer.end(),
               [col, desc](const auto &a, const auto &b) {
-                int cmp_result = cmp(a[col]->type, a[col]->data, b[col]->data);
+                int cmp_result = cmp(a[col].type, a[col].data, b[col].data);
                 return desc ? (cmp_result > 0) : (cmp_result < 0);
               });
     VM.pc++;
@@ -557,12 +564,12 @@ bool vm_step() {
   }
 
   case Op_Flush: {
-      // for(auto x : VM.output_buffer) {
-      //    for(auto y : x)  {
-      //        print_ptr(y->data,  y->type);
-      //    }
-      //    std::cout << "\n";
-      // }
+      for(auto x : VM.output_buffer) {
+         for(auto y : x)  {
+             print_ptr(y.data,  y.type);
+         }
+         std::cout << "\n";
+      }
     // Clear the output buffer
     VM.output_buffer.clear();
     VM.pc++;
