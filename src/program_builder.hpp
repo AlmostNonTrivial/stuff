@@ -171,7 +171,7 @@ inline VMInstruction make_column(int32_t cursor_id, int32_t column_index, int32_
 }
 
 inline VMInstruction make_key(int32_t cursor_id, int32_t dest_reg) {
-    return {OP_Key, cursor_id, dest_reg, 0, nullptr, 0};
+    return {OP_Column, cursor_id, 0, dest_reg, nullptr, 0};
 }
 
 inline VMInstruction make_record(int32_t first_reg, int32_t reg_count, int32_t dest_reg) {

@@ -73,8 +73,6 @@ enum OpCode : uint8_t {
   // P1: cursor_id, P2: column_index, P3: dest_register, P4: unused, P5: unused
   OP_Column = 30,
 
-  // P1: cursor_id, P2: dest_register, P3: unused, P4: unused, P5: unused
-  OP_Key = 31,
 
   // P1: first_register, P2: register_count, P3: dest_register, P4: unused, P5: unused
   OP_MakeRecord = 32,
