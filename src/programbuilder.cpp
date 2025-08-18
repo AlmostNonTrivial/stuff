@@ -1036,259 +1036,254 @@ std::vector<VMInstruction> build_index_scan_operation(
 }
 
 
-// #include "programbuilder.hpp"
-// #include "parser.hpp"
-// #include "defs.hpp"
-// #include "schema.hpp"
-// #include "vm.hpp"
-// #include <cstring>
 
-// // Forward declarations for AST traversal
-// static std::vector<WhereCondition> extract_where_conditions(WhereNode* where, const TableSchema& schema);
-// static WhereCondition extract_condition_from_binary_op(BinaryOpNode* op, const TableSchema& schema);
-// static uint32_t resolve_column_index(const char* col_name, const std::vector<ColumnInfo>& columns);
-// static std::vector<VMInstruction> build_from_ast(ASTNode* ast);
 
-// // Helper to resolve column name to index
-// static uint32_t resolve_column_index(const char* col_name, const std::vector<ColumnInfo>& columns) {
-//     for (size_t i = 0; i < columns.size(); i++) {
-//         if (strcmp(columns[i].name, col_name) == 0) {
-//             return i;
-//         }
-//     }
-//     return 0; // Default to first column if not found
-// }
+// Forward declarations for AST traversal
+static std::vector<WhereCondition> extract_where_conditions(WhereNode* where, const TableSchema& schema);
+static WhereCondition extract_condition_from_binary_op(BinaryOpNode* op, const TableSchema& schema);
+static uint32_t resolve_column_index(const char* col_name, const std::vector<ColumnInfo>& columns);
+static std::vector<VMInstruction> build_from_ast(ASTNode* ast);
 
-// // Extract a single condition from a binary op node
-// static WhereCondition extract_condition_from_binary_op(BinaryOpNode* op, const TableSchema& schema) {
-//     WhereCondition cond;
+// Helper to resolve column name to index
+static uint32_t resolve_column_index(const char* col_name, const std::vector<ColumnInfo>& columns) {
+    for (size_t i = 0; i < columns.size(); i++) {
+        if (strcmp(columns[i].name, col_name) == 0) {
+            return i;
+        }
+    }
+    return 0; // Default to first column if not found
+}
 
-//     // Left side should be column reference
-//     if (op->left->type == AST_COLUMN_REF) {
-//         ColumnRefNode* col = (ColumnRefNode*)op->left;
-//         cond.column_name = col->name;
-//         cond.column_index = resolve_column_index(col->name, schema.columns);
-//     }
+// Extract a single condition from a binary op node
+static WhereCondition extract_condition_from_binary_op(BinaryOpNode* op, const TableSchema& schema) {
+    WhereCondition cond;
 
-//     // Right side should be literal
-//     if (op->right->type == AST_LITERAL) {
-//         LiteralNode* lit = (LiteralNode*)op->right;
-//         cond.value = lit->value;
-//     }
+    // Left side should be column reference
+    if (op->left->type == AST_COLUMN_REF) {
+        ColumnRefNode* col = (ColumnRefNode*)op->left;
+        cond.column_name = col->name;
+        cond.column_index = resolve_column_index(col->name, schema.columns);
+    }
 
-//     cond.operator_type = op->op;
-//     cond.selectivity = 0.5; // Default selectivity
+    // Right side should be literal
+    if (op->right->type == AST_LITERAL) {
+        LiteralNode* lit = (LiteralNode*)op->right;
+        cond.value = lit->value;
+    }
 
-//     return cond;
-// }
+    cond.operator_type = op->op;
+    cond.selectivity = 0.5; // Default selectivity
 
-// // Recursively extract WHERE conditions from AST
-// static std::vector<WhereCondition> extract_where_conditions(WhereNode* where, const TableSchema& schema) {
-//     std::vector<WhereCondition> conditions;
+    return cond;
+}
 
-//     if (!where || !where->condition) {
-//         return conditions;
-//     }
+// Recursively extract WHERE conditions from AST
+static std::vector<WhereCondition> extract_where_conditions(WhereNode* where, const TableSchema& schema) {
+    std::vector<WhereCondition> conditions;
 
-//     // Traverse the condition tree
-//     std::function<void(ASTNode*)> traverse = [&](ASTNode* node) {
-//         if (!node) return;
+    if (!where || !where->condition) {
+        return conditions;
+    }
 
-//         if (node->type == AST_BINARY_OP) {
-//             BinaryOpNode* binop = (BinaryOpNode*)node;
+    // Traverse the condition tree
+    std::function<void(ASTNode*)> traverse = [&](ASTNode* node) {
+        if (!node) return;
 
-//             if (binop->is_and) {
-//                 // AND node - traverse both sides
-//                 traverse(binop->left);
-//                 traverse(binop->right);
-//             } else {
-//                 // Comparison node - extract condition
-//                 conditions.push_back(extract_condition_from_binary_op(binop, schema));
-//             }
-//         }
-//     };
+        if (node->type == AST_BINARY_OP) {
+            BinaryOpNode* binop = (BinaryOpNode*)node;
 
-//     traverse(where->condition);
-//     return conditions;
-// }
+            if (binop->is_and) {
+                // AND node - traverse both sides
+                traverse(binop->left);
+                traverse(binop->right);
+            } else {
+                // Comparison node - extract condition
+                conditions.push_back(extract_condition_from_binary_op(binop, schema));
+            }
+        }
+    };
 
-// // Build SELECT from AST
-// static std::vector<VMInstruction> build_select_from_ast(SelectNode* node) {
-//     // Get table schema
-//     Table& table = vm_get_table(node->table);
+    traverse(where->condition);
+    return conditions;
+}
 
-//     // Handle aggregate functions
-//     if (node->aggregate) {
-//         AggregateNode* agg = node->aggregate;
-//         uint32_t* column_index = nullptr;
-//         uint32_t col_idx;
+// Build SELECT from AST
+static std::vector<VMInstruction> build_select_from_ast(SelectNode* node) {
+    // Get table schema
+    Table& table = vm_get_table(node->table);
 
-//         if (agg->arg && agg->arg->type == AST_COLUMN_REF) {
-//             ColumnRefNode* col = (ColumnRefNode*)agg->arg;
-//             col_idx = resolve_column_index(col->name, table.schema.columns);
-//             column_index = &col_idx;
-//         }
+    // Handle aggregate functions
+    if (node->aggregate) {
+        AggregateNode* agg = node->aggregate;
+        uint32_t* column_index = nullptr;
+        uint32_t col_idx;
 
-//         std::vector<WhereCondition> conditions = extract_where_conditions(node->where, table.schema);
+        if (agg->arg && agg->arg->type == AST_COLUMN_REF) {
+            ColumnRefNode* col = (ColumnRefNode*)agg->arg;
+            col_idx = resolve_column_index(col->name, table.schema.columns);
+            column_index = &col_idx;
+        }
 
-//         return aggregate(node->table, agg->function, column_index, conditions);
-//     }
+        std::vector<WhereCondition> conditions = extract_where_conditions(node->where, table.schema);
 
-//     // Regular SELECT
-//     ParsedParameters params;
-//     params.table_name = node->table;
-//     params.operation = ParsedParameters::SELECT;
-//     params.where_conditions = extract_where_conditions(node->where, table.schema);
+        return aggregate(node->table, agg->function, column_index, conditions);
+    }
 
-//     // Extract column list
-//     if (!node->columns.empty()) {
-//         for (ASTNode* col_node : node->columns) {
-//             if (col_node->type == AST_COLUMN_REF) {
-//                 ColumnRefNode* col = (ColumnRefNode*)col_node;
-//                 params.select_columns.push_back(col->name);
-//             }
-//         }
-//     }
+    // Regular SELECT
+    ParsedParameters params;
+    params.table_name = node->table;
+    params.operation = ParsedParameters::SELECT;
+    params.where_conditions = extract_where_conditions(node->where, table.schema);
 
-//     // Handle ORDER BY
-//     if (node->order_by) {
-//         params.order_by.column_name = node->order_by->column;
-//         params.order_by.asc = node->order_by->ascending;
-//     }
+    // Extract column list
+    if (!node->columns.empty()) {
+        for (ASTNode* col_node : node->columns) {
+            if (col_node->type == AST_COLUMN_REF) {
+                ColumnRefNode* col = (ColumnRefNode*)col_node;
+                params.select_columns.push_back(col->name);
+            }
+        }
+    }
 
-//     return build_select(params);
-// }
+    // Handle ORDER BY
+    if (node->order_by) {
+        params.order_by.column_name = node->order_by->column;
+        params.order_by.asc = node->order_by->ascending;
+    }
 
-// // Build INSERT from AST
-// static std::vector<VMInstruction> build_insert_from_ast(InsertNode* node) {
-//     Table& table = vm_get_table(node->table);
+    return build_select(params);
+}
 
-//     std::vector<SET_PAIR> values;
-//     for (size_t i = 0; i < node->values.size() && i < table.schema.columns.size(); i++) {
-//         if (node->values[i]->type == AST_LITERAL) {
-//             LiteralNode* lit = (LiteralNode*)node->values[i];
-//             values.push_back({table.schema.columns[i].name, lit->value});
-//         }
-//     }
+// Build INSERT from AST
+static std::vector<VMInstruction> build_insert_from_ast(InsertNode* node) {
+    Table& table = vm_get_table(node->table);
 
-//     // Check if we're in a transaction
-//     bool implicit_begin = !VM.in_transaction;
+    std::vector<SET_PAIR> values;
+    for (size_t i = 0; i < node->values.size() && i < table.schema.columns.size(); i++) {
+        if (node->values[i]->type == AST_LITERAL) {
+            LiteralNode* lit = (LiteralNode*)node->values[i];
+            values.push_back({table.schema.columns[i].name, lit->value});
+        }
+    }
 
-//     return build_insert(node->table, values, implicit_begin);
-// }
+    // Check if we're in a transaction
+    bool implicit_begin = !VM.in_transaction;
 
-// // Build UPDATE from AST
-// static std::vector<VMInstruction> build_update_from_ast(UpdateNode* node) {
-//     Table& table = vm_get_table(node->table);
+    return build_insert(node->table, values, implicit_begin);
+}
 
-//     ParsedParameters params;
-//     params.table_name = node->table;
-//     params.operation = ParsedParameters::UPDATE;
-//     params.where_conditions = extract_where_conditions(node->where, table.schema);
+// Build UPDATE from AST
+static std::vector<VMInstruction> build_update_from_ast(UpdateNode* node) {
+    Table& table = vm_get_table(node->table);
 
-//     // Extract SET clauses
-//     for (SetClauseNode* set : node->set_clauses) {
-//         if (set->value->type == AST_LITERAL) {
-//             LiteralNode* lit = (LiteralNode*)set->value;
-//             uint32_t col_idx = resolve_column_index(set->column, table.schema.columns);
-//             params.set_columns.push_back({set->column, lit->value});
-//         }
-//     }
+    ParsedParameters params;
+    params.table_name = node->table;
+    params.operation = ParsedParameters::UPDATE;
+    params.where_conditions = extract_where_conditions(node->where, table.schema);
 
-//     bool implicit_begin = !VM.in_transaction;
+    // Extract SET clauses
+    for (SetClauseNode* set : node->set_clauses) {
+        if (set->value->type == AST_LITERAL) {
+            LiteralNode* lit = (LiteralNode*)set->value;
+            uint32_t col_idx = resolve_column_index(set->column, table.schema.columns);
+            params.set_columns.push_back({set->column, lit->value});
+        }
+    }
 
-//     return build_update(params, implicit_begin);
-// }
+    bool implicit_begin = !VM.in_transaction;
 
-// // Build DELETE from AST
-// static std::vector<VMInstruction> build_delete_from_ast(DeleteNode* node) {
-//     Table& table = vm_get_table(node->table);
+    return build_update(params, implicit_begin);
+}
 
-//     ParsedParameters params;
-//     params.table_name = node->table;
-//     params.operation = ParsedParameters::DELETE;
-//     params.where_conditions = extract_where_conditions(node->where, table.schema);
+// Build DELETE from AST
+static std::vector<VMInstruction> build_delete_from_ast(DeleteNode* node) {
+    Table& table = vm_get_table(node->table);
 
-//     bool implicit_begin = !VM.in_transaction;
+    ParsedParameters params;
+    params.table_name = node->table;
+    params.operation = ParsedParameters::DELETE;
+    params.where_conditions = extract_where_conditions(node->where, table.schema);
 
-//     return build_delete(params, implicit_begin);
-// }
+    bool implicit_begin = !VM.in_transaction;
 
-// // Build CREATE TABLE from AST
-// static std::vector<VMInstruction> build_create_table_from_ast(CreateTableNode* node) {
-//     return build_create_table(node->table, node->columns);
-// }
+    return build_delete(params, implicit_begin);
+}
 
-// // Build CREATE INDEX from AST
-// static std::vector<VMInstruction> build_create_index_from_ast(CreateIndexNode* node) {
-//     Table& table = vm_get_table(node->table);
-//     uint32_t col_idx = resolve_column_index(node->column, table.schema.columns);
-//     DataType key_type = table.schema.columns[col_idx].type;
+// Build CREATE TABLE from AST
+static std::vector<VMInstruction> build_create_table_from_ast(CreateTableNode* node) {
+    return build_create_table(node->table, node->columns);
+}
 
-//     return build_create_index(node->table, col_idx, key_type);
-// }
+// Build CREATE INDEX from AST
+static std::vector<VMInstruction> build_create_index_from_ast(CreateIndexNode* node) {
+    Table& table = vm_get_table(node->table);
+    uint32_t col_idx = resolve_column_index(node->column, table.schema.columns);
+    DataType key_type = table.schema.columns[col_idx].type;
 
-// // Build transaction commands from AST
-// static std::vector<VMInstruction> build_begin_from_ast(BeginNode* node) {
-//     return {make_begin(), make_halt()};
-// }
+    return build_create_index(node->table, col_idx, key_type);
+}
 
-// static std::vector<VMInstruction> build_commit_from_ast(CommitNode* node) {
-//     return {make_commit(), make_halt()};
-// }
+// Build transaction commands from AST
+static std::vector<VMInstruction> build_begin_from_ast(BeginNode* node) {
+    return {make_begin(), make_halt()};
+}
 
-// static std::vector<VMInstruction> build_rollback_from_ast(RollbackNode* node) {
-//     return {make_rollback(), make_halt()};
-// }
+static std::vector<VMInstruction> build_commit_from_ast(CommitNode* node) {
+    return {make_commit(), make_halt()};
+}
 
-// // Main entry point - builds VM instructions from AST
-// std::vector<VMInstruction> build_from_ast(ASTNode* ast) {
-//     if (!ast) {
-//         return {make_halt()};
-//     }
+static std::vector<VMInstruction> build_rollback_from_ast(RollbackNode* node) {
+    return {make_rollback(), make_halt()};
+}
 
-//     switch (ast->type) {
-//         case AST_SELECT:
-//             return build_select_from_ast((SelectNode*)ast);
+// Main entry point - builds VM instructions from AST
+std::vector<VMInstruction> build_from_ast(ASTNode* ast) {
+    if (!ast) {
+        return {make_halt()};
+    }
 
-//         case AST_INSERT:
-//             return build_insert_from_ast((InsertNode*)ast);
+    switch (ast->type) {
+        case AST_SELECT:
+            return build_select_from_ast((SelectNode*)ast);
 
-//         case AST_UPDATE:
-//             return build_update_from_ast((UpdateNode*)ast);
+        case AST_INSERT:
+            return build_insert_from_ast((InsertNode*)ast);
 
-//         case AST_DELETE:
-//             return build_delete_from_ast((DeleteNode*)ast);
+        case AST_UPDATE:
+            return build_update_from_ast((UpdateNode*)ast);
 
-//         case AST_CREATE_TABLE:
-//             return build_create_table_from_ast((CreateTableNode*)ast);
+        case AST_DELETE:
+            return build_delete_from_ast((DeleteNode*)ast);
 
-//         case AST_CREATE_INDEX:
-//             return build_create_index_from_ast((CreateIndexNode*)ast);
+        case AST_CREATE_TABLE:
+            return build_create_table_from_ast((CreateTableNode*)ast);
 
-//         case AST_BEGIN:
-//             return build_begin_from_ast((BeginNode*)ast);
+        case AST_CREATE_INDEX:
+            return build_create_index_from_ast((CreateIndexNode*)ast);
 
-//         case AST_COMMIT:
-//             return build_commit_from_ast((CommitNode*)ast);
+        case AST_BEGIN:
+            return build_begin_from_ast((BeginNode*)ast);
 
-//         case AST_ROLLBACK:
-//             return build_rollback_from_ast((RollbackNode*)ast);
+        case AST_COMMIT:
+            return build_commit_from_ast((CommitNode*)ast);
 
-//         default:
-//             return {make_halt()};
-//     }
-// }
+        case AST_ROLLBACK:
+            return build_rollback_from_ast((RollbackNode*)ast);
 
-// // Public wrapper that combines parsing and building
-// std::vector<VMInstruction> parse_and_build(const char* sql) {
-//     ASTNode* ast = parse_sql(sql);
-//     if (!ast) {
-//         return {make_halt()};
-//     }
+        default:
+            return {make_halt()};
+    }
+}
 
-//     return build_from_ast(ast);
-// }
+// Public wrapper that combines parsing and building
+std::vector<VMInstruction> parse_and_build(const char* sql) {
+    ASTNode* ast = parse_sql(sql);
+    if (!ast) {
+        return {make_halt()};
+    }
 
-// // Keep the existing implementation functions below unchanged...
-// // (All the build_direct_rowid_operation, build_index_scan_operation, etc. remain the same)
+    return build_from_ast(ast);
+}
+
+// Keep the existing implementation functions below unchanged...
+// (All the build_direct_rowid_operation, build_index_scan_operation, etc. remain the same)

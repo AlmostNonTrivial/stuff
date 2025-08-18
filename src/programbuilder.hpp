@@ -1,10 +1,9 @@
 #pragma once
 #include "vm.hpp"
+#include "parser.hpp"
 #include <utility>
 
 #define SET_PAIR std::pair<std::string,VMValue>
-
-
 
 struct RegisterAllocator {
   std::unordered_map<std::string, int> name_to_register;
@@ -16,6 +15,7 @@ struct RegisterAllocator {
 
 struct WhereCondition {
   std::string column_name;
+  uint32_t column_index;
   CompareOp operator_type;
   VMValue value;
   double selectivity = 0.5;
@@ -23,16 +23,16 @@ struct WhereCondition {
 
 struct OrderBy {
   std::string column_name;
-  bool asc; // "ASC" or "DESC"
+  bool asc; // true for ASC, false for DESC
 };
 
 struct ParsedParameters {
-  std::string table_name; // all
-  std::vector<SET_PAIR> set_columns; // update
-  std::vector<WhereCondition> where_conditions; // all
-  enum Operation { UPDATE, DELETE, SELECT, AGGREGATE } operation; // all
-  std::vector<std::string> select_columns; // select
-  OrderBy order_by; // select
+  std::string table_name;
+  std::vector<SET_PAIR> set_columns;
+  std::vector<WhereCondition> where_conditions;
+  enum Operation { UPDATE, DELETE, SELECT, AGGREGATE } operation;
+  std::vector<std::string> select_columns;
+  OrderBy order_by;
   std::string aggregate;
 };
 
@@ -43,10 +43,15 @@ struct AccessMethod {
   uint32_t index_col;
 };
 
-// Main functions
+// Main entry points for AST-based building
+std::vector<VMInstruction> build_from_ast(ASTNode* ast);
+std::vector<VMInstruction> parse_and_build(const char* sql);
+
+// Original functions that still work with ParsedParameters
 std::vector<VMInstruction>
-build_creat_table(const std::string &table_name,
+build_create_table(const std::string &table_name,
                   const std::vector<ColumnInfo> &columns);
+
 std::vector<VMInstruction> build_drop_table(const std::string &table_name);
 std::vector<VMInstruction> build_drop_index(const std::string &index_name);
 std::vector<VMInstruction> build_create_index(const std::string &table_name,
