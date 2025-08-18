@@ -289,8 +289,7 @@ static std::vector<VMInstruction> build_insert_from_ast(InsertNode *node) {
     }
   }
 
-  // Check if we're in a transaction (would need VM state access in real
-  // implementation)
+
 
   return build_insert(node->table, values);
 }

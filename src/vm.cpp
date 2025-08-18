@@ -241,15 +241,23 @@ VM_RESULT vm_step() {
     uint32_t cursor_id = inst->p2;
     VmCursor &cursor = VM.cursors[cursor_id];
 
+    // need a copy because we might alter the root
+    // we we might need to rollback.
+    BTree * tree = ARENA_ALLOC(BTree);
+
     if (index_column != 0) {
       Index *index = get_index(table_name, index_column);
       if (!index) {
         return ERR;
       }
-      cursor.btree_cursor.tree = &index->tree;
+
+      memcpy(tree, &index->tree, sizeof(BTree));
+      cursor.btree_cursor.tree = tree;
       cursor.is_index = true;
     } else {
-      cursor.btree_cursor.tree = &table->tree;
+
+      memcpy(tree, &table->tree, sizeof(BTree));
+      cursor.btree_cursor.tree = tree;
       cursor.is_index = false;
     }
 
@@ -411,7 +419,7 @@ VM_RESULT vm_step() {
     }
 
     if (cursor->btree_cursor.tree->root_page_index != current_root) {
-      emit_event(EVT_BTREE_ROOT_CHANGED);
+      emit_event(EVT_BTREE_ROOT_CHANGED, cursor->btree_cursor.tree);
     }
 
     emit_row_event(EVT_ROWS_INSERTED, 1);
@@ -430,7 +438,7 @@ VM_RESULT vm_step() {
     btree_cursor_delete(&cursor->btree_cursor);
 
     if (cursor->btree_cursor.tree->root_page_index != current_root) {
-      emit_event(EVT_BTREE_ROOT_CHANGED);
+      emit_event(EVT_BTREE_ROOT_CHANGED, cursor->btree_cursor.tree);
     }
 
     emit_row_event(EVT_ROWS_DELETED, 1);

@@ -1,6 +1,5 @@
 
 
-
-- Do we actually need registers, or can we just use
-the arena?
-- the label resoluion sucks
+TODO:
+-  Make master table stuff
+-  
