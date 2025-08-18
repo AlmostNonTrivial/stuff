@@ -60,14 +60,14 @@ std::vector<VMInstruction> build_create_index(const std::string &table_name,
                                               DataType key_type);
 
 std::vector<VMInstruction> build_insert(const std::string &table_name,
-                                        const std::vector<SET_PAIR> &values,
-                                        bool implicit_begin);
+                                        const std::vector<SET_PAIR> &values
+                                        );
 
 std::vector<VMInstruction> build_select(const ParsedParameters&options);
-std::vector<VMInstruction> build_update(const ParsedParameters&options,
-                                        bool implicit_begin);
-std::vector<VMInstruction> build_delete(const ParsedParameters&options,
-                                        bool implicit_begin);
+std::vector<VMInstruction> build_update(const ParsedParameters&options
+                                        );
+std::vector<VMInstruction> build_delete(const ParsedParameters&options
+                                        );
 
 std::vector<VMInstruction>
 aggregate(const std::string &table_name, const char *agg_func,

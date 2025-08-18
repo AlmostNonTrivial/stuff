@@ -14,8 +14,7 @@ extract_condition_from_binary_op(BinaryOpNode *op,
 static uint32_t resolve_column_index(const char *col_name,
                                      const std::string &table_name);
 std::vector<VMInstruction>
-update_or_delete_or_select(const ParsedParameters &options,
-                           bool implicit_begin);
+update_or_delete_or_select(const ParsedParameters &options);
 
 // Global tables reference
 extern std::unordered_map<std::string, Table> tables;
@@ -64,10 +63,6 @@ OpCode str_or_int(const VMValue &value) {
 }
 
 uint8_t set_p5(uint8_t current, uint8_t flag) { return current | flag; }
-
-void add_begin(std::vector<VMInstruction> &instructions) {
-  instructions.insert(instructions.begin(), make_begin());
-}
 
 void load_value(std::vector<VMInstruction> &instructions, const VMValue &value,
                 int target_reg) {
@@ -268,9 +263,8 @@ static std::vector<VMInstruction> build_insert_from_ast(InsertNode *node) {
 
   // Check if we're in a transaction (would need VM state access in real
   // implementation)
-  bool implicit_begin = true;
 
-  return build_insert(node->table, values, implicit_begin);
+  return build_insert(node->table, values);
 }
 
 // Build UPDATE from AST
@@ -289,9 +283,7 @@ static std::vector<VMInstruction> build_update_from_ast(UpdateNode *node) {
     }
   }
 
-  bool implicit_begin = true;
-
-  return build_update(params, implicit_begin);
+  return build_update(params);
 }
 
 // Build DELETE from AST
@@ -301,9 +293,7 @@ static std::vector<VMInstruction> build_delete_from_ast(DeleteNode *node) {
   params.operation = ParsedParameters::DELETE;
   params.where_conditions = extract_where_conditions(node->where, node->table);
 
-  bool implicit_begin = true;
-
-  return build_delete(params, implicit_begin);
+  return build_delete(params);
 }
 
 // Build CREATE TABLE from AST
@@ -491,14 +481,9 @@ std::vector<VMInstruction> build_create_index(const std::string &table_name,
 
 // Insert
 std::vector<VMInstruction> build_insert(const std::string &table_name,
-                                        const std::vector<SET_PAIR> &values,
-                                        bool implicit_begin) {
+                                        const std::vector<SET_PAIR> &values) {
   RegisterAllocator regs;
   std::vector<VMInstruction> instructions;
-
-  if (implicit_begin) {
-    add_begin(instructions);
-  }
 
   const int table_cursor_id = 0;
 
@@ -578,7 +563,7 @@ aggregate(const std::string &table_name, const char *agg_func,
     options.operation = ParsedParameters::AGGREGATE;
     options.aggregate = std::string(agg_func);
 
-    return update_or_delete_or_select(options, false);
+    return update_or_delete_or_select(options);
   }
 
   // Simple aggregate without WHERE
@@ -704,7 +689,7 @@ std::vector<VMInstruction> build_direct_rowid_operation(
     const WhereCondition &primary_condition,
     const std::vector<WhereCondition> &remaining_conditions,
     RegisterAllocator &regs, ParsedParameters::Operation operation,
-    bool implicit_begin, const std::vector<std::string> &select_columns,
+    const std::vector<std::string> &select_columns,
     const std::string &aggregate_func);
 
 std::vector<VMInstruction> build_index_scan_operation(
@@ -712,20 +697,19 @@ std::vector<VMInstruction> build_index_scan_operation(
     const WhereCondition &index_condition,
     const std::vector<WhereCondition> &remaining_conditions, uint32_t index_col,
     RegisterAllocator &regs, ParsedParameters::Operation operation,
-    bool implicit_begin, const std::vector<std::string> &select_columns,
+    const std::vector<std::string> &select_columns,
     const std::string &aggregate_func);
 
 std::vector<VMInstruction> build_full_table_scan_operation(
     const std::string &table_name, const std::vector<SET_PAIR> &set_columns,
     const std::vector<WhereCondition> &conditions, RegisterAllocator &regs,
-    ParsedParameters::Operation operation, bool implicit_begin,
+    ParsedParameters::Operation operation,
     const std::vector<std::string> &select_columns,
     const std::string &aggregate_func);
 
 // Main unified function
 std::vector<VMInstruction>
-update_or_delete_or_select(const ParsedParameters &options,
-                           bool implicit_begin) {
+update_or_delete_or_select(const ParsedParameters &options) {
   RegisterAllocator regs;
 
   auto optimized_conditions =
@@ -750,8 +734,7 @@ update_or_delete_or_select(const ParsedParameters &options,
           }
           return remaining;
         }(),
-        regs, options.operation, implicit_begin, options.select_columns,
-        options.aggregate);
+        regs, options.operation, options.select_columns, options.aggregate);
     break;
 
   case AccessMethod::INDEX_SCAN:
@@ -766,7 +749,7 @@ update_or_delete_or_select(const ParsedParameters &options,
           }
           return remaining;
         }(),
-        access_method.index_col, regs, options.operation, implicit_begin,
+        access_method.index_col, regs, options.operation,
         options.select_columns, options.aggregate);
     break;
 
@@ -774,8 +757,7 @@ update_or_delete_or_select(const ParsedParameters &options,
   default:
     instructions = build_full_table_scan_operation(
         options.table_name, options.set_columns, optimized_conditions, regs,
-        options.operation, implicit_begin, options.select_columns,
-        options.aggregate);
+        options.operation, options.select_columns, options.aggregate);
   }
 
   if (options.operation == ParsedParameters::SELECT &&
@@ -793,34 +775,28 @@ update_or_delete_or_select(const ParsedParameters &options,
 
 // Public wrapper functions
 std::vector<VMInstruction> build_select(const ParsedParameters &options) {
-  return update_or_delete_or_select(options, false);
+  return update_or_delete_or_select(options);
 }
 
-std::vector<VMInstruction> build_update(const ParsedParameters &options,
-                                        bool implicit_begin) {
-  return update_or_delete_or_select(options, implicit_begin);
+std::vector<VMInstruction> build_update(const ParsedParameters &options) {
+  return update_or_delete_or_select(options);
 }
 
-std::vector<VMInstruction> build_delete(const ParsedParameters &options,
-                                        bool implicit_begin) {
-  return update_or_delete_or_select(options, implicit_begin);
+std::vector<VMInstruction> build_delete(const ParsedParameters &options) {
+  return update_or_delete_or_select(options);
 }
 
 // Build full table scan operation
 std::vector<VMInstruction> build_full_table_scan_operation(
     const std::string &table_name, const std::vector<SET_PAIR> &set_columns,
     const std::vector<WhereCondition> &conditions, RegisterAllocator &regs,
-    ParsedParameters::Operation operation, bool implicit_begin,
+    ParsedParameters::Operation operation,
     const std::vector<std::string> &select_columns,
     const std::string &aggregate_func) {
 
   std::vector<VMInstruction> instructions;
   std::unordered_map<std::string, int> labels;
   const int cursor_id = 0;
-
-  if (implicit_begin) {
-    add_begin(instructions);
-  }
 
   char *table_name_str = (char *)arena_alloc(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
@@ -936,16 +912,12 @@ std::vector<VMInstruction> build_direct_rowid_operation(
     const WhereCondition &primary_condition,
     const std::vector<WhereCondition> &remaining_conditions,
     RegisterAllocator &regs, ParsedParameters::Operation operation,
-    bool implicit_begin, const std::vector<std::string> &select_columns,
+    const std::vector<std::string> &select_columns,
     const std::string &aggregate_func) {
 
   std::vector<VMInstruction> instructions;
   std::unordered_map<std::string, int> labels;
   const int cursor_id = 0;
-
-  if (implicit_begin) {
-    add_begin(instructions);
-  }
 
   char *table_name_str = (char *)arena_alloc(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
@@ -1077,17 +1049,13 @@ std::vector<VMInstruction> build_index_scan_operation(
     const WhereCondition &index_condition,
     const std::vector<WhereCondition> &remaining_conditions, uint32_t index_col,
     RegisterAllocator &regs, ParsedParameters::Operation operation,
-    bool implicit_begin, const std::vector<std::string> &select_columns,
+    const std::vector<std::string> &select_columns,
     const std::string &aggregate_func) {
 
   std::vector<VMInstruction> instructions;
   std::unordered_map<std::string, int> labels;
   const int table_cursor_id = 1;
   const int index_cursor_id = 0;
-
-  if (implicit_begin) {
-    add_begin(instructions);
-  }
 
   char *table_name_str = (char *)arena_alloc(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());

@@ -166,12 +166,20 @@ void execute(const char* sql) {
     bool success = true;
     bool explicit_transaction = false;
 
+
     for (auto statement : statements) {
+        bool read = false;
         // Check for explicit transaction commands
         if (statement->type == AST_BEGIN) {
             explicit_transaction = true;
         } else if (statement->type == AST_COMMIT || statement->type == AST_ROLLBACK) {
             explicit_transaction = false;
+        } else if (statement->type == AST_SELECT) {
+           read = true;
+        }
+
+        if(!explicit_transaction && !executor_state.in_transaction && !read) {
+            btree_begin_transaction();
         }
 
         // Build program from AST
