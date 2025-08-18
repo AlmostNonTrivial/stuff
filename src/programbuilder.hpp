@@ -48,32 +48,6 @@ struct AccessMethod {
 std::vector<VMInstruction> build_from_ast(ASTNode* ast);
 
 
-// Original functions that still work with ParsedParameters
-std::vector<VMInstruction>
-build_create_table(const std::string &table_name,
-                  const std::vector<ColumnInfo> &columns);
-
-std::vector<VMInstruction> build_drop_table(const std::string &table_name);
-std::vector<VMInstruction> build_drop_index(const std::string &index_name);
-std::vector<VMInstruction> build_create_index(const std::string &table_name,
-                                              uint32_t column_index,
-                                              DataType key_type);
-
-std::vector<VMInstruction> build_insert(const std::string &table_name,
-                                        const std::vector<SET_PAIR> &values
-                                        );
-
-std::vector<VMInstruction> build_select(const ParsedParameters&options);
-std::vector<VMInstruction> build_update(const ParsedParameters&options
-                                        );
-std::vector<VMInstruction> build_delete(const ParsedParameters&options
-                                        );
-
-std::vector<VMInstruction>
-aggregate(const std::string &table_name, const char *agg_func,
-          uint32_t *column_index,
-          const std::vector<WhereCondition> &where_conditions);
-
 // Control flow
 inline VMInstruction make_trace(const char *message) {
   return {OP_Trace, 0, 0, 0, (void *)message, 0};
