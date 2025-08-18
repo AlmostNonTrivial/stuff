@@ -623,26 +623,28 @@ VM_RESULT vm_step() {
 
   case OP_CreateTable:
   {
-
     TableSchema *schema = (TableSchema *)inst->p4;
     if (get_table((char*)schema->table_name.c_str())){
       return ERR;
     }
 
-    Table new_table;
-    new_table.schema = *schema;
-    new_table.schema.record_size = 0;
-    schema->column_offsets.resize(new_table.schema.columns.size());
+    Table *new_table = ARENA_ALLOC(Table);
+    new_table->schema = *schema;
+    new_table->schema.record_size = 0;
+    schema->column_offsets.resize(new_table->schema.columns.size());
     // column 0 is key
-    for (uint32_t i = 1; i < new_table.schema.columns.size(); i++) {
-      new_table.schema.column_offsets[i] = new_table.schema.record_size;
-      new_table.schema.record_size += new_table.schema.columns[i].type;
+    for (uint32_t i = 1; i < new_table->schema.columns.size(); i++) {
+      new_table->schema.column_offsets[i] = new_table->schema.record_size;
+      new_table->schema.record_size += new_table->schema.columns[i].type;
     }
 
-    new_table.tree = btree_create(new_table.schema.key_type(),
-                                  new_table.schema.record_size, BPLUS);
+    new_table->tree = btree_create(new_table->schema.key_type(),
+                                  new_table->schema.record_size, BPLUS);
 
-    VM.tables[schema->table_name] = new_table;
+    vm_events().push({
+        .type = EVT_TABLE_CREATED,
+        .data = new_table,
+    });
     VM.pc++;
     return OK;
   }
@@ -662,10 +664,13 @@ VM_RESULT vm_step() {
 
     ColumnInfo columnInfo = table->schema.columns.at(column);
 
-    Index index;
-    index.tree = btree_create(columnInfo.type, table->schema.key_type(), BTREE);
+    Index * index  = ARENA_ALLOC(Index);
+    index->tree = btree_create(columnInfo.type, table->schema.key_type(), BTREE);
 
-    table->indexes[column] = index;
+    vm_events().push({
+        .type = EVT_TABLE_CREATED,
+        .data = index,
+    });
     VM.pc++;
     return OK;
   }

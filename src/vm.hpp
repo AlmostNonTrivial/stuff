@@ -200,7 +200,7 @@ enum EventType {
 };
 struct VmEvent {
     EventType type;
-    uint8_t * data;
+    void * data;
 };
 
 VM_RESULT vm_execute(std::vector<VMInstruction> &instructions);
