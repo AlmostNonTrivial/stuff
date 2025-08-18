@@ -385,7 +385,7 @@ void execute(const char* sql) {
         } else if (statement->type == AST_COMMIT) {
             if (explicit_transaction) {
                 btree_commit();
-                executor_state.in_transaction = false;
+            executor_state.in_transaction = false;
                 explicit_transaction = false;
             }
         } else if (statement->type == AST_ROLLBACK) {
