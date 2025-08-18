@@ -46,7 +46,7 @@ struct AccessMethod {
 
 // Main entry points for AST-based building
 std::vector<VMInstruction> build_from_ast(ASTNode* ast);
-std::vector<VMInstruction> parse_and_build(const char* sql);
+
 
 // Original functions that still work with ParsedParameters
 std::vector<VMInstruction>

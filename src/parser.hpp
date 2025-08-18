@@ -163,4 +163,6 @@ struct Parser {
     size_t error_pos;
 };
 
-ASTNode * parse_sql(const char *sql);
+
+
+std::vector<ASTNode*> parse_sql(const char* sql);

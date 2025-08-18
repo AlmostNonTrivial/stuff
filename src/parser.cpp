@@ -590,7 +590,7 @@ static ASTNode* parse_transaction(Parser* p) {
 }
 
 // Main parse function - returns AST
-ASTNode* parse_sql(const char* sql) {
+ASTNode* parse_statement(const char* sql) {
     Parser parser = {};
     parser.input = sql;
     parser.len = strlen(sql);
@@ -639,4 +639,34 @@ ASTNode* parse_sql(const char* sql) {
     }
 
     return ast;
+}
+std::vector<ASTNode*> parse_sql(const char* sql) {
+    std::vector<ASTNode*> statements;
+
+    // Simple multi-statement parsing
+    const char* current = sql;
+    while (*current) {
+        // Skip whitespace
+        while (*current && isspace(*current)) current++;
+        if (!*current) break;
+
+        // Find end of statement (semicolon or end of string)
+        const char* end = current;
+        while (*end && *end != ';') end++;
+
+        // Parse single statement
+        size_t len = end - current;
+        char* single_sql = (char*)arena_alloc(len + 1);
+        memcpy(single_sql, current, len);
+        single_sql[len] = '\0';
+
+        ASTNode* ast = parse_statement(single_sql);
+        if (ast) {
+            statements.push_back(ast);
+        }
+
+        current = (*end == ';') ? end + 1 : end;
+    }
+
+    return statements;
 }

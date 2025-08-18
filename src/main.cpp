@@ -25,7 +25,7 @@
 
 int main() {
 
-  vm_init();
   arena_init(PAGE_SIZE * 10);
+btree_init("db");
   execute("");
 }

@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <ios>
 #include <queue>
 #include <unordered_map>
 #include <vector>
@@ -25,7 +24,10 @@ struct VmCursor {
 DataType vb_column_type(VmCursor *vb, uint32_t col_index) {
   return vb->schema->columns[col_index].type;
 }
-DataType vb_key_type(VmCursor *vb) { return vb->schema->columns[0].type; }
+
+DataType vb_key_type(VmCursor *vb) {
+  return vb->schema->columns[0].type;
+}
 
 uint8_t *vb_column(VmCursor *vb, uint32_t col_index) {
   if (col_index == 0) {
@@ -37,15 +39,15 @@ uint8_t *vb_column(VmCursor *vb, uint32_t col_index) {
   }
 
   uint8_t *record = btree_cursor_record(&vb->btree_cursor);
-
   return record + vb->schema->column_offsets[col_index];
 }
 
-uint8_t *vb_key(VmCursor *vb) { return vb_column(vb, 0); }
+uint8_t *vb_key(VmCursor *vb) {
+  return vb_column(vb, 0);
+}
 
-/*------------VMCURSOR---------------- */
+/*------------AGGREGATOR---------------- */
 
-// Single aggregator structure
 struct Aggregator {
   enum Type { NONE = 0, COUNT = 1, SUM = 2, MIN = 3, MAX = 4, AVG = 5 };
   Type type;
@@ -53,48 +55,31 @@ struct Aggregator {
   uint32_t count;
 
   void reset() {
-    type = Aggregator::NONE;
+    type = NONE;
     accumulator = 0;
     count = 0;
   }
 };
 
-static struct {
+/*------------VM STATE---------------- */
 
+static struct {
   std::vector<VMInstruction> program;
   uint32_t pc;
   bool halted;
 
   VMValue registers[REGISTER_COUNT];
-
   std::unordered_map<uint32_t, VmCursor> cursors;
   std::queue<VmEvent> event_queue;
 
   int32_t compare_result;
-
   std::vector<std::vector<VMValue>> output_buffer;
-
   Aggregator aggregator;
 
+  bool initialized;
 } VM = {};
 
-Table &vm_get_table(const std::string &name) {
-  if (VM.tables.find(name) != VM.tables.end()) {
-    return VM.tables[name];
-  }
-  exit(1);
-}
-
-std::unordered_map<uint32_t, Index> empty_map;
-std::unordered_map<uint32_t, Index> &
-vm_get_table_indexes(const std::string &name) {
-  if (VM.tables.find(name) != VM.tables.end()) {
-    return VM.tables[name].indexes;
-  }
-  return empty_map;
-}
-
-// Helper to allocate and copy data to arena
+// Helper functions
 static uint8_t *arena_copy_data(const uint8_t *src, uint32_t size) {
   uint8_t *dst = (uint8_t *)arena_alloc(size);
   if (dst && src) {
@@ -103,56 +88,103 @@ static uint8_t *arena_copy_data(const uint8_t *src, uint32_t size) {
   return dst;
 }
 
-// Helper to create a VMValue
-// Helper to create a VMValue
 static void vm_set_value(VMValue *val, DataType type, const void *data) {
   val->type = type;
   uint32_t size = VMValue::get_size(type);
-
-  // Allocate full size for the type
   val->data = (uint8_t *)arena_alloc(size);
 
   if (data) {
     if (type == TYPE_VARCHAR32 || type == TYPE_VARCHAR256) {
-      // For strings, zero-fill first then copy what we have
       memset(val->data, 0, size);
-
-      // Copy up to size bytes (data should already be properly sized from
-      // parser)
       memcpy(val->data, data, size);
     } else {
-      // For fixed-size types, just copy
       memcpy(val->data, data, size);
     }
   } else {
-    // No data provided, zero-fill
     memset(val->data, 0, size);
   }
 }
 
+// Event emission helpers
+static void emit_event(EventType type, void* data = nullptr) {
+  VmEvent event;
+  event.type = type;
+  event.data = data;
+  VM.event_queue.push(event);
+}
+
+static void emit_table_event(EventType type, const char* table_name, uint32_t root_page = 0) {
+  VmEvent event;
+  event.type = type;
+  event.data = nullptr;
+  event.context.table_info.table_name = table_name;
+  event.context.table_info.root_page = root_page;
+  VM.event_queue.push(event);
+}
+
+static void emit_index_event(EventType type, const char* table_name,
+                             uint32_t column_index, const char* index_name = nullptr) {
+  VmEvent event;
+  event.type = type;
+  event.data = nullptr;
+  event.context.index_info.table_name = table_name;
+  event.context.index_info.column_index = column_index;
+  event.context.index_info.index_name = index_name;
+  VM.event_queue.push(event);
+}
+
+static void emit_row_event(EventType type, uint32_t count) {
+  VmEvent event;
+  event.type = type;
+  event.data = nullptr;
+  event.context.row_info.count = count;
+  VM.event_queue.push(event);
+}
+
+
+void vm_shutdown() {
+  VM.initialized = false;
+  VM.cursors.clear();
+  VM.event_queue = std::queue<VmEvent>();
+  VM.output_buffer.clear();
+}
+void vm_clear_events() {
+  while (!VM.event_queue.empty()) {
+    VM.event_queue.pop();
+  }
+}
 void vm_reset() {
   VM.pc = 0;
   VM.halted = false;
   VM.compare_result = 0;
 
-  // Clear registers
   for (uint32_t i = 0; i < REGISTER_COUNT; i++) {
     VM.registers[i].type = TYPE_NULL;
     VM.registers[i].data = nullptr;
   }
 
-  // Close all cursors
   VM.cursors.clear();
-  while (VM.event_queue.size()) {
-    VM.event_queue.pop();
-  }
-  // Clear output buffer
+  vm_clear_events();
   VM.output_buffer.clear();
-
-  // Reset aggregator
   VM.aggregator.reset();
 }
 
+// Public VM functions
+void vm_init() {
+  VM.initialized = true;
+  vm_reset();
+}
+
+
+bool vm_is_halted() {
+  return VM.halted;
+}
+
+std::queue<VmEvent>& vm_events() {
+  return VM.event_queue;
+}
+
+// Main execution step
 VM_RESULT vm_step() {
   if (VM.halted || VM.pc >= VM.program.size()) {
     return ERR;
@@ -199,9 +231,9 @@ VM_RESULT vm_step() {
   case OP_OpenRead:
   case OP_OpenWrite: {
     char *table_name = (char *)inst->p4;
-    uint32_t index_column = inst->p3; // 0 if on table;
+    uint32_t index_column = inst->p3;
 
-    auto table = get_table(table_name);
+    Table* table = get_table(table_name);
     if (!table) {
       return ERR;
     }
@@ -210,23 +242,18 @@ VM_RESULT vm_step() {
     VmCursor &cursor = VM.cursors[cursor_id];
 
     if (index_column != 0) {
-
       Index *index = get_index(table_name, index_column);
       if (!index) {
         return ERR;
       }
-
-      cursor.btree_cursor.tree = &table->indexes[index_column].tree;
-      cursor.is_index = false;
-
+      cursor.btree_cursor.tree = &index->tree;
+      cursor.is_index = true;
     } else {
       cursor.btree_cursor.tree = &table->tree;
       cursor.is_index = false;
     }
 
-    //
     cursor.schema = &table->schema;
-
     VM.pc++;
     return OK;
   }
@@ -292,7 +319,7 @@ VM_RESULT vm_step() {
     }
 
     VmCursor *cursor = &it->second;
-    VMValue *key = &VM.registers[inst->p2]; // CHANGED from p3 to p2
+    VMValue *key = &VM.registers[inst->p2];
 
     bool found = false;
     switch (inst->opcode) {
@@ -313,13 +340,14 @@ VM_RESULT vm_step() {
       break;
     }
 
-    if (!found && inst->p3 > 0) { // CHANGED from p2 to p3
-      VM.pc = inst->p3;           // CHANGED from p2 to p3
+    if (!found && inst->p3 > 0) {
+      VM.pc = inst->p3;
     } else {
       VM.pc++;
     }
     return OK;
   }
+
   case OP_Column: {
     auto it = VM.cursors.find(inst->p1);
     if (it == VM.cursors.end()) {
@@ -334,8 +362,6 @@ VM_RESULT vm_step() {
       DataType type = vb_key_type(cursor);
       vm_set_value(&VM.registers[inst->p3], type, key_data);
     } else {
-
-      // Other columns come from record
       uint8_t *col_data = vb_column(cursor, col_index);
       DataType type = vb_column_type(cursor, col_index);
       vm_set_value(&VM.registers[inst->p3], type, col_data);
@@ -345,11 +371,6 @@ VM_RESULT vm_step() {
   }
 
   case OP_MakeRecord: {
-    // P1 = starting register
-    // P2 = number of columns (including key)
-    // P3 = destination register
-
-    // start at i == 1, so we don't include the key
     uint32_t total_size = 0;
     for (int i = 1; i < inst->p2; i++) {
       VMValue *val = &VM.registers[inst->p1 + i];
@@ -357,7 +378,6 @@ VM_RESULT vm_step() {
     }
 
     uint8_t *record = (uint8_t *)arena_alloc(total_size);
-
     uint32_t offset = 0;
 
     for (int i = 1; i < inst->p2; i++) {
@@ -367,7 +387,7 @@ VM_RESULT vm_step() {
       offset += size;
     }
 
-    VM.registers[inst->p3].type = TYPE_INT32; // Store as blob
+    VM.registers[inst->p3].type = TYPE_INT32;
     VM.registers[inst->p3].data = record;
     VM.pc++;
     return OK;
@@ -383,18 +403,18 @@ VM_RESULT vm_step() {
     VMValue *key = &VM.registers[inst->p2];
     VMValue *record = &VM.registers[inst->p3];
 
-    bool current_root = cursor->btree_cursor.tree->root_page_index;
+    uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
 
-    bool success =
-        btree_cursor_insert(&cursor->btree_cursor, key->data, record->data);
+    bool success = btree_cursor_insert(&cursor->btree_cursor, key->data, record->data);
     if (!success) {
       return ERR;
     }
 
-    bool root_changed =
-        cursor->btree_cursor.tree->root_page_index != current_root;
-    // need to update Master table
+    if (cursor->btree_cursor.tree->root_page_index != current_root) {
+      emit_event(EVT_BTREE_ROOT_CHANGED);
+    }
 
+    emit_row_event(EVT_ROWS_INSERTED, 1);
     VM.pc++;
     return OK;
   }
@@ -407,13 +427,13 @@ VM_RESULT vm_step() {
     VmCursor *cursor = &it->second;
 
     uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
-
     btree_cursor_delete(&cursor->btree_cursor);
 
-    bool root_changed =
-        cursor->btree_cursor.tree->root_page_index != current_root;
-    // need to update Master table
+    if (cursor->btree_cursor.tree->root_page_index != current_root) {
+      emit_event(EVT_BTREE_ROOT_CHANGED);
+    }
 
+    emit_row_event(EVT_ROWS_DELETED, 1);
     VM.pc++;
     return OK;
   }
@@ -428,7 +448,7 @@ VM_RESULT vm_step() {
     VMValue *record = &VM.registers[inst->p2];
 
     btree_cursor_update(&cursor->btree_cursor, record->data);
-
+    emit_row_event(EVT_ROWS_UPDATED, 1);
     VM.pc++;
     return OK;
   }
@@ -497,7 +517,6 @@ VM_RESULT vm_step() {
   }
 
   case OP_ResultRow: {
-    // Add row to output buffer
     std::vector<VMValue> row;
     for (int i = 0; i < inst->p2; i++) {
       VMValue copy;
@@ -514,8 +533,6 @@ VM_RESULT vm_step() {
   }
 
   case Op_Sort: {
-    // P1 = column index to sort by
-    // P2 = 0 for ASC, 1 for DESC
     uint32_t col = inst->p1;
     bool desc = inst->p2;
 
@@ -529,23 +546,21 @@ VM_RESULT vm_step() {
   }
 
   case Op_Flush: {
-    for (auto x : VM.output_buffer) {
-      for (auto y : x) {
-        print_ptr(y.data, y.type);
+    for (auto& row : VM.output_buffer) {
+      for (auto& val : row) {
+        print_ptr(val.data, val.type);
       }
       std::cout << "\n";
     }
-    // Clear the output buffer
     VM.output_buffer.clear();
     VM.pc++;
     return OK;
   }
 
   case OP_AggStep: {
-    // P1 = value register (or -1 for COUNT)
     VMValue *value = nullptr;
     if (inst->p1 >= 0) {
-      value = (&VM.registers[inst->p1]);
+      value = &VM.registers[inst->p1];
     }
     Aggregator &aggr = VM.aggregator;
 
@@ -573,7 +588,7 @@ VM_RESULT vm_step() {
         aggr.count++;
         break;
       default:
-
+        return ERR;
         break;
       }
     }
@@ -585,15 +600,16 @@ VM_RESULT vm_step() {
   case OP_AggReset: {
     VM.aggregator.reset();
     const char *function_name = (char *)inst->p4;
-    if (strcmp("COUNT", function_name)) {
+
+    if (strcmp(function_name, "COUNT") == 0) {
       VM.aggregator.type = Aggregator::COUNT;
-    } else if (strcmp("MIN", function_name)) {
+    } else if (strcmp(function_name, "MIN") == 0) {
       VM.aggregator.type = Aggregator::MIN;
-    } else if (strcmp("AVG", function_name)) {
+    } else if (strcmp(function_name, "AVG") == 0) {
       VM.aggregator.type = Aggregator::AVG;
-    } else if (strcmp("MAX", function_name)) {
+    } else if (strcmp(function_name, "MAX") == 0) {
       VM.aggregator.type = Aggregator::MAX;
-    } else if (strcmp("SUM", function_name)) {
+    } else if (strcmp(function_name, "SUM") == 0) {
       VM.aggregator.type = Aggregator::SUM;
     }
 
@@ -602,8 +618,6 @@ VM_RESULT vm_step() {
   }
 
   case OP_AggFinal: {
-    // P1 = output register
-
     uint32_t result;
     if (VM.aggregator.type == Aggregator::AVG && VM.aggregator.count > 0) {
       result = (uint32_t)(VM.aggregator.accumulator / VM.aggregator.count);
@@ -613,113 +627,136 @@ VM_RESULT vm_step() {
 
     vm_set_value(&VM.registers[inst->p1], TYPE_INT32, &result);
 
-    VM.aggregator.type = Aggregator::NONE;
-    VM.aggregator.accumulator = 0;
-    VM.aggregator.count = 0;
-
+    VM.aggregator.reset();
     VM.pc++;
     return OK;
   }
 
-  case OP_CreateTable:
-  {
+  case OP_CreateTable: {
     TableSchema *schema = (TableSchema *)inst->p4;
-    if (get_table((char*)schema->table_name.c_str())){
+
+    // Check if table already exists
+    if (get_table(schema->table_name.c_str())) {
       return ERR;
     }
 
+    // Create table structure in arena
     Table *new_table = ARENA_ALLOC(Table);
     new_table->schema = *schema;
-    new_table->schema.record_size = 0;
-    schema->column_offsets.resize(new_table->schema.columns.size());
-    // column 0 is key
-    for (uint32_t i = 1; i < new_table->schema.columns.size(); i++) {
-      new_table->schema.column_offsets[i] = new_table->schema.record_size;
-      new_table->schema.record_size += new_table->schema.columns[i].type;
-    }
 
-    new_table->tree = btree_create(new_table->schema.key_type(),
-                                  new_table->schema.record_size, BPLUS);
+    // Calculate offsets and record size
+    calculate_column_offsets(&new_table->schema);
 
-    vm_events().push({
-        .type = EVT_TABLE_CREATED,
-        .data = new_table,
-    });
+    // Create btree for table
+    new_table->tree = btree_create(
+        new_table->schema.key_type(),
+        new_table->schema.record_size,
+        BPLUS
+    );
+
+    // Emit event with table data
+    VmEvent event;
+    event.type = EVT_TABLE_CREATED;
+    event.data = new_table;
+    event.context.table_info.table_name = schema->table_name.c_str();
+    event.context.table_info.root_page = new_table->tree.root_page_index;
+    VM.event_queue.push(event);
+
     VM.pc++;
     return OK;
   }
 
   case OP_CreateIndex: {
     char *table_name = (char *)inst->p4;
-    uint32_t column = inst->p1; // Column index in P1 as documented
+    uint32_t column = inst->p1;
 
     Table *table = get_table(table_name);
     if (!table) {
       return ERR;
     }
 
+    // Check if index already exists
     if (get_index(table_name, column)) {
       return ERR;
     }
 
-    ColumnInfo columnInfo = table->schema.columns.at(column);
+    // Create index structure in arena
+    Index *index = ARENA_ALLOC(Index);
+    index->column_index = column;
+    index->tree = btree_create(
+        table->schema.columns[column].type,
+        table->schema.key_type(),
+        BTREE
+    );
 
-    Index * index  = ARENA_ALLOC(Index);
-    index->tree = btree_create(columnInfo.type, table->schema.key_type(), BTREE);
+    // Emit event
+    VmEvent event;
+    event.type = EVT_INDEX_CREATED;
+    event.data = index;
+    event.context.index_info.table_name = table_name;
+    event.context.index_info.column_index = column;
+    event.context.index_info.index_name = nullptr;
+    VM.event_queue.push(event);
 
-    vm_events().push({
-        .type = EVT_TABLE_CREATED,
-        .data = index,
-    });
     VM.pc++;
     return OK;
   }
 
-  case OP_DropTable:
-  case OP_DropIndex: {
+  case OP_DropTable: {
     char *table_name = (char *)inst->p4;
-    uint32_t column = inst->p1; // Keep as p1 for column index
 
     Table *table = get_table(table_name);
     if (!table) {
       return ERR;
     }
 
-    // also need to update master table
-
-    if (column == 0) {
-      btree_clear(&table->tree);
-      for (auto [col, index] : table->indexes) {
-        btree_clear(&index.tree);
-      }
-    } else {
-      Index *index = get_index(table_name, column);
-      if (!index) {
-        return ERR;
-      }
-
-      btree_clear(&index->tree);
-      table->indexes.erase(column);
+    // Clear btrees
+    btree_clear(&table->tree);
+    for (auto& [col, index] : table->indexes) {
+      btree_clear(&index.tree);
     }
 
+    emit_table_event(EVT_TABLE_DROPPED, table_name);
+    VM.pc++;
+    return OK;
+  }
+
+  case OP_DropIndex: {
+    char *table_name = (char *)inst->p4;
+    uint32_t column = inst->p1;
+
+    Table *table = get_table(table_name);
+    if (!table) {
+      return ERR;
+    }
+
+    Index *index = get_index(table_name, column);
+    if (!index) {
+      return ERR;
+    }
+
+    btree_clear(&index->tree);
+    emit_index_event(EVT_INDEX_DROPPED, table_name, column);
     VM.pc++;
     return OK;
   }
 
   case OP_Begin:
-    pager_begin_transaction();
-
+    btree_begin_transaction();
+    emit_event(EVT_TRANSACTION_BEGIN);
     VM.pc++;
     return OK;
 
   case OP_Commit:
-    pager_commit();
-
+    btree_commit();
+    emit_event(EVT_TRANSACTION_COMMIT);
     VM.pc++;
     return OK;
 
   case OP_Rollback:
-    pager_rollback();
+    btree_rollback();
+    emit_event(EVT_TRANSACTION_ROLLBACK);
+    VM.pc++;
     return ABORT;
 
   default:
@@ -729,6 +766,10 @@ VM_RESULT vm_step() {
 }
 
 VM_RESULT vm_execute(std::vector<VMInstruction> &instructions) {
+  if (!VM.initialized) {
+    vm_init();
+  }
+
   vm_reset();
   VM.program = instructions;
 
@@ -740,5 +781,3 @@ VM_RESULT vm_execute(std::vector<VMInstruction> &instructions) {
   }
   return OK;
 }
-
-std::queue<VmEvent> &vm_events() { return VM.event_queue; }

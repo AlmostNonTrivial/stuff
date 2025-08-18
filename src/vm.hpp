@@ -200,8 +200,28 @@ enum EventType {
 };
 struct VmEvent {
     EventType type;
-    void * data;
+    void* data;
+
+    // Additional context
+    union {
+        struct {
+            const char* table_name;
+            uint32_t root_page;
+        } table_info;
+
+        struct {
+            const char* table_name;
+            uint32_t column_index;
+            const char* index_name;
+        } index_info;
+
+        struct {
+            uint32_t count;
+        } row_info;
+    } context;
 };
 
 VM_RESULT vm_execute(std::vector<VMInstruction> &instructions);
 std::queue<VmEvent>& vm_events();
+
+void vm_clear_events();
