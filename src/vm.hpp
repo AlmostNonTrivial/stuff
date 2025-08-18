@@ -12,7 +12,14 @@
 // VM value - uses arena allocation for data
 struct VMValue {
   DataType type;
-  uint8_t *data; // Points to arena-allocated memory
+  union{
+        uint32_t u32;
+        uint64_t u64;
+        int32_t i32;
+        int64_t i64;
+        uint8_t *data; // Points to arena-allocated memory
+  };
+
 
   // Helper to get size based on type
   static uint32_t get_size(DataType t) { return static_cast<uint32_t>(t); }

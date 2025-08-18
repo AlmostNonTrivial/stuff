@@ -154,7 +154,7 @@ BTree btree_create(DataType key, uint32_t record_size, TreeType tree_type) {
 
   if (tree_type == BTREE) {
     uint32_t key_record_size = tree.node_key_size + record_size;
-    uint32_t child_ptr_size = TYPE_INT32;
+    uint32_t child_ptr_size = TYPE_UINT32;
 
     uint32_t max_keys =
         (USABLE_SPACE - child_ptr_size) / (key_record_size + child_ptr_size);
@@ -185,7 +185,7 @@ BTree btree_create(DataType key, uint32_t record_size, TreeType tree_type) {
     tree.leaf_min_keys = tree.leaf_max_keys / 2;
     tree.leaf_split_index = tree.leaf_max_keys / 2;
 
-    uint32_t child_ptr_size = TYPE_INT32;
+    uint32_t child_ptr_size = TYPE_UINT32;
     uint32_t internal_max_entries =
         (USABLE_SPACE - child_ptr_size) / (tree.node_key_size + child_ptr_size);
 
@@ -338,7 +338,7 @@ static BTreeNode *split(BTree &tree, BTreeNode *node) {
 
     memcpy(parent_children + parent_index + 2,
            parent_children + parent_index + 1,
-           (parent->num_keys - parent_index) * TYPE_INT32);
+           (parent->num_keys - parent_index) * TYPE_UINT32);
 
     memcpy(get_key_at(tree, parent, parent_index + 1),
            get_key_at(tree, parent, parent_index),
@@ -1186,6 +1186,10 @@ uint8_t *btree_cursor_record(BtCursor *cursor) {
 
 bool btree_cursor_seek(BtCursor *cursor, const void *key) {
   cursor_clear(cursor);
+
+  if(!cursor->tree->root_page_index) {
+      return false;
+  }
 
   FindResult result =
       find_containing_node(*cursor->tree, get_root(*cursor->tree),

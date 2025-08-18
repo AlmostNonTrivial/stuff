@@ -1,6 +1,7 @@
 #pragma once
 
 #include "vm.hpp"
+#include "arena.hpp"
 #include <vector>
 
 
@@ -76,7 +77,7 @@ struct SetClauseNode : ASTNode {
 // Statement nodes
 struct SelectNode : ASTNode {
     const char* table;
-    std::vector<ASTNode*> columns;  // empty = *
+    ArenaVec<ASTNode*> columns;  // empty = *
     WhereNode* where;
     AggregateNode* aggregate;
     OrderByNode* order_by;
@@ -84,12 +85,12 @@ struct SelectNode : ASTNode {
 
 struct InsertNode : ASTNode {
     const char* table;
-    std::vector<ASTNode*> values;
+    ArenaVec<ASTNode*> values;
 };
 
 struct UpdateNode : ASTNode {
     const char* table;
-    std::vector<SetClauseNode*> set_clauses;
+    ArenaVec<SetClauseNode*> set_clauses;
     WhereNode* where;
 };
 
@@ -100,7 +101,7 @@ struct DeleteNode : ASTNode {
 
 struct CreateTableNode : ASTNode {
     const char* table;
-    std::vector<ColumnInfo> columns;
+    ArenaVec<ColumnInfo> columns;
 };
 
 struct CreateIndexNode : ASTNode {
@@ -165,4 +166,4 @@ struct Parser {
 
 
 
-std::vector<ASTNode*> parse_sql(const char* sql);
+ArenaVec<ASTNode*> parse_sql(const char* sql);

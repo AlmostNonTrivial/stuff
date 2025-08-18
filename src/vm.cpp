@@ -208,7 +208,7 @@ VM_RESULT vm_step() {
 
   case OP_Integer: {
     uint32_t val = inst->p2;
-    vm_set_value(&VM.registers[inst->p1], TYPE_INT32, &val);
+    vm_set_value(&VM.registers[inst->p1], TYPE_UINT32, &val);
     VM.pc++;
     return OK;
   }
@@ -400,7 +400,7 @@ VM_RESULT vm_step() {
       offset += size;
     }
 
-    VM.registers[inst->p3].type = TYPE_INT32;
+    VM.registers[inst->p3].type = TYPE_UINT32;
     VM.registers[inst->p3].data = record;
     VM.pc++;
     return OK;
@@ -417,6 +417,11 @@ VM_RESULT vm_step() {
     VMValue *record = &VM.registers[inst->p3];
 
     uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
+
+    bool exists = btree_cursor_seek(&cursor->btree_cursor, (void*)key->data);
+    if(exists) {
+       return ERR;
+    }
 
     bool success = btree_cursor_insert(&cursor->btree_cursor, key->data, record->data);
     if (!success) {
@@ -580,7 +585,7 @@ VM_RESULT vm_step() {
     if (aggr.type == Aggregator::COUNT) {
       aggr.accumulator++;
       aggr.count++;
-    } else if (value && value->type == TYPE_INT32) {
+    } else if (value && value->type == TYPE_UINT32) {
       uint32_t val = *(uint32_t *)value->data;
       switch (aggr.type) {
       case Aggregator::SUM:
@@ -638,7 +643,7 @@ VM_RESULT vm_step() {
       result = (uint32_t)VM.aggregator.accumulator;
     }
 
-    vm_set_value(&VM.registers[inst->p1], TYPE_INT32, &result);
+    vm_set_value(&VM.registers[inst->p1], TYPE_UINT32, &result);
 
     VM.aggregator.reset();
     VM.pc++;

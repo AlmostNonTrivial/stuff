@@ -3,10 +3,10 @@
 
 void print_ptr(uint8_t *data, DataType type) {
   switch (type) {
-  case TYPE_INT32:
+  case TYPE_UINT32:
     std::cout << *reinterpret_cast<uint32_t *>(data) << ",";
     break;
-  case TYPE_INT64:
+  case TYPE_UINT64:
     std::cout << *reinterpret_cast<uint64_t *>(data) << ",";
     break;
   case TYPE_VARCHAR32:
@@ -28,13 +28,13 @@ void debug_type(uint8_t *data, DataType type) {
   printf("\n");
 
   switch (type) {
-  case TYPE_INT32: {
+  case TYPE_UINT32: {
     uint32_t val;
     memcpy(&val, data, 4);
     printf("INT32: %u (0x%08x)\n", val, val);
     break;
   }
-  case TYPE_INT64: {
+  case TYPE_UINT64: {
     uint64_t val;
     memcpy(&val, data, 8);
     printf("INT64: %lu (0x%016lx)\n", val, val);
@@ -59,7 +59,7 @@ void debug_type(uint8_t *data, DataType type) {
     int cmp(DataType key_size, const uint8_t *key1, const uint8_t *key2) {
       switch (key_size) {
 
-      case TYPE_INT32: {
+      case TYPE_UINT32: {
 
         uint32_t val1 = *reinterpret_cast<const uint32_t *>(key1);
         uint32_t val2 = *reinterpret_cast<const uint32_t *>(key2);
@@ -70,7 +70,7 @@ void debug_type(uint8_t *data, DataType type) {
         return 0;
       }
 
-      case TYPE_INT64: {
+      case TYPE_UINT64: {
 
         uint64_t val1 = *reinterpret_cast<const uint64_t *>(key1);
         uint64_t val2 = *reinterpret_cast<const uint64_t *>(key2);

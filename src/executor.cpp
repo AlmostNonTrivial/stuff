@@ -1,5 +1,6 @@
 // executor.cpp
 #include "executor.hpp"
+#include "arena.hpp"
 #include "btree.hpp"
 #include "parser.hpp"
 #include "vm.hpp"
@@ -11,13 +12,14 @@ static struct ExecutorState {
     bool initialized;
     bool in_transaction;
     bool master_table_exists;
+    uint32_t next_master_id;  // Sequential ID counter
 } executor_state = {};
 
 // Master table helpers
 static const char* type_to_string(DataType type) {
     switch (type) {
-        case TYPE_INT32: return "INT32";
-        case TYPE_INT64: return "INT64";
+        case TYPE_UINT32: return "INT32";
+        case TYPE_UINT64: return "INT64";
         case TYPE_VARCHAR32: return "VARCHAR32";
         case TYPE_VARCHAR256: return "VARCHAR256";
         default: return "VARCHAR32";
@@ -57,7 +59,7 @@ static char* generate_index_sql(const char* table_name, uint32_t column_index) {
 
 // Execute SQL through VM without triggering events
 static VM_RESULT execute_internal(const char* sql) {
-    std::vector<ASTNode*> stmts = parse_sql(sql);
+    ArenaVec<ASTNode*> stmts = parse_sql(sql);
     if (stmts.empty()) return ERR;
 
     std::vector<VMInstruction> program = build_from_ast(stmts[0]);
@@ -75,8 +77,8 @@ static void insert_master_table_entry(const char* type, const char* name,
 
     char buffer[2048];
     snprintf(buffer, sizeof(buffer),
-        "INSERT INTO sqlite_master VALUES ('%s', '%s', '%s', %u, '%s')",
-        type, name, tbl_name, rootpage, sql);
+        "INSERT INTO sqlite_master VALUES (%u, '%s', '%s', '%s', %u, '%s')",
+        executor_state.next_master_id++, type, name, tbl_name, rootpage, sql);
 
     execute_internal(buffer);
 }
@@ -96,11 +98,12 @@ static void create_master_table() {
     TableSchema* schema = ARENA_ALLOC(TableSchema);
     schema->table_name = "sqlite_master";
 
-    // Columns: type, name, tbl_name, rootpage, sql
+    // Columns: id (key), type, name, tbl_name, rootpage, sql
+    schema->columns.push_back({"id", TYPE_UINT32});       // Key column must be first
     schema->columns.push_back({"type", TYPE_VARCHAR32});
     schema->columns.push_back({"name", TYPE_VARCHAR32});
     schema->columns.push_back({"tbl_name", TYPE_VARCHAR32});
-    schema->columns.push_back({"rootpage", TYPE_INT32});
+    schema->columns.push_back({"rootpage", TYPE_UINT32});
     schema->columns.push_back({"sql", TYPE_VARCHAR256});
 
     calculate_column_offsets(schema);
@@ -112,6 +115,7 @@ static void create_master_table() {
 
     add_table(master);
     executor_state.master_table_exists = true;
+    executor_state.next_master_id = 1;  // Initialize counter
 }
 
 static void rebuild_schema_from_master() {
@@ -132,9 +136,30 @@ static void rebuild_schema_from_master() {
         add_table(&master_copy);
     }
 
-    // Query master table to rebuild schema
+    // Reset the ID counter to max(id) + 1
+    executor_state.next_master_id = 1;
+
+    // First pass: find max ID
+    const char* max_query = "SELECT * FROM sqlite_master";
+    ArenaVec<ASTNode*> max_stmts = parse_sql(max_query);
+    if (!max_stmts.empty()) {
+        std::vector<VMInstruction> max_program = build_from_ast(max_stmts[0]);
+        vm_execute(max_program);
+
+        for (auto& row : vm_output_buffer()) {
+            if (row.size() >= 6) {
+                uint32_t id = *(uint32_t*)row[0].data;
+                if (id >= executor_state.next_master_id) {
+                    executor_state.next_master_id = id + 1;
+                }
+            }
+        }
+        vm_clear_events();
+    }
+
+    // Query master table to rebuild schema - tables first
     const char* query = "SELECT * FROM sqlite_master WHERE type = 'table' AND name != 'sqlite_master'";
-    std::vector<ASTNode*> stmts = parse_sql(query);
+    ArenaVec<ASTNode*> stmts = parse_sql(query);
     if (stmts.empty()) return;
 
     std::vector<VMInstruction> program = build_from_ast(stmts[0]);
@@ -147,22 +172,27 @@ static void rebuild_schema_from_master() {
 
     // Process results to rebuild tables
     for (auto& row : vm_output_buffer()) {
-        if (row.size() < 5) continue;
+        if (row.size() < 6) continue;
 
-        const char* type = (const char*)row[0].data;
-        const char* name = (const char*)row[1].data;
-        uint32_t rootpage = *(uint32_t*)row[3].data;
-        const char* sql = (const char*)row[4].data;
+        // row[0] is id
+        const char* type = (const char*)row[1].data;
+        const char* name = (const char*)row[2].data;
+        const char* tbl_name = (const char*)row[3].data;
+        uint32_t rootpage = *(uint32_t*)row[4].data;
+        const char* sql = (const char*)row[5].data;
 
         if (strcmp(type, "table") == 0) {
             // Parse CREATE TABLE to rebuild schema
-            std::vector<ASTNode*> create_stmts = parse_sql(sql);
+            ArenaVec<ASTNode*> create_stmts = parse_sql(sql);
             if (!create_stmts.empty() && create_stmts[0]->type == AST_CREATE_TABLE) {
                 CreateTableNode* node = (CreateTableNode*)create_stmts[0];
 
                 Table* table = ARENA_ALLOC(Table);
                 table->schema.table_name = name;
-                table->schema.columns = node->columns;
+                for(int i = 0; i < node->columns.size; i++) {
+                    table->schema.columns[i] = node->columns[i];
+                }
+
                 calculate_column_offsets(&table->schema);
 
                 // Restore btree with existing root page
@@ -186,12 +216,13 @@ static void rebuild_schema_from_master() {
         vm_execute(program);
 
         for (auto& row : vm_output_buffer()) {
-            if (row.size() < 5) continue;
+            if (row.size() < 6) continue;
 
-            const char* type = (const char*)row[0].data;
-            const char* name = (const char*)row[1].data;
-            const char* tbl_name = (const char*)row[2].data;
-            uint32_t rootpage = *(uint32_t*)row[3].data;
+            // row[0] is id
+            const char* type = (const char*)row[1].data;
+            const char* name = (const char*)row[2].data;
+            const char* tbl_name = (const char*)row[3].data;
+            uint32_t rootpage = *(uint32_t*)row[4].data;
 
             if (strcmp(type, "index") == 0) {
                 Table* table = get_table(tbl_name);
@@ -295,7 +326,6 @@ static void process_vm_events() {
         }
 
         case EVT_BTREE_ROOT_CHANGED: {
-
             // Update root page in master table if needed
             // This would require an UPDATE statement
             break;
@@ -324,6 +354,7 @@ static void init_executor() {
     executor_state.initialized = true;
     executor_state.in_transaction = false;
     executor_state.master_table_exists = false;
+    executor_state.next_master_id = 1;
 
     // Create master table if it doesn't exist
     if (!get_table("sqlite_master")) {
@@ -332,17 +363,18 @@ static void init_executor() {
 }
 
 void execute(const char* sql) {
+    arena_reset();
     if (!executor_state.initialized) {
         init_executor();
     }
 
-    arena_reset();
-    std::vector<ASTNode*> statements = parse_sql(sql);
+    ArenaVec<ASTNode*> statements = parse_sql(sql);
 
     bool success = true;
     bool explicit_transaction = false;
 
-    for (auto statement : statements) {
+    for (int i = 0; i < statements.size;i++) {
+        auto statement = statements[i];
         bool is_read = (statement->type == AST_SELECT);
 
         // Check for explicit transaction commands

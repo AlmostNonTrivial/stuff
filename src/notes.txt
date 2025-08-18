@@ -1,5 +1,17 @@
 
 
-TODO:
--  Make master table stuff
--  
+- create master table might
+need to put key in first column
+
+- make sure the offsets are being
+correctly set with the key or not
+
+- do we still need to run the insert master
+or can we just load the hardcoded version
+as it won't change?
+
+- how do we manage the master root changing
+if we do it through execute internal?
+
+- can our vm value be a 64 bit, 32 bit,
+or string?

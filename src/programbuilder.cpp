@@ -86,7 +86,7 @@ void resolve_labels(std::vector<VMInstruction> &program,
 }
 
 OpCode str_or_int(const VMValue &value) {
-  return (value.type == TYPE_INT32 || value.type == TYPE_INT64) ? OP_Integer
+  return (value.type == TYPE_UINT32 || value.type == TYPE_UINT64) ? OP_Integer
                                                                 : OP_String;
 }
 
@@ -94,7 +94,7 @@ uint8_t set_p5(uint8_t current, uint8_t flag) { return current | flag; }
 
 void load_value(std::vector<VMInstruction> &instructions, const VMValue &value,
                 int target_reg) {
-  if (value.type == TYPE_INT32 || value.type == TYPE_INT64) {
+  if (value.type == TYPE_UINT32 || value.type == TYPE_UINT64) {
     uint32_t val = *(uint32_t *)value.data;
     instructions.push_back(make_integer(target_reg, (int32_t)val));
   } else {

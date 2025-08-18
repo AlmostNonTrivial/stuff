@@ -8,7 +8,7 @@
 
 
 // Global keyword map - initialized once
-static std::unordered_map<const char*, TokenType> keyword_map = {
+static std::unordered_map<std::string, TokenType> keyword_map = {
         {"SELECT", TOK_SELECT}, {"FROM", TOK_FROM}, {"WHERE", TOK_WHERE},
         {"ORDER", TOK_ORDER}, {"BY", TOK_BY}, {"INSERT", TOK_INSERT},
         {"INTO", TOK_INTO}, {"VALUES", TOK_VALUES}, {"UPDATE", TOK_UPDATE},
@@ -30,8 +30,15 @@ static std::unordered_map<const char*, TokenType> keyword_map = {
 
 // Check if identifier is a keyword
 static TokenType check_keyword(const char* start, size_t len) {
-    auto it = keyword_map.find(start);
+    // Create temporary string for comparison
+    std::string keyword(start, len);
 
+    // Convert to uppercase for case-insensitive comparison
+    for (char& c : keyword) {
+        c = toupper(c);
+    }
+
+    auto it = keyword_map.find(keyword);
     if (it != keyword_map.end()) {
         return it->second;
     }
@@ -244,9 +251,9 @@ static DataType token_to_data_type(TokenType type) {
     switch (type) {
         case TOK_INT:
         case TOK_INT32:
-            return TYPE_INT32;
+            return TYPE_UINT32;
         case TOK_INT64:
-            return TYPE_INT64;
+            return TYPE_UINT64;
         case TOK_VARCHAR:
         case TOK_VARCHAR256:
             return TYPE_VARCHAR256;
@@ -269,7 +276,7 @@ static ASTNode* parse_literal(Parser* p) {
     node->type = AST_LITERAL;
 
     if (p->current_type == TOK_INTEGER) {
-        node->value.type = TYPE_INT32;
+        node->value.type = TYPE_UINT32;
         uint32_t val = (uint32_t)p->current_value.int_val;
         node->value.data = (uint8_t*)arena_alloc(sizeof(uint32_t));
         memcpy(node->value.data, &val, sizeof(uint32_t));
@@ -640,8 +647,8 @@ ASTNode* parse_statement(const char* sql) {
 
     return ast;
 }
-std::vector<ASTNode*> parse_sql(const char* sql) {
-    std::vector<ASTNode*> statements;
+ArenaVec<ASTNode*> parse_sql(const char* sql) {
+    ArenaVec<ASTNode*> statements;
 
     // Simple multi-statement parsing
     const char* current = sql;
