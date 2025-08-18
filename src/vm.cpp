@@ -3,20 +3,16 @@
 #include "btree.hpp"
 #include "defs.hpp"
 #include "pager.hpp"
+#include "schema.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <ios>
+#include <queue>
 #include <unordered_map>
 #include <vector>
-
-void prec(std::vector<VMValue *> x) {
-  for (auto y : x) {
-    print_ptr(y->data, y->type);
-  }
-}
 
 /*------------VMCURSOR---------------- */
 
@@ -72,7 +68,7 @@ static struct {
   VMValue registers[REGISTER_COUNT];
 
   std::unordered_map<uint32_t, VmCursor> cursors;
-  std::unordered_map<std::string, Table> tables;
+  std::queue<VmEvent> event_queue;
 
   int32_t compare_result;
 
@@ -80,7 +76,6 @@ static struct {
 
   Aggregator aggregator;
 
-  bool in_transaction;
 } VM = {};
 
 Table &vm_get_table(const std::string &name) {
@@ -135,16 +130,6 @@ static void vm_set_value(VMValue *val, DataType type, const void *data) {
   }
 }
 
-void vm_init() {
-  pager_init("db");
-  VM.pc = 0;
-  VM.halted = false;
-  VM.compare_result = 0;
-  VM.in_transaction = false;
-  VM.output_buffer.clear();
-  VM.aggregator.reset();
-}
-
 void vm_reset() {
   VM.pc = 0;
   VM.halted = false;
@@ -158,7 +143,9 @@ void vm_reset() {
 
   // Close all cursors
   VM.cursors.clear();
-
+  while (VM.event_queue.size()) {
+    VM.event_queue.pop();
+  }
   // Clear output buffer
   VM.output_buffer.clear();
 
@@ -166,26 +153,7 @@ void vm_reset() {
   VM.aggregator.reset();
 }
 
-// Get results from buffer
-std::vector<std::vector<VMValue>> vm_get_results() { return VM.output_buffer; }
-
-bool vm_execute(std::vector<VMInstruction> &instructions) {
-  vm_reset();
-  VM.program = instructions;
-
-  while (!VM.halted && VM.pc < VM.program.size()) {
-    if (!vm_step()) {
-      if (VM.in_transaction) {
-        pager_rollback();
-        VM.in_transaction = false;
-      }
-      return false;
-    }
-  }
-  return true;
-}
-
-bool vm_step() {
+VM_RESULT vm_step() {
   if (VM.halted || VM.pc >= VM.program.size()) {
     return false;
   }
@@ -195,17 +163,17 @@ bool vm_step() {
   switch (inst->opcode) {
   case OP_Halt:
     VM.halted = true;
-    return true;
+    return OK;
 
   case OP_Goto:
     VM.pc = inst->p2;
-    return true;
+    return OK;
 
   case OP_Integer: {
     uint32_t val = inst->p2;
     vm_set_value(&VM.registers[inst->p1], TYPE_INT32, &val);
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_String: {
@@ -213,38 +181,39 @@ bool vm_step() {
     uint32_t size = inst->p2;
     vm_set_value(&VM.registers[inst->p1], (DataType)size, str);
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_Copy:
     VM.registers[inst->p2] = VM.registers[inst->p1];
     VM.pc++;
-    return true;
+    return OK;
 
   case OP_Move:
     VM.registers[inst->p2] = VM.registers[inst->p1];
     VM.registers[inst->p1].type = TYPE_NULL;
     VM.registers[inst->p1].data = nullptr;
     VM.pc++;
-    return true;
+    return OK;
 
   case OP_OpenRead:
   case OP_OpenWrite: {
-    const char *table_name = (const char *)inst->p4;
+    char *table_name = (char *)inst->p4;
     uint32_t index_column = inst->p3; // 0 if on table;
 
-    auto it = VM.tables.find(table_name);
-    if (it == VM.tables.end()) {
-      return false;
+    auto table = get_table(table_name);
+    if (!table) {
+      return ERR;
     }
 
-    Table *table = &it->second;
     uint32_t cursor_id = inst->p2;
     VmCursor &cursor = VM.cursors[cursor_id];
 
     if (index_column != 0) {
-      if (table->indexes.find(index_column) == table->indexes.end()) {
-        return false;
+
+      Index *index = get_index(table_name, index_column);
+      if (!index) {
+        return ERR;
       }
 
       cursor.btree_cursor.tree = &table->indexes[index_column].tree;
@@ -259,13 +228,13 @@ bool vm_step() {
     cursor.schema = &table->schema;
 
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_Close:
     VM.cursors.erase(inst->p1);
     VM.pc++;
-    return true;
+    return OK;
 
   case OP_Last:
   case OP_Rewind:
@@ -289,7 +258,7 @@ bool vm_step() {
     } else {
       VM.pc++;
     }
-    return true;
+    return OK;
   }
 
   case OP_Next:
@@ -309,7 +278,7 @@ bool vm_step() {
     } else {
       VM.pc++;
     }
-    return true;
+    return OK;
   }
 
   case OP_SeekEQ:
@@ -349,7 +318,7 @@ bool vm_step() {
     } else {
       VM.pc++;
     }
-    return true;
+    return OK;
   }
   case OP_Column: {
     auto it = VM.cursors.find(inst->p1);
@@ -372,7 +341,7 @@ bool vm_step() {
       vm_set_value(&VM.registers[inst->p3], type, col_data);
     }
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_MakeRecord: {
@@ -401,7 +370,7 @@ bool vm_step() {
     VM.registers[inst->p3].type = TYPE_INT32; // Store as blob
     VM.registers[inst->p3].data = record;
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_Insert: {
@@ -427,7 +396,7 @@ bool vm_step() {
     // need to update Master table
 
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_Delete: {
@@ -446,7 +415,7 @@ bool vm_step() {
     // need to update Master table
 
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_Update: {
@@ -461,7 +430,7 @@ bool vm_step() {
     btree_cursor_update(&cursor->btree_cursor, record->data);
 
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_Compare: {
@@ -470,7 +439,7 @@ bool vm_step() {
 
     VM.compare_result = cmp(a->type, a->data, b->data);
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_Jump: {
@@ -483,7 +452,7 @@ bool vm_step() {
     } else {
       VM.pc++;
     }
-    return true;
+    return OK;
   }
 
   case OP_Eq:
@@ -524,7 +493,7 @@ bool vm_step() {
     } else {
       VM.pc++;
     }
-    return true;
+    return OK;
   }
 
   case OP_ResultRow: {
@@ -541,7 +510,7 @@ bool vm_step() {
 
     VM.output_buffer.push_back(row);
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case Op_Sort: {
@@ -556,7 +525,7 @@ bool vm_step() {
                 return desc ? (cmp_result > 0) : (cmp_result < 0);
               });
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case Op_Flush: {
@@ -569,7 +538,7 @@ bool vm_step() {
     // Clear the output buffer
     VM.output_buffer.clear();
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_AggStep: {
@@ -610,7 +579,7 @@ bool vm_step() {
     }
 
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_AggReset: {
@@ -629,7 +598,7 @@ bool vm_step() {
     }
 
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_AggFinal: {
@@ -649,7 +618,7 @@ bool vm_step() {
     VM.aggregator.count = 0;
 
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_CreateTable:
@@ -677,7 +646,7 @@ bool vm_step() {
 
     VM.tables[schema->table_name] = new_table;
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_CreateIndex: {
@@ -701,7 +670,7 @@ bool vm_step() {
 
     table->indexes[column] = index;
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_DropTable:
@@ -732,26 +701,24 @@ bool vm_step() {
     }
 
     VM.pc++;
-    return true;
+    return OK;
   }
 
   case OP_Begin:
     pager_begin_transaction();
-    VM.in_transaction = true;
+
     VM.pc++;
-    return true;
+    return OK;
 
   case OP_Commit:
     pager_commit();
-    VM.in_transaction = false;
+
     VM.pc++;
-    return true;
+    return OK;
 
   case OP_Rollback:
     pager_rollback();
-    VM.in_transaction = false;
-    VM.pc++;
-    return true;
+    return VM_ABORT;
 
   default:
     printf("Unknown opcode: %d\n", inst->opcode);
@@ -759,22 +726,16 @@ bool vm_step() {
   }
 }
 
+bool vm_execute(std::vector<VMInstruction> &instructions) {
+  vm_reset();
+  VM.program = instructions;
 
-static uint32_t resolve_column_index(const char* col_name, const std::vector<ColumnInfo>& schema) {
-    for (size_t i = 0; i < schema.size(); i++) {
-        if (strcmp(schema[i].name, col_name) == 0) {
-            return i;
-        }
+  while (!VM.halted && VM.pc < VM.program.size()) {
+    if (!vm_step()) {
+      return false;
     }
-    // Default to 0 if not found - in production would error
-    return 0;
+  }
+  return OK;
 }
 
-Index* vm_get_index(const std::string table, const std::string&name)
-{
-    uint32_t x = resolve_column_index(name.c_str(), VM.tables[table].schema.columns);
-    if(x != 0) {
-        return &VM.tables[table].indexes[x];
-    }
-    return nullptr;
-}
+std::queue<VmEvent> &vm_events() { return VM.event_queue; }

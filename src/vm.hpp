@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <queue>
 #include <unordered_map>
 #include <vector>
 #include "schema.hpp"
@@ -167,23 +168,40 @@ struct VMInstruction {
 
 
 
-struct Index {
-  BTree tree;
-};
 
-struct Table {
-  TableSchema schema;
-  BTree tree;
-  std::unordered_map<uint32_t, Index> indexes;
-};
-#define REGISTER_COUNT 100
+#define REGISTER_COUNT 20
 
 // VM execution
-void vm_init();
-void vm_reset();
-bool vm_execute(std::vector<VMInstruction> &instructions);
-bool vm_step();
 
-Table& vm_get_table(const std::string&name);
-std::unordered_map<uint32_t, Index>& vm_get_table_indexes(const std::string&name);
-Index* vm_get_index(const std::string table, const std::string&name);
+
+
+
+enum VM_RESULT  {
+  OK,
+  ABORT,
+  ERR
+};
+
+
+
+
+enum EventType {
+    EVT_TABLE_CREATED,
+    EVT_TABLE_DROPPED,
+    EVT_INDEX_CREATED,
+    EVT_INDEX_DROPPED,
+    EVT_BTREE_ROOT_CHANGED,
+    EVT_ROWS_INSERTED,
+    EVT_ROWS_DELETED,
+    EVT_ROWS_UPDATED,
+    EVT_TRANSACTION_BEGIN,
+    EVT_TRANSACTION_COMMIT,
+    EVT_TRANSACTION_ROLLBACK
+};
+struct VmEvent {
+    EventType type;
+    uint8_t * data;
+};
+
+VM_RESULT vm_execute(std::vector<VMInstruction> &instructions);
+std::queue<VmEvent>& vm_events();
