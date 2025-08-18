@@ -142,6 +142,11 @@ static void emit_row_event(EventType type, uint32_t count) {
 }
 
 
+
+std::vector<std::vector<VMValue>> &vm_output_buffer() {
+   return VM.output_buffer;
+}
+
 void vm_shutdown() {
   VM.initialized = false;
   VM.cursors.clear();

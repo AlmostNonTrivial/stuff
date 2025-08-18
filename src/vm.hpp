@@ -225,3 +225,5 @@ VM_RESULT vm_execute(std::vector<VMInstruction> &instructions);
 std::queue<VmEvent>& vm_events();
 
 void vm_clear_events();
+
+std::vector<std::vector<VMValue>> &vm_output_buffer();
