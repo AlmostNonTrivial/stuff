@@ -1,5 +1,7 @@
 // main.cpp - Enhanced fuzzer for complete btree coverage
+#include "arena.hpp"
 #include "executor.hpp"
+#include <vector>
 
 /*
 
@@ -26,6 +28,17 @@
 int main() {
 
   arena_init(PAGE_SIZE * 10);
-btree_init("db");
-  execute("");
+  btree_init("db");
+
+  std::vector<const char *> queries = {
+      "BEGIN; CREATE TABLE X (INT id, INT age, VARCHAR32 name); COMMIT;",
+      "BEGIN; INSERT INTO X VALUES (1, 18, 'ricky'); COMMIT;",
+      "BEGIN; INSERT INTO X VALUES (2, 22, 'marky'); COMMIT;",
+      "BEGIN; INSERT INTO X VALUES (3, 16, 'marshal'); COMMIT;",
+      "SELECT * FROM X;"};
+
+  for (auto query : queries) {
+    execute(query);
+  }
+  arena_shutdown();
 }
