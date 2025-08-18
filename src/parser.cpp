@@ -1,104 +1,48 @@
 #include "parser.hpp"
 #include "arena.hpp"
 #include "vm.hpp"
-#include "programbuilder.hpp"
 #include <algorithm>
 #include <cstring>
 #include <cctype>
+#include <unordered_map>
 
 
-enum TokenType {
-    TOK_EOF,
-    TOK_IDENTIFIER,
-    TOK_INTEGER,
-    TOK_FLOAT,
-    TOK_STRING,
+// Global keyword map - initialized once
+static std::unordered_map<const char*, TokenType> keyword_map = {
+        {"SELECT", TOK_SELECT}, {"FROM", TOK_FROM}, {"WHERE", TOK_WHERE},
+        {"ORDER", TOK_ORDER}, {"BY", TOK_BY}, {"INSERT", TOK_INSERT},
+        {"INTO", TOK_INTO}, {"VALUES", TOK_VALUES}, {"UPDATE", TOK_UPDATE},
+        {"SET", TOK_SET}, {"DELETE", TOK_DELETE}, {"CREATE", TOK_CREATE},
+        {"TABLE", TOK_TABLE}, {"INDEX", TOK_INDEX}, {"ON", TOK_ON},
+        {"BEGIN", TOK_BEGIN}, {"COMMIT", TOK_COMMIT}, {"ROLLBACK", TOK_ROLLBACK},
+        {"AND", TOK_AND}, {"OR", TOK_OR}, {"ASC", TOK_ASC}, {"DESC", TOK_DESC},
+        {"COUNT", TOK_COUNT}, {"MIN", TOK_MIN}, {"MAX", TOK_MAX},
+        {"SUM", TOK_SUM}, {"AVG", TOK_AVG},
 
-    // Keywords
-    TOK_SELECT, TOK_FROM, TOK_WHERE, TOK_ORDER, TOK_BY,
-    TOK_INSERT, TOK_INTO, TOK_VALUES,
-    TOK_UPDATE, TOK_SET,
-    TOK_DELETE,
-    TOK_CREATE, TOK_TABLE, TOK_INDEX, TOK_ON,
-    TOK_BEGIN, TOK_COMMIT, TOK_ROLLBACK,
-    TOK_AND, TOK_OR,
-    TOK_ASC, TOK_DESC,
-    TOK_COUNT, TOK_MIN, TOK_MAX, TOK_SUM, TOK_AVG,
-
-    // Operators
-    TOK_LPAREN, TOK_RPAREN,
-    TOK_COMMA, TOK_SEMICOLON,
-    TOK_STAR,
-    TOK_EQ, TOK_NE, TOK_LT, TOK_LE, TOK_GT, TOK_GE,
-};
+        // Type keywords
+        {"INT", TOK_INT}, {"INT32", TOK_INT32}, {"INT64", TOK_INT64},
+        {"VARCHAR", TOK_VARCHAR}, {"VARCHAR32", TOK_VARCHAR32},
+        {"VARCHAR256", TOK_VARCHAR256}, {"VAR32", TOK_VAR32}
+    };
 
 
-struct Parser {
-    const char* input;
-    size_t pos;
-    size_t len;
-
-    // Current token
-    TokenType current_type;
-    const char* current_start;
-    size_t current_len;
-    union {
-        int64_t int_val;
-        double float_val;
-    } current_value;
-
-    // Lookahead
-    TokenType next_type;
-
-    // Error state
-    const char* error_msg;
-    size_t error_pos;
-};
 
 
-// Helper to resolve column name to index
-static uint32_t resolve_column_index(const char* col_name, const std::vector<ColumnInfo>& schema) {
-    for (size_t i = 0; i < schema.size(); i++) {
-        if (strcmp(schema[i].name, col_name) == 0) {
-            return i;
-        }
+// Check if identifier is a keyword
+static TokenType check_keyword(const char* start, size_t len) {
+    auto it = keyword_map.find(start);
+
+    if (it != keyword_map.end()) {
+        return it->second;
     }
-    // Default to 0 if not found - in production would error
-    return 0;
+    return TOK_IDENTIFIER;
 }
 
-// Token lookup table for keywords
-struct Keyword {
-    const char* str;
-    TokenType type;
-};
-
-static const Keyword keywords[] = {
-    {"SELECT", TOK_SELECT}, {"FROM", TOK_FROM}, {"WHERE", TOK_WHERE},
-    {"ORDER", TOK_ORDER}, {"BY", TOK_BY}, {"INSERT", TOK_INSERT},
-    {"INTO", TOK_INTO}, {"VALUES", TOK_VALUES}, {"UPDATE", TOK_UPDATE},
-    {"SET", TOK_SET}, {"DELETE", TOK_DELETE}, {"CREATE", TOK_CREATE},
-    {"TABLE", TOK_TABLE}, {"INDEX", TOK_INDEX}, {"ON", TOK_ON},
-    {"BEGIN", TOK_BEGIN}, {"COMMIT", TOK_COMMIT}, {"ROLLBACK", TOK_ROLLBACK},
-    {"AND", TOK_AND}, {"OR", TOK_OR}, {"ASC", TOK_ASC}, {"DESC", TOK_DESC},
-    {"COUNT", TOK_COUNT}, {"MIN", TOK_MIN}, {"MAX", TOK_MAX},
-    {"SUM", TOK_SUM}, {"AVG", TOK_AVG},
-    {nullptr, TOK_EOF}
-};
-
+// Lexer functions
 static void skip_whitespace(Parser* p) {
     while (p->pos < p->len && isspace(p->input[p->pos])) {
         p->pos++;
     }
-}
-
-static TokenType check_keyword(const char* start, size_t len) {
-    for (const Keyword* k = keywords; k->str; k++) {
-        if (strlen(k->str) == len && strncasecmp(start, k->str, len) == 0) {
-            return k->type;
-        }
-    }
-    return TOK_IDENTIFIER;
 }
 
 static void scan_token(Parser* p) {
@@ -212,7 +156,6 @@ static void scan_token(Parser* p) {
                 p->pos++;
             }
             p->current_type = TOK_FLOAT;
-            // Parse float value
             char buffer[64];
             size_t len = p->pos - start;
             if (len >= sizeof(buffer)) len = sizeof(buffer) - 1;
@@ -221,7 +164,6 @@ static void scan_token(Parser* p) {
             p->current_value.float_val = atof(buffer);
         } else {
             p->current_type = TOK_INTEGER;
-            // Parse integer value
             p->current_value.int_val = 0;
             size_t i = start;
             int sign = 1;
@@ -285,41 +227,6 @@ static char* copy_identifier(Parser* p) {
     return result;
 }
 
-static VMValue parse_value(Parser* p) {
-    VMValue value;
-
-    if (p->current_type == TOK_INTEGER) {
-        value.type = TYPE_INT32;
-        uint32_t val = (uint32_t)p->current_value.int_val;
-        value.data = (uint8_t*)arena_alloc(sizeof(uint32_t));
-        memcpy(value.data, &val, sizeof(uint32_t));
-        advance(p);
-    } else if (p->current_type == TOK_STRING) {
-        size_t len = p->current_len;
-        if (len > 256) len = 256;
-
-        // Determine type based on length
-        value.type = (len <= 32) ? TYPE_VARCHAR32 : TYPE_VARCHAR256;
-
-        // Always allocate the full size for the type
-        uint32_t alloc_size = VMValue::get_size(value.type);
-        value.data = (uint8_t*)arena_alloc(alloc_size);
-
-        // Zero-fill the entire allocation
-        memset(value.data, 0, alloc_size);
-
-        // Copy the actual string data (without null terminator from source)
-        memcpy(value.data, p->current_start, len);
-
-        advance(p);
-    } else {
-        value.type = TYPE_NULL;
-        value.data = nullptr;
-    }
-
-    return value;
-}
-
 static CompareOp token_to_compare_op(TokenType type) {
     switch (type) {
         case TOK_EQ: return EQ;
@@ -332,237 +239,296 @@ static CompareOp token_to_compare_op(TokenType type) {
     }
 }
 
-static WhereCondition parse_condition(Parser* p) {
-    WhereCondition cond;
-
-    // Get column name
-    char* column_name = copy_identifier(p);
-    advance(p);
-
-    // Resolve column index
-    cond.column_name = column_name;
-
-    // Get operator
-    cond.operator_type = token_to_compare_op(p->current_type);
-    advance(p);
-
-    // Get value
-    cond.value = parse_value(p);
-
-    return cond;
+// Convert type token to DataType
+static DataType token_to_data_type(TokenType type) {
+    switch (type) {
+        case TOK_INT:
+        case TOK_INT32:
+            return TYPE_INT32;
+        case TOK_INT64:
+            return TYPE_INT64;
+        case TOK_VARCHAR:
+        case TOK_VARCHAR256:
+            return TYPE_VARCHAR256;
+        case TOK_VARCHAR32:
+        case TOK_VAR32:
+            return TYPE_VARCHAR32;
+        default:
+            return TYPE_VARCHAR32;  // Default type
+    }
 }
 
-static std::vector<WhereCondition> parse_where_clause(Parser* p) {
-    std::vector<WhereCondition> conditions;
+// Forward declarations
+static ASTNode* parse_expression(Parser* p);
+static ASTNode* parse_comparison(Parser* p);
+static ASTNode* parse_and_expression(Parser* p);
 
-    if (!match(p, TOK_WHERE)) {
-        return conditions;
+// Parse a literal value
+static ASTNode* parse_literal(Parser* p) {
+    LiteralNode* node = (LiteralNode*)arena_alloc(sizeof(LiteralNode));
+    node->type = AST_LITERAL;
+
+    if (p->current_type == TOK_INTEGER) {
+        node->value.type = TYPE_INT32;
+        uint32_t val = (uint32_t)p->current_value.int_val;
+        node->value.data = (uint8_t*)arena_alloc(sizeof(uint32_t));
+        memcpy(node->value.data, &val, sizeof(uint32_t));
+        advance(p);
+    } else if (p->current_type == TOK_STRING) {
+        size_t len = p->current_len;
+        if (len > 256) len = 256;
+
+        node->value.type = (len <= 32) ? TYPE_VARCHAR32 : TYPE_VARCHAR256;
+        uint32_t alloc_size = VMValue::get_size(node->value.type);
+        node->value.data = (uint8_t*)arena_alloc(alloc_size);
+        memset(node->value.data, 0, alloc_size);
+        memcpy(node->value.data, p->current_start, len);
+
+        advance(p);
+    } else {
+        node->value.type = TYPE_NULL;
+        node->value.data = nullptr;
     }
 
-    conditions.push_back(parse_condition(p));
+    return (ASTNode*)node;
+}
+
+// Parse a column reference
+static ASTNode* parse_column_ref(Parser* p) {
+    ColumnRefNode* node = (ColumnRefNode*)arena_alloc(sizeof(ColumnRefNode));
+    node->type = AST_COLUMN_REF;
+    node->name = copy_identifier(p);
+    node->index = 0;  // Will be resolved later
+    advance(p);
+    return (ASTNode*)node;
+}
+
+// Parse a primary expression (column or literal)
+static ASTNode* parse_primary(Parser* p) {
+    if (p->current_type == TOK_IDENTIFIER) {
+        return parse_column_ref(p);
+    } else if (p->current_type == TOK_INTEGER || p->current_type == TOK_STRING) {
+        return parse_literal(p);
+    }
+
+    p->error_msg = "Expected column or value";
+    return nullptr;
+}
+
+// Parse a comparison expression
+static ASTNode* parse_comparison(Parser* p) {
+    ASTNode* left = parse_primary(p);
+    if (!left) return nullptr;
+
+    if (p->current_type >= TOK_EQ && p->current_type <= TOK_GE) {
+        BinaryOpNode* node = (BinaryOpNode*)arena_alloc(sizeof(BinaryOpNode));
+        node->type = AST_BINARY_OP;
+        node->op = token_to_compare_op(p->current_type);
+        node->left = left;
+        node->is_and = false;
+        advance(p);
+
+        node->right = parse_primary(p);
+        if (!node->right) return nullptr;
+
+        return (ASTNode*)node;
+    }
+
+    return left;
+}
+
+// Parse AND expression (only AND support for now)
+static ASTNode* parse_and_expression(Parser* p) {
+    ASTNode* left = parse_comparison(p);
+    if (!left) return nullptr;
 
     while (match(p, TOK_AND)) {
-        conditions.push_back(parse_condition(p));
+        BinaryOpNode* node = (BinaryOpNode*)arena_alloc(sizeof(BinaryOpNode));
+        node->type = AST_BINARY_OP;
+        node->is_and = true;
+        node->left = left;
+        node->right = parse_comparison(p);
+        if (!node->right) return nullptr;
+        left = (ASTNode*)node;
     }
 
-    // Note: OR support would require expression tree
-
-    return conditions;
+    return left;
 }
 
-static std::vector<VMInstruction> parse_select(Parser* p) {
+// Parse WHERE clause
+static WhereNode* parse_where_clause(Parser* p) {
+    if (!match(p, TOK_WHERE)) {
+        return nullptr;
+    }
+
+    WhereNode* node = (WhereNode*)arena_alloc(sizeof(WhereNode));
+    node->type = AST_WHERE;
+    node->condition = parse_and_expression(p);
+
+    return node;
+}
+
+// Parse ORDER BY clause
+static OrderByNode* parse_order_by_clause(Parser* p) {
+    if (!match(p, TOK_ORDER)) {
+        return nullptr;
+    }
+
+    expect(p, TOK_BY);
+
+    OrderByNode* node = (OrderByNode*)arena_alloc(sizeof(OrderByNode));
+    node->type = AST_ORDER_BY;
+    node->column = copy_identifier(p);
+    node->column_index = 0;  // Will be resolved later
+    advance(p);
+
+    if (match(p, TOK_DESC)) {
+        node->ascending = false;
+    } else {
+        match(p, TOK_ASC);  // Optional
+        node->ascending = true;
+    }
+
+    return node;
+}
+
+// Parse SELECT statement
+static ASTNode* parse_select(Parser* p) {
     expect(p, TOK_SELECT);
 
-    bool is_aggregate = false;
-    const char* agg_func = nullptr;
+    SelectNode* node = (SelectNode*)arena_alloc(sizeof(SelectNode));
+    node->type = AST_SELECT;
+    node->aggregate = nullptr;
 
-    std::vector<char*> column_names;
-
-    // Check for aggregate function
-    if (p->current_type == TOK_COUNT || p->current_type == TOK_MIN ||
-        p->current_type == TOK_MAX || p->current_type == TOK_SUM ||
-        p->current_type == TOK_AVG) {
-
-        is_aggregate = true;
-        agg_func = copy_identifier(p);
+    // Parse column list or aggregate
+    if (p->current_type >= TOK_COUNT && p->current_type <= TOK_AVG) {
+        // Aggregate function
+        AggregateNode* agg = (AggregateNode*)arena_alloc(sizeof(AggregateNode));
+        agg->type = AST_AGGREGATE;
+        agg->function = copy_identifier(p);
         advance(p);
+
         expect(p, TOK_LPAREN);
-
-        if (p->current_type == TOK_STAR) {
-            advance(p);
-            // COUNT(*) - no column
+        if (match(p, TOK_STAR)) {
+            agg->arg = nullptr;  // COUNT(*)
         } else {
-            exit(1 );
+            agg->arg = parse_column_ref(p);
         }
-
         expect(p, TOK_RPAREN);
 
+        node->aggregate = agg;
+
     } else if (match(p, TOK_STAR)) {
-        // SELECT * - all columns
-        // remain empty
+        // SELECT * - leave columns empty
+
     } else {
+        // Column list
         do {
             if (p->current_type == TOK_IDENTIFIER) {
-                char* col_name = copy_identifier(p);
-                advance(p);
-                column_names.push_back(col_name);
+                node->columns.push_back(parse_column_ref(p));
             }
         } while (match(p, TOK_COMMA));
     }
 
     expect(p, TOK_FROM);
-
-    char* table_name = copy_identifier(p);
+    node->table = copy_identifier(p);
     advance(p);
 
-    std::vector<WhereCondition> conditions = parse_where_clause(p);
+    node->where = parse_where_clause(p);
+    node->order_by = parse_order_by_clause(p);
 
-    OrderBy order_by;
-    if (match(p, TOK_ORDER)) {
-        expect(p, TOK_BY);
-
-        char* order_col = copy_identifier(p);
-        advance(p);
-        order_by.column_name = order_col;
-
-        if (match(p, TOK_DESC)) {
-            order_by.asc = false;
-        } else {
-            match(p, TOK_ASC); // Optional
-            order_by.asc = true;
-        }
-    }
-
-    if (is_aggregate) {
-        return aggregate(table_name, agg_func, nullptr, conditions);
-    } else {
-        ParsedParameters opts;
-        opts.table_name = table_name;
-        opts.column_names = column_names;
-        opts.where_conditions = conditions;
-        opts.order_by = order_by;
-
-        return build_select(opts);
-    }
+    return (ASTNode*)node;
 }
 
-static std::vector<VMInstruction> parse_insert(Parser* p) {
+// Parse INSERT statement
+static ASTNode* parse_insert(Parser* p) {
     expect(p, TOK_INSERT);
     expect(p, TOK_INTO);
 
-    char* table_name = copy_identifier(p);
+    InsertNode* node = (InsertNode*)arena_alloc(sizeof(InsertNode));
+    node->type = AST_INSERT;
+    node->table = copy_identifier(p);
     advance(p);
 
     expect(p, TOK_VALUES);
     expect(p, TOK_LPAREN);
 
-    std::vector<Pair> values;
-    uint32_t col_index = 0;
-
     do {
-        VMValue val = parse_value(p);
-        values.push_back({col_index++, val});
+        node->values.push_back(parse_literal(p));
     } while (match(p, TOK_COMMA));
 
     expect(p, TOK_RPAREN);
 
-    return build_insert(table_name, values, false);
+    return (ASTNode*)node;
 }
 
-static std::vector<VMInstruction> parse_update(Parser* p) {
+// Parse UPDATE statement
+static ASTNode* parse_update(Parser* p) {
     expect(p, TOK_UPDATE);
 
-    char* table_name = copy_identifier(p);
+    UpdateNode* node = (UpdateNode*)arena_alloc(sizeof(UpdateNode));
+    node->type = AST_UPDATE;
+    node->table = copy_identifier(p);
     advance(p);
-
-    // Get actual table schema
-    auto table = vm_get_table(table_name);
-    const auto& schema = table.schema.columns;
 
     expect(p, TOK_SET);
 
-    std::vector<Pair> set_columns;
     do {
-        char* col_name = copy_identifier(p);
+        SetClauseNode* set = (SetClauseNode*)arena_alloc(sizeof(SetClauseNode));
+        set->type = AST_SET_CLAUSE;
+        set->column = copy_identifier(p);
+        set->column_index = 0;  // Will be resolved later
         advance(p);
-        expect(p, TOK_EQ);
-        VMValue val = parse_value(p);
 
-        // Find actual column index
-        uint32_t col_index = resolve_column_index(col_name, schema);
-        set_columns.push_back({col_index, val});
+        expect(p, TOK_EQ);
+        set->value = parse_literal(p);
+
+        node->set_clauses.push_back(set);
     } while (match(p, TOK_COMMA));
 
-    std::vector<WhereCondition> conditions = parse_where_clause(p, schema);
+    node->where = parse_where_clause(p);
 
-    UpdateOptions opts;
-    opts.table_name = table_name;
-    opts.schema = schema;
-    opts.set_columns = set_columns;
-    opts.where_conditions = conditions;
-
-    return build_update(opts, false);
+    return (ASTNode*)node;
 }
 
-static std::vector<VMInstruction> parse_delete(Parser* p) {
+// Parse DELETE statement
+static ASTNode* parse_delete(Parser* p) {
     expect(p, TOK_DELETE);
     expect(p, TOK_FROM);
 
-    char* table_name = copy_identifier(p);
+    DeleteNode* node = (DeleteNode*)arena_alloc(sizeof(DeleteNode));
+    node->type = AST_DELETE;
+    node->table = copy_identifier(p);
     advance(p);
 
-    // Get actual table schema
-    auto table = vm_get_table(table_name);
-    const auto& schema = table.schema.columns;
+    node->where = parse_where_clause(p);
 
-    std::vector<WhereCondition> conditions = parse_where_clause(p, schema);
-
-    UpdateOptions opts;
-    opts.table_name = table_name;
-    opts.schema = schema;
-    opts.set_columns = {};
-    opts.where_conditions = conditions;
-
-    return build_delete(opts, false);
+    return (ASTNode*)node;
 }
 
-static std::vector<VMInstruction> parse_create(Parser* p) {
+// Parse CREATE statement
+static ASTNode* parse_create(Parser* p) {
     expect(p, TOK_CREATE);
 
     if (match(p, TOK_TABLE)) {
-        char* table_name = copy_identifier(p);
+        CreateTableNode* node = (CreateTableNode*)arena_alloc(sizeof(CreateTableNode));
+        node->type = AST_CREATE_TABLE;
+        node->table = copy_identifier(p);
         advance(p);
 
         expect(p, TOK_LPAREN);
 
-        std::vector<ColumnInfo> columns;
-
         do {
             ColumnInfo col;
 
-            // Check for type keywords (INT, VARCHAR, VAR32, etc.)
-            if (p->current_type == TOK_IDENTIFIER) {
-                char* type_str = copy_identifier(p);
+            // Parse type - now using proper type tokens
+            if (p->current_type >= TOK_INT && p->current_type <= TOK_VAR32) {
+                col.type = token_to_data_type(p->current_type);
                 advance(p);
-
-                // Enhanced type mapping
-                if (strcasecmp(type_str, "INT") == 0) {
-                    col.type = TYPE_INT32;
-                } else if (strcasecmp(type_str, "INT32") == 0) {
-                    col.type = TYPE_INT32;
-                } else if (strcasecmp(type_str, "INT64") == 0) {
-                    col.type = TYPE_INT64;
-                } else if (strcasecmp(type_str, "VARCHAR") == 0) {
-                    col.type = TYPE_VARCHAR256;
-                } else if (strcasecmp(type_str, "VARCHAR32") == 0 ||
-                          strcasecmp(type_str, "VAR32") == 0) {
-                    col.type = TYPE_VARCHAR32;
-                } else if (strcasecmp(type_str, "VARCHAR256") == 0) {
-                    col.type = TYPE_VARCHAR256;
-                } else {
-                    // Default to VARCHAR32 for unknown types
-                    col.type = TYPE_VARCHAR32;
-                }
+            } else if (p->current_type == TOK_IDENTIFIER) {
+                // Fallback for unrecognized types
+                advance(p);
+                col.type = TYPE_VARCHAR32;
             }
 
             // Parse column name
@@ -576,78 +542,55 @@ static std::vector<VMInstruction> parse_create(Parser* p) {
                 col.name[len] = '\0';
             }
 
-            columns.push_back(col);
+            node->columns.push_back(col);
 
         } while (match(p, TOK_COMMA));
 
         expect(p, TOK_RPAREN);
 
-        return build_creat_table(table_name, columns);
+        return (ASTNode*)node;
 
     } else if (match(p, TOK_INDEX)) {
-        char* index_name = copy_identifier(p);
+        CreateIndexNode* node = (CreateIndexNode*)arena_alloc(sizeof(CreateIndexNode));
+        node->type = AST_CREATE_INDEX;
+        node->index_name = copy_identifier(p);
         advance(p);
 
         expect(p, TOK_ON);
-
-        char* table_name = copy_identifier(p);
+        node->table = copy_identifier(p);
         advance(p);
 
         expect(p, TOK_LPAREN);
-        char* column_name = copy_identifier(p);
+        node->column = copy_identifier(p);
         advance(p);
         expect(p, TOK_RPAREN);
 
-        // Get table schema to resolve column index and type
-        auto table = vm_get_table(table_name);
-        const auto& schema = table.schema.columns;
-
-        uint32_t col_index = resolve_column_index(column_name, schema);
-        DataType col_type = schema[col_index].type;
-
-        return build_create_index(table_name, col_index, col_type);
+        return (ASTNode*)node;
     }
 
-    return {};
+    return nullptr;
 }
 
-static std::vector<VMInstruction> parse_statement(Parser* p) {
-    std::vector<VMInstruction> instructions;
-
-    switch (p->current_type) {
-        case TOK_SELECT:
-            return parse_select(p);
-        case TOK_INSERT:
-            return parse_insert(p);
-        case TOK_UPDATE:
-            return parse_update(p);
-        case TOK_DELETE:
-            return parse_delete(p);
-        case TOK_CREATE:
-            return parse_create(p);
-        case TOK_BEGIN:
-            advance(p);
-            instructions.push_back({OP_Begin, 0, 0, 0, nullptr, 0});
-            instructions.push_back({OP_Halt, 0, 0, 0, nullptr, 0});
-            return instructions;
-        case TOK_COMMIT:
-            advance(p);
-            instructions.push_back({OP_Commit, 0, 0, 0, nullptr, 0});
-            instructions.push_back({OP_Halt, 0, 0, 0, nullptr, 0});
-            return instructions;
-        case TOK_ROLLBACK:
-            advance(p);
-            instructions.push_back({OP_Rollback, 0, 0, 0, nullptr, 0});
-            instructions.push_back({OP_Halt, 0, 0, 0, nullptr, 0});
-            return instructions;
-        default:
-            p->error_msg = "Expected statement";
-            p->error_pos = p->pos;
-            return {};
+// Parse transaction statements
+static ASTNode* parse_transaction(Parser* p) {
+    if (match(p, TOK_BEGIN)) {
+        BeginNode* node = (BeginNode*)arena_alloc(sizeof(BeginNode));
+        node->type = AST_BEGIN;
+        return (ASTNode*)node;
+    } else if (match(p, TOK_COMMIT)) {
+        CommitNode* node = (CommitNode*)arena_alloc(sizeof(CommitNode));
+        node->type = AST_COMMIT;
+        return (ASTNode*)node;
+    } else if (match(p, TOK_ROLLBACK)) {
+        RollbackNode* node = (RollbackNode*)arena_alloc(sizeof(RollbackNode));
+        node->type = AST_ROLLBACK;
+        return (ASTNode*)node;
     }
+    return nullptr;
 }
 
-std::vector<VMInstruction> parse_sql(const char* sql) {
+// Main parse function - returns AST
+ASTNode* parse_sql(const char* sql) {
     Parser parser = {};
     parser.input = sql;
     parser.len = strlen(sql);
@@ -655,19 +598,45 @@ std::vector<VMInstruction> parse_sql(const char* sql) {
 
     advance(&parser);
 
-    std::vector<VMInstruction> result = parse_statement(&parser);
+    ASTNode* ast = nullptr;
+
+    switch (parser.current_type) {
+        case TOK_SELECT:
+            ast = parse_select(&parser);
+            break;
+        case TOK_INSERT:
+            ast = parse_insert(&parser);
+            break;
+        case TOK_UPDATE:
+            ast = parse_update(&parser);
+            break;
+        case TOK_DELETE:
+            ast = parse_delete(&parser);
+            break;
+        case TOK_CREATE:
+            ast = parse_create(&parser);
+            break;
+        case TOK_BEGIN:
+        case TOK_COMMIT:
+        case TOK_ROLLBACK:
+            ast = parse_transaction(&parser);
+            break;
+        default:
+            parser.error_msg = "Expected statement";
+            parser.error_pos = parser.pos;
+            return nullptr;
+    }
 
     // Expect semicolon or EOF
     if (parser.current_type != TOK_SEMICOLON && parser.current_type != TOK_EOF) {
         parser.error_msg = "Expected semicolon or end of input";
-        return {};
+        return nullptr;
     }
 
     if (parser.error_msg) {
-        PRINT "err" END;
         // Could add error reporting here
-        return {};
+        return nullptr;
     }
 
-    return result;
+    return ast;
 }
