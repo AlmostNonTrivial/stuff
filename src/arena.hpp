@@ -1,6 +1,7 @@
 // arena.h
 #pragma once
 #include <stddef.h>
+#include "defs.hpp"
 #include <stdint.h>
 #include <string>
 
@@ -98,6 +99,8 @@ struct ArenaMap {
             }
         }
 
+        exit(1);
+        // FAIL("OUT of space in map");
         // Should not reach here if capacity is sufficient
         return entries[0].value;
     }
@@ -312,4 +315,59 @@ struct ArenaString {
 
     char& operator[](size_t i) { return data[i]; }
     const char& operator[](size_t i) const { return data[i]; }
+};
+
+
+
+template <typename T, size_t MaxSize>
+class FixedSet {
+private:
+    T data[MaxSize]{};
+    size_t count = 0;
+
+public:
+    // Insert element if not already present
+    bool insert(const T& value) {
+        // Check if value already exists
+        for (size_t i = 0; i < count; ++i) {
+            if (data[i] == value) {
+                return false; // Value already in set
+            }
+        }
+        // Add new value if there's space
+        if (count < MaxSize) {
+            data[count++] = value;
+            return true;
+        }
+        return false; // Set is full
+    }
+
+    // Check if element exists
+    bool contains(const T& value) const {
+        for (size_t i = 0; i < count; ++i) {
+            if (data[i] == value) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Remove element
+    bool remove(const T& value) {
+        for (size_t i = 0; i < count; ++i) {
+            if (data[i] == value) {
+                // Shift elements to maintain contiguous data
+                for (size_t j = i; j < count - 1; ++j) {
+                    data[j] = data[j + 1];
+                }
+                --count;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    size_t size() const { return count; }
+    bool empty() const { return count == 0; }
+    constexpr size_t max_size() const { return MaxSize; }
 };
