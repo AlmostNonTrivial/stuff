@@ -758,3 +758,23 @@ bool vm_step() {
     return false;
   }
 }
+
+
+static uint32_t resolve_column_index(const char* col_name, const std::vector<ColumnInfo>& schema) {
+    for (size_t i = 0; i < schema.size(); i++) {
+        if (strcmp(schema[i].name, col_name) == 0) {
+            return i;
+        }
+    }
+    // Default to 0 if not found - in production would error
+    return 0;
+}
+
+Index* vm_get_index(const std::string table, const std::string&name)
+{
+    uint32_t x = resolve_column_index(name.c_str(), VM.tables[table].schema.columns);
+    if(x != 0) {
+        return &VM.tables[table].indexes[x];
+    }
+    return nullptr;
+}

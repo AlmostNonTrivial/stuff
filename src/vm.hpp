@@ -186,3 +186,4 @@ bool vm_step();
 
 Table& vm_get_table(const std::string&name);
 std::unordered_map<uint32_t, Index>& vm_get_table_indexes(const std::string&name);
+Index* vm_get_index(const std::string table, const std::string&name);
