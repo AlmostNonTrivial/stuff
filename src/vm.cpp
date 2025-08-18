@@ -155,7 +155,7 @@ void vm_reset() {
 
 VM_RESULT vm_step() {
   if (VM.halted || VM.pc >= VM.program.size()) {
-    return false;
+    return ERR;
   }
 
   VMInstruction *inst = &VM.program[VM.pc];
@@ -241,7 +241,7 @@ VM_RESULT vm_step() {
   case OP_First: {
     auto it = VM.cursors.find(inst->p1);
     if (it == VM.cursors.end()) {
-      return false;
+      return ERR;
     }
     VmCursor *cursor = &it->second;
 
@@ -265,7 +265,7 @@ VM_RESULT vm_step() {
   case OP_Prev: {
     auto it = VM.cursors.find(inst->p1);
     if (it == VM.cursors.end()) {
-      return false;
+      return ERR;
     }
 
     VmCursor *cursor = &it->second;
@@ -288,7 +288,7 @@ VM_RESULT vm_step() {
   case OP_SeekLT: {
     auto it = VM.cursors.find(inst->p1);
     if (it == VM.cursors.end()) {
-      return false;
+      return ERR;
     }
 
     VmCursor *cursor = &it->second;
@@ -323,7 +323,7 @@ VM_RESULT vm_step() {
   case OP_Column: {
     auto it = VM.cursors.find(inst->p1);
     if (it == VM.cursors.end()) {
-      return false;
+      return ERR;
     }
 
     VmCursor *cursor = &it->second;
@@ -376,7 +376,7 @@ VM_RESULT vm_step() {
   case OP_Insert: {
     auto it = VM.cursors.find(inst->p1);
     if (it == VM.cursors.end()) {
-      return false;
+      return ERR;
     }
 
     VmCursor *cursor = &it->second;
@@ -388,7 +388,7 @@ VM_RESULT vm_step() {
     bool success =
         btree_cursor_insert(&cursor->btree_cursor, key->data, record->data);
     if (!success) {
-      return false;
+      return ERR;
     }
 
     bool root_changed =
@@ -402,7 +402,7 @@ VM_RESULT vm_step() {
   case OP_Delete: {
     auto it = VM.cursors.find(inst->p1);
     if (it == VM.cursors.end()) {
-      return false;
+      return ERR;
     }
     VmCursor *cursor = &it->second;
 
@@ -421,7 +421,7 @@ VM_RESULT vm_step() {
   case OP_Update: {
     auto it = VM.cursors.find(inst->p1);
     if (it == VM.cursors.end()) {
-      return false;
+      return ERR;
     }
 
     VmCursor *cursor = &it->second;
@@ -622,19 +622,17 @@ VM_RESULT vm_step() {
   }
 
   case OP_CreateTable:
-
   {
-    TableSchema *schema = (TableSchema *)inst->p4;
 
-    if (VM.tables.find(schema->table_name) != VM.tables.end()) {
-      // Table already exists
-      return false;
+    TableSchema *schema = (TableSchema *)inst->p4;
+    if (get_table((char*)schema->table_name.c_str())){
+      return ERR;
     }
 
     Table new_table;
     new_table.schema = *schema;
-
     new_table.schema.record_size = 0;
+    schema->column_offsets.resize(new_table.schema.columns.size());
     // column 0 is key
     for (uint32_t i = 1; i < new_table.schema.columns.size(); i++) {
       new_table.schema.column_offsets[i] = new_table.schema.record_size;
@@ -653,14 +651,13 @@ VM_RESULT vm_step() {
     char *table_name = (char *)inst->p4;
     uint32_t column = inst->p1; // Column index in P1 as documented
 
-    if (VM.tables.find(table_name) == VM.tables.end()) {
-      return false;
+    Table *table = get_table(table_name);
+    if (!table) {
+      return ERR;
     }
 
-    Table *table = &VM.tables[table_name];
-
-    if (table->indexes.find(column) != table->indexes.end()) {
-      return false;
+    if (get_index(table_name, column)) {
+      return ERR;
     }
 
     ColumnInfo columnInfo = table->schema.columns.at(column);
@@ -678,24 +675,24 @@ VM_RESULT vm_step() {
     char *table_name = (char *)inst->p4;
     uint32_t column = inst->p1; // Keep as p1 for column index
 
-    if (VM.tables.find(table_name) != VM.tables.end()) {
-      return false;
+    Table *table = get_table(table_name);
+    if (!table) {
+      return ERR;
     }
 
     // also need to update master table
 
-    Table *table = &VM.tables[table_name];
     if (column == 0) {
       btree_clear(&table->tree);
       for (auto [col, index] : table->indexes) {
         btree_clear(&index.tree);
       }
     } else {
-      if (table->indexes.find(column) == table->indexes.end()) {
-        return false;
+      Index *index = get_index(table_name, column);
+      if (!index) {
+        return ERR;
       }
 
-      Index *index = &table->indexes[column];
       btree_clear(&index->tree);
       table->indexes.erase(column);
     }
@@ -718,21 +715,22 @@ VM_RESULT vm_step() {
 
   case OP_Rollback:
     pager_rollback();
-    return VM_ABORT;
+    return ABORT;
 
   default:
     printf("Unknown opcode: %d\n", inst->opcode);
-    return false;
+    return ERR;
   }
 }
 
-bool vm_execute(std::vector<VMInstruction> &instructions) {
+VM_RESULT vm_execute(std::vector<VMInstruction> &instructions) {
   vm_reset();
   VM.program = instructions;
 
   while (!VM.halted && VM.pc < VM.program.size()) {
-    if (!vm_step()) {
-      return false;
+    VM_RESULT result = vm_step();
+    if (result != OK) {
+      return result;
     }
   }
   return OK;

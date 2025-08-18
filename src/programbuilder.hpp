@@ -1,6 +1,7 @@
 #pragma once
 #include "vm.hpp"
 #include "parser.hpp"
+#include "arena.hpp"
 #include <utility>
 
 #define SET_PAIR std::pair<std::string,VMValue>
