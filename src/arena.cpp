@@ -52,6 +52,7 @@ void *arena_alloc(size_t size) {
 //              ^                         ^                ^ ^
 //           0x1007                    0x1010           0x1024 0x1030
 
+
 void arena_reset(void) { g_arena.current = g_arena.base; }
 
 size_t arena_used(void) { return g_arena.current - g_arena.base; }

@@ -64,7 +64,7 @@ struct Aggregator {
 /*------------VM STATE---------------- */
 
 static struct {
-  std::vector<VMInstruction> program;
+  ArenaVector<VMInstruction> program;
   uint32_t pc;
   bool halted;
 
@@ -73,7 +73,7 @@ static struct {
   std::queue<VmEvent> event_queue;
 
   int32_t compare_result;
-  std::vector<std::vector<VMValue>> output_buffer;
+  ArenaVector<ArenaVector<VMValue>> output_buffer;
   Aggregator aggregator;
 
   bool initialized;
@@ -143,7 +143,7 @@ static void emit_row_event(EventType type, uint32_t count) {
 
 
 
-std::vector<std::vector<VMValue>> &vm_output_buffer() {
+ArenaVector<ArenaVector<VMValue>> &vm_output_buffer() {
    return VM.output_buffer;
 }
 
@@ -535,7 +535,7 @@ VM_RESULT vm_step() {
   }
 
   case OP_ResultRow: {
-    std::vector<VMValue> row;
+    ArenaVector<VMValue> row;
     for (int i = 0; i < inst->p2; i++) {
       VMValue copy;
       copy.type = VM.registers[inst->p1 + i].type;
@@ -783,7 +783,7 @@ VM_RESULT vm_step() {
   }
 }
 
-VM_RESULT vm_execute(std::vector<VMInstruction> &instructions) {
+VM_RESULT vm_execute(ArenaVector<VMInstruction> &instructions) {
   if (!VM.initialized) {
     vm_init();
   }

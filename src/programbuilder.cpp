@@ -1,4 +1,5 @@
 #include "programbuilder.hpp"
+#include "arena.hpp"
 #include "defs.hpp"
 #include "schema.hpp"
 #include "vm.hpp"
@@ -8,47 +9,47 @@
 
 
 // Original functions that still work with ParsedParameters
-std::vector<VMInstruction>
-build_create_table(const std::string &table_name,
-                  const std::vector<ColumnInfo> &columns);
+ArenaVector<VMInstruction>
+build_create_table(const ArenaString &table_name,
+                  const ArenaVector<ColumnInfo> &columns);
 
-std::vector<VMInstruction> build_drop_table(const std::string &table_name);
-std::vector<VMInstruction> build_drop_index(const std::string &index_name);
-std::vector<VMInstruction> build_create_index(const std::string &table_name,
+ArenaVector<VMInstruction>build_drop_table(const ArenaString &table_name);
+ArenaVector<VMInstruction>build_drop_index(const ArenaString &index_name);
+ArenaVector<VMInstruction>build_create_index(const ArenaString &table_name,
                                               uint32_t column_index,
                                               DataType key_type);
 
-std::vector<VMInstruction> build_insert(const std::string &table_name,
-                                        const std::vector<SET_PAIR> &values
+ArenaVector<VMInstruction>build_insert(const ArenaString &table_name,
+                                        const ArenaVector<SET_PAIR> &values
                                         );
 
-std::vector<VMInstruction> build_select(const ParsedParameters&options);
-std::vector<VMInstruction> build_update(const ParsedParameters&options
+ArenaVector<VMInstruction>build_select(const ParsedParameters&options);
+ArenaVector<VMInstruction>build_update(const ParsedParameters&options
                                         );
-std::vector<VMInstruction> build_delete(const ParsedParameters&options
+ArenaVector<VMInstruction>build_delete(const ParsedParameters&options
                                         );
 
-std::vector<VMInstruction>
-aggregate(const std::string &table_name, const char *agg_func,
+ArenaVector<VMInstruction>
+aggregate(const ArenaString &table_name, const char *agg_func,
           uint32_t *column_index,
-          const std::vector<WhereCondition> &where_conditions);
+          const ArenaVector<WhereCondition> &where_conditions);
 
 // Forward declarations for AST traversal
-static std::vector<WhereCondition>
-extract_where_conditions(WhereNode *where, const std::string &table_name);
+static ArenaVector<WhereCondition>
+extract_where_conditions(WhereNode *where, const ArenaString &table_name);
 static WhereCondition
 extract_condition_from_binary_op(BinaryOpNode *op,
-                                 const std::string &table_name);
+                                 const ArenaString &table_name);
 static uint32_t resolve_column_index(const char *col_name,
-                                     const std::string &table_name);
-std::vector<VMInstruction>
+                                     const ArenaString &table_name);
+ArenaVector<VMInstruction>
 update_or_delete_or_select(const ParsedParameters &options);
 
 // Global tables reference
-extern std::unordered_map<std::string, Table> tables;
+extern ArenaMap<ArenaString, Table> tables;
 
 // RegisterAllocator implementation
-int RegisterAllocator::get(const std::string &name) {
+int RegisterAllocator::get(const ArenaString &name) {
   auto it = name_to_register.find(name);
   if (it == name_to_register.end()) {
     name_to_register[name] = next_register;
@@ -63,8 +64,8 @@ void RegisterAllocator::clear() {
 }
 
 // Helper functions
-void resolve_labels(std::vector<VMInstruction> &program,
-                    const std::unordered_map<std::string, int> &map) {
+void resolve_labels(ArenaVector<VMInstruction>&program,
+                    const ArenaMap<ArenaString, int> &map) {
   for (auto &inst : program) {
     // Check p2 for label (stored as string in p4)
     if (inst.p4 && inst.p2 == -1) {
@@ -92,7 +93,7 @@ OpCode str_or_int(const VMValue &value) {
 
 uint8_t set_p5(uint8_t current, uint8_t flag) { return current | flag; }
 
-void load_value(std::vector<VMInstruction> &instructions, const VMValue &value,
+void load_value(ArenaVector<VMInstruction>&instructions, const VMValue &value,
                 int target_reg) {
   if (value.type == TYPE_UINT32 || value.type == TYPE_UINT64) {
     uint32_t val = *(uint32_t *)value.data;
@@ -160,7 +161,7 @@ bool ascending(CompareOp op) { return op == GE || op == GT || op == EQ; }
 
 // Helper to resolve column name to index
 static uint32_t resolve_column_index(const char *col_name,
-                                     const std::string &table_name) {
+                                     const ArenaString &table_name) {
   return get_column_index(const_cast<char *>(table_name.c_str()),
                           const_cast<char *>(col_name));
 }
@@ -168,13 +169,13 @@ static uint32_t resolve_column_index(const char *col_name,
 // Extract a single condition from a binary op node
 static WhereCondition
 extract_condition_from_binary_op(BinaryOpNode *op,
-                                 const std::string &table_name) {
+                                 const ArenaString &table_name) {
   WhereCondition cond;
 
   // Left side should be column reference
   if (op->left->type == AST_COLUMN_REF) {
     ColumnRefNode *col = (ColumnRefNode *)op->left;
-    cond.column_name = std::string(col->name);
+    cond.column_name = ArenaString(col->name);
     cond.column_index = resolve_column_index(col->name, table_name);
   }
 
@@ -191,9 +192,9 @@ extract_condition_from_binary_op(BinaryOpNode *op,
 }
 
 // Recursively extract WHERE conditions from AST
-static std::vector<WhereCondition>
-extract_where_conditions(WhereNode *where, const std::string &table_name) {
-  std::vector<WhereCondition> conditions;
+static ArenaVector<WhereCondition>
+extract_where_conditions(WhereNode *where, const ArenaString &table_name) {
+  ArenaVector<WhereCondition> conditions;
 
   if (!where || !where->condition) {
     return conditions;
@@ -224,7 +225,7 @@ extract_where_conditions(WhereNode *where, const std::string &table_name) {
 }
 
 // Build SELECT from AST
-static std::vector<VMInstruction> build_select_from_ast(SelectNode *node) {
+static ArenaVector<VMInstruction>build_select_from_ast(SelectNode *node) {
   // Handle aggregate functions
   if (node->aggregate) {
     AggregateNode *agg = node->aggregate;
@@ -237,7 +238,7 @@ static std::vector<VMInstruction> build_select_from_ast(SelectNode *node) {
       column_index = &col_idx;
     }
 
-    std::vector<WhereCondition> conditions =
+    ArenaVector<WhereCondition> conditions =
         extract_where_conditions(node->where, node->table);
 
     return aggregate(node->table, agg->function, column_index, conditions);
@@ -250,12 +251,12 @@ static std::vector<VMInstruction> build_select_from_ast(SelectNode *node) {
   params.where_conditions = extract_where_conditions(node->where, node->table);
 
   // Extract column list
-  std::vector<std::string> select_columns;
+  ArenaVector<ArenaString> select_columns;
   if (!node->columns.empty()) {
     for (ASTNode *col_node : node->columns) {
       if (col_node->type == AST_COLUMN_REF) {
         ColumnRefNode *col = (ColumnRefNode *)col_node;
-        select_columns.push_back(std::string(col->name));
+        select_columns.push_back(ArenaString(col->name));
       }
     }
   }
@@ -271,8 +272,8 @@ static std::vector<VMInstruction> build_select_from_ast(SelectNode *node) {
 }
 
 // Build INSERT from AST
-static std::vector<VMInstruction> build_insert_from_ast(InsertNode *node) {
-  std::vector<SET_PAIR> values;
+static ArenaVector<VMInstruction>build_insert_from_ast(InsertNode *node) {
+  ArenaVector<SET_PAIR> values;
 
   // Get table to know column names
   Table *table = get_table(const_cast<char *>(node->table));
@@ -285,7 +286,7 @@ static std::vector<VMInstruction> build_insert_from_ast(InsertNode *node) {
     if (node->values[i]->type == AST_LITERAL) {
       LiteralNode *lit = (LiteralNode *)node->values[i];
       values.push_back(
-          {std::string(table->schema.columns[i].name), lit->value});
+          {ArenaString(table->schema.columns[i].name), lit->value});
     }
   }
 
@@ -295,7 +296,7 @@ static std::vector<VMInstruction> build_insert_from_ast(InsertNode *node) {
 }
 
 // Build UPDATE from AST
-static std::vector<VMInstruction> build_update_from_ast(UpdateNode *node) {
+static ArenaVector<VMInstruction>build_update_from_ast(UpdateNode *node) {
   ParsedParameters params;
   params.table_name = node->table;
   params.operation = ParsedParameters::UPDATE;
@@ -306,7 +307,7 @@ static std::vector<VMInstruction> build_update_from_ast(UpdateNode *node) {
     if (set->value->type == AST_LITERAL) {
       LiteralNode *lit = (LiteralNode *)set->value;
       uint32_t col_idx = resolve_column_index(set->column, node->table);
-      params.set_columns.push_back({std::string(set->column), lit->value});
+      params.set_columns.push_back({ArenaString(set->column), lit->value});
     }
   }
 
@@ -314,7 +315,7 @@ static std::vector<VMInstruction> build_update_from_ast(UpdateNode *node) {
 }
 
 // Build DELETE from AST
-static std::vector<VMInstruction> build_delete_from_ast(DeleteNode *node) {
+static ArenaVector<VMInstruction>build_delete_from_ast(DeleteNode *node) {
   ParsedParameters params;
   params.table_name = node->table;
   params.operation = ParsedParameters::DELETE;
@@ -324,13 +325,13 @@ static std::vector<VMInstruction> build_delete_from_ast(DeleteNode *node) {
 }
 
 // Build CREATE TABLE from AST
-static std::vector<VMInstruction>
+static ArenaVector<VMInstruction>
 build_create_table_from_ast(CreateTableNode *node) {
   return build_create_table(node->table, node->columns);
 }
 
 // Build CREATE INDEX from AST
-static std::vector<VMInstruction>
+static ArenaVector<VMInstruction>
 build_create_index_from_ast(CreateIndexNode *node) {
   Table *table = get_table(const_cast<char *>(node->table));
   if (!table) {
@@ -344,20 +345,23 @@ build_create_index_from_ast(CreateIndexNode *node) {
 }
 
 // Build transaction commands from AST
-static std::vector<VMInstruction> build_begin_from_ast(BeginNode *node) {
-  return {make_begin(), make_halt()};
+static ArenaVector<VMInstruction>build_begin_from_ast(BeginNode *node) {
+    ArenaVector<VMInstruction> vec;
+    vec.push_back(make_begin());
+    vec.push_back(make_halt());
+    return vec;
 }
 
-static std::vector<VMInstruction> build_commit_from_ast(CommitNode *node) {
+static ArenaVector<VMInstruction>build_commit_from_ast(CommitNode *node) {
   return {make_commit(), make_halt()};
 }
 
-static std::vector<VMInstruction> build_rollback_from_ast(RollbackNode *node) {
+static ArenaVector<VMInstruction>build_rollback_from_ast(RollbackNode *node) {
   return {make_rollback(), make_halt()};
 }
 
 // Main entry point - builds VM instructions from AST
-std::vector<VMInstruction> build_from_ast(ASTNode *ast) {
+ArenaVector<VMInstruction>build_from_ast(ASTNode *ast) {
   if (!ast) {
     return {make_halt()};
   }
@@ -396,9 +400,9 @@ std::vector<VMInstruction> build_from_ast(ASTNode *ast) {
 }
 
 // Build where checks helper
-void build_where_checks(std::vector<VMInstruction> &instructions, int cursor_id,
-                        const std::vector<WhereCondition> &conditions,
-                        const std::string &skip_label,
+void build_where_checks(ArenaVector<VMInstruction>&instructions, int cursor_id,
+                        const ArenaVector<WhereCondition> &conditions,
+                        const ArenaString &skip_label,
                         RegisterAllocator &regs) {
   for (size_t i = 0; i < conditions.size(); i++) {
     int col_reg = regs.get("where_col_" + std::to_string(i));
@@ -438,9 +442,9 @@ void build_where_checks(std::vector<VMInstruction> &instructions, int cursor_id,
 }
 
 // Create table
-std::vector<VMInstruction>
-build_create_table(const std::string &table_name,
-                   const std::vector<ColumnInfo> &columns) {
+ArenaVector<VMInstruction>
+build_create_table(const ArenaString &table_name,
+                   const ArenaVector<ColumnInfo> &columns) {
   TableSchema *schema = ARENA_ALLOC(TableSchema);
   schema->table_name = table_name;
   schema->columns = columns;
@@ -449,7 +453,7 @@ build_create_table(const std::string &table_name,
 }
 
 // Drop table
-std::vector<VMInstruction> build_drop_table(const std::string &table_name) {
+ArenaVector<VMInstruction>build_drop_table(const ArenaString &table_name) {
   char *name = (char *)arena_alloc(table_name.size() + 1);
   strcpy(name, table_name.c_str());
 
@@ -457,7 +461,7 @@ std::vector<VMInstruction> build_drop_table(const std::string &table_name) {
 }
 
 // Drop index
-std::vector<VMInstruction> build_drop_index(const std::string &index_name) {
+ArenaVector<VMInstruction>build_drop_index(const ArenaString &index_name) {
   char *name = (char *)arena_alloc(index_name.size() + 1);
   strcpy(name, index_name.c_str());
 
@@ -465,12 +469,12 @@ std::vector<VMInstruction> build_drop_index(const std::string &index_name) {
 }
 
 // Create index
-std::vector<VMInstruction> build_create_index(const std::string &table_name,
+ArenaVector<VMInstruction>build_create_index(const ArenaString &table_name,
                                               uint32_t column_index,
                                               DataType key_type) {
   RegisterAllocator regs;
-  std::vector<VMInstruction> instructions;
-  std::unordered_map<std::string, int> labels;
+  ArenaVector<VMInstruction>instructions;
+  ArenaMap<ArenaString, int> labels;
 
   const int table_cursor_id = 0;
   const int index_cursor_id = 1;
@@ -507,10 +511,10 @@ std::vector<VMInstruction> build_create_index(const std::string &table_name,
 }
 
 // Insert
-std::vector<VMInstruction> build_insert(const std::string &table_name,
-                                        const std::vector<SET_PAIR> &values) {
+ArenaVector<VMInstruction>build_insert(const ArenaString &table_name,
+                                        const ArenaVector<SET_PAIR> &values) {
   RegisterAllocator regs;
-  std::vector<VMInstruction> instructions;
+  ArenaVector<VMInstruction>instructions;
 
   const int table_cursor_id = 0;
 
@@ -520,7 +524,7 @@ std::vector<VMInstruction> build_insert(const std::string &table_name,
     return {make_halt()};
   }
 
-  std::unordered_map<uint32_t, int> indexes_to_insert;
+  ArenaMap<uint32_t, int> indexes_to_insert;
   int cursor_id = 1;
   for (const auto &[col, index] : table->indexes) {
     indexes_to_insert[col] = cursor_id++;
@@ -538,7 +542,7 @@ std::vector<VMInstruction> build_insert(const std::string &table_name,
   }
 
   // Load values
-  std::vector<int> value_regs;
+  ArenaVector<int> value_regs;
   for (size_t i = 0; i < values.size(); i++) {
     int reg = regs.get("value_" + std::to_string(i));
     value_regs.push_back(reg);
@@ -569,10 +573,10 @@ std::vector<VMInstruction> build_insert(const std::string &table_name,
 }
 
 // Generate aggregate instructions
-std::vector<VMInstruction>
-aggregate(const std::string &table_name, const char *agg_func,
+ArenaVector<VMInstruction>
+aggregate(const ArenaString &table_name, const char *agg_func,
           uint32_t *column_index,
-          const std::vector<WhereCondition> &where_conditions) {
+          const ArenaVector<WhereCondition> &where_conditions) {
 
   if (strcmp(agg_func, "COUNT") != 0 && column_index == nullptr) {
     return {};
@@ -588,14 +592,14 @@ aggregate(const std::string &table_name, const char *agg_func,
     options.table_name = table_name;
     options.where_conditions = where_conditions;
     options.operation = ParsedParameters::AGGREGATE;
-    options.aggregate = std::string(agg_func);
+    options.aggregate = ArenaString(agg_func);
 
     return update_or_delete_or_select(options);
   }
 
   // Simple aggregate without WHERE
   RegisterAllocator regs;
-  std::vector<VMInstruction> instructions;
+  ArenaVector<VMInstruction>instructions;
   const int cursor_id = 0;
   int agg_reg = regs.get("agg");
   int output_reg = regs.get("output");
@@ -632,8 +636,8 @@ aggregate(const std::string &table_name, const char *agg_func,
 
 // Optimization functions
 double estimate_selectivity(const WhereCondition &condition,
-                            const std::string &table_name) {
-  std::string column_name = condition.column_name;
+                            const ArenaString &table_name) {
+  ArenaString column_name = condition.column_name;
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
   if (!table) {
@@ -660,11 +664,11 @@ double estimate_selectivity(const WhereCondition &condition,
   }
 }
 
-std::vector<WhereCondition>
-optimize_where_conditions(const std::vector<WhereCondition> &conditions,
-                          const std::string &table_name) {
+ArenaVector<WhereCondition>
+optimize_where_conditions(const ArenaVector<WhereCondition> &conditions,
+                          const ArenaString &table_name) {
 
-  std::vector<WhereCondition> optimized = conditions;
+  ArenaVector<WhereCondition> optimized = conditions;
 
   // Sort by selectivity
   std::sort(optimized.begin(), optimized.end(),
@@ -676,9 +680,9 @@ optimize_where_conditions(const std::vector<WhereCondition> &conditions,
   return optimized;
 }
 
-AccessMethod choose_access_method(const std::vector<WhereCondition> &conditions,
-                                  const std::string &table_name) {
-  std::vector<WhereCondition> sorted_conditions = conditions;
+AccessMethod choose_access_method(const ArenaVector<WhereCondition> &conditions,
+                                  const ArenaString &table_name) {
+  ArenaVector<WhereCondition> sorted_conditions = conditions;
   std::stable_partition(
       sorted_conditions.begin(), sorted_conditions.end(),
       [](const WhereCondition &c) { return c.operator_type == EQ; });
@@ -711,31 +715,31 @@ AccessMethod choose_access_method(const std::vector<WhereCondition> &conditions,
 }
 
 // Forward declarations for implementation functions
-std::vector<VMInstruction> build_direct_rowid_operation(
-    const std::string &table_name, const std::vector<SET_PAIR> &set_columns,
+ArenaVector<VMInstruction>build_direct_rowid_operation(
+    const ArenaString &table_name, const ArenaVector<SET_PAIR> &set_columns,
     const WhereCondition &primary_condition,
-    const std::vector<WhereCondition> &remaining_conditions,
+    const ArenaVector<WhereCondition> &remaining_conditions,
     RegisterAllocator &regs, ParsedParameters::Operation operation,
-    const std::vector<std::string> &select_columns,
-    const std::string &aggregate_func);
+    const ArenaVector<ArenaString> &select_columns,
+    const ArenaString &aggregate_func);
 
-std::vector<VMInstruction> build_index_scan_operation(
-    const std::string &table_name, const std::vector<SET_PAIR> &set_columns,
+ArenaVector<VMInstruction>build_index_scan_operation(
+    const ArenaString &table_name, const ArenaVector<SET_PAIR> &set_columns,
     const WhereCondition &index_condition,
-    const std::vector<WhereCondition> &remaining_conditions, uint32_t index_col,
+    const ArenaVector<WhereCondition> &remaining_conditions, uint32_t index_col,
     RegisterAllocator &regs, ParsedParameters::Operation operation,
-    const std::vector<std::string> &select_columns,
-    const std::string &aggregate_func);
+    const ArenaVector<ArenaString> &select_columns,
+    const ArenaString &aggregate_func);
 
-std::vector<VMInstruction> build_full_table_scan_operation(
-    const std::string &table_name, const std::vector<SET_PAIR> &set_columns,
-    const std::vector<WhereCondition> &conditions, RegisterAllocator &regs,
+ArenaVector<VMInstruction>build_full_table_scan_operation(
+    const ArenaString &table_name, const ArenaVector<SET_PAIR> &set_columns,
+    const ArenaVector<WhereCondition> &conditions, RegisterAllocator &regs,
     ParsedParameters::Operation operation,
-    const std::vector<std::string> &select_columns,
-    const std::string &aggregate_func);
+    const ArenaVector<ArenaString> &select_columns,
+    const ArenaString &aggregate_func);
 
 // Main unified function
-std::vector<VMInstruction>
+ArenaVector<VMInstruction>
 update_or_delete_or_select(const ParsedParameters &options) {
   RegisterAllocator regs;
 
@@ -745,7 +749,7 @@ update_or_delete_or_select(const ParsedParameters &options) {
   auto access_method =
       choose_access_method(optimized_conditions, options.table_name);
 
-  std::vector<VMInstruction> instructions;
+  ArenaVector<VMInstruction>instructions;
 
   switch (access_method.type) {
   case AccessMethod::DIRECT_ROWID:
@@ -753,7 +757,7 @@ update_or_delete_or_select(const ParsedParameters &options) {
         options.table_name, options.set_columns,
         *access_method.primary_condition,
         [&]() {
-          std::vector<WhereCondition> remaining;
+          ArenaVector<WhereCondition> remaining;
           for (const auto &c : optimized_conditions) {
             if (&c != access_method.primary_condition) {
               remaining.push_back(c);
@@ -768,7 +772,7 @@ update_or_delete_or_select(const ParsedParameters &options) {
     instructions = build_index_scan_operation(
         options.table_name, options.set_columns, *access_method.index_condition,
         [&]() {
-          std::vector<WhereCondition> remaining;
+          ArenaVector<WhereCondition> remaining;
           for (const auto &c : optimized_conditions) {
             if (&c != access_method.index_condition) {
               remaining.push_back(c);
@@ -801,28 +805,28 @@ update_or_delete_or_select(const ParsedParameters &options) {
 }
 
 // Public wrapper functions
-std::vector<VMInstruction> build_select(const ParsedParameters &options) {
+ArenaVector<VMInstruction>build_select(const ParsedParameters &options) {
   return update_or_delete_or_select(options);
 }
 
-std::vector<VMInstruction> build_update(const ParsedParameters &options) {
+ArenaVector<VMInstruction>build_update(const ParsedParameters &options) {
   return update_or_delete_or_select(options);
 }
 
-std::vector<VMInstruction> build_delete(const ParsedParameters &options) {
+ArenaVector<VMInstruction>build_delete(const ParsedParameters &options) {
   return update_or_delete_or_select(options);
 }
 
 // Build full table scan operation
-std::vector<VMInstruction> build_full_table_scan_operation(
-    const std::string &table_name, const std::vector<SET_PAIR> &set_columns,
-    const std::vector<WhereCondition> &conditions, RegisterAllocator &regs,
+ArenaVector<VMInstruction>build_full_table_scan_operation(
+    const ArenaString &table_name, const ArenaVector<SET_PAIR> &set_columns,
+    const ArenaVector<WhereCondition> &conditions, RegisterAllocator &regs,
     ParsedParameters::Operation operation,
-    const std::vector<std::string> &select_columns,
-    const std::string &aggregate_func) {
+    const ArenaVector<ArenaString> &select_columns,
+    const ArenaString &aggregate_func) {
 
-  std::vector<VMInstruction> instructions;
-  std::unordered_map<std::string, int> labels;
+  ArenaVector<VMInstruction>instructions;
+  ArenaMap<ArenaString, int> labels;
   const int cursor_id = 0;
 
   char *table_name_str = (char *)arena_alloc(table_name.size() + 1);
@@ -866,8 +870,8 @@ std::vector<VMInstruction> build_full_table_scan_operation(
     // Handle aggregate step
     instructions.push_back(make_agg_step());
   } else if (operation == ParsedParameters::SELECT) {
-    std::vector<int> output_regs;
-    std::vector<uint32_t> columns_to_select;
+    ArenaVector<int> output_regs;
+    ArenaVector<uint32_t> columns_to_select;
 
     if (!select_columns.empty()) {
       for (const auto &col_name : select_columns) {
@@ -891,7 +895,7 @@ std::vector<VMInstruction> build_full_table_scan_operation(
         make_result_row(output_regs[0], (int32_t)output_regs.size()));
   } else {
     // UPDATE
-    std::vector<int> current_regs;
+    ArenaVector<int> current_regs;
     for (size_t i = 0; i < table->schema.columns.size(); i++) {
       int col_reg = regs.get("current_col_" + std::to_string(i));
       current_regs.push_back(col_reg);
@@ -934,16 +938,16 @@ std::vector<VMInstruction> build_full_table_scan_operation(
 }
 
 // Build direct rowid operation
-std::vector<VMInstruction> build_direct_rowid_operation(
-    const std::string &table_name, const std::vector<SET_PAIR> &set_columns,
+ArenaVector<VMInstruction>build_direct_rowid_operation(
+    const ArenaString &table_name, const ArenaVector<SET_PAIR> &set_columns,
     const WhereCondition &primary_condition,
-    const std::vector<WhereCondition> &remaining_conditions,
+    const ArenaVector<WhereCondition> &remaining_conditions,
     RegisterAllocator &regs, ParsedParameters::Operation operation,
-    const std::vector<std::string> &select_columns,
-    const std::string &aggregate_func) {
+    const ArenaVector<ArenaString> &select_columns,
+    const ArenaString &aggregate_func) {
 
-  std::vector<VMInstruction> instructions;
-  std::unordered_map<std::string, int> labels;
+  ArenaVector<VMInstruction>instructions;
+  ArenaMap<ArenaString, int> labels;
   const int cursor_id = 0;
 
   char *table_name_str = (char *)arena_alloc(table_name.size() + 1);
@@ -967,7 +971,7 @@ std::vector<VMInstruction> build_direct_rowid_operation(
     instructions.push_back(make_agg_reset(aggregate_func.c_str()));
   }
 
-  std::unordered_map<uint32_t, int> indexes_to_update;
+  ArenaMap<uint32_t, int> indexes_to_update;
   if (operation == ParsedParameters::UPDATE) {
     int cursor_idx = 1;
     for (const auto &[column, index] : table->indexes) {
@@ -993,8 +997,8 @@ std::vector<VMInstruction> build_direct_rowid_operation(
   } else if (operation == ParsedParameters::AGGREGATE) {
     instructions.push_back(make_agg_step());
   } else if (operation == ParsedParameters::SELECT) {
-    std::vector<int> output_regs;
-    std::vector<uint32_t> columns_to_select;
+    ArenaVector<int> output_regs;
+    ArenaVector<uint32_t> columns_to_select;
 
     if (!select_columns.empty()) {
       for (const auto &col_name : select_columns) {
@@ -1018,7 +1022,7 @@ std::vector<VMInstruction> build_direct_rowid_operation(
         make_result_row(output_regs[0], (int32_t)output_regs.size()));
   } else {
     // UPDATE
-    std::vector<int> current_regs;
+    ArenaVector<int> current_regs;
     for (size_t i = 0; i < table->schema.columns.size(); i++) {
       int col_reg = regs.get("current_col_" + std::to_string(i));
       current_regs.push_back(col_reg);
@@ -1071,16 +1075,16 @@ std::vector<VMInstruction> build_direct_rowid_operation(
 }
 
 // Build index scan operation
-std::vector<VMInstruction> build_index_scan_operation(
-    const std::string &table_name, const std::vector<SET_PAIR> &set_columns,
+ArenaVector<VMInstruction>build_index_scan_operation(
+    const ArenaString &table_name, const ArenaVector<SET_PAIR> &set_columns,
     const WhereCondition &index_condition,
-    const std::vector<WhereCondition> &remaining_conditions, uint32_t index_col,
+    const ArenaVector<WhereCondition> &remaining_conditions, uint32_t index_col,
     RegisterAllocator &regs, ParsedParameters::Operation operation,
-    const std::vector<std::string> &select_columns,
-    const std::string &aggregate_func) {
+    const ArenaVector<ArenaString> &select_columns,
+    const ArenaString &aggregate_func) {
 
-  std::vector<VMInstruction> instructions;
-  std::unordered_map<std::string, int> labels;
+  ArenaVector<VMInstruction>instructions;
+  ArenaMap<ArenaString, int> labels;
   const int table_cursor_id = 1;
   const int index_cursor_id = 0;
 
@@ -1109,7 +1113,7 @@ std::vector<VMInstruction> build_index_scan_operation(
   }
 
   int ii = 2;
-  std::unordered_map<uint32_t, int> indexes_to_update;
+  ArenaMap<uint32_t, int> indexes_to_update;
   if (operation == ParsedParameters::UPDATE) {
     for (const auto &[column, index] : table->indexes) {
       if (column != index_col) {
@@ -1198,8 +1202,8 @@ std::vector<VMInstruction> build_index_scan_operation(
   } else if (operation == ParsedParameters::AGGREGATE) {
     instructions.push_back(make_agg_step());
   } else if (operation == ParsedParameters::SELECT) {
-    std::vector<int> output_regs;
-    std::vector<uint32_t> columns_to_select;
+    ArenaVector<int> output_regs;
+    ArenaVector<uint32_t> columns_to_select;
 
     if (!select_columns.empty()) {
       for (const auto &col_name : select_columns) {
@@ -1223,7 +1227,7 @@ std::vector<VMInstruction> build_index_scan_operation(
         make_result_row(output_regs[0], (int32_t)output_regs.size()));
   } else {
     // UPDATE
-    std::vector<int> current_regs;
+    ArenaVector<int> current_regs;
     for (size_t i = 0; i < table->schema.columns.size(); i++) {
       int col_reg = regs.get("current_col_" + std::to_string(i));
       current_regs.push_back(col_reg);

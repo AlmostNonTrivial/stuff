@@ -2,6 +2,7 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+#include <string>
 
 void arena_init(size_t capacity);
 void arena_shutdown(void);
@@ -197,4 +198,118 @@ struct ArenaVector{
 
     T* begin() { return data; }
     T* end() { return data + count; }
+};
+
+
+
+// Simple arena string
+struct ArenaString {
+    char* data = nullptr;
+    size_t len = 0;
+
+    // Default constructor
+    ArenaString() = default;
+
+    // From C string
+    ArenaString(const char* str) {
+        if (str) {
+            len = strlen(str);
+            data = (char*)arena_alloc(len + 1);
+            memcpy(data, str, len + 1);
+        }
+    }
+
+    // From std::string (for migration)
+    ArenaString(const std::string& str) {
+        len = str.length();
+        data = (char*)arena_alloc(len + 1);
+        memcpy(data, str.c_str(), len + 1);
+    }
+
+    // Copy constructor
+    ArenaString(const ArenaString& other) {
+        if (other.data) {
+            len = other.len;
+            data = (char*)arena_alloc(len + 1);
+            memcpy(data, other.data, len + 1);
+        }
+    }
+
+    // Assignment
+    ArenaString& operator=(const char* str) {
+        if (str) {
+            len = strlen(str);
+            data = (char*)arena_alloc(len + 1);
+            memcpy(data, str, len + 1);
+        } else {
+            data = nullptr;
+            len = 0;
+        }
+        return *this;
+    }
+
+    ArenaString& operator=(const ArenaString& other) {
+        if (other.data) {
+            len = other.len;
+            data = (char*)arena_alloc(len + 1);
+            memcpy(data, other.data, len + 1);
+        } else {
+            data = nullptr;
+            len = 0;
+        }
+        return *this;
+    }
+
+    // Concatenation
+    ArenaString operator+(const ArenaString& other) const {
+        ArenaString result;
+        result.len = len + other.len;
+        result.data = (char*)arena_alloc(result.len + 1);
+        if (data) memcpy(result.data, data, len);
+        if (other.data) memcpy(result.data + len, other.data, other.len);
+        result.data[result.len] = '\0';
+        return result;
+    }
+
+    ArenaString operator+(const char* str) const {
+        size_t str_len = str ? strlen(str) : 0;
+        ArenaString result;
+        result.len = len + str_len;
+        result.data = (char*)arena_alloc(result.len + 1);
+        if (data) memcpy(result.data, data, len);
+        if (str) memcpy(result.data + len, str, str_len);
+        result.data[result.len] = '\0';
+        return result;
+    }
+
+    // Comparison
+    bool operator==(const ArenaString& other) const {
+        if (len != other.len) return false;
+        if (!data || !other.data) return data == other.data;
+        return memcmp(data, other.data, len) == 0;
+    }
+
+    bool operator==(const char* str) const {
+        if (!data) return !str || *str == '\0';
+        if (!str) return false;
+        return strcmp(data, str) == 0;
+    }
+
+    bool operator!=(const ArenaString& other) const { return !(*this == other); }
+    bool operator!=(const char* str) const { return !(*this == str); }
+
+    // For use in map
+    bool operator<(const ArenaString& other) const {
+        if (!data || !other.data) return data < other.data;
+        return strcmp(data, other.data) < 0;
+    }
+
+    // Access
+    const char* c_str() const { return data ? data : ""; }
+    size_t length() const { return len; }
+    size_t size() const { return len; }
+    bool empty() const { return len == 0; }
+
+    char& operator[](size_t i) { return data[i]; }
+    const char& operator[](size_t i) const { return data[i]; }
 };

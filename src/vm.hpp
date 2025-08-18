@@ -1,5 +1,6 @@
 #pragma once
 #include "btree.hpp"
+#include "arena.hpp"
 #include "defs.hpp"
 #include <cstddef>
 #include <cstdint>
@@ -228,9 +229,9 @@ struct VmEvent {
     } context;
 };
 
-VM_RESULT vm_execute(std::vector<VMInstruction> &instructions);
+VM_RESULT vm_execute(ArenaVector<VMInstruction> &instructions);
 std::queue<VmEvent>& vm_events();
 
 void vm_clear_events();
 
-std::vector<std::vector<VMValue>> &vm_output_buffer();
+ArenaVector<ArenaVector<VMValue>> &vm_output_buffer();

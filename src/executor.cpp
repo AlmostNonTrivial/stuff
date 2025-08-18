@@ -62,7 +62,7 @@ static VM_RESULT execute_internal(const char* sql) {
     ArenaVector<ASTNode*> stmts = parse_sql(sql);
     if (stmts.empty()) return ERR;
 
-    std::vector<VMInstruction> program = build_from_ast(stmts[0]);
+    ArenaVector<VMInstruction> program = build_from_ast(stmts[0]);
     VM_RESULT result = vm_execute(program);
 
     // Clear events from internal operations
@@ -143,7 +143,7 @@ static void rebuild_schema_from_master() {
     const char* max_query = "SELECT * FROM sqlite_master";
     ArenaVector<ASTNode*> max_stmts = parse_sql(max_query);
     if (!max_stmts.empty()) {
-        std::vector<VMInstruction> max_program = build_from_ast(max_stmts[0]);
+        ArenaVector<VMInstruction> max_program = build_from_ast(max_stmts[0]);
         vm_execute(max_program);
 
         for (auto& row : vm_output_buffer()) {
@@ -162,7 +162,7 @@ static void rebuild_schema_from_master() {
     ArenaVector<ASTNode*> stmts = parse_sql(query);
     if (stmts.empty()) return;
 
-    std::vector<VMInstruction> program = build_from_ast(stmts[0]);
+    ArenaVector<VMInstruction> program = build_from_ast(stmts[0]);
 
     // Save current output buffer
     auto saved_buffer = vm_output_buffer();
@@ -189,7 +189,7 @@ static void rebuild_schema_from_master() {
 
                 Table* table = ARENA_ALLOC(Table);
                 table->schema.table_name = name;
-                for(int i = 0; i < node->columns.size; i++) {
+                for(int i = 0; i < node->columns.size(); i++) {
                     table->schema.columns[i] = node->columns[i];
                 }
 
@@ -373,7 +373,7 @@ void execute(const char* sql) {
     bool success = true;
     bool explicit_transaction = false;
 
-    for (int i = 0; i < statements.size;i++) {
+    for (int i = 0; i < statements.size();i++) {
         auto statement = statements[i];
         bool is_read = (statement->type == AST_SELECT);
 
@@ -403,7 +403,7 @@ void execute(const char* sql) {
             }
 
             // Build and execute program
-            std::vector<VMInstruction> program = build_from_ast(statement);
+            ArenaVector<VMInstruction> program = build_from_ast(statement);
             VM_RESULT result = vm_execute(program);
 
             if (result != OK) {
