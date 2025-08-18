@@ -647,8 +647,8 @@ ASTNode* parse_statement(const char* sql) {
 
     return ast;
 }
-ArenaVec<ASTNode*> parse_sql(const char* sql) {
-    ArenaVec<ASTNode*> statements;
+ArenaVector<ASTNode*> parse_sql(const char* sql) {
+    ArenaVector<ASTNode*> statements;
 
     // Simple multi-statement parsing
     const char* current = sql;

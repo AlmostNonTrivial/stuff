@@ -59,7 +59,7 @@ static char* generate_index_sql(const char* table_name, uint32_t column_index) {
 
 // Execute SQL through VM without triggering events
 static VM_RESULT execute_internal(const char* sql) {
-    ArenaVec<ASTNode*> stmts = parse_sql(sql);
+    ArenaVector<ASTNode*> stmts = parse_sql(sql);
     if (stmts.empty()) return ERR;
 
     std::vector<VMInstruction> program = build_from_ast(stmts[0]);
@@ -141,7 +141,7 @@ static void rebuild_schema_from_master() {
 
     // First pass: find max ID
     const char* max_query = "SELECT * FROM sqlite_master";
-    ArenaVec<ASTNode*> max_stmts = parse_sql(max_query);
+    ArenaVector<ASTNode*> max_stmts = parse_sql(max_query);
     if (!max_stmts.empty()) {
         std::vector<VMInstruction> max_program = build_from_ast(max_stmts[0]);
         vm_execute(max_program);
@@ -159,7 +159,7 @@ static void rebuild_schema_from_master() {
 
     // Query master table to rebuild schema - tables first
     const char* query = "SELECT * FROM sqlite_master WHERE type = 'table' AND name != 'sqlite_master'";
-    ArenaVec<ASTNode*> stmts = parse_sql(query);
+    ArenaVector<ASTNode*> stmts = parse_sql(query);
     if (stmts.empty()) return;
 
     std::vector<VMInstruction> program = build_from_ast(stmts[0]);
@@ -183,7 +183,7 @@ static void rebuild_schema_from_master() {
 
         if (strcmp(type, "table") == 0) {
             // Parse CREATE TABLE to rebuild schema
-            ArenaVec<ASTNode*> create_stmts = parse_sql(sql);
+            ArenaVector<ASTNode*> create_stmts = parse_sql(sql);
             if (!create_stmts.empty() && create_stmts[0]->type == AST_CREATE_TABLE) {
                 CreateTableNode* node = (CreateTableNode*)create_stmts[0];
 
@@ -368,7 +368,7 @@ void execute(const char* sql) {
         init_executor();
     }
 
-    ArenaVec<ASTNode*> statements = parse_sql(sql);
+    ArenaVector<ASTNode*> statements = parse_sql(sql);
 
     bool success = true;
     bool explicit_transaction = false;

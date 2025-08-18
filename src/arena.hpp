@@ -14,35 +14,187 @@ size_t arena_used(void);
 #define ARENA_ALLOC_ARRAY(type, count) ((type*)arena_alloc(sizeof(type) * (count)))
 
 
-/// Simple arena-based vector - self-initializing
-template<typename T>
-struct ArenaVec {
-    T* data;
-    size_t size;
-    size_t capacity;
+// arena_containers.hpp
+#pragma once
+#include "arena.hpp"
+#include <cstring>
 
-    void push_back(T value) {
-        // Self-initialize on first use if needed
-        // arena_alloc gives zeroed memory, so capacity will be 0
-        if (size >= capacity) {
-            // Grow by doubling (or initial size of 4)
-            size_t new_capacity = capacity == 0 ? 4 : capacity * 2;
-            T* new_data = ARENA_ALLOC_ARRAY(T, new_capacity);
+// Simple arena-based map using linear search
+// Just use it directly - allocates on first use
+template<typename K, typename V>
+struct ArenaMap {
+    struct Entry {
+        K key;
+        V value;
+        bool used;
+    };
 
-            // Copy old data if any
-            if (data && size > 0) {
-                memcpy(new_data, data, size * sizeof(T));
+    Entry* entries = nullptr;
+    size_t capacity = 0;
+    size_t count = 0;
+
+    V* find(const K& key) {
+        if (!entries) return nullptr;
+
+        for (size_t i = 0; i < capacity; i++) {
+            if (entries[i].used && entries[i].key == key) {
+                return &entries[i].value;
             }
+        }
+        return nullptr;
+    }
 
+    void insert(const K& key, const V& value) {
+        // Lazy allocation
+        if (!entries) {
+            capacity = 64;
+            entries = (Entry*)arena_alloc(sizeof(Entry) * capacity);
+            memset(entries, 0, sizeof(Entry) * capacity);
+        }
+
+        // Check if exists
+        for (size_t i = 0; i < capacity; i++) {
+            if (entries[i].used && entries[i].key == key) {
+                entries[i].value = value;
+                return;
+            }
+        }
+
+        // Find empty slot
+        for (size_t i = 0; i < capacity; i++) {
+            if (!entries[i].used) {
+                entries[i].key = key;
+                entries[i].value = value;
+                entries[i].used = true;
+                count++;
+                return;
+            }
+        }
+    }
+
+    V& operator[](const K& key) {
+        // Lazy allocation
+        if (!entries) {
+            capacity = 64;
+            entries = (Entry*)arena_alloc(sizeof(Entry) * capacity);
+            memset(entries, 0, sizeof(Entry) * capacity);
+        }
+
+        // Find existing
+        for (size_t i = 0; i < capacity; i++) {
+            if (entries[i].used && entries[i].key == key) {
+                return entries[i].value;
+            }
+        }
+
+        // Create new
+        for (size_t i = 0; i < capacity; i++) {
+            if (!entries[i].used) {
+                entries[i].key = key;
+                entries[i].used = true;
+                count++;
+                return entries[i].value;
+            }
+        }
+
+        // Should not reach here if capacity is sufficient
+        return entries[0].value;
+    }
+
+    void erase(const K& key) {
+        if (!entries) return;
+
+        for (size_t i = 0; i < capacity; i++) {
+            if (entries[i].used && entries[i].key == key) {
+                entries[i].used = false;
+                count--;
+                return;
+            }
+        }
+    }
+
+    void clear() {
+        if (entries) {
+            memset(entries, 0, sizeof(Entry) * capacity);
+            count = 0;
+        }
+    }
+
+    bool empty() const { return count == 0; }
+    size_t size() const { return count; }
+};
+
+// Simple arena-based queue - circular buffer
+template<typename T>
+struct ArenaQueue {
+    T* data = nullptr;
+    size_t capacity = 0;
+    size_t head = 0;
+    size_t tail = 0;
+    size_t count = 0;
+
+    void push(const T& item) {
+        // Lazy allocation
+        if (!data) {
+            capacity = 256;
+            data = (T*)arena_alloc(sizeof(T) * capacity);
+        }
+
+        if (count >= capacity) return; // Full
+
+        data[tail] = item;
+        tail = (tail + 1) % capacity;
+        count++;
+    }
+
+    T front() {
+        if (count == 0) return T{};
+        return data[head];
+    }
+
+    void pop() {
+        if (count == 0) return;
+        head = (head + 1) % capacity;
+        count--;
+    }
+
+    bool empty() const { return count == 0; }
+    size_t size() const { return count; }
+
+    void clear() {
+        head = 0;
+        tail = 0;
+        count = 0;
+    }
+};
+
+// Simple arena vector - just for completeness
+template<typename T>
+struct ArenaVector{
+    T* data = nullptr;
+    size_t capacity = 0;
+    size_t count = 0;
+
+    void push_back(const T& item) {
+        if (!data || count >= capacity) {
+            size_t new_capacity = capacity ? capacity * 2 : 16;
+            T* new_data = (T*)arena_alloc(sizeof(T) * new_capacity);
+            if (data) {
+                memcpy(new_data, data, sizeof(T) * count);
+            }
             data = new_data;
             capacity = new_capacity;
         }
-
-        data[size++] = value;
+        data[count++] = item;
     }
 
     T& operator[](size_t i) { return data[i]; }
     const T& operator[](size_t i) const { return data[i]; }
 
-    bool empty() const { return size == 0; }
+    size_t size() const { return count; }
+    bool empty() const { return count == 0; }
+    void clear() { count = 0; }
+
+    T* begin() { return data; }
+    T* end() { return data + count; }
 };

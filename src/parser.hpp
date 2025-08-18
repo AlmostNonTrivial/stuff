@@ -77,7 +77,7 @@ struct SetClauseNode : ASTNode {
 // Statement nodes
 struct SelectNode : ASTNode {
     const char* table;
-    ArenaVec<ASTNode*> columns;  // empty = *
+    ArenaVector<ASTNode*> columns;  // empty = *
     WhereNode* where;
     AggregateNode* aggregate;
     OrderByNode* order_by;
@@ -85,12 +85,12 @@ struct SelectNode : ASTNode {
 
 struct InsertNode : ASTNode {
     const char* table;
-    ArenaVec<ASTNode*> values;
+    ArenaVector<ASTNode*> values;
 };
 
 struct UpdateNode : ASTNode {
     const char* table;
-    ArenaVec<SetClauseNode*> set_clauses;
+    ArenaVector<SetClauseNode*> set_clauses;
     WhereNode* where;
 };
 
@@ -101,7 +101,7 @@ struct DeleteNode : ASTNode {
 
 struct CreateTableNode : ASTNode {
     const char* table;
-    ArenaVec<ColumnInfo> columns;
+    ArenaVector<ColumnInfo> columns;
 };
 
 struct CreateIndexNode : ASTNode {
@@ -166,4 +166,4 @@ struct Parser {
 
 
 
-ArenaVec<ASTNode*> parse_sql(const char* sql);
+ArenaVector<ASTNode*> parse_sql(const char* sql);
