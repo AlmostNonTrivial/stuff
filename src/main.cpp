@@ -29,16 +29,30 @@
 
 int main() {
 
-  arena::init<QueryArena>(PAGE_SIZE * 20);
-  arena::init<SchemaArena>(PAGE_SIZE * 10);
+  arena::init<QueryArena>(PAGE_SIZE * 30);
+  arena::init<SchemaArena>(PAGE_SIZE * 14);
   btree_init("db");
 
   std::vector<const char *> queries = {
       "BEGIN; CREATE TABLE X (INT id, INT age, VARCHAR32 name); COMMIT;",
+      // "BEGIN; CREATE TABLE Y (INT id, INT age, VARCHAR32 name); COMMIT;",
+      // "BEGIN; INSERT INTO Y VALUES (1, 16, 'rickstar'); COMMIT;",
       "BEGIN; INSERT INTO X VALUES (1, 18, 'ricky'); COMMIT;",
       "BEGIN; INSERT INTO X VALUES (2, 22, 'marky'); COMMIT;",
       "BEGIN; INSERT INTO X VALUES (3, 16, 'marshal'); COMMIT;",
-      "SELECT * FROM X;"};
+      // "SELECT * FROM X;",
+      // "SELECT * FROM Y;",
+      // "BEGIN; DELETE FROM X WHERE name = 'ricky';COMMIT;",
+      "BEGIN; CREATE INDEX index_x_name ON X (name);COMMIT;",
+      "BEGIN; UPDATE X SET name = 'ricksmart' WHERE name = 'ricky';COMMIT;",
+      // "SELECT * FROM X WHERE name = 'rick';",
+      "SELECT * FROM X WHERE name = 'ricksmart';"
+      // "SELECT COUNT(*) FROM X;",
+
+
+
+
+  };
 
   for (auto query : queries) {
     execute(query);

@@ -74,7 +74,7 @@ static VM_RESULT execute_internal(const char* sql) {
     VM_RESULT result = vm_execute(program);
 
     // Clear events from internal operations
-    vm_clear_events();
+
     return result;
 }
 
@@ -162,7 +162,7 @@ static void rebuild_schema_from_master() {
                 }
             }
         }
-        vm_clear_events();
+
     }
 
     // Query master table to rebuild schema - tables first
@@ -254,7 +254,7 @@ static void rebuild_schema_from_master() {
         }
     }
 
-    vm_clear_events();
+
 }
 
 static void process_vm_events() {
@@ -284,57 +284,60 @@ static void process_vm_events() {
             break;
         }
 
-        // case EVT_TABLE_DROPPED: {
-        //     const char* table_name = event.context.table_info.table_name;
+        case EVT_TABLE_DROPPED: {
+            const char* table_name = event.context.table_info.table_name;
 
-        //     // Remove from in-memory schema
-        //     remove_table(table_name);
+            // Remove from in-memory schema
+            remove_table(table_name);
 
-        //     // Delete from master table
-        //     delete_master_table_entry(table_name);
-        //     break;
-        // }
+            // Delete from master table
+            // delete_master_table_entry(table_name);
+            break;
+        }
 
-        // case EVT_INDEX_CREATED: {
-        //     Index* index = (Index*)event.data;
-        //     const char* table_name = event.context.index_info.table_name;
+        case EVT_INDEX_CREATED: {
+            Index* index = (Index*)event.data;
+            const char* table_name = event.context.index_info.table_name;
 
-        //     // Apply immediately
-        //     add_index(table_name, index);
+            // Apply immediately
+            add_index(table_name, index);
 
-        //     // Insert into master table
-        //     if (executor_state.master_table_exists) {
-        //         char* sql = generate_index_sql(table_name, index->column_index);
-        //         char index_name[128];
-        //         snprintf(index_name, sizeof(index_name), "idx_%s_%u",
-        //                 table_name, index->column_index);
+            // // Insert into master table
+            // if (executor_state.master_table_exists) {
+            //     char* sql = generate_index_sql(table_name, index->column_index);
+            //     char index_name[128];
+            //     snprintf(index_name, sizeof(index_name), "idx_%s_%u",
+            //             table_name, index->column_index);
 
-        //         insert_master_table_entry("index",
-        //             index_name,
-        //             table_name,
-        //             index->tree.root_page_index,
-        //             sql);
-        //     }
-        //     break;
-        // }
+            //     insert_master_table_entry("index",
+            //         index_name,
+            //         table_name,
+            //         index->tree.root_page_index,
+            //         sql);
+            // }
+            break;
+        }
 
-        // case EVT_INDEX_DROPPED: {
-        //     const char* table_name = event.context.index_info.table_name;
-        //     uint32_t column_index = event.context.index_info.column_index;
+        case EVT_INDEX_DROPPED: {
+            const char* table_name = event.context.index_info.table_name;
+            uint32_t column_index = event.context.index_info.column_index;
 
-        //     // Remove from in-memory schema
-        //     remove_index(table_name, column_index);
+            // Remove from in-memory schema
+            remove_index(table_name, column_index);
 
-        //     // Delete from master table
-        //     char index_name[128];
-        //     snprintf(index_name, sizeof(index_name), "idx_%s_%u",
-        //             table_name, column_index);
-        //     delete_master_table_entry(index_name);
-        //     break;
-        // }
+            // // Delete from master table
+            // char index_name[128];
+            // snprintf(index_name, sizeof(index_name), "idx_%s_%u",
+            //         table_name, column_index);
+            // delete_master_table_entry(index_name);
+            break;
+        }
 
         case EVT_BTREE_ROOT_CHANGED: {
             int i =0;
+            get_table(event.context.table_info.table_name)->tree.root_page_index = event.context.table_info.root_page;
+
+
             // Update root page in master table if needed
             // This would require an UPDATE statement
             break;
@@ -380,15 +383,16 @@ void execute(const char* sql) {
 
     ArenaVector<ASTNode*, QueryArena> statements = parse_sql(sql);
 
-
-
-
     bool success = true;
     bool explicit_transaction = false;
 
     for (int i = 0; i < statements.size();i++) {
         auto statement = statements[i];
         bool is_read = (statement->type == AST_SELECT);
+
+        if(statement->type == AST_SELECT) {
+            _debug = true;
+        }
 
         // Check for explicit transaction commands
         if (statement->type == AST_BEGIN) {
@@ -420,7 +424,7 @@ void execute(const char* sql) {
 
 
 
-            std::cout << program.size() << ", ";
+            // std::cout << program.size() << ", ";
 
 
 
@@ -435,6 +439,9 @@ void execute(const char* sql) {
                     rebuild_schema_from_master();
                     executor_state.in_transaction = false;
                 }
+
+                std::cout << "failed";
+                exit(1);
 
                 break; // Stop executing further statements
             } else {
@@ -452,9 +459,6 @@ void execute(const char* sql) {
                 }
             }
         }
-
-        // Clear VM events after processing
-        vm_clear_events();
     }
 
     // Reset arena after all statements complete

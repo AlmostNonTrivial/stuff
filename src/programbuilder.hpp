@@ -60,8 +60,8 @@ inline VMInstruction make_halt(int32_t exit_code = 0) {
 }
 
 // Cursor operations
-inline VMInstruction make_open_read(int32_t cursor_id, const char *table_name) {
-  return {OP_OpenRead, 0, cursor_id, 0, (void *)table_name, 0};
+inline VMInstruction make_open_read(int32_t cursor_id, const char *table_name, int32_t index_col = 0) {
+  return {OP_OpenRead, 0, cursor_id, index_col, (void *)table_name, 0};
 }
 
 inline VMInstruction make_open_write(int32_t cursor_id, const char *table_name,

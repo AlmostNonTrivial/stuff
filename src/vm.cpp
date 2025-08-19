@@ -10,9 +10,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <queue>
-#include <unordered_map>
-#include <vector>
+
+bool _debug;
 
 /*------------VMCURSOR---------------- */
 
@@ -20,6 +19,7 @@ struct VmCursor {
   BtCursor btree_cursor;
   TableSchema *schema;
   bool is_index;
+  uint32_t column; // for index
 };
 
 DataType vb_column_type(VmCursor *vb, uint32_t col_index) {
@@ -101,8 +101,8 @@ static void emit_event(EventType type, void *data = nullptr) {
   VM.event_queue.push(event);
 }
 
-static void emit_table_event(EventType type, const char *table_name,
-                             uint32_t root_page = 0) {
+static void emit_root_changed_event(EventType type, const char *table_name,
+                                    uint32_t root_page = 0) {
   VmEvent event;
   event.type = type;
   event.data = nullptr;
@@ -141,8 +141,9 @@ void vm_shutdown() {
   VM.event_queue.clear();
   VM.output_buffer.clear();
 }
-void vm_clear_events() { VM.event_queue.clear(); }
+
 void vm_reset() {
+  // std::cout << "next\n";
   VM.pc = 0;
   VM.halted = false;
   VM.compare_result = 0;
@@ -152,8 +153,9 @@ void vm_reset() {
     VM.registers[i].data = nullptr;
   }
 
+  VM.program.clear();
   VM.cursors.clear();
-  vm_clear_events();
+  VM.event_queue.clear();
   VM.output_buffer.clear();
   VM.aggregator.reset();
 }
@@ -170,11 +172,18 @@ ArenaQueue<VmEvent, QueryArena> &vm_events() { return VM.event_queue; }
 
 // Main execution step
 VM_RESULT vm_step() {
-  if (VM.halted || VM.pc >= VM.program.size()) {
-    return ERR;
-  }
 
   VMInstruction *inst = &VM.program[VM.pc];
+
+  if (_debug) {
+      // for(int i = 0; i < VM.program.size(); i++) {
+      //     auto& inst = VM.program[i];
+      //     printf("[%d] op=%d, p1=%d, p2=%d, p3=%d\n",
+      //            i, inst.opcode, inst.p1, inst.p2, inst.p3);
+      // }
+      // exit(1);
+
+  }
 
   switch (inst->opcode) {
   case OP_Halt:
@@ -237,6 +246,7 @@ VM_RESULT vm_step() {
 
       memcpy(tree, &index->tree, sizeof(BTree));
       cursor.btree_cursor.tree = tree;
+      cursor.column = index_column;
       cursor.is_index = true;
     } else {
 
@@ -408,11 +418,29 @@ VM_RESULT vm_step() {
       return ERR;
     }
 
+    // VM.program valid
     if (cursor->btree_cursor.tree->root_page_index != current_root) {
-      emit_event(EVT_BTREE_ROOT_CHANGED, cursor->btree_cursor.tree);
+      if (cursor->is_index) {
+        get_table(cursor->schema->table_name.c_str())
+            ->indexes[cursor->column]
+            .tree.root_page_index = cursor->btree_cursor.tree->root_page_index;
+      } else {
+
+        /// TODO needs to work with indexes also
+        emit_root_changed_event(EVT_BTREE_ROOT_CHANGED,
+                                cursor->schema->table_name.c_str(),
+                                cursor->btree_cursor.tree->root_page_index);
+      }
     }
 
+    // for (int i = 0; i < VM.program.size(); i++) {
+    //   auto &inst = VM.program[i];
+    //   printf("[%d] op=%d, p1=%d, p2=%d, p3=%d\n", i, inst.opcode, inst.p1,
+    //          inst.p2, inst.p3);
+    // }
+
     emit_row_event(EVT_ROWS_INSERTED, 1);
+
     VM.pc++;
     return OK;
   }
@@ -440,6 +468,7 @@ VM_RESULT vm_step() {
       return ERR;
     }
 
+    // IS it the case that the cursors current page is right?
     VmCursor *cursor = VM.cursors.find(inst->p1);
     VMValue *record = &VM.registers[inst->p2];
 
@@ -679,6 +708,7 @@ VM_RESULT vm_step() {
     index->tree = btree_create(table->schema.columns[column].type,
                                table->schema.key_type(), BTREE);
 
+    add_index(table_name, index);
     // Emit event
     VmEvent event;
     event.type = EVT_INDEX_CREATED;
@@ -706,7 +736,7 @@ VM_RESULT vm_step() {
       btree_clear(&table->indexes.value_at(i)->tree);
     }
 
-    emit_table_event(EVT_TABLE_DROPPED, table_name);
+    emit_root_changed_event(EVT_TABLE_DROPPED, table_name);
     VM.pc++;
     return OK;
   }
@@ -751,6 +781,7 @@ VM_RESULT vm_step() {
 
   default:
     printf("Unknown opcode: %d\n", inst->opcode);
+    exit(1);
     return ERR;
   }
 }
@@ -761,14 +792,13 @@ VM_RESULT vm_execute(ArenaVector<VMInstruction, QueryArena> &instructions) {
   }
 
   vm_reset();
-  VM.program.clear();
-  VM.program = instructions;
+  VM.program.set(instructions);
 
-  for(int i = 0; i <VM.program.size();  i++) {
-      std::cout << (uint32_t)VM.program[i].opcode;
-      std::cout << ",";
-  }
-  std::cout << '\n';
+  // for(int i = 0; i < VM.program.size(); i++) {
+  //     auto& inst = instructions[i];
+  //     printf("[%d] op=%d, p1=%d, p2=%d, p3=%d\n",
+  //            i, inst.opcode, inst.p1, inst.p2, inst.p3);
+  // }
 
   while (!VM.halted && VM.pc < VM.program.size()) {
     VM_RESULT result = vm_step();

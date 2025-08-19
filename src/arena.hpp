@@ -51,6 +51,8 @@ template <typename Tag> struct Arena {
     if (next > base + capacity) {
       fprintf(stderr, "Arena exhausted: requested %zu, used %zu/%zu\n", size,
               used(), capacity);
+
+      exit(1);
       return nullptr;
     }
 
@@ -60,8 +62,9 @@ template <typename Tag> struct Arena {
 
   // Reset arena (move pointer back to start)
   static void reset() {
+      current = base;
       memset(base, 0, capacity);
-      current = base; }
+  }
 
   // Get used memory
   static size_t used() { return current - base; }
@@ -94,7 +97,15 @@ struct ArenaVector {
   // Constructor - automatically initializes
   ArenaVector() : data(nullptr), capacity(0), count(0) {}
 
-  void set(const ArenaVector<T, ArenaTag> to_copy) {
+  ArenaVector& operator=(const ArenaVector& other) {
+        if (this != &other) {
+            clear();
+            set(other);
+        }
+        return *this;
+    }
+
+  void set(const ArenaVector<T, ArenaTag> & to_copy) {
     if (count != 0) {
       // needs to be empty;
       return;
@@ -112,6 +123,7 @@ struct ArenaVector {
       if(count != 0) {
           return; // or clear() first
       }
+
       this->reserve(to_copy.count); // or to_copy.capacity
       for(size_t i = 0; i < to_copy.count; i++) {
           this->push_back(to_copy[i]);
@@ -166,7 +178,7 @@ struct ArenaVector {
 
   bool empty() const { return count == 0; }
 
-  void clear() { count = 0; }
+  void clear() { count = 0; data = nullptr; capacity = 0; }
 
   void reserve(size_t new_capacity) {
     if (new_capacity > capacity) {
@@ -419,6 +431,24 @@ template <typename ArenaTag, size_t InitialCapacity = 32> struct ArenaString {
       return false;
     return strncmp(data, prefix, prefix_len) == 0;
   }
+
+  bool equals(const char *prefix) const {
+     size_t prefix_len = strlen(prefix);
+     if(len != prefix_len) {
+         return false;
+     }
+
+     return strncmp(data, prefix, prefix_len) == 0;
+  }
+
+  bool equals(const ArenaString &str) const {
+     if(len != str.length()) {
+         return false;
+     }
+
+     return starts_with(str);
+  }
+
 
   bool starts_with(const ArenaString &prefix) const {
     return starts_with(prefix.c_str());
@@ -692,6 +722,8 @@ struct ArenaMap {
     count = 0;
     cached_value = nullptr;
     has_cached = false;
+    entries = nullptr;
+    capacity = 0;
   }
 
   // Get all keys

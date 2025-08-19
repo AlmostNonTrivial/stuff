@@ -29,8 +29,10 @@ do an exact match
 
 
 BUGS:
+HOW ARE WE GOING TO RESULT CREATE Index needing the reference to itself
+before the event can be read
 
 DEBUGGING:
 - ignore vm commands and master table for now
-- for make record, and insert, the registers need to 
+- for make record, and insert, the registers need to
 be contiguous, should this involve the key

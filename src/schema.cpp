@@ -30,11 +30,14 @@ uint32_t get_column_index(const char* table_name, const char* col_name) {
     }
 
     for (size_t i = 0; i < table->schema.columns.size(); i++) {
-        if (table->schema.columns[i].name.starts_with(col_name) == 0) {
+        auto name = table->schema.columns[i].name;
+        if (name.equals(col_name)) {
             return i;
         }
     }
-    return 0;
+    PRINT "NOT RIGHT COLUMN Index";
+    exit(1);
+    return -1;
 }
 
 DataType get_column_type(const char* table_name, uint32_t col_index) {

@@ -7,6 +7,9 @@
 #include <cstring>
 
 
+
+extern bool _debug;
+
 struct QueryArena {};
 
 
@@ -232,6 +235,7 @@ struct VmEvent {
 VM_RESULT vm_execute(ArenaVector<VMInstruction, QueryArena> &instructions);
 ArenaQueue<VmEvent, QueryArena>& vm_events();
 
-void vm_clear_events();
+
+
 
 ArenaVector<ArenaVector<VMValue, QueryArena>, QueryArena> &vm_output_buffer();
