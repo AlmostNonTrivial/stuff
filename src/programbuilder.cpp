@@ -422,9 +422,7 @@ setup_update_indexes(ArenaVector<VMInstruction, QueryArena> &instructions,
   ArenaVector<IndexUpdate, QueryArena> indexes_to_update;
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
 
-  char *table_name_str =
-      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
-  strcpy(table_name_str, table_name.c_str());
+
 
   // Determine which columns are being updated
   ArenaSet<uint32_t, QueryArena> updated_columns;
@@ -453,7 +451,7 @@ setup_update_indexes(ArenaVector<VMInstruction, QueryArena> &instructions,
         // Allocate a new cursor and open it
         idx_update.cursor_id = next_cursor_id;
         instructions.push_back(
-            make_open_write(next_cursor_id, table_name_str, indexed_col));
+            make_open_write(next_cursor_id, table_name.c_str(), indexed_col));
         next_cursor_id++;
       }
 
@@ -536,11 +534,9 @@ static ArenaVector<VMInstruction, QueryArena> build_select_full_table_scan(
   ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
   const int cursor_id = 0;
 
-  char *table_name_str =
-      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
-  strcpy(table_name_str, table_name.c_str());
 
-  instructions.push_back(make_open_read(cursor_id, table_name_str));
+
+  instructions.push_back(make_open_read(cursor_id, table_name.c_str()));
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
   if (!table) {
@@ -602,11 +598,7 @@ static ArenaVector<VMInstruction, QueryArena> build_select_direct_rowid(
   ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
   const int cursor_id = 0;
 
-  char *table_name_str =
-      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
-  strcpy(table_name_str, table_name.c_str());
-
-  instructions.push_back(make_open_read(cursor_id, table_name_str));
+  instructions.push_back(make_open_read(cursor_id, table_name.c_str()));
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
   if (!table) {
@@ -662,12 +654,8 @@ static ArenaVector<VMInstruction, QueryArena> build_select_index_scan(
   const int table_cursor_id = 1;
   const int index_cursor_id = 0;
 
-  char *table_name_str =
-      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
-  strcpy(table_name_str, table_name.c_str());
-
-  instructions.push_back(make_open_read(index_cursor_id, table_name_str, index_col));
-  instructions.push_back(make_open_read(table_cursor_id, table_name_str));
+  instructions.push_back(make_open_read(index_cursor_id, table_name.c_str(), index_col));
+  instructions.push_back(make_open_read(table_cursor_id, table_name.c_str()));
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
 
@@ -744,11 +732,7 @@ static ArenaVector<VMInstruction, QueryArena> build_delete_full_table_scan(
   ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
   const int cursor_id = 0;
 
-  char *table_name_str =
-      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
-  strcpy(table_name_str, table_name.c_str());
-
-  instructions.push_back(make_open_write(cursor_id, table_name_str));
+  instructions.push_back(make_open_write(cursor_id, table_name.c_str()));
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
   if (!table) {
@@ -792,11 +776,9 @@ static ArenaVector<VMInstruction, QueryArena> build_delete_direct_rowid(
   ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
   const int cursor_id = 0;
 
-  char *table_name_str =
-      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
-  strcpy(table_name_str, table_name.c_str());
 
-  instructions.push_back(make_open_write(cursor_id, table_name_str));
+
+  instructions.push_back(make_open_write(cursor_id, table_name.c_str()));
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
   if (!table) {
@@ -834,13 +816,11 @@ static ArenaVector<VMInstruction, QueryArena> build_delete_index_scan(
   const int table_cursor_id = 1;
   const int index_cursor_id = 0;
 
-  char *table_name_str =
-      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
-  strcpy(table_name_str, table_name.c_str());
+
 
   instructions.push_back(
-      make_open_write(index_cursor_id, table_name_str, index_col));
-  instructions.push_back(make_open_write(table_cursor_id, table_name_str));
+      make_open_write(index_cursor_id, table_name.c_str(), index_col));
+  instructions.push_back(make_open_write(table_cursor_id, table_name.c_str()));
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
 
@@ -903,11 +883,9 @@ static ArenaVector<VMInstruction, QueryArena> build_update_full_table_scan(
   ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
   const int cursor_id = 0;
 
-  char *table_name_str =
-      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
-  strcpy(table_name_str, table_name.c_str());
 
-  instructions.push_back(make_open_write(cursor_id, table_name_str));
+
+  instructions.push_back(make_open_write(cursor_id, table_name.c_str()));
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
   if (!table) {
@@ -964,11 +942,9 @@ static ArenaVector<VMInstruction, QueryArena> build_update_direct_rowid(
   ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
   const int cursor_id = 0;
 
-  char *table_name_str =
-      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
-  strcpy(table_name_str, table_name.c_str());
 
-  instructions.push_back(make_open_write(cursor_id, table_name_str));
+
+  instructions.push_back(make_open_write(cursor_id, table_name.c_str()));
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
   if (!table) {
@@ -1019,13 +995,11 @@ static ArenaVector<VMInstruction, QueryArena> build_update_index_scan(
   const int table_cursor_id = 1;
   const int index_cursor_id = 0;
 
-  char *table_name_str =
-      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
-  strcpy(table_name_str, table_name.c_str());
+
 
   instructions.push_back(
-      make_open_write(index_cursor_id, table_name_str, index_col));
-  instructions.push_back(make_open_write(table_cursor_id, table_name_str));
+      make_open_write(index_cursor_id, table_name.c_str(), index_col));
+  instructions.push_back(make_open_write(table_cursor_id, table_name.c_str()));
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
 
@@ -1289,11 +1263,9 @@ aggregate(const ArenaString<QueryArena> &table_name, const char *agg_func,
   int agg_reg = regs.get("agg");
   int output_reg = regs.get("output");
 
-  char *table_name_str =
-      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
-  strcpy(table_name_str, table_name.c_str());
 
-  instructions.push_back(make_open_read(cursor_id, table_name_str));
+
+  instructions.push_back(make_open_read(cursor_id, table_name.c_str()));
   instructions.push_back(make_agg_reset(agg_func));
 
   int rewind_jump = 6 + (strcmp(agg_func, "COUNT") == 0 ? 0 : 1);
@@ -1371,14 +1343,12 @@ build_create_index(const ArenaString<QueryArena> &table_name,
   const int table_cursor_id = 0;
   const int index_cursor_id = 1;
 
-  char *table_name_str =
-      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
-  strcpy(table_name_str, table_name.c_str());
 
-  instructions.push_back(make_create_index(column_index, table_name_str));
-  instructions.push_back(make_open_read(table_cursor_id, table_name_str));
+
+  instructions.push_back(make_create_index(column_index, table_name.c_str()));
+  instructions.push_back(make_open_read(table_cursor_id, table_name.c_str()));
   instructions.push_back(
-      make_open_write(index_cursor_id, table_name_str, column_index));
+      make_open_write(index_cursor_id, table_name.c_str(), column_index));
 
   instructions.push_back(make_rewind_label(table_cursor_id, "end"));
 
@@ -1424,17 +1394,15 @@ build_insert(const ArenaString<QueryArena> &table_name,
   int cursor_id = 1;
 
   // Iterate through table indexes
-  char *table_name_str =
-      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
-  strcpy(table_name_str, table_name.c_str());
-  instructions.push_back(make_open_write(table_cursor_id, table_name_str));
+
+  instructions.push_back(make_open_write(table_cursor_id, table_name.c_str()));
 
   for (int i = 0; i < table->indexes.size(); i++) {
     auto key = table->indexes.key_at(i);
 
     indexes_to_insert[*key] = cursor_id++;
     instructions.push_back(
-        make_open_write(cursor_id - 1, table_name_str, *key));
+        make_open_write(cursor_id - 1, table_name.c_str(), *key));
   }
 
   // Load values
