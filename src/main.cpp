@@ -29,8 +29,8 @@
 
 int main() {
 
-  arena::init<QueryArena>(PAGE_SIZE * 10);
-  arena::init<SchemaArena>(PAGE_SIZE * 3);
+  arena::init<QueryArena>(PAGE_SIZE * 20);
+  arena::init<SchemaArena>(PAGE_SIZE * 10);
   btree_init("db");
 
   std::vector<const char *> queries = {

@@ -620,7 +620,10 @@ build_insert(const ArenaString<QueryArena> &table_name,
       make_insert(table_cursor_id, value_regs[0], record_reg));
   instructions.push_back(make_close(table_cursor_id));
   instructions.push_back(make_halt());
-
+  // for(int i = 0; i <instructions.size();  i++) {
+  //     std::cout << (int)instructions[i].opcode << ","
+  // }
+  // std::cout << '\n';
   return instructions;
 }
 

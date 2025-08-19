@@ -77,20 +77,20 @@ static struct {
 } VM = {};
 
 static void vm_set_value(VMValue *val, DataType type, const void *data) {
-  // val->type = type;
-  // uint32_t size = VMValue::get_size(type);
-  // val->data = (uint8_t *)arena_alloc(size);
+  val->type = type;
+  uint32_t size = VMValue::get_size(type);
+  val->data = (uint8_t *)arena::alloc<QueryArena>(size);
 
-  // if (data) {
-  //   if (type == TYPE_VARCHAR32 || type == TYPE_VARCHAR256) {
-  //     memset(val->data, 0, size);
-  //     memcpy(val->data, data, size);
-  //   } else {
-  //     memcpy(val->data, data, size);
-  //   }
-  // } else {
-  //   memset(val->data, 0, size);
-  // }
+  if (data) {
+    if (type == TYPE_VARCHAR32 || type == TYPE_VARCHAR256) {
+      memset(val->data, 0, size);
+      memcpy(val->data, data, size);
+    } else {
+      memcpy(val->data, data, size);
+    }
+  } else {
+    memset(val->data, 0, size);
+  }
 }
 
 // Event emission helpers
@@ -283,7 +283,7 @@ VM_RESULT vm_step() {
   case OP_Next:
   case OP_Prev: {
 
-    if (VM.cursors.contains(inst->p1)) {
+    if (!VM.cursors.contains(inst->p1)) {
       return ERR;
     }
 
@@ -341,7 +341,7 @@ VM_RESULT vm_step() {
   }
 
   case OP_Column: {
-    if (VM.cursors.contains(inst->p1)) {
+    if (!VM.cursors.contains(inst->p1)) {
       return ERR;
     }
 
@@ -387,7 +387,7 @@ VM_RESULT vm_step() {
 
   case OP_Insert: {
 
-    if (VM.cursors.contains(inst->p1)) {
+    if (!VM.cursors.contains(inst->p1)) {
       return ERR;
     }
 
@@ -418,7 +418,7 @@ VM_RESULT vm_step() {
   }
 
   case OP_Delete: {
-    if (VM.cursors.contains(inst->p1)) {
+    if (!VM.cursors.contains(inst->p1)) {
       return ERR;
     }
     VmCursor *cursor = VM.cursors.find(inst->p1);
@@ -436,7 +436,7 @@ VM_RESULT vm_step() {
   }
 
   case OP_Update: {
-    if (VM.cursors.contains(inst->p1)) {
+    if (!VM.cursors.contains(inst->p1)) {
       return ERR;
     }
 
@@ -674,7 +674,7 @@ VM_RESULT vm_step() {
     }
 
     // Create index structure in arena
-    Index *index = (Index*)arena::alloc<QueryArena>(sizeof(Index));
+    Index *index = (Index *)arena::alloc<QueryArena>(sizeof(Index));
     index->column_index = column;
     index->tree = btree_create(table->schema.columns[column].type,
                                table->schema.key_type(), BTREE);
@@ -761,7 +761,14 @@ VM_RESULT vm_execute(ArenaVector<VMInstruction, QueryArena> &instructions) {
   }
 
   vm_reset();
+  VM.program.clear();
   VM.program = instructions;
+
+  for(int i = 0; i <VM.program.size();  i++) {
+      std::cout << (uint32_t)VM.program[i].opcode;
+      std::cout << ",";
+  }
+  std::cout << '\n';
 
   while (!VM.halted && VM.pc < VM.program.size()) {
     VM_RESULT result = vm_step();

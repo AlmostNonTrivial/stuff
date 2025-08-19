@@ -52,8 +52,8 @@ bool add_table(Table* table) {
     if (tables.contains(name)) {
         return false; // Table already exists
     }
-
-    tables[name] = *table;
+    auto copy = *table;
+    tables[name] = copy;
     return true;
 }
 

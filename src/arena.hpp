@@ -59,7 +59,9 @@ template <typename Tag> struct Arena {
   }
 
   // Reset arena (move pointer back to start)
-  static void reset() { current = base; }
+  static void reset() {
+      memset(base, 0, capacity);
+      current = base; }
 
   // Get used memory
   static size_t used() { return current - base; }

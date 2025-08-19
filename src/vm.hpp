@@ -35,7 +35,7 @@ P4: Pointer data (strings, schemas, names)
 P5: Flags byte
 */
 
-enum OpCode : uint8_t {
+enum OpCode : uint32_t {
   // Control flow
   // P1: unused, P2: unused, P3: unused, P4: trace message, P5: unused
   OP_Trace = 0,

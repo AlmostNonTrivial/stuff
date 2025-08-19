@@ -272,68 +272,69 @@ static void process_vm_events() {
             add_table(table);
 
             // Insert into master table if not the master table itself
-            if (executor_state.master_table_exists &&
-                table->schema.table_name != "sqlite_master") {
-                char* sql = generate_create_sql(&table->schema);
-                insert_master_table_entry("table",
-                    table->schema.table_name.c_str(),
-                    table->schema.table_name.c_str(),
-                    table->tree.root_page_index,
-                    sql);
-            }
+            // if (executor_state.master_table_exists &&
+            //     table->schema.table_name != "sqlite_master") {
+            //     char* sql = generate_create_sql(&table->schema);
+            //     insert_master_table_entry("table",
+            //         table->schema.table_name.c_str(),
+            //         table->schema.table_name.c_str(),
+            //         table->tree.root_page_index,
+            //         sql);
+            // }
             break;
         }
 
-        case EVT_TABLE_DROPPED: {
-            const char* table_name = event.context.table_info.table_name;
+        // case EVT_TABLE_DROPPED: {
+        //     const char* table_name = event.context.table_info.table_name;
 
-            // Remove from in-memory schema
-            remove_table(table_name);
+        //     // Remove from in-memory schema
+        //     remove_table(table_name);
 
-            // Delete from master table
-            delete_master_table_entry(table_name);
-            break;
-        }
+        //     // Delete from master table
+        //     delete_master_table_entry(table_name);
+        //     break;
+        // }
 
-        case EVT_INDEX_CREATED: {
-            Index* index = (Index*)event.data;
-            const char* table_name = event.context.index_info.table_name;
+        // case EVT_INDEX_CREATED: {
+        //     Index* index = (Index*)event.data;
+        //     const char* table_name = event.context.index_info.table_name;
 
-            // Apply immediately
-            add_index(table_name, index);
+        //     // Apply immediately
+        //     add_index(table_name, index);
 
-            // Insert into master table
-            if (executor_state.master_table_exists) {
-                char* sql = generate_index_sql(table_name, index->column_index);
-                char index_name[128];
-                snprintf(index_name, sizeof(index_name), "idx_%s_%u",
-                        table_name, index->column_index);
+        //     // Insert into master table
+        //     if (executor_state.master_table_exists) {
+        //         char* sql = generate_index_sql(table_name, index->column_index);
+        //         char index_name[128];
+        //         snprintf(index_name, sizeof(index_name), "idx_%s_%u",
+        //                 table_name, index->column_index);
 
-                insert_master_table_entry("index",
-                    index_name,
-                    table_name,
-                    index->tree.root_page_index,
-                    sql);
-            }
-            break;
-        }
+        //         insert_master_table_entry("index",
+        //             index_name,
+        //             table_name,
+        //             index->tree.root_page_index,
+        //             sql);
+        //     }
+        //     break;
+        // }
 
-        case EVT_INDEX_DROPPED: {
-            const char* table_name = event.context.index_info.table_name;
-            uint32_t column_index = event.context.index_info.column_index;
+        // case EVT_INDEX_DROPPED: {
+        //     const char* table_name = event.context.index_info.table_name;
+        //     uint32_t column_index = event.context.index_info.column_index;
 
-            // Remove from in-memory schema
-            remove_index(table_name, column_index);
+        //     // Remove from in-memory schema
+        //     remove_index(table_name, column_index);
 
-            // Delete from master table
-            char index_name[128];
-            snprintf(index_name, sizeof(index_name), "idx_%s_%u",
-                    table_name, column_index);
-            delete_master_table_entry(index_name);
-            break;
-        }
+        //     // Delete from master table
+        //     char index_name[128];
+        //     snprintf(index_name, sizeof(index_name), "idx_%s_%u",
+        //             table_name, column_index);
+        //     delete_master_table_entry(index_name);
+        //     break;
+        // }
 
         case EVT_BTREE_ROOT_CHANGED: {
+            int i =0;
             // Update root page in master table if needed
             // This would require an UPDATE statement
             break;
@@ -349,6 +350,7 @@ static void process_vm_events() {
 
         case EVT_TRANSACTION_ROLLBACK:
             executor_state.in_transaction = false;
+                    // rebuild_schema_from_master();
             // Schema will be rebuilt after btree rollback
             break;
 
@@ -365,9 +367,9 @@ static void init_executor() {
     executor_state.next_master_id = 1;
 
     // Create master table if it doesn't exist
-    if (!get_table("sqlite_master")) {
-        create_master_table();
-    }
+    // if (!get_table("sqlite_master")) {
+    // create_master_table();
+    // }
 }
 
 void execute(const char* sql) {
@@ -377,6 +379,9 @@ void execute(const char* sql) {
     }
 
     ArenaVector<ASTNode*, QueryArena> statements = parse_sql(sql);
+
+
+
 
     bool success = true;
     bool explicit_transaction = false;
@@ -412,6 +417,13 @@ void execute(const char* sql) {
 
             // Build and execute program
             ArenaVector<VMInstruction, QueryArena> program = build_from_ast(statement);
+
+
+
+            std::cout << program.size() << ", ";
+
+
+
             VM_RESULT result = vm_execute(program);
 
             if (result != OK) {
@@ -427,7 +439,11 @@ void execute(const char* sql) {
                 break; // Stop executing further statements
             } else {
                 // Process events immediately on success
-                process_vm_events();
+               process_vm_events();
+
+               if(is_read) {
+                   auto buffer = vm_output_buffer();
+               }
 
                 // Auto-commit for non-explicit transactions
                 if (!explicit_transaction && executor_state.in_transaction && !is_read) {
