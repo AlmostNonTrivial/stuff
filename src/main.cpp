@@ -46,7 +46,7 @@ int main() {
       "BEGIN; CREATE INDEX index_x_name ON X (name);COMMIT;",
       "BEGIN; UPDATE X SET name = 'ricksmart' WHERE name = 'ricky';COMMIT;",
       // "SELECT * FROM X WHERE name = 'rick';",
-      "SELECT * FROM X WHERE name = 'ricksmart';"
+      "SELECT * FROM X;"
       // "SELECT COUNT(*) FROM X;",
 
 
