@@ -1,373 +1,448 @@
-// arena.h
 #pragma once
-#include <stddef.h>
-#include "defs.hpp"
-#include <stdint.h>
-#include <string>
-
-void arena_init(size_t capacity);
-void arena_shutdown(void);
-void* arena_alloc(size_t size);
-void arena_reset(void);
-size_t arena_used(void);
-
-// Convenience macro for typed allocation
-#define ARENA_ALLOC(type) ((type*)arena_alloc(sizeof(type)))
-#define ARENA_ALLOC_ARRAY(type, count) ((type*)arena_alloc(sizeof(type) * (count)))
-
-
-// arena_containers.hpp
-#pragma once
-#include "arena.hpp"
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <cstdlib>
+#include <cstdio>
 
-// Simple arena-based map using linear search
-// Just use it directly - allocates on first use
-template<typename K, typename V>
-struct ArenaMap {
-    struct Entry {
-        K key;
-        V value;
-        bool used;
-    };
+// Tagged arena system - each arena type gets its own memory pool
+template<typename Tag>
+struct Arena {
+    static inline uint8_t* base = nullptr;
+    static inline uint8_t* current = nullptr;
+    static inline size_t capacity = 0;
 
-    Entry* entries = nullptr;
-    size_t capacity = 0;
-    size_t count = 0;
+    // Initialize arena with given capacity
+    static void init(size_t cap) {
+        if (base) return; // Already initialized
 
-    V* find(const K& key) {
-        if (!entries) return nullptr;
-
-        for (size_t i = 0; i < capacity; i++) {
-            if (entries[i].used && entries[i].key == key) {
-                return &entries[i].value;
-            }
+        base = (uint8_t*)malloc(cap);
+        if (!base) {
+            fprintf(stderr, "Failed to allocate arena: %zu bytes\n", cap);
+            exit(1);
         }
-        return nullptr;
+        current = base;
+        capacity = cap;
     }
 
-    void insert(const K& key, const V& value) {
-        // Lazy allocation
-        if (!entries) {
-            capacity = 64;
-            entries = (Entry*)arena_alloc(sizeof(Entry) * capacity);
-            memset(entries, 0, sizeof(Entry) * capacity);
-        }
-
-        // Check if exists
-        for (size_t i = 0; i < capacity; i++) {
-            if (entries[i].used && entries[i].key == key) {
-                entries[i].value = value;
-                return;
-            }
-        }
-
-        // Find empty slot
-        for (size_t i = 0; i < capacity; i++) {
-            if (!entries[i].used) {
-                entries[i].key = key;
-                entries[i].value = value;
-                entries[i].used = true;
-                count++;
-                return;
-            }
-        }
+    // Shutdown and free memory
+    static void shutdown() {
+        free(base);
+        base = nullptr;
+        current = nullptr;
+        capacity = 0;
     }
 
-    V& operator[](const K& key) {
-        // Lazy allocation
-        if (!entries) {
-            capacity = 64;
-            entries = (Entry*)arena_alloc(sizeof(Entry) * capacity);
-            memset(entries, 0, sizeof(Entry) * capacity);
+    // Allocate memory from this arena
+    static void* alloc(size_t size) {
+        // Lazy init with default size if needed
+        if (!base) {
+            init(64 * 1024 * 1024); // 64MB default
         }
 
-        // Find existing
-        for (size_t i = 0; i < capacity; i++) {
-            if (entries[i].used && entries[i].key == key) {
-                return entries[i].value;
-            }
+        // Align to 16 bytes
+        size_t align = 16;
+        uintptr_t current_addr = (uintptr_t)current;
+        uintptr_t aligned_addr = (current_addr + align - 1) & ~(align - 1);
+
+        uint8_t* aligned = (uint8_t*)aligned_addr;
+        uint8_t* next = aligned + size;
+
+        if (next > base + capacity) {
+            fprintf(stderr, "Arena exhausted: requested %zu, used %zu/%zu\n",
+                    size, used(), capacity);
+            return nullptr;
         }
 
-        // Create new
-        for (size_t i = 0; i < capacity; i++) {
-            if (!entries[i].used) {
-                entries[i].key = key;
-                entries[i].used = true;
-                count++;
-                return entries[i].value;
-            }
-        }
-
-        exit(1);
-        // FAIL("OUT of space in map");
-        // Should not reach here if capacity is sufficient
-        return entries[0].value;
+        current = next;
+        return aligned;
     }
 
-    void erase(const K& key) {
-        if (!entries) return;
-
-        for (size_t i = 0; i < capacity; i++) {
-            if (entries[i].used && entries[i].key == key) {
-                entries[i].used = false;
-                count--;
-                return;
-            }
-        }
+    // Reset arena (move pointer back to start)
+    static void reset() {
+        current = base;
     }
 
-    void clear() {
-        if (entries) {
-            memset(entries, 0, sizeof(Entry) * capacity);
-            count = 0;
-        }
-    }
-
-    bool empty() const { return count == 0; }
-    size_t size() const { return count; }
-};
-
-// Simple arena-based queue - circular buffer
-template<typename T>
-struct ArenaQueue {
-    T* data = nullptr;
-    size_t capacity = 0;
-    size_t head = 0;
-    size_t tail = 0;
-    size_t count = 0;
-
-    void push(const T& item) {
-        // Lazy allocation
-        if (!data) {
-            capacity = 256;
-            data = (T*)arena_alloc(sizeof(T) * capacity);
-        }
-
-        if (count >= capacity) return; // Full
-
-        data[tail] = item;
-        tail = (tail + 1) % capacity;
-        count++;
-    }
-
-    T front() {
-        if (count == 0) return T{};
-        return data[head];
-    }
-
-    void pop() {
-        if (count == 0) return;
-        head = (head + 1) % capacity;
-        count--;
-    }
-
-    bool empty() const { return count == 0; }
-    size_t size() const { return count; }
-
-    void clear() {
-        head = 0;
-        tail = 0;
-        count = 0;
+    // Get used memory
+    static size_t used() {
+        return current - base;
     }
 };
 
-// Simple arena vector - just for completeness
-template<typename T>
-struct ArenaVector{
-    T* data = nullptr;
-    size_t capacity = 0;
-    size_t count = 0;
+// Convenience namespace for arena operations
+namespace arena {
+    template<typename Tag>
+    void init(size_t capacity) {
+        Arena<Tag>::init(capacity);
+    }
+
+    template<typename Tag>
+    void shutdown() {
+        Arena<Tag>::shutdown();
+    }
+
+    template<typename Tag>
+    void reset() {
+        Arena<Tag>::reset();
+    }
+
+    template<typename Tag>
+    void* alloc(size_t size) {
+        return Arena<Tag>::alloc(size);
+    }
+
+    template<typename Tag>
+    size_t used() {
+        return Arena<Tag>::used();
+    }
+}
+
+// Arena-based vector
+template<typename T, typename ArenaTag, size_t InitialCapacity = 16>
+struct ArenaVector {
+    T* data;
+    size_t capacity;
+    size_t count;
+
+    // Constructor - automatically initializes
+    ArenaVector() : data(nullptr), capacity(0), count(0) {}
 
     void push_back(const T& item) {
         if (!data || count >= capacity) {
-            size_t new_capacity = capacity ? capacity * 2 : 16;
-            T* new_data = (T*)arena_alloc(sizeof(T) * new_capacity);
-            if (data) {
+            size_t new_capacity = capacity ? capacity * 2 : InitialCapacity;
+            T* new_data = (T*)Arena<ArenaTag>::alloc(sizeof(T) * new_capacity);
+            if (data && new_data) {
                 memcpy(new_data, data, sizeof(T) * count);
             }
             data = new_data;
             capacity = new_capacity;
         }
-        data[count++] = item;
+        if (data) {
+            data[count++] = item;
+        }
     }
 
-    T& operator[](size_t i) { return data[i]; }
-    const T& operator[](size_t i) const { return data[i]; }
 
-    size_t size() const { return count; }
-    bool empty() const { return count == 0; }
-    void clear() { count = 0; }
+    void erase(const T&item) {
+       int position = this->find(item);
+       if(position == -1) {
+           return;
+       }
+
+       this->data[position] = this->data[this->count - 1];
+       this->count--;
+    }
+
+    void insert_unique(const T& item) {
+        if(this->find(item) == -1) {
+            this->push_back(item);
+        }
+    }
+
+    void pop_back() {
+        if (count > 0) count--;
+    }
+
+    T& back() {
+        return data[count - 1];
+    }
+
+    const T& back() const {
+        return data[count - 1];
+    }
+
+    T& operator[](size_t i) {
+        return data[i];
+    }
+
+    const T& operator[](size_t i) const {
+        return data[i];
+    }
+
+    size_t size() const {
+        return count;
+    }
+
+    bool empty() const {
+        return count == 0;
+    }
+
+    void clear() {
+        count = 0;
+    }
+
+    void reserve(size_t new_capacity) {
+        if (new_capacity > capacity) {
+            T* new_data = (T*)Arena<ArenaTag>::alloc(sizeof(T) * new_capacity);
+            if (data && new_data) {
+                memcpy(new_data, data, sizeof(T) * count);
+            }
+            data = new_data;
+            capacity = new_capacity;
+        }
+    }
+
+    void resize(size_t new_size) {
+        if (new_size > capacity) {
+            reserve(new_size);
+        }
+        count = new_size;
+    }
 
     T* begin() { return data; }
     T* end() { return data + count; }
-};
+    const T* begin() const { return data; }
+    const T* end() const { return data + count; }
 
-
-
-// Simple arena string
-struct ArenaString {
-    char* data = nullptr;
-    size_t len = 0;
-
-    // Default constructor
-    ArenaString() = default;
-
-    // From C string
-    ArenaString(const char* str) {
-        if (str) {
-            len = strlen(str);
-            data = (char*)arena_alloc(len + 1);
-            memcpy(data, str, len + 1);
+    // Find element and return index (-1 if not found)
+    int find(const T& value) const {
+        for (size_t i = 0; i < count; i++) {
+            if (data[i] == value) {
+                return (int)i;
+            }
         }
+        return -1;
     }
 
-    // From std::string (for migration)
-    ArenaString(const std::string& str) {
-        len = str.length();
-        data = (char*)arena_alloc(len + 1);
-        memcpy(data, str.c_str(), len + 1);
+    // Find element with custom predicate and return index (-1 if not found)
+    template<typename Predicate>
+    int find_if(Predicate pred) const {
+        for (size_t i = 0; i < count; i++) {
+            if (pred(data[i])) {
+                return (int)i;
+            }
+        }
+        return -1;
+    }
+};
+
+// Arena-based string
+template<typename ArenaTag, size_t InitialCapacity = 32>
+struct ArenaString {
+    char* data;
+    size_t len;
+    size_t capacity;
+
+    // Default constructor
+    ArenaString() : data(nullptr), len(0), capacity(0) {}
+
+    // From C string
+    ArenaString(const char* str) : data(nullptr), len(0), capacity(0) {
+        if (str) {
+            assign(str);
+        }
     }
 
     // Copy constructor
-    ArenaString(const ArenaString& other) {
+    ArenaString(const ArenaString& other) : data(nullptr), len(0), capacity(0) {
         if (other.data) {
-            len = other.len;
-            data = (char*)arena_alloc(len + 1);
-            memcpy(data, other.data, len + 1);
+            assign(other.data);
         }
     }
 
-    // Assignment
-    ArenaString& operator=(const char* str) {
-        if (str) {
-            len = strlen(str);
-            data = (char*)arena_alloc(len + 1);
-            memcpy(data, str, len + 1);
-        } else {
+    void assign(const char* str) {
+        if (!str) {
             data = nullptr;
             len = 0;
+            capacity = 0;
+            return;
         }
+
+        len = strlen(str);
+        if (!data || len + 1 > capacity) {
+            capacity = len + 1 > InitialCapacity ? len + 1 : InitialCapacity;
+            data = (char*)Arena<ArenaTag>::alloc(capacity);
+        }
+        if (data) {
+            memcpy(data, str, len + 1);
+        }
+    }
+
+    // Assignment operators
+    ArenaString& operator=(const char* str) {
+        assign(str);
         return *this;
     }
 
     ArenaString& operator=(const ArenaString& other) {
-        if (other.data) {
-            len = other.len;
-            data = (char*)arena_alloc(len + 1);
-            memcpy(data, other.data, len + 1);
-        } else {
-            data = nullptr;
-            len = 0;
+        if (this != &other && other.data) {
+            assign(other.data);
         }
         return *this;
     }
 
-    // Concatenation
-    ArenaString operator+(const ArenaString& other) const {
-        ArenaString result;
-        result.len = len + other.len;
-        result.data = (char*)arena_alloc(result.len + 1);
-        if (data) memcpy(result.data, data, len);
-        if (other.data) memcpy(result.data + len, other.data, other.len);
-        result.data[result.len] = '\0';
-        return result;
+    // Append
+    void append(const char* str) {
+        if (!str) return;
+
+        size_t str_len = strlen(str);
+        size_t new_len = len + str_len;
+
+        if (!data || new_len + 1 > capacity) {
+            size_t new_capacity = capacity ? capacity * 2 : InitialCapacity;
+            while (new_capacity < new_len + 1) {
+                new_capacity *= 2;
+            }
+
+            char* new_data = (char*)Arena<ArenaTag>::alloc(new_capacity);
+            if (data && new_data) {
+                memcpy(new_data, data, len);
+            }
+            data = new_data;
+            capacity = new_capacity;
+        }
+
+        if (data) {
+            memcpy(data + len, str, str_len + 1);
+            len = new_len;
+        }
     }
 
+    void append(char c) {
+        char buf[2] = {c, '\0'};
+        append(buf);
+    }
+
+    void append(const ArenaString& other) {
+        if (other.data) {
+            append(other.data);
+        }
+    }
+
+    // Concatenation operators
     ArenaString operator+(const char* str) const {
-        size_t str_len = str ? strlen(str) : 0;
-        ArenaString result;
-        result.len = len + str_len;
-        result.data = (char*)arena_alloc(result.len + 1);
-        if (data) memcpy(result.data, data, len);
-        if (str) memcpy(result.data + len, str, str_len);
-        result.data[result.len] = '\0';
+        ArenaString result(*this);
+        result.append(str);
         return result;
     }
 
-    // Comparison
-    bool operator==(const ArenaString& other) const {
-        if (len != other.len) return false;
-        if (!data || !other.data) return data == other.data;
-        return memcmp(data, other.data, len) == 0;
+    ArenaString operator+(const ArenaString& other) const {
+        ArenaString result(*this);
+        result.append(other);
+        return result;
     }
 
-    bool operator==(const char* str) const {
-        if (!data) return !str || *str == '\0';
-        if (!str) return false;
-        return strcmp(data, str) == 0;
+    ArenaString& operator+=(const char* str) {
+        append(str);
+        return *this;
     }
 
-    bool operator!=(const ArenaString& other) const { return !(*this == other); }
-    bool operator!=(const char* str) const { return !(*this == str); }
+    ArenaString& operator+=(const ArenaString& other) {
+        append(other);
+        return *this;
+    }
 
-    // For use in map
-    bool operator<(const ArenaString& other) const {
-        if (!data || !other.data) return data < other.data;
-        return strcmp(data, other.data) < 0;
+    ArenaString& operator+=(char c) {
+        append(c);
+        return *this;
     }
 
     // Access
-    const char* c_str() const { return data ? data : ""; }
-    size_t length() const { return len; }
-    size_t size() const { return len; }
-    bool empty() const { return len == 0; }
-
-    char& operator[](size_t i) { return data[i]; }
-    const char& operator[](size_t i) const { return data[i]; }
-};
-
-
-
-template <typename T, size_t MaxSize>
-class FixedSet {
-private:
-    T data[MaxSize]{};
-    size_t count = 0;
-
-public:
-    // Insert element if not already present
-    bool insert(const T& value) {
-        // Check if value already exists
-        for (size_t i = 0; i < count; ++i) {
-            if (data[i] == value) {
-                return false; // Value already in set
-            }
-        }
-        // Add new value if there's space
-        if (count < MaxSize) {
-            data[count++] = value;
-            return true;
-        }
-        return false; // Set is full
+    char& operator[](size_t i) {
+        return data[i];
     }
 
-    // Check if element exists
-    bool contains(const T& value) const {
-        for (size_t i = 0; i < count; ++i) {
-            if (data[i] == value) {
-                return true;
-            }
-        }
-        return false;
+    const char& operator[](size_t i) const {
+        return data[i];
     }
 
-    // Remove element
-    bool remove(const T& value) {
-        for (size_t i = 0; i < count; ++i) {
-            if (data[i] == value) {
-                // Shift elements to maintain contiguous data
-                for (size_t j = i; j < count - 1; ++j) {
-                    data[j] = data[j + 1];
-                }
-                --count;
-                return true;
-            }
-        }
-        return false;
+    const char* c_str() const {
+        return data ? data : "";
     }
 
-    size_t size() const { return count; }
-    bool empty() const { return count == 0; }
-    constexpr size_t max_size() const { return MaxSize; }
+    size_t length() const {
+        return len;
+    }
+
+    size_t size() const {
+        return len;
+    }
+
+    bool empty() const {
+        return len == 0;
+    }
+
+    void clear() {
+        len = 0;
+        if (data) {
+            data[0] = '\0';
+        }
+    }
+
+    // Comparison operators
+    bool operator==(const char* str) const {
+        if (!data && !str) return true;
+        if (!data || !str) return false;
+        return strcmp(data, str) == 0;
+    }
+
+    bool operator==(const ArenaString& other) const {
+        if (!data && !other.data) return true;
+        if (!data || !other.data) return false;
+        return strcmp(data, other.data) == 0;
+    }
+
+    bool operator!=(const char* str) const {
+        return !(*this == str);
+    }
+
+    bool operator!=(const ArenaString& other) const {
+        return !(*this == other);
+    }
+
+    bool operator<(const ArenaString& other) const {
+        if (!data && !other.data) return false;
+        if (!data) return true;
+        if (!other.data) return false;
+        return strcmp(data, other.data) < 0;
+    }
+
+    // Check if string contains substring
+    bool contains(const char* substr) const {
+        if (!data || !substr) return false;
+        return strstr(data, substr) != nullptr;
+    }
+
+    bool contains(const ArenaString& substr) const {
+        if (!data || !substr.data) return false;
+        return strstr(data, substr.data) != nullptr;
+    }
+
+    // Find substring and return position (-1 if not found)
+    int find(const char* substr) const {
+        if (!data || !substr) return -1;
+        const char* pos = strstr(data, substr);
+        if (pos) {
+            return (int)(pos - data);
+        }
+        return -1;
+    }
+
+    int find(const ArenaString& substr) const {
+        return find(substr.c_str());
+    }
+
+    // Check if string starts with prefix
+    bool starts_with(const char* prefix) const {
+        if (!data || !prefix) return false;
+        size_t prefix_len = strlen(prefix);
+        if (prefix_len > len) return false;
+        return strncmp(data, prefix, prefix_len) == 0;
+    }
+
+    bool starts_with(const ArenaString& prefix) const {
+        return starts_with(prefix.c_str());
+    }
+
+    // Check if string ends with suffix
+    bool ends_with(const char* suffix) const {
+        if (!data || !suffix) return false;
+        size_t suffix_len = strlen(suffix);
+        if (suffix_len > len) return false;
+        return strcmp(data + len - suffix_len, suffix) == 0;
+    }
+
+    bool ends_with(const ArenaString& suffix) const {
+        return ends_with(suffix.c_str());
+    }
 };
