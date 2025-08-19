@@ -7,9 +7,64 @@
 #include <cassert>
 #include <cstring>
 
-void err(const char * msg) {
-    std::cout << msg;
-    exit(1);
+void err(const char *msg) {
+  std::cout << msg;
+  exit(1);
+}
+
+// Helper 8: Comparison Instruction Builder
+inline void
+add_comparison_with_label(ArenaVector<VMInstruction, QueryArena> &instructions,
+                          OpCode op, int reg1, int reg2, const char *label) {
+
+  switch (op) {
+  case OP_Eq:
+    instructions.push_back(make_eq_label(reg1, reg2, label));
+    break;
+  case OP_Ne:
+    instructions.push_back(make_ne_label(reg1, reg2, label));
+    break;
+  case OP_Lt:
+    instructions.push_back(make_lt_label(reg1, reg2, label));
+    break;
+  case OP_Le:
+    instructions.push_back(make_le_label(reg1, reg2, label));
+    break;
+  case OP_Gt:
+    instructions.push_back(make_gt_label(reg1, reg2, label));
+    break;
+  case OP_Ge:
+    instructions.push_back(make_ge_label(reg1, reg2, label));
+    break;
+  }
+}
+
+// Helper 9: Seek Instruction Builder
+inline void
+add_seek_instruction(ArenaVector<VMInstruction, QueryArena> &instructions,
+                     CompareOp op, int cursor_id, int key_reg,
+                     const char *label) {
+
+  switch (op) {
+  case EQ:
+    instructions.push_back(make_seek_eq_label(cursor_id, key_reg, label));
+    break;
+  case GE:
+    instructions.push_back(make_seek_ge_label(cursor_id, key_reg, label));
+    break;
+  case GT:
+    instructions.push_back(make_seek_gt_label(cursor_id, key_reg, label));
+    break;
+  case LE:
+    instructions.push_back(make_seek_le_label(cursor_id, key_reg, label));
+    break;
+  case LT:
+    instructions.push_back(make_seek_lt_label(cursor_id, key_reg, label));
+    break;
+  default:
+    instructions.push_back(make_seek_eq_label(cursor_id, key_reg, label));
+    break;
+  }
 }
 
 struct RegisterAllocator {
@@ -61,8 +116,7 @@ void resolve_labels(
 }
 
 OpCode str_or_int(const VMValue &value) {
-  return (value.type == TYPE_UINT32 || value.type == TYPE_UINT64) ?
-                                                                  OP_Integer
+  return (value.type == TYPE_UINT32 || value.type == TYPE_UINT64) ? OP_Integer
                                                                   : OP_String;
 }
 
@@ -219,27 +273,8 @@ void build_where_checks(
     char *label_str = (char *)arena::alloc<QueryArena>(skip_label.size() + 1);
     strcpy(label_str, skip_label.c_str());
 
-    // Build the appropriate comparison with label
-    switch (negated) {
-    case OP_Eq:
-      instructions.push_back(make_eq_label(col_reg, compare_reg, label_str));
-      break;
-    case OP_Ne:
-      instructions.push_back(make_ne_label(col_reg, compare_reg, label_str));
-      break;
-    case OP_Lt:
-      instructions.push_back(make_lt_label(col_reg, compare_reg, label_str));
-      break;
-    case OP_Le:
-      instructions.push_back(make_le_label(col_reg, compare_reg, label_str));
-      break;
-    case OP_Gt:
-      instructions.push_back(make_gt_label(col_reg, compare_reg, label_str));
-      break;
-    case OP_Ge:
-      instructions.push_back(make_ge_label(col_reg, compare_reg, label_str));
-      break;
-    }
+    add_comparison_with_label(instructions, negated, col_reg, compare_reg,
+                              label_str);
   }
 }
 
@@ -335,11 +370,9 @@ choose_access_method(const ArenaVector<WhereCondition, QueryArena> &conditions,
 // ============================================================================
 
 static void build_select_output(
-    ArenaVector<VMInstruction, QueryArena> &instructions,
-    int cursor_id,
+    ArenaVector<VMInstruction, QueryArena> &instructions, int cursor_id,
     const ArenaVector<ArenaString<QueryArena>, QueryArena> &select_columns,
-    const ArenaString<QueryArena> &table_name,
-    RegisterAllocator &regs) {
+    const ArenaString<QueryArena> &table_name, RegisterAllocator &regs) {
 
   ArenaVector<int, QueryArena> output_regs;
   ArenaVector<uint32_t, QueryArena> columns_to_select;
@@ -379,24 +412,25 @@ struct IndexUpdate {
   bool is_scan_index;
 };
 
-static ArenaVector<IndexUpdate, QueryArena> setup_update_indexes(
-    ArenaVector<VMInstruction, QueryArena> &instructions,
-    const ArenaVector<SetColumns, QueryArena> &set_columns,
-    const ArenaString<QueryArena> &table_name,
-    int scan_index_cursor_id,
-    uint32_t scan_index_col,
-    int starting_cursor_id) {
+static ArenaVector<IndexUpdate, QueryArena>
+setup_update_indexes(ArenaVector<VMInstruction, QueryArena> &instructions,
+                     const ArenaVector<SetColumns, QueryArena> &set_columns,
+                     const ArenaString<QueryArena> &table_name,
+                     int scan_index_cursor_id, uint32_t scan_index_col,
+                     int starting_cursor_id) {
 
   ArenaVector<IndexUpdate, QueryArena> indexes_to_update;
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
 
-  char *table_name_str = (char *)arena::alloc<QueryArena>(table_name.size() + 1);
+  char *table_name_str =
+      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
   // Determine which columns are being updated
   ArenaSet<uint32_t, QueryArena> updated_columns;
   for (size_t i = 0; i < set_columns.size(); i++) {
-    uint32_t col_idx = resolve_column_index(set_columns[i].first.c_str(), table_name);
+    uint32_t col_idx =
+        resolve_column_index(set_columns[i].first.c_str(), table_name);
     updated_columns.insert(col_idx);
   }
 
@@ -409,7 +443,8 @@ static ArenaVector<IndexUpdate, QueryArena> setup_update_indexes(
     if (updated_columns.contains(indexed_col)) {
       IndexUpdate idx_update;
       idx_update.column_index = indexed_col;
-      idx_update.is_scan_index = (scan_index_cursor_id >= 0 && indexed_col == scan_index_col);
+      idx_update.is_scan_index =
+          (scan_index_cursor_id >= 0 && indexed_col == scan_index_col);
 
       if (idx_update.is_scan_index) {
         // Reuse the scan index cursor
@@ -430,12 +465,10 @@ static ArenaVector<IndexUpdate, QueryArena> setup_update_indexes(
 }
 
 static void build_update_record(
-    ArenaVector<VMInstruction, QueryArena> &instructions,
-    int table_cursor_id,
+    ArenaVector<VMInstruction, QueryArena> &instructions, int table_cursor_id,
     const ArenaVector<SetColumns, QueryArena> &set_columns,
     const ArenaVector<IndexUpdate, QueryArena> &indexes_to_update,
-    const ArenaString<QueryArena> &table_name,
-    RegisterAllocator &regs,
+    const ArenaString<QueryArena> &table_name, RegisterAllocator &regs,
     ArenaMap<ArenaString<QueryArena>, int, QueryArena> &labels) {
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
@@ -464,7 +497,8 @@ static void build_update_record(
 
   // Apply updates to column values
   for (size_t i = 0; i < set_columns.size(); i++) {
-    uint32_t col_idx = resolve_column_index(set_columns[i].first.c_str(), table_name);
+    uint32_t col_idx =
+        resolve_column_index(set_columns[i].first.c_str(), table_name);
     int reg = regs.get(("update_col_" + std::to_string(col_idx)).c_str());
     load_value(instructions, set_columns[i].second, reg);
     instructions.push_back(make_move(reg, current_regs[col_idx]));
@@ -502,7 +536,8 @@ static ArenaVector<VMInstruction, QueryArena> build_select_full_table_scan(
   ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
   const int cursor_id = 0;
 
-  char *table_name_str = (char *)arena::alloc<QueryArena>(table_name.size() + 1);
+  char *table_name_str =
+      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
   instructions.push_back(make_open_read(cursor_id, table_name_str));
@@ -534,7 +569,8 @@ static ArenaVector<VMInstruction, QueryArena> build_select_full_table_scan(
   if (!aggregate_func.empty()) {
     instructions.push_back(make_agg_step());
   } else {
-    build_select_output(instructions, cursor_id, select_columns, table_name, regs);
+    build_select_output(instructions, cursor_id, select_columns, table_name,
+                        regs);
   }
 
   labels["next_record"] = instructions.size();
@@ -566,7 +602,8 @@ static ArenaVector<VMInstruction, QueryArena> build_select_direct_rowid(
   ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
   const int cursor_id = 0;
 
-  char *table_name_str = (char *)arena::alloc<QueryArena>(table_name.size() + 1);
+  char *table_name_str =
+      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
   instructions.push_back(make_open_read(cursor_id, table_name_str));
@@ -587,12 +624,14 @@ static ArenaVector<VMInstruction, QueryArena> build_select_direct_rowid(
 
   instructions.push_back(make_seek_eq_label(cursor_id, rowid_reg, "end"));
 
-  build_where_checks(instructions, cursor_id, remaining_conditions, "end", regs);
+  build_where_checks(instructions, cursor_id, remaining_conditions, "end",
+                     regs);
 
   if (!aggregate_func.empty()) {
     instructions.push_back(make_agg_step());
   } else {
-    build_select_output(instructions, cursor_id, select_columns, table_name, regs);
+    build_select_output(instructions, cursor_id, select_columns, table_name,
+                        regs);
   }
 
   labels["end"] = instructions.size();
@@ -623,7 +662,8 @@ static ArenaVector<VMInstruction, QueryArena> build_select_index_scan(
   const int table_cursor_id = 1;
   const int index_cursor_id = 0;
 
-  char *table_name_str = (char *)arena::alloc<QueryArena>(table_name.size() + 1);
+  char *table_name_str =
+      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
   instructions.push_back(make_open_read(index_cursor_id, table_name_str, index_col));
@@ -639,25 +679,8 @@ static ArenaVector<VMInstruction, QueryArena> build_select_index_scan(
   load_value(instructions, index_condition.value, index_key_reg);
 
   // Build seek based on operator type
-  switch (index_condition.operator_type) {
-  case EQ:
-    instructions.push_back(make_seek_eq_label(index_cursor_id, index_key_reg, "end"));
-    break;
-  case GE:
-    instructions.push_back(make_seek_ge_label(index_cursor_id, index_key_reg, "end"));
-    break;
-  case GT:
-    instructions.push_back(make_seek_gt_label(index_cursor_id, index_key_reg, "end"));
-    break;
-  case LE:
-    instructions.push_back(make_seek_le_label(index_cursor_id, index_key_reg, "end"));
-    break;
-  case LT:
-    instructions.push_back(make_seek_lt_label(index_cursor_id, index_key_reg, "end"));
-    break;
-  default:
-    instructions.push_back(make_seek_eq_label(index_cursor_id, index_key_reg, "end"));
-  }
+  add_seek_instruction(instructions, index_condition.operator_type,
+                       index_cursor_id, index_key_reg, "end");
 
   labels["loop_start"] = instructions.size();
 
@@ -665,38 +688,23 @@ static ArenaVector<VMInstruction, QueryArena> build_select_index_scan(
   instructions.push_back(make_key(index_cursor_id, current_key_reg));
 
   OpCode negated_op = get_negated_opcode(index_condition.operator_type);
-  switch (negated_op) {
-  case OP_Eq:
-    instructions.push_back(make_eq_label(current_key_reg, index_key_reg, "end"));
-    break;
-  case OP_Ne:
-    instructions.push_back(make_ne_label(current_key_reg, index_key_reg, "end"));
-    break;
-  case OP_Lt:
-    instructions.push_back(make_lt_label(current_key_reg, index_key_reg, "end"));
-    break;
-  case OP_Le:
-    instructions.push_back(make_le_label(current_key_reg, index_key_reg, "end"));
-    break;
-  case OP_Gt:
-    instructions.push_back(make_gt_label(current_key_reg, index_key_reg, "end"));
-    break;
-  case OP_Ge:
-    instructions.push_back(make_ge_label(current_key_reg, index_key_reg, "end"));
-    break;
-  }
+  add_comparison_with_label(instructions, negated_op, current_key_reg,
+                            index_key_reg, "end");
 
   int rowid_reg = regs.get("rowid");
   instructions.push_back(make_column(index_cursor_id, 1, rowid_reg));
 
-  instructions.push_back(make_seek_eq_label(table_cursor_id, rowid_reg, "next_iteration"));
+  instructions.push_back(
+      make_seek_eq_label(table_cursor_id, rowid_reg, "next_iteration"));
 
-  build_where_checks(instructions, table_cursor_id, remaining_conditions, "next_iteration", regs);
+  build_where_checks(instructions, table_cursor_id, remaining_conditions,
+                     "next_iteration", regs);
 
   if (!aggregate_func.empty()) {
     instructions.push_back(make_agg_step());
   } else {
-    build_select_output(instructions, table_cursor_id, select_columns, table_name, regs);
+    build_select_output(instructions, table_cursor_id, select_columns,
+                        table_name, regs);
   }
 
   labels["next_iteration"] = instructions.size();
@@ -736,7 +744,8 @@ static ArenaVector<VMInstruction, QueryArena> build_delete_full_table_scan(
   ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
   const int cursor_id = 0;
 
-  char *table_name_str = (char *)arena::alloc<QueryArena>(table_name.size() + 1);
+  char *table_name_str =
+      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
   instructions.push_back(make_open_write(cursor_id, table_name_str));
@@ -783,7 +792,8 @@ static ArenaVector<VMInstruction, QueryArena> build_delete_direct_rowid(
   ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
   const int cursor_id = 0;
 
-  char *table_name_str = (char *)arena::alloc<QueryArena>(table_name.size() + 1);
+  char *table_name_str =
+      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
   instructions.push_back(make_open_write(cursor_id, table_name_str));
@@ -800,7 +810,8 @@ static ArenaVector<VMInstruction, QueryArena> build_delete_direct_rowid(
 
   instructions.push_back(make_seek_eq_label(cursor_id, rowid_reg, "end"));
 
-  build_where_checks(instructions, cursor_id, remaining_conditions, "end", regs);
+  build_where_checks(instructions, cursor_id, remaining_conditions, "end",
+                     regs);
 
   instructions.push_back(make_delete(cursor_id));
 
@@ -823,10 +834,12 @@ static ArenaVector<VMInstruction, QueryArena> build_delete_index_scan(
   const int table_cursor_id = 1;
   const int index_cursor_id = 0;
 
-  char *table_name_str = (char *)arena::alloc<QueryArena>(table_name.size() + 1);
+  char *table_name_str =
+      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
-  instructions.push_back(make_open_write(index_cursor_id, table_name_str, index_col));
+  instructions.push_back(
+      make_open_write(index_cursor_id, table_name_str, index_col));
   instructions.push_back(make_open_write(table_cursor_id, table_name_str));
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
@@ -835,25 +848,8 @@ static ArenaVector<VMInstruction, QueryArena> build_delete_index_scan(
   load_value(instructions, index_condition.value, index_key_reg);
 
   // Build seek based on operator type
-  switch (index_condition.operator_type) {
-  case EQ:
-    instructions.push_back(make_seek_eq_label(index_cursor_id, index_key_reg, "end"));
-    break;
-  case GE:
-    instructions.push_back(make_seek_ge_label(index_cursor_id, index_key_reg, "end"));
-    break;
-  case GT:
-    instructions.push_back(make_seek_gt_label(index_cursor_id, index_key_reg, "end"));
-    break;
-  case LE:
-    instructions.push_back(make_seek_le_label(index_cursor_id, index_key_reg, "end"));
-    break;
-  case LT:
-    instructions.push_back(make_seek_lt_label(index_cursor_id, index_key_reg, "end"));
-    break;
-  default:
-    instructions.push_back(make_seek_eq_label(index_cursor_id, index_key_reg, "end"));
-  }
+  add_seek_instruction(instructions, index_condition.operator_type,
+                       index_cursor_id, index_key_reg, "end");
 
   labels["loop_start"] = instructions.size();
 
@@ -861,33 +857,17 @@ static ArenaVector<VMInstruction, QueryArena> build_delete_index_scan(
   instructions.push_back(make_key(index_cursor_id, current_key_reg));
 
   OpCode negated_op = get_negated_opcode(index_condition.operator_type);
-  switch (negated_op) {
-  case OP_Eq:
-    instructions.push_back(make_eq_label(current_key_reg, index_key_reg, "end"));
-    break;
-  case OP_Ne:
-    instructions.push_back(make_ne_label(current_key_reg, index_key_reg, "end"));
-    break;
-  case OP_Lt:
-    instructions.push_back(make_lt_label(current_key_reg, index_key_reg, "end"));
-    break;
-  case OP_Le:
-    instructions.push_back(make_le_label(current_key_reg, index_key_reg, "end"));
-    break;
-  case OP_Gt:
-    instructions.push_back(make_gt_label(current_key_reg, index_key_reg, "end"));
-    break;
-  case OP_Ge:
-    instructions.push_back(make_ge_label(current_key_reg, index_key_reg, "end"));
-    break;
-  }
+  add_comparison_with_label(instructions, negated_op, current_key_reg,
+                            index_key_reg, "end");
 
   int rowid_reg = regs.get("rowid");
   instructions.push_back(make_column(index_cursor_id, 1, rowid_reg));
 
-  instructions.push_back(make_seek_eq_label(table_cursor_id, rowid_reg, "next_iteration"));
+  instructions.push_back(
+      make_seek_eq_label(table_cursor_id, rowid_reg, "next_iteration"));
 
-  build_where_checks(instructions, table_cursor_id, remaining_conditions, "next_iteration", regs);
+  build_where_checks(instructions, table_cursor_id, remaining_conditions,
+                     "next_iteration", regs);
 
   instructions.push_back(make_delete(table_cursor_id));
 
@@ -923,7 +903,8 @@ static ArenaVector<VMInstruction, QueryArena> build_update_full_table_scan(
   ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
   const int cursor_id = 0;
 
-  char *table_name_str = (char *)arena::alloc<QueryArena>(table_name.size() + 1);
+  char *table_name_str =
+      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
   instructions.push_back(make_open_write(cursor_id, table_name_str));
@@ -936,8 +917,8 @@ static ArenaVector<VMInstruction, QueryArena> build_update_full_table_scan(
   }
 
   // Setup indexes that need updating
-  auto indexes_to_update = setup_update_indexes(
-      instructions, set_columns, table_name, -1, 0, 1);
+  auto indexes_to_update =
+      setup_update_indexes(instructions, set_columns, table_name, -1, 0, 1);
 
   // Load comparison values
   for (size_t i = 0; i < conditions.size(); i++) {
@@ -952,7 +933,7 @@ static ArenaVector<VMInstruction, QueryArena> build_update_full_table_scan(
   build_where_checks(instructions, cursor_id, conditions, "next_record", regs);
 
   build_update_record(instructions, cursor_id, set_columns, indexes_to_update,
-                     table_name, regs, labels);
+                      table_name, regs, labels);
 
   labels["next_record"] = instructions.size();
   instructions.push_back(make_next_label(cursor_id, "loop_start"));
@@ -983,7 +964,8 @@ static ArenaVector<VMInstruction, QueryArena> build_update_direct_rowid(
   ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
   const int cursor_id = 0;
 
-  char *table_name_str = (char *)arena::alloc<QueryArena>(table_name.size() + 1);
+  char *table_name_str =
+      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
   instructions.push_back(make_open_write(cursor_id, table_name_str));
@@ -996,18 +978,19 @@ static ArenaVector<VMInstruction, QueryArena> build_update_direct_rowid(
   }
 
   // Setup indexes that need updating
-  auto indexes_to_update = setup_update_indexes(
-      instructions, set_columns, table_name, -1, 0, 1);
+  auto indexes_to_update =
+      setup_update_indexes(instructions, set_columns, table_name, -1, 0, 1);
 
   int rowid_reg = regs.get("rowid_value");
   load_value(instructions, primary_condition.value, rowid_reg);
 
   instructions.push_back(make_seek_eq_label(cursor_id, rowid_reg, "end"));
 
-  build_where_checks(instructions, cursor_id, remaining_conditions, "end", regs);
+  build_where_checks(instructions, cursor_id, remaining_conditions, "end",
+                     regs);
 
   build_update_record(instructions, cursor_id, set_columns, indexes_to_update,
-                     table_name, regs, labels);
+                      table_name, regs, labels);
 
   labels["end"] = instructions.size();
   instructions.push_back(make_close(cursor_id));
@@ -1036,10 +1019,12 @@ static ArenaVector<VMInstruction, QueryArena> build_update_index_scan(
   const int table_cursor_id = 1;
   const int index_cursor_id = 0;
 
-  char *table_name_str = (char *)arena::alloc<QueryArena>(table_name.size() + 1);
+  char *table_name_str =
+      (char *)arena::alloc<QueryArena>(table_name.size() + 1);
   strcpy(table_name_str, table_name.c_str());
 
-  instructions.push_back(make_open_write(index_cursor_id, table_name_str, index_col));
+  instructions.push_back(
+      make_open_write(index_cursor_id, table_name_str, index_col));
   instructions.push_back(make_open_write(table_cursor_id, table_name_str));
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
@@ -1052,25 +1037,9 @@ static ArenaVector<VMInstruction, QueryArena> build_update_index_scan(
   load_value(instructions, index_condition.value, index_key_reg);
 
   // Build seek based on operator type
-  switch (index_condition.operator_type) {
-  case EQ:
-    instructions.push_back(make_seek_eq_label(index_cursor_id, index_key_reg, "end"));
-    break;
-  case GE:
-    instructions.push_back(make_seek_ge_label(index_cursor_id, index_key_reg, "end"));
-    break;
-  case GT:
-    instructions.push_back(make_seek_gt_label(index_cursor_id, index_key_reg, "end"));
-    break;
-  case LE:
-    instructions.push_back(make_seek_le_label(index_cursor_id, index_key_reg, "end"));
-    break;
-  case LT:
-    instructions.push_back(make_seek_lt_label(index_cursor_id, index_key_reg, "end"));
-    break;
-  default:
-    instructions.push_back(make_seek_eq_label(index_cursor_id, index_key_reg, "end"));
-  }
+  //
+  add_seek_instruction(instructions, index_condition.operator_type,
+                       index_cursor_id, index_key_reg, "end");
 
   labels["loop_start"] = instructions.size();
 
@@ -1078,36 +1047,20 @@ static ArenaVector<VMInstruction, QueryArena> build_update_index_scan(
   instructions.push_back(make_key(index_cursor_id, current_key_reg));
 
   OpCode negated_op = get_negated_opcode(index_condition.operator_type);
-  switch (negated_op) {
-  case OP_Eq:
-    instructions.push_back(make_eq_label(current_key_reg, index_key_reg, "end"));
-    break;
-  case OP_Ne:
-    instructions.push_back(make_ne_label(current_key_reg, index_key_reg, "end"));
-    break;
-  case OP_Lt:
-    instructions.push_back(make_lt_label(current_key_reg, index_key_reg, "end"));
-    break;
-  case OP_Le:
-    instructions.push_back(make_le_label(current_key_reg, index_key_reg, "end"));
-    break;
-  case OP_Gt:
-    instructions.push_back(make_gt_label(current_key_reg, index_key_reg, "end"));
-    break;
-  case OP_Ge:
-    instructions.push_back(make_ge_label(current_key_reg, index_key_reg, "end"));
-    break;
-  }
+  add_comparison_with_label(instructions, negated_op, current_key_reg,
+                            index_key_reg, "end");
 
   int rowid_reg = regs.get("rowid");
   instructions.push_back(make_column(index_cursor_id, 1, rowid_reg));
 
-  instructions.push_back(make_seek_eq_label(table_cursor_id, rowid_reg, "next_iteration"));
+  instructions.push_back(
+      make_seek_eq_label(table_cursor_id, rowid_reg, "next_iteration"));
 
-  build_where_checks(instructions, table_cursor_id, remaining_conditions, "next_iteration", regs);
+  build_where_checks(instructions, table_cursor_id, remaining_conditions,
+                     "next_iteration", regs);
 
-  build_update_record(instructions, table_cursor_id, set_columns, indexes_to_update,
-                     table_name, regs, labels);
+  build_update_record(instructions, table_cursor_id, set_columns,
+                      indexes_to_update, table_name, regs, labels);
 
   labels["next_iteration"] = instructions.size();
 
@@ -1179,9 +1132,9 @@ build_select(const ParsedParameters &options) {
   }
   case AccessMethod::FULL_TABLE_SCAN:
   default:
-    instructions = build_select_full_table_scan(
-        options.table_name, optimized_conditions, options.select_columns,
-        options.aggregate);
+    instructions =
+        build_select_full_table_scan(options.table_name, optimized_conditions,
+                                     options.select_columns, options.aggregate);
   }
 
   if (!options.order_by.column_name.empty()) {
@@ -1217,9 +1170,9 @@ build_update(const ParsedParameters &options) {
         remaining.push_back(c);
       }
     }
-    instructions = build_update_direct_rowid(
-        options.table_name, options.set_columns,
-        *access_method.primary_condition, remaining);
+    instructions =
+        build_update_direct_rowid(options.table_name, options.set_columns,
+                                  *access_method.primary_condition, remaining);
     break;
   }
   case AccessMethod::INDEX_SCAN: {
@@ -1280,15 +1233,15 @@ build_delete(const ParsedParameters &options) {
         remaining.push_back(c);
       }
     }
-    instructions = build_delete_index_scan(
-        options.table_name, *access_method.index_condition, remaining,
-        access_method.index_col);
+    instructions = build_delete_index_scan(options.table_name,
+                                           *access_method.index_condition,
+                                           remaining, access_method.index_col);
     break;
   }
   case AccessMethod::FULL_TABLE_SCAN:
   default:
-    instructions = build_delete_full_table_scan(
-        options.table_name, optimized_conditions);
+    instructions =
+        build_delete_full_table_scan(options.table_name, optimized_conditions);
   }
 
   instructions.push_back(make_flush());
