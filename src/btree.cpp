@@ -1,4 +1,5 @@
 #include "btree.hpp"
+#include "arena.hpp"
 #include "defs.hpp"
 #include "pager.hpp"
 #include <algorithm>
@@ -951,11 +952,21 @@ static void repair_after_delete(BTree &tree, BTreeNode *node) {
   }
 }
 
+/*
+ * The btree module doesn't really need dynamic memory as it operates
+ * on the pagers cached memory, but in this instance we don't know how
+ * big the btree is going to be;
+ *
+ * TODO, calculate exact max memory from t
+ */
+struct BTreeArena;
 bool btree_clear(BTree *tree) {
+  arena::init<BTreeArena>(tree->internal_max_keys);
   if (tree->root_page_index == 0) {
     return false;
   }
-  std::queue<uint32_t> bfs;
+
+  ArenaQueue<uint32_t, BTreeArena, 1024> bfs;
   bfs.push(tree->root_page_index);
 
   while (bfs.size()) {
@@ -964,6 +975,7 @@ bool btree_clear(BTree *tree) {
 
     auto node = static_cast<BTreeNode *>(pager_get(index));
     if (!node) {
+      arena::shutdown<BTreeArena>();
       return false;
     }
 
@@ -977,6 +989,7 @@ bool btree_clear(BTree *tree) {
     pager_delete(node->index);
   }
 
+  arena::shutdown<BTreeArena>();
   return true;
 }
 

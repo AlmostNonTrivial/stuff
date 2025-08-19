@@ -1,16 +1,13 @@
 #include "schema.hpp"
+#include "arena.hpp"
 #include "defs.hpp"
 #include <cstdint>
 #include <cstring>
 
-static std::unordered_map<std::string, Table> tables;
+static ArenaMap<ArenaString<SchemaArena>, Table, SchemaArena> tables;
 
 Table* get_table(const char* table_name) {
-    auto it = tables.find(table_name);
-    if (it == tables.end()) {
-        return nullptr;
-    }
-    return &it->second;
+    return tables.find(table_name);
 }
 
 Index* get_index(const char* table_name, uint32_t column_index) {
@@ -23,11 +20,7 @@ Index* get_index(const char* table_name, uint32_t column_index) {
         return nullptr;
     }
 
-    auto it = table->indexes.find(column_index);
-    if (it == table->indexes.end()) {
-        return nullptr;
-    }
-    return &it->second;
+    return table->indexes.find(column_index);
 }
 
 uint32_t get_column_index(const char* table_name, const char* col_name) {
@@ -37,7 +30,7 @@ uint32_t get_column_index(const char* table_name, const char* col_name) {
     }
 
     for (size_t i = 0; i < table->schema.columns.size(); i++) {
-        if (strcmp(table->schema.columns[i].name, col_name) == 0) {
+        if (table->schema.columns[i].name.starts_with(col_name) == 0) {
             return i;
         }
     }
@@ -55,8 +48,8 @@ DataType get_column_type(const char* table_name, uint32_t col_index) {
 bool add_table(Table* table) {
     if (!table) return false;
 
-    std::string name = table->schema.table_name;
-    if (tables.find(name) != tables.end()) {
+    auto name = table->schema.table_name;
+    if (tables.contains(name)) {
         return false; // Table already exists
     }
 
@@ -65,7 +58,8 @@ bool add_table(Table* table) {
 }
 
 bool remove_table(const char* table_name) {
-    return tables.erase(table_name) > 0;
+    tables.erase(table_name);
+    return true;
 }
 
 bool add_index(const char* table_name, Index* index) {
@@ -74,7 +68,7 @@ bool add_index(const char* table_name, Index* index) {
         return false;
     }
 
-    if (table->indexes.find(index->column_index) != table->indexes.end()) {
+    if (table->indexes.contains(index->column_index)) {
         return false; // Index already exists
     }
 
@@ -88,7 +82,8 @@ bool remove_index(const char* table_name, uint32_t column_index) {
         return false;
     }
 
-    return table->indexes.erase(column_index) > 0;
+    table->indexes.erase(column_index);
+    return true;
 }
 
 void clear_schema() {

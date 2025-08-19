@@ -1,6 +1,8 @@
 // main.cpp - Enhanced fuzzer for complete btree coverage
 #include "arena.hpp"
 #include "executor.hpp"
+#include "schema.hpp"
+#include "vm.hpp"
 #include <vector>
 
 /*
@@ -27,7 +29,8 @@
 
 int main() {
 
-  arena_init(PAGE_SIZE * 10);
+  arena::init<QueryArena>(PAGE_SIZE * 10);
+  arena::init<SchemaArena>(PAGE_SIZE * 3);
   btree_init("db");
 
   std::vector<const char *> queries = {
@@ -40,5 +43,5 @@ int main() {
   for (auto query : queries) {
     execute(query);
   }
-  arena_shutdown();
+
 }

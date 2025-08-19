@@ -5,10 +5,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <queue>
-#include <unordered_map>
-#include <vector>
-#include "schema.hpp"
+
+
+struct QueryArena {};
+
 
 // VM value - uses arena allocation for data
 struct VMValue {
@@ -229,9 +229,9 @@ struct VmEvent {
     } context;
 };
 
-VM_RESULT vm_execute(ArenaVector<VMInstruction> &instructions);
-std::queue<VmEvent>& vm_events();
+VM_RESULT vm_execute(ArenaVector<VMInstruction, QueryArena> &instructions);
+ArenaQueue<VmEvent, QueryArena>& vm_events();
 
 void vm_clear_events();
 
-ArenaVector<ArenaVector<VMValue>> &vm_output_buffer();
+ArenaVector<ArenaVector<VMValue, QueryArena>, QueryArena> &vm_output_buffer();

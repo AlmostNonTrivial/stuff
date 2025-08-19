@@ -2,20 +2,18 @@
 #include "vm.hpp"
 #include "parser.hpp"
 #include "arena.hpp"
+#include "schema.hpp"
 #include <utility>
 
-#define SET_PAIR std::pair<ArenaString,VMValue>
 
-struct RegisterAllocator {
-  ArenaMap<ArenaString, int> name_to_register;
-  int next_register = 0;
-
-  int get(const ArenaString &name);
-  void clear();
+struct SetColumns {
+    ArenaString<QueryArena> first;
+    VMValue second;
 };
 
+
 struct WhereCondition {
-  ArenaString column_name;
+  ArenaString<QueryArena> column_name;
   uint32_t column_index;
   CompareOp operator_type;
   VMValue value;
@@ -23,18 +21,18 @@ struct WhereCondition {
 };
 
 struct OrderBy {
-  ArenaString column_name;
+  ArenaString<QueryArena> column_name;
   bool asc; // true for ASC, false for DESC
 };
 
 struct ParsedParameters {
-  ArenaString table_name;
-  ArenaVector<SET_PAIR> set_columns;
-  ArenaVector<WhereCondition> where_conditions;
+  ArenaString<QueryArena> table_name;
+  ArenaVector<SetColumns, QueryArena> set_columns;
+  ArenaVector<WhereCondition, QueryArena> where_conditions;
   enum Operation { UPDATE, DELETE, SELECT, AGGREGATE } operation;
-  ArenaVector<ArenaString> select_columns;
+  ArenaVector<ArenaString<QueryArena>, QueryArena> select_columns;
   OrderBy order_by;
-  ArenaString aggregate;
+  ArenaString<QueryArena> aggregate;
 };
 
 struct AccessMethod {
@@ -45,7 +43,7 @@ struct AccessMethod {
 };
 
 // Main entry points for AST-based building
-ArenaVector<VMInstruction> build_from_ast(ASTNode* ast);
+ArenaVector<VMInstruction, QueryArena> build_from_ast(ASTNode* ast);
 
 
 // Control flow

@@ -15,3 +15,24 @@ if we do it through execute internal?
 
 - can our vm value be a 64 bit, 32 bit,
 or string?
+
+
+make sure to test the cached find in the containers
+
+// arena
+- do we want to plug in sort to use a string as the key for maps?
+- for btree clear, we can do some a priori calculation based on t, as to
+the max amount of memory surely
+
+
+// what should I do about the keywords map?
+
+
+// what are we going to do about to_string in reg allocator
+
+// give "indexes_to_update" in programbuilder attention, and anywhere where we did
+use map destructure iteration
+
+
+// does        if (table->schema.columns[i].name.starts_with(col_name) == 0) need to
+do an exact match

@@ -5,8 +5,8 @@
 #include "parser.hpp"
 #include "vm.hpp"
 #include "schema.hpp"
-#include <vector>
-#include <unordered_map>
+
+
 
 static struct ExecutorState {
     bool initialized;
@@ -27,42 +27,50 @@ static const char* type_to_string(DataType type) {
 }
 
 static char* generate_create_sql(const TableSchema* schema) {
-    std::string sql = "CREATE TABLE " + schema->table_name + " (";
-    for (size_t i = 0; i < schema->columns.size(); i++) {
-        if (i > 0) sql += ", ";
-        sql += type_to_string(schema->columns[i].type);
-        sql += " ";
-        sql += schema->columns[i].name;
-    }
-    sql += ")";
+    ArenaString<QueryArena> sql("CREATE TABLE");
+    //  sql .append(schema->table_name.c_str());
+    //  sql.append(" (");
+    // for (size_t i = 0; i < schema->columns.size(); i++) {
+    //     if (i > 0) sql += ", ";
+    //     sql += type_to_string(schema->columns[i].type);
+    //     sql += " ";
+    //     sql += schema->columns[i].name;
+    // }
+    // sql += ")";
 
-    char* result = (char*)arena_alloc(sql.size() + 1);
-    strcpy(result, sql.c_str());
-    return result;
+    // char* result = (char*)arena::alloc<QueryArena>(sql.size() + 1);
+    // strcpy(result, sql.c_str());
+    // return result;
+    std::cout << "not implemented";
+    exit(1);
+    return "";
 }
 
 static char* generate_index_sql(const char* table_name, uint32_t column_index) {
-    Table* table = get_table(table_name);
-    if (!table || column_index >= table->schema.columns.size()) {
-        return nullptr;
-    }
+    // Table* table = get_table(table_name);
+    // if (!table || column_index >= table->schema.columns.size()) {
+    //     return nullptr;
+    // }
 
-    std::string sql = "CREATE INDEX idx_" + std::string(table_name) + "_" +
-                     table->schema.columns[column_index].name +
-                     " ON " + table_name + " (" +
-                     table->schema.columns[column_index].name + ")";
+    // std::string sql = "CREATE INDEX idx_" + std::string(table_name) + "_" +
+    //                  table->schema.columns[column_index].name +
+    //                  " ON " + table_name + " (" +
+    //                  table->schema.columns[column_index].name + ")";
 
-    char* result = (char*)arena_alloc(sql.size() + 1);
-    strcpy(result, sql.c_str());
-    return result;
+    // char* result = (char*)arena::alloc<QueryArena>(sql.size() + 1);
+    // strcpy(result, sql.c_str());
+    // return result;
+    std::cout << "not implemented";
+    exit(1);
+    return "";
 }
 
 // Execute SQL through VM without triggering events
 static VM_RESULT execute_internal(const char* sql) {
-    ArenaVector<ASTNode*> stmts = parse_sql(sql);
+    ArenaVector<ASTNode*, QueryArena> stmts = parse_sql(sql);
     if (stmts.empty()) return ERR;
 
-    ArenaVector<VMInstruction> program = build_from_ast(stmts[0]);
+    ArenaVector<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
     VM_RESULT result = vm_execute(program);
 
     // Clear events from internal operations
@@ -95,7 +103,7 @@ static void delete_master_table_entry(const char* name) {
 
 static void create_master_table() {
     // Create the master table schema
-    TableSchema* schema = ARENA_ALLOC(TableSchema);
+    TableSchema* schema = (TableSchema*)arena::alloc<QueryArena>(sizeof(TableSchema));
     schema->table_name = "sqlite_master";
 
     // Columns: id (key), type, name, tbl_name, rootpage, sql
@@ -109,7 +117,7 @@ static void create_master_table() {
     calculate_column_offsets(schema);
 
     // Create table directly
-    Table* master = ARENA_ALLOC(Table);
+    Table* master = (Table*)arena::alloc<QueryArena>(sizeof(Table));
     master->schema = *schema;
     master->tree = btree_create(schema->key_type(), schema->record_size, BPLUS);
 
@@ -141,9 +149,9 @@ static void rebuild_schema_from_master() {
 
     // First pass: find max ID
     const char* max_query = "SELECT * FROM sqlite_master";
-    ArenaVector<ASTNode*> max_stmts = parse_sql(max_query);
+    ArenaVector<ASTNode*, QueryArena> max_stmts = parse_sql(max_query);
     if (!max_stmts.empty()) {
-        ArenaVector<VMInstruction> max_program = build_from_ast(max_stmts[0]);
+        ArenaVector<VMInstruction, QueryArena> max_program = build_from_ast(max_stmts[0]);
         vm_execute(max_program);
 
         for (auto& row : vm_output_buffer()) {
@@ -159,10 +167,10 @@ static void rebuild_schema_from_master() {
 
     // Query master table to rebuild schema - tables first
     const char* query = "SELECT * FROM sqlite_master WHERE type = 'table' AND name != 'sqlite_master'";
-    ArenaVector<ASTNode*> stmts = parse_sql(query);
+    ArenaVector<ASTNode*, QueryArena> stmts = parse_sql(query);
     if (stmts.empty()) return;
 
-    ArenaVector<VMInstruction> program = build_from_ast(stmts[0]);
+    ArenaVector<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
 
     // Save current output buffer
     auto saved_buffer = vm_output_buffer();
@@ -183,11 +191,11 @@ static void rebuild_schema_from_master() {
 
         if (strcmp(type, "table") == 0) {
             // Parse CREATE TABLE to rebuild schema
-            ArenaVector<ASTNode*> create_stmts = parse_sql(sql);
+            ArenaVector<ASTNode*, QueryArena> create_stmts = parse_sql(sql);
             if (!create_stmts.empty() && create_stmts[0]->type == AST_CREATE_TABLE) {
                 CreateTableNode* node = (CreateTableNode*)create_stmts[0];
 
-                Table* table = ARENA_ALLOC(Table);
+                Table* table = (Table*)arena::alloc<QueryArena>(sizeof(Table));
                 table->schema.table_name = name;
                 for(int i = 0; i < node->columns.size(); i++) {
                     table->schema.columns[i] = node->columns[i];
@@ -230,7 +238,7 @@ static void rebuild_schema_from_master() {
                     // Parse index name to get column (simplified)
                     // Real implementation would parse the SQL
                     for (uint32_t i = 1; i < table->schema.columns.size(); i++) {
-                        Index* index = ARENA_ALLOC(Index);
+                        Index* index = (Index*)arena::alloc<QueryArena>(sizeof(Index));
                         index->column_index = i;
                         index->tree = btree_create(
                             table->schema.columns[i].type,
@@ -363,12 +371,12 @@ static void init_executor() {
 }
 
 void execute(const char* sql) {
-    arena_reset();
+    arena::reset<QueryArena>();
     if (!executor_state.initialized) {
         init_executor();
     }
 
-    ArenaVector<ASTNode*> statements = parse_sql(sql);
+    ArenaVector<ASTNode*, QueryArena> statements = parse_sql(sql);
 
     bool success = true;
     bool explicit_transaction = false;
@@ -403,7 +411,7 @@ void execute(const char* sql) {
             }
 
             // Build and execute program
-            ArenaVector<VMInstruction> program = build_from_ast(statement);
+            ArenaVector<VMInstruction, QueryArena> program = build_from_ast(statement);
             VM_RESULT result = vm_execute(program);
 
             if (result != OK) {
@@ -434,5 +442,5 @@ void execute(const char* sql) {
     }
 
     // Reset arena after all statements complete
-    arena_reset();
+    arena::reset<QueryArena>();
 }

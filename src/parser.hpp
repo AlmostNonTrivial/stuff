@@ -3,7 +3,7 @@
 #include "vm.hpp"
 #include "arena.hpp"
 #include <vector>
-
+#include "schema.hpp"
 
 
 // AST Node Types
@@ -77,7 +77,7 @@ struct SetClauseNode : ASTNode {
 // Statement nodes
 struct SelectNode : ASTNode {
     const char* table;
-    ArenaVector<ASTNode*> columns;  // empty = *
+    ArenaVector<ASTNode*, QueryArena> columns;  // empty = *
     WhereNode* where;
     AggregateNode* aggregate;
     OrderByNode* order_by;
@@ -85,12 +85,12 @@ struct SelectNode : ASTNode {
 
 struct InsertNode : ASTNode {
     const char* table;
-    ArenaVector<ASTNode*> values;
+    ArenaVector<ASTNode*, QueryArena> values;
 };
 
 struct UpdateNode : ASTNode {
     const char* table;
-    ArenaVector<SetClauseNode*> set_clauses;
+    ArenaVector<SetClauseNode*, QueryArena> set_clauses;
     WhereNode* where;
 };
 
@@ -101,7 +101,7 @@ struct DeleteNode : ASTNode {
 
 struct CreateTableNode : ASTNode {
     const char* table;
-    ArenaVector<ColumnInfo> columns;
+    ArenaVector<ColumnInfo, QueryArena> columns;
 };
 
 struct CreateIndexNode : ASTNode {
@@ -166,4 +166,4 @@ struct Parser {
 
 
 
-ArenaVector<ASTNode*> parse_sql(const char* sql);
+ArenaVector<ASTNode*, QueryArena> parse_sql(const char* sql);

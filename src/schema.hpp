@@ -1,35 +1,34 @@
 #pragma once
+#include "arena.hpp"
 #include "defs.hpp"
 #include "btree.hpp"
 #include <cstdint>
-#include <string>
-#include <vector>
-#include <unordered_map>
+
+struct SchemaArena {};
 
 struct ColumnInfo {
-  char name[TYPE_VARCHAR32];
+  ArenaString<SchemaArena> name;
   DataType type;
 };
 
 struct TableSchema {
-  std::string table_name;
+  ArenaString<SchemaArena> table_name;
   uint32_t record_size;
-  std::vector<ColumnInfo> columns;
-  std::vector<uint32_t> column_offsets;
-
+  ArenaVector<ColumnInfo, SchemaArena> columns;
+  ArenaVector<uint32_t, SchemaArena> column_offsets;
   DataType key_type() const { return columns[0].type; }
 };
 
 struct Index {
   BTree tree;
-  std::string index_name;
+  ArenaString<SchemaArena> index_name;
   uint32_t column_index;
 };
 
 struct Table {
   TableSchema schema;
   BTree tree;
-  std::unordered_map<uint32_t, Index> indexes;
+  ArenaMap<uint32_t, Index, SchemaArena> indexes;
 };
 
 // Schema registry functions
@@ -47,5 +46,5 @@ void clear_schema();
 
 // Utility functions
 void print_record(uint8_t* record, TableSchema* schema);
-uint32_t calculate_record_size(const std::vector<ColumnInfo>& columns);
+uint32_t calculate_record_size(const ArenaVector<ColumnInfo, SchemaArena>& columns);
 void calculate_column_offsets(TableSchema* schema);

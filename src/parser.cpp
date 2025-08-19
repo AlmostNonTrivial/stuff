@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 
+// TODO, what should I do about this?
 // Global keyword map - initialized once
 static std::unordered_map<std::string, TokenType> keyword_map = {
         {"SELECT", TOK_SELECT}, {"FROM", TOK_FROM}, {"WHERE", TOK_WHERE},
@@ -228,7 +229,7 @@ static bool expect(Parser* p, TokenType type) {
 }
 
 static char* copy_identifier(Parser* p) {
-    char* result = (char*)arena_alloc(p->current_len + 1);
+    char* result = (char*)arena::alloc<QueryArena>(p->current_len + 1);
     memcpy(result, p->current_start, p->current_len);
     result[p->current_len] = '\0';
     return result;
@@ -272,13 +273,13 @@ static ASTNode* parse_and_expression(Parser* p);
 
 // Parse a literal value
 static ASTNode* parse_literal(Parser* p) {
-    LiteralNode* node = (LiteralNode*)arena_alloc(sizeof(LiteralNode));
+    LiteralNode* node = (LiteralNode*)arena::alloc<QueryArena>(sizeof(LiteralNode));
     node->type = AST_LITERAL;
 
     if (p->current_type == TOK_INTEGER) {
         node->value.type = TYPE_UINT32;
         uint32_t val = (uint32_t)p->current_value.int_val;
-        node->value.data = (uint8_t*)arena_alloc(sizeof(uint32_t));
+        node->value.data = (uint8_t*)arena::alloc<QueryArena>(sizeof(uint32_t));
         memcpy(node->value.data, &val, sizeof(uint32_t));
         advance(p);
     } else if (p->current_type == TOK_STRING) {
@@ -287,7 +288,7 @@ static ASTNode* parse_literal(Parser* p) {
 
         node->value.type = (len <= 32) ? TYPE_VARCHAR32 : TYPE_VARCHAR256;
         uint32_t alloc_size = VMValue::get_size(node->value.type);
-        node->value.data = (uint8_t*)arena_alloc(alloc_size);
+        node->value.data = (uint8_t*)arena::alloc<QueryArena>(alloc_size);
         memset(node->value.data, 0, alloc_size);
         memcpy(node->value.data, p->current_start, len);
 
@@ -302,7 +303,7 @@ static ASTNode* parse_literal(Parser* p) {
 
 // Parse a column reference
 static ASTNode* parse_column_ref(Parser* p) {
-    ColumnRefNode* node = (ColumnRefNode*)arena_alloc(sizeof(ColumnRefNode));
+    ColumnRefNode* node = (ColumnRefNode*)arena::alloc<QueryArena>(sizeof(ColumnRefNode));
     node->type = AST_COLUMN_REF;
     node->name = copy_identifier(p);
     node->index = 0;  // Will be resolved later
@@ -328,7 +329,7 @@ static ASTNode* parse_comparison(Parser* p) {
     if (!left) return nullptr;
 
     if (p->current_type >= TOK_EQ && p->current_type <= TOK_GE) {
-        BinaryOpNode* node = (BinaryOpNode*)arena_alloc(sizeof(BinaryOpNode));
+        BinaryOpNode* node = (BinaryOpNode*)arena::alloc<QueryArena>(sizeof(BinaryOpNode));
         node->type = AST_BINARY_OP;
         node->op = token_to_compare_op(p->current_type);
         node->left = left;
@@ -350,7 +351,7 @@ static ASTNode* parse_and_expression(Parser* p) {
     if (!left) return nullptr;
 
     while (match(p, TOK_AND)) {
-        BinaryOpNode* node = (BinaryOpNode*)arena_alloc(sizeof(BinaryOpNode));
+        BinaryOpNode* node = (BinaryOpNode*)arena::alloc<QueryArena>(sizeof(BinaryOpNode));
         node->type = AST_BINARY_OP;
         node->is_and = true;
         node->left = left;
@@ -368,7 +369,7 @@ static WhereNode* parse_where_clause(Parser* p) {
         return nullptr;
     }
 
-    WhereNode* node = (WhereNode*)arena_alloc(sizeof(WhereNode));
+    WhereNode* node = (WhereNode*)arena::alloc<QueryArena>(sizeof(WhereNode));
     node->type = AST_WHERE;
     node->condition = parse_and_expression(p);
 
@@ -383,7 +384,7 @@ static OrderByNode* parse_order_by_clause(Parser* p) {
 
     expect(p, TOK_BY);
 
-    OrderByNode* node = (OrderByNode*)arena_alloc(sizeof(OrderByNode));
+    OrderByNode* node = (OrderByNode*)arena::alloc<QueryArena>(sizeof(OrderByNode));
     node->type = AST_ORDER_BY;
     node->column = copy_identifier(p);
     node->column_index = 0;  // Will be resolved later
@@ -403,14 +404,14 @@ static OrderByNode* parse_order_by_clause(Parser* p) {
 static ASTNode* parse_select(Parser* p) {
     expect(p, TOK_SELECT);
 
-    SelectNode* node = (SelectNode*)arena_alloc(sizeof(SelectNode));
+    SelectNode* node = (SelectNode*)arena::alloc<QueryArena>(sizeof(SelectNode));
     node->type = AST_SELECT;
     node->aggregate = nullptr;
 
     // Parse column list or aggregate
     if (p->current_type >= TOK_COUNT && p->current_type <= TOK_AVG) {
         // Aggregate function
-        AggregateNode* agg = (AggregateNode*)arena_alloc(sizeof(AggregateNode));
+        AggregateNode* agg = (AggregateNode*)arena::alloc<QueryArena>(sizeof(AggregateNode));
         agg->type = AST_AGGREGATE;
         agg->function = copy_identifier(p);
         advance(p);
@@ -452,7 +453,7 @@ static ASTNode* parse_insert(Parser* p) {
     expect(p, TOK_INSERT);
     expect(p, TOK_INTO);
 
-    InsertNode* node = (InsertNode*)arena_alloc(sizeof(InsertNode));
+    InsertNode* node = (InsertNode*)arena::alloc<QueryArena>(sizeof(InsertNode));
     node->type = AST_INSERT;
     node->table = copy_identifier(p);
     advance(p);
@@ -473,7 +474,7 @@ static ASTNode* parse_insert(Parser* p) {
 static ASTNode* parse_update(Parser* p) {
     expect(p, TOK_UPDATE);
 
-    UpdateNode* node = (UpdateNode*)arena_alloc(sizeof(UpdateNode));
+    UpdateNode* node = (UpdateNode*)arena::alloc<QueryArena>(sizeof(UpdateNode));
     node->type = AST_UPDATE;
     node->table = copy_identifier(p);
     advance(p);
@@ -481,7 +482,7 @@ static ASTNode* parse_update(Parser* p) {
     expect(p, TOK_SET);
 
     do {
-        SetClauseNode* set = (SetClauseNode*)arena_alloc(sizeof(SetClauseNode));
+        SetClauseNode* set = (SetClauseNode*)arena::alloc<QueryArena>(sizeof(SetClauseNode));
         set->type = AST_SET_CLAUSE;
         set->column = copy_identifier(p);
         set->column_index = 0;  // Will be resolved later
@@ -503,7 +504,7 @@ static ASTNode* parse_delete(Parser* p) {
     expect(p, TOK_DELETE);
     expect(p, TOK_FROM);
 
-    DeleteNode* node = (DeleteNode*)arena_alloc(sizeof(DeleteNode));
+    DeleteNode* node = (DeleteNode*)arena::alloc<QueryArena>(sizeof(DeleteNode));
     node->type = AST_DELETE;
     node->table = copy_identifier(p);
     advance(p);
@@ -518,7 +519,7 @@ static ASTNode* parse_create(Parser* p) {
     expect(p, TOK_CREATE);
 
     if (match(p, TOK_TABLE)) {
-        CreateTableNode* node = (CreateTableNode*)arena_alloc(sizeof(CreateTableNode));
+        CreateTableNode* node = (CreateTableNode*)arena::alloc<QueryArena>(sizeof(CreateTableNode));
         node->type = AST_CREATE_TABLE;
         node->table = copy_identifier(p);
         advance(p);
@@ -545,8 +546,8 @@ static ASTNode* parse_create(Parser* p) {
 
                 size_t len = strlen(col_name);
                 if (len > 31) len = 31;
-                memcpy(col.name, col_name, len);
-                col.name[len] = '\0';
+                col.name.assign(col_name);
+                // col.name[len] = '\0';
             }
 
             node->columns.push_back(col);
@@ -558,7 +559,7 @@ static ASTNode* parse_create(Parser* p) {
         return (ASTNode*)node;
 
     } else if (match(p, TOK_INDEX)) {
-        CreateIndexNode* node = (CreateIndexNode*)arena_alloc(sizeof(CreateIndexNode));
+        CreateIndexNode* node = (CreateIndexNode*)arena::alloc<QueryArena>(sizeof(CreateIndexNode));
         node->type = AST_CREATE_INDEX;
         node->index_name = copy_identifier(p);
         advance(p);
@@ -581,15 +582,15 @@ static ASTNode* parse_create(Parser* p) {
 // Parse transaction statements
 static ASTNode* parse_transaction(Parser* p) {
     if (match(p, TOK_BEGIN)) {
-        BeginNode* node = (BeginNode*)arena_alloc(sizeof(BeginNode));
+        BeginNode* node = (BeginNode*)arena::alloc<QueryArena>(sizeof(BeginNode));
         node->type = AST_BEGIN;
         return (ASTNode*)node;
     } else if (match(p, TOK_COMMIT)) {
-        CommitNode* node = (CommitNode*)arena_alloc(sizeof(CommitNode));
+        CommitNode* node = (CommitNode*)arena::alloc<QueryArena>(sizeof(CommitNode));
         node->type = AST_COMMIT;
         return (ASTNode*)node;
     } else if (match(p, TOK_ROLLBACK)) {
-        RollbackNode* node = (RollbackNode*)arena_alloc(sizeof(RollbackNode));
+        RollbackNode* node = (RollbackNode*)arena::alloc<QueryArena>(sizeof(RollbackNode));
         node->type = AST_ROLLBACK;
         return (ASTNode*)node;
     }
@@ -647,8 +648,8 @@ ASTNode* parse_statement(const char* sql) {
 
     return ast;
 }
-ArenaVector<ASTNode*> parse_sql(const char* sql) {
-    ArenaVector<ASTNode*> statements;
+ArenaVector<ASTNode*, QueryArena> parse_sql(const char* sql) {
+    ArenaVector<ASTNode*, QueryArena> statements;
 
     // Simple multi-statement parsing
     const char* current = sql;
@@ -663,7 +664,7 @@ ArenaVector<ASTNode*> parse_sql(const char* sql) {
 
         // Parse single statement
         size_t len = end - current;
-        char* single_sql = (char*)arena_alloc(len + 1);
+        char* single_sql = (char*)arena::alloc<QueryArena>(len + 1);
         memcpy(single_sql, current, len);
         single_sql[len] = '\0';
 
