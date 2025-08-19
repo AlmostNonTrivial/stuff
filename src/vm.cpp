@@ -351,24 +351,45 @@ VM_RESULT vm_step() {
   }
 
   case OP_Column: {
-    if (!VM.cursors.contains(inst->p1)) {
-      return ERR;
-    }
+      if (!VM.cursors.contains(inst->p1)) {
+        return ERR;
+      }
 
-    VmCursor *cursor = VM.cursors.find(inst->p1);
-    uint32_t col_index = inst->p2;
+      VmCursor *cursor = VM.cursors.find(inst->p1);
+      uint32_t col_index = inst->p2;
 
-    if (col_index == 0) {
-      const uint8_t *key_data = vb_key(cursor);
-      DataType type = vb_key_type(cursor);
-      vm_set_value(&VM.registers[inst->p3], type, key_data);
-    } else {
-      uint8_t *col_data = vb_column(cursor, col_index);
-      DataType type = vb_column_type(cursor, col_index);
-      vm_set_value(&VM.registers[inst->p3], type, col_data);
-    }
-    VM.pc++;
-    return OK;
+      if (cursor->is_index) {
+        // For index cursors:
+        // Column 0 = the indexed value (key)
+        // Column 1 = the rowid (stored as record)
+        if (col_index == 0) {
+          // Get the indexed column value
+          const uint8_t *key_data = btree_cursor_key(&cursor->btree_cursor);
+          DataType key_type = cursor->schema->columns[cursor->column].type;
+          vm_set_value(&VM.registers[inst->p3], key_type, key_data);
+        } else {
+          // Get the rowid from the record
+          uint8_t *record_data = btree_cursor_record(&cursor->btree_cursor);
+          // The record in an index is always a uint32 rowid
+          vm_set_value(&VM.registers[inst->p3], TYPE_UINT32, record_data);
+        }
+      } else {
+        // For table cursors, handle normally
+        if (col_index == 0) {
+          // Column 0 is the primary key/rowid
+          const uint8_t *key_data = vb_key(cursor);
+          DataType type = vb_key_type(cursor);
+          vm_set_value(&VM.registers[inst->p3], type, key_data);
+        } else {
+          // Regular column access
+          uint8_t *col_data = vb_column(cursor, col_index);
+          DataType type = vb_column_type(cursor, col_index);
+          vm_set_value(&VM.registers[inst->p3], type, col_data);
+        }
+      }
+
+      VM.pc++;
+      return OK;
   }
 
   case OP_MakeRecord: {
