@@ -375,7 +375,12 @@ static void init_executor() {
     // }
 }
 
-void execute(const char* sql) {
+
+
+
+ExecutionMeta meta;
+
+ExecutionMeta * execute(const char* sql) {
     arena::reset<QueryArena>();
     if (!executor_state.initialized) {
         init_executor();
@@ -421,15 +426,15 @@ void execute(const char* sql) {
 
             // Build and execute program
             ArenaVector<VMInstruction, QueryArena> program = build_from_ast(statement);
-
-
+            // will have duplicates obv
+            meta.sql = sql;
 
             // std::cout << program.size() << ", ";
 
 
 
             VM_RESULT result = vm_execute(program);
-
+            meta.result = result;
             if (result != OK) {
                 success = false;
 
@@ -440,8 +445,8 @@ void execute(const char* sql) {
                     executor_state.in_transaction = false;
                 }
 
-                std::cout << "failed";
-                exit(1);
+
+
 
                 break; // Stop executing further statements
             } else {
@@ -460,7 +465,5 @@ void execute(const char* sql) {
             }
         }
     }
-
-    // Reset arena after all statements complete
-    arena::reset<QueryArena>();
+    return &meta;
 }

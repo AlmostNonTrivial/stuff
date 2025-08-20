@@ -34,9 +34,9 @@ struct ParsedParameters {
   OrderBy order_by;
   ArenaString<QueryArena> aggregate;
 };
-
+ enum AccessMethodEnum{ DIRECT_ROWID, INDEX_SCAN, FULL_TABLE_SCAN } ;
 struct AccessMethod {
-  enum Type { DIRECT_ROWID, INDEX_SCAN, FULL_TABLE_SCAN } type;
+AccessMethodEnum type;
   WhereCondition *primary_condition = nullptr;
   WhereCondition *index_condition = nullptr;
   uint32_t index_col;

@@ -5,4 +5,11 @@
 #include "arena.hpp"
 
 
-void execute(const char * sql);
+
+struct ExecutionMeta {
+    ArenaString<QueryArena> sql;
+    AccessMethodEnum access;
+    VM_RESULT result;
+};
+
+ExecutionMeta * execute(const char * sql);

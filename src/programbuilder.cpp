@@ -338,7 +338,7 @@ choose_access_method(const ArenaVector<WhereCondition, QueryArena> &conditions,
   for (size_t i = 0; i < sorted_conditions.size(); i++) {
     auto &cond = sorted_conditions[i];
     if (cond.operator_type == EQ && cond.column_index == 0) {
-      return {.type = AccessMethod::DIRECT_ROWID,
+      return {.type = AccessMethodEnum::DIRECT_ROWID,
               .primary_condition = const_cast<WhereCondition *>(&cond),
               .index_condition = nullptr,
               .index_col = cond.column_index};
@@ -351,7 +351,7 @@ choose_access_method(const ArenaVector<WhereCondition, QueryArena> &conditions,
       auto &cond = sorted_conditions[i];
 
       if (table->indexes.contains(cond.column_index)) {
-        return {.type = AccessMethod::INDEX_SCAN,
+        return {.type = AccessMethodEnum::INDEX_SCAN,
                 .primary_condition = nullptr,
                 .index_condition = const_cast<WhereCondition *>(&cond),
                 .index_col = cond.column_index};
@@ -359,7 +359,7 @@ choose_access_method(const ArenaVector<WhereCondition, QueryArena> &conditions,
     }
   }
 
-  return {.type = AccessMethod::FULL_TABLE_SCAN,
+  return {.type = AccessMethodEnum::FULL_TABLE_SCAN,
           .primary_condition = nullptr,
           .index_condition = nullptr,
           .index_col = 0};
@@ -1082,7 +1082,7 @@ build_select(const ParsedParameters &options) {
   ArenaVector<VMInstruction, QueryArena> instructions;
 
   switch (access_method.type) {
-  case AccessMethod::DIRECT_ROWID: {
+  case AccessMethodEnum::DIRECT_ROWID: {
     ArenaVector<WhereCondition, QueryArena> remaining;
     for (size_t i = 0; i < optimized_conditions.size(); i++) {
       const auto &c = optimized_conditions[i];
@@ -1095,7 +1095,7 @@ build_select(const ParsedParameters &options) {
         options.select_columns, options.aggregate);
     break;
   }
-  case AccessMethod::INDEX_SCAN: {
+  case AccessMethodEnum::INDEX_SCAN: {
     ArenaVector<WhereCondition, QueryArena> remaining;
     for (size_t i = 0; i < optimized_conditions.size(); i++) {
       const auto &c = optimized_conditions[i];
@@ -1108,7 +1108,7 @@ build_select(const ParsedParameters &options) {
         access_method.index_col, options.select_columns, options.aggregate);
     break;
   }
-  case AccessMethod::FULL_TABLE_SCAN:
+  case AccessMethodEnum::FULL_TABLE_SCAN:
   default:
     instructions =
         build_select_full_table_scan(options.table_name, optimized_conditions,
@@ -1140,7 +1140,7 @@ build_update(const ParsedParameters &options) {
   ArenaVector<VMInstruction, QueryArena> instructions;
 
   switch (access_method.type) {
-  case AccessMethod::DIRECT_ROWID: {
+  case AccessMethodEnum::DIRECT_ROWID: {
     ArenaVector<WhereCondition, QueryArena> remaining;
     for (size_t i = 0; i < optimized_conditions.size(); i++) {
       const auto &c = optimized_conditions[i];
@@ -1153,7 +1153,7 @@ build_update(const ParsedParameters &options) {
                                   *access_method.primary_condition, remaining);
     break;
   }
-  case AccessMethod::INDEX_SCAN: {
+  case AccessMethodEnum::INDEX_SCAN: {
     ArenaVector<WhereCondition, QueryArena> remaining;
     for (size_t i = 0; i < optimized_conditions.size(); i++) {
       const auto &c = optimized_conditions[i];
@@ -1166,7 +1166,7 @@ build_update(const ParsedParameters &options) {
         remaining, access_method.index_col);
     break;
   }
-  case AccessMethod::FULL_TABLE_SCAN:
+  case AccessMethodEnum::FULL_TABLE_SCAN:
   default:
     instructions = build_update_full_table_scan(
         options.table_name, options.set_columns, optimized_conditions);
@@ -1191,7 +1191,7 @@ build_delete(const ParsedParameters &options) {
   ArenaVector<VMInstruction, QueryArena> instructions;
 
   switch (access_method.type) {
-  case AccessMethod::DIRECT_ROWID: {
+  case AccessMethodEnum::DIRECT_ROWID: {
     ArenaVector<WhereCondition, QueryArena> remaining;
     for (size_t i = 0; i < optimized_conditions.size(); i++) {
       const auto &c = optimized_conditions[i];
@@ -1203,7 +1203,7 @@ build_delete(const ParsedParameters &options) {
         options.table_name, *access_method.primary_condition, remaining);
     break;
   }
-  case AccessMethod::INDEX_SCAN: {
+  case AccessMethodEnum::INDEX_SCAN: {
     ArenaVector<WhereCondition, QueryArena> remaining;
     for (size_t i = 0; i < optimized_conditions.size(); i++) {
       const auto &c = optimized_conditions[i];
@@ -1216,7 +1216,7 @@ build_delete(const ParsedParameters &options) {
                                            remaining, access_method.index_col);
     break;
   }
-  case AccessMethod::FULL_TABLE_SCAN:
+  case AccessMethodEnum::FULL_TABLE_SCAN:
   default:
     instructions =
         build_delete_full_table_scan(options.table_name, optimized_conditions);

@@ -50,13 +50,11 @@ int main() {
       // "SELECT * FROM X;"
       // "SELECT COUNT(*) FROM X;",
 
-
-
-
   };
 
   for (auto query : queries) {
-    execute(query);
+    ExecutionMeta * meta = execute(query);
+    auto output = vm_output_buffer();
   }
 
 }
