@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <cstring>
 
-static ArenaMap<ArenaString<SchemaArena>, Table, SchemaArena> tables;
+static Map<Str<SchemaArena>, Table, SchemaArena> tables;
 
 Table* get_table(const char* table_name) {
     return tables.find(table_name);
@@ -131,8 +131,8 @@ void print_record(uint8_t* record, TableSchema* schema) {
 }
 
 // Helper to get all table names (useful for debugging)
-ArenaVector<ArenaString<SchemaArena>, SchemaArena> get_all_table_names() {
-    ArenaVector<ArenaString<SchemaArena>, SchemaArena> names;
+ArenaVector<Str<SchemaArena>, SchemaArena> get_all_table_names() {
+    ArenaVector<Str<SchemaArena>, SchemaArena> names;
     for (size_t i = 0; i < tables.size(); i++) {
         auto entry = tables.at(i);
         if (entry) {

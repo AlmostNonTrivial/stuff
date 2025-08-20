@@ -60,11 +60,11 @@ static struct {
 
   bool in_transaction;
 
-  ArenaMap<uint32_t, int32_t, PagerArena, MAX_CACHE_ENTRIES> page_to_cache;
-  ArenaSet<uint32_t, PagerArena> free_pages_set;
-  ArenaSet<uint32_t, PagerArena> journaled_pages;
-  ArenaSet<uint32_t, PagerArena> new_pages_in_transaction;
-  ArenaSet<uint32_t, PagerArena> pages_in_use;
+  Map<uint32_t, int32_t, PagerArena, MAX_CACHE_ENTRIES> page_to_cache;
+  Set<uint32_t, PagerArena> free_pages_set;
+  Set<uint32_t, PagerArena> journaled_pages;
+  Set<uint32_t, PagerArena> new_pages_in_transaction;
+  Set<uint32_t, PagerArena> pages_in_use;
 
   const char *data_file;
   char journal_file[JOURNAL_FILENAME_SIZE];

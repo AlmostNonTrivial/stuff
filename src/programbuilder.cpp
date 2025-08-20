@@ -69,7 +69,7 @@ add_seek_instruction(Vector<VMInstruction, QueryArena> &instructions,
 }
 
 struct RegisterAllocator {
-  ArenaMap<ArenaString<QueryArena>, uint32_t, QueryArena, REGISTER_COUNT>
+  Map<Str<QueryArena>, uint32_t, QueryArena, REGISTERS>
       name_to_register;
   int next_register = 0;
 
@@ -123,7 +123,7 @@ OpCode str_or_int(const VMValue &value) {
 
 uint8_t set_p5(uint8_t current, uint8_t flag) { return current | flag; }
 
-void load_value(ArenaVector<VMInstruction, QueryArena> &instructions,
+void load_value(Vector<VMInstruction, QueryArena> &instructions,
                 const VMValue &value, int target_reg) {
   if (value.type == TYPE_UINT32 || value.type == TYPE_UINT64) {
     uint32_t val = *(uint32_t *)value.data;
@@ -193,7 +193,7 @@ bool ascending(CompareOp op) { return op == GE || op == GT || op == EQ; }
 // Helper to resolve column name to index
 static uint32_t
 resolve_column_index(const char *col_name,
-                     const ArenaString<QueryArena> &table_name) {
+                     const Str<QueryArena> &table_name) {
   return get_column_index(const_cast<char *>(table_name.c_str()),
                           const_cast<char *>(col_name));
 }
@@ -201,13 +201,13 @@ resolve_column_index(const char *col_name,
 // Extract a single condition from a binary op node
 static WhereCondition
 extract_condition_from_binary_op(BinaryOpNode *op,
-                                 const ArenaString<QueryArena> &table_name) {
+                                 const Str<QueryArena> &table_name) {
   WhereCondition cond;
 
   // Left side should be column reference
   if (op->left->type == AST_COLUMN_REF) {
     ColumnRefNode *col = (ColumnRefNode *)op->left;
-    cond.column_name = ArenaString<QueryArena>(col->name);
+    cond.column_name = Str<QueryArena>(col->name);
     cond.column_index = resolve_column_index(col->name, table_name);
   }
 
@@ -224,10 +224,10 @@ extract_condition_from_binary_op(BinaryOpNode *op,
 }
 
 // Recursively extract WHERE conditions from AST
-static ArenaVector<WhereCondition, QueryArena>
+static Vector<WhereCondition, QueryArena>
 extract_where_conditions(WhereNode *where,
-                         const ArenaString<QueryArena> &table_name) {
-  ArenaVector<WhereCondition, QueryArena> conditions;
+                         const Str<QueryArena> &table_name) {
+  Vector<WhereCondition, QueryArena> conditions;
 
   if (!where || !where->condition) {
     return conditions;
@@ -259,9 +259,9 @@ extract_where_conditions(WhereNode *where,
 
 // Build where checks helper
 void build_where_checks(
-    ArenaVector<VMInstruction, QueryArena> &instructions, int cursor_id,
-    const ArenaVector<WhereCondition, QueryArena> &conditions,
-    const ArenaString<QueryArena> &skip_label, RegisterAllocator &regs) {
+    Vector<VMInstruction, QueryArena> &instructions, int cursor_id,
+    const Vector<WhereCondition, QueryArena> &conditions,
+    const Str<QueryArena> &skip_label, RegisterAllocator &regs) {
 
   for (size_t i = 0; i < conditions.size(); i++) {
     int col_reg = regs.get(("where_col_" + std::to_string(i)).c_str());
@@ -286,8 +286,8 @@ void build_where_checks(
 // ============================================================================
 
 double estimate_selectivity(const WhereCondition &condition,
-                            const ArenaString<QueryArena> &table_name) {
-  ArenaString<QueryArena> column_name = condition.column_name;
+                            const Str<QueryArena> &table_name) {
+  Str<QueryArena> column_name = condition.column_name;
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
   if (!table) {
@@ -314,11 +314,11 @@ double estimate_selectivity(const WhereCondition &condition,
   }
 
 
-ArenaVector<WhereCondition, QueryArena> optimize_where_conditions(
-    const ArenaVector<WhereCondition, QueryArena> &conditions,
-    const ArenaString<QueryArena> &table_name) {
+Vector<WhereCondition, QueryArena> optimize_where_conditions(
+    const Vector<WhereCondition, QueryArena> &conditions,
+    const Str<QueryArena> &table_name) {
 
-  ArenaVector<WhereCondition, QueryArena> optimized = conditions;
+  Vector<WhereCondition, QueryArena> optimized = conditions;
 
   // Sort by selectivity
   std::sort(optimized.begin(), optimized.end(),
@@ -331,9 +331,9 @@ ArenaVector<WhereCondition, QueryArena> optimize_where_conditions(
 }
 
 AccessMethod
-choose_access_method(const ArenaVector<WhereCondition, QueryArena> &conditions,
-                     const ArenaString<QueryArena> &table_name) {
-  ArenaVector<WhereCondition, QueryArena> sorted_conditions = conditions;
+choose_access_method(const Vector<WhereCondition, QueryArena> &conditions,
+                     const Str<QueryArena> &table_name) {
+  Vector<WhereCondition, QueryArena> sorted_conditions = conditions;
   std::stable_partition(
       sorted_conditions.begin(), sorted_conditions.end(),
       [](const WhereCondition &c) { return c.operator_type == EQ; });
@@ -377,11 +377,11 @@ choose_access_method(const ArenaVector<WhereCondition, QueryArena> &conditions,
 // DELETE - Simplified to only full table scan
 // ============================================================================
 
-ArenaVector<VMInstruction, QueryArena>
+Vector<VMInstruction, QueryArena>
 build_delete(const ParsedParameters &options) {
   RegisterAllocator regs;
-  ArenaVector<VMInstruction, QueryArena> instructions;
-  ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
+  Vector<VMInstruction, QueryArena> instructions;
+  Map<Str<QueryArena>, int, QueryArena> labels;
   const int cursor_id = 0;
 
   // Always do full table scan for delete
@@ -419,12 +419,12 @@ build_delete(const ParsedParameters &options) {
 }
 
 static void build_select_output(
-    ArenaVector<VMInstruction, QueryArena> &instructions, int cursor_id,
-    const ArenaVector<ArenaString<QueryArena>, QueryArena> &select_columns,
-    const ArenaString<QueryArena> &table_name, RegisterAllocator &regs) {
+    Vector<VMInstruction, QueryArena> &instructions, int cursor_id,
+    const Vector<Str<QueryArena>, QueryArena> &select_columns,
+    const Str<QueryArena> &table_name, RegisterAllocator &regs) {
 
-  ArenaVector<int, QueryArena> output_regs;
-  ArenaVector<uint32_t, QueryArena> columns_to_select;
+  Vector<int, QueryArena> output_regs;
+  Vector<uint32_t, QueryArena> columns_to_select;
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
 
@@ -461,11 +461,11 @@ struct IndexUpdate {
 // UPDATE - Simplified to only full table scan
 // ============================================================================
 
-ArenaVector<VMInstruction, QueryArena>
+Vector<VMInstruction, QueryArena>
 build_update(const ParsedParameters &options) {
   RegisterAllocator regs;
-  ArenaVector<VMInstruction, QueryArena> instructions;
-  ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
+  Vector<VMInstruction, QueryArena> instructions;
+  Map<Str<QueryArena>, int, QueryArena> labels;
   const int table_cursor_id = 0;
 
   // Always do full table scan for update
@@ -478,7 +478,7 @@ build_update(const ParsedParameters &options) {
   }
 
   // Open cursors for indexes on columns being updated (for new insertions only)
-  ArenaVector<IndexUpdate, QueryArena> index_cursors;
+  Vector<IndexUpdate, QueryArena> index_cursors;
   ArenaSet<uint32_t, QueryArena> updated_columns;
 
   for (size_t i = 0; i < options.set_columns.size(); i++) {
@@ -522,7 +522,7 @@ build_update(const ParsedParameters &options) {
                      "next_record", regs);
 
   // Build updated record
-  ArenaVector<int, QueryArena> current_regs;
+  Vector<int, QueryArena> current_regs;
   for (size_t i = 0; i < table->schema.columns.size(); i++) {
     int reg = regs.get(("current_col_" + std::to_string(i)).c_str());
     current_regs.push_back(reg);
@@ -582,16 +582,16 @@ build_update(const ParsedParameters &options) {
 // SELECT - Uses key buffer for index scans
 // ============================================================================
 
-static ArenaVector<VMInstruction, QueryArena>
+static Vector<VMInstruction, QueryArena>
 build_select_full_table_scan(
-    const ArenaString<QueryArena> &table_name,
-    const ArenaVector<WhereCondition, QueryArena> &conditions,
-    const ArenaVector<ArenaString<QueryArena>, QueryArena> &select_columns,
-    const ArenaString<QueryArena> &aggregate_func) {
+    const Str<QueryArena> &table_name,
+    const Vector<WhereCondition, QueryArena> &conditions,
+    const Vector<Str<QueryArena>, QueryArena> &select_columns,
+    const Str<QueryArena> &aggregate_func) {
 
   RegisterAllocator regs;
-  ArenaVector<VMInstruction, QueryArena> instructions;
-  ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
+  Vector<VMInstruction, QueryArena> instructions;
+  Map<Str<QueryArena>, int, QueryArena> labels;
   const int cursor_id = 0;
 
   instructions.push_back(make_open_read(cursor_id, table_name.c_str()));
@@ -635,18 +635,18 @@ build_select_full_table_scan(
   return instructions;
 }
 
-static ArenaVector<VMInstruction, QueryArena>
+static Vector<VMInstruction, QueryArena>
 build_select_with_index(
-    const ArenaString<QueryArena> &table_name,
+    const Str<QueryArena> &table_name,
     const WhereCondition &index_condition,
-    const ArenaVector<WhereCondition, QueryArena> &all_conditions,
+    const Vector<WhereCondition, QueryArena> &all_conditions,
     uint32_t index_col,
-    const ArenaVector<ArenaString<QueryArena>, QueryArena> &select_columns,
-    const ArenaString<QueryArena> &aggregate_func) {
+    const Vector<Str<QueryArena>, QueryArena> &select_columns,
+    const Str<QueryArena> &aggregate_func) {
 
   RegisterAllocator regs;
-  ArenaVector<VMInstruction, QueryArena> instructions;
-  ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
+  Vector<VMInstruction, QueryArena> instructions;
+  Map<Str<QueryArena>, int, QueryArena> labels;
   const int index_cursor_id = 0;
   const int table_cursor_id = 1;
 
@@ -742,7 +742,7 @@ build_select_with_index(
   return instructions;
 }
 
-ArenaVector<VMInstruction, QueryArena>
+Vector<VMInstruction, QueryArena>
 build_select(const ParsedParameters &options) {
 
   auto optimized_conditions = optimize_where_conditions(
@@ -751,7 +751,7 @@ build_select(const ParsedParameters &options) {
   auto access_method = choose_access_method(
       optimized_conditions, options.table_name);
 
-  ArenaVector<VMInstruction, QueryArena> instructions;
+  Vector<VMInstruction, QueryArena> instructions;
 
   // For direct rowid access, just use full table scan with the condition
   // For simplicity in educational context
@@ -788,52 +788,52 @@ build_select(const ParsedParameters &options) {
 }
 
 // Create table
-ArenaVector<VMInstruction, QueryArena>
-build_create_table(const ArenaString<QueryArena> &table_name,
-                   const ArenaVector<ColumnInfo, QueryArena> &columns) {
+Vector<VMInstruction, QueryArena>
+build_create_table(const Str<QueryArena> &table_name,
+                   const Vector<ColumnInfo, QueryArena> &columns) {
 
   TableSchema *schema =
       (TableSchema *)arena::alloc<QueryArena>(sizeof(TableSchema));
   schema->table_name.assign(table_name.c_str());
   schema->columns.set(columns);
 
-  ArenaVector<VMInstruction, QueryArena> vec;
+  Vector<VMInstruction, QueryArena> vec;
   vec.push_back(make_create_table(schema));
   vec.push_back(make_halt());
   return vec;
 }
 
 // Drop table
-ArenaVector<VMInstruction, QueryArena>
-build_drop_table(const ArenaString<QueryArena> &table_name) {
+Vector<VMInstruction, QueryArena>
+build_drop_table(const Str<QueryArena> &table_name) {
   char *name = (char *)arena::alloc<QueryArena>(table_name.size() + 1);
   strcpy(name, table_name.c_str());
 
-  ArenaVector<VMInstruction, QueryArena> vec;
+  Vector<VMInstruction, QueryArena> vec;
   vec.push_back(make_drop_table(name));
   vec.push_back(make_halt());
   return vec;
 }
 
 // Drop index
-ArenaVector<VMInstruction, QueryArena>
-build_drop_index(const ArenaString<QueryArena> &index_name) {
+Vector<VMInstruction, QueryArena>
+build_drop_index(const Str<QueryArena> &index_name) {
   char *name = (char *)arena::alloc<QueryArena>(index_name.size() + 1);
   strcpy(name, index_name.c_str());
 
-  ArenaVector<VMInstruction, QueryArena> vec;
+  Vector<VMInstruction, QueryArena> vec;
   vec.push_back(make_drop_index(0, name));
   vec.push_back(make_halt());
   return vec;
 }
 
 // Create index
-ArenaVector<VMInstruction, QueryArena>
-build_create_index(const ArenaString<QueryArena> &table_name,
+Vector<VMInstruction, QueryArena>
+build_create_index(const Str<QueryArena> &table_name,
                    uint32_t column_index, DataType key_type) {
   RegisterAllocator regs;
-  ArenaVector<VMInstruction, QueryArena> instructions;
-  ArenaMap<ArenaString<QueryArena>, int, QueryArena> labels;
+  Vector<VMInstruction, QueryArena> instructions;
+  Map<Str<QueryArena>, int, QueryArena> labels;
 
   const int table_cursor_id = 0;
   const int index_cursor_id = 1;
@@ -867,11 +867,11 @@ build_create_index(const ArenaString<QueryArena> &table_name,
 
 // Insert
 // In build_insert function, fix the MakeRecord call:
-ArenaVector<VMInstruction, QueryArena>
-build_insert(const ArenaString<QueryArena> &table_name,
-             const ArenaVector<SetColumns, QueryArena> &values) {
+Vector<VMInstruction, QueryArena>
+build_insert(const Str<QueryArena> &table_name,
+             const Vector<SetColumns, QueryArena> &values) {
   RegisterAllocator regs;
-  ArenaVector<VMInstruction, QueryArena> instructions;
+  Vector<VMInstruction, QueryArena> instructions;
 
   const int table_cursor_id = 0;
 
@@ -880,7 +880,7 @@ build_insert(const ArenaString<QueryArena> &table_name,
 
 
   // <column_index, cursorid>
-  ArenaMap<uint32_t, int, QueryArena> indexes_to_insert;
+  Map<uint32_t, int, QueryArena> indexes_to_insert;
   int cursor_id = 1;
 
   instructions.push_back(make_open_write(table_cursor_id, table_name.c_str()));
@@ -894,7 +894,7 @@ build_insert(const ArenaString<QueryArena> &table_name,
   }
 
   // Load values into registers, full record on insert
-  ArenaVector<int, QueryArena> value_regs;
+  Vector<int, QueryArena> value_regs;
   for (size_t i = 0; i < values.size(); i++) {
     // key is at value_regs[0]
     int reg = regs.get(("value_" + std::to_string(i)).c_str());
@@ -927,19 +927,19 @@ build_insert(const ArenaString<QueryArena> &table_name,
 }
 
 // Generate aggregate instructions
-ArenaVector<VMInstruction, QueryArena>
-aggregate(const ArenaString<QueryArena> &table_name, const char *agg_func,
+Vector<VMInstruction, QueryArena>
+aggregate(const Str<QueryArena> &table_name, const char *agg_func,
           uint32_t *column_index,
-          const ArenaVector<WhereCondition, QueryArena> &where_conditions) {
+          const Vector<WhereCondition, QueryArena> &where_conditions) {
 
   if (strcmp(agg_func, "COUNT") != 0 && column_index == nullptr) {
-    ArenaVector<VMInstruction, QueryArena> vec;
+    Vector<VMInstruction, QueryArena> vec;
     return vec;
   }
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
   if (!table) {
-    ArenaVector<VMInstruction, QueryArena> vec;
+    Vector<VMInstruction, QueryArena> vec;
     vec.push_back(make_halt());
     return vec;
   }
@@ -949,14 +949,14 @@ aggregate(const ArenaString<QueryArena> &table_name, const char *agg_func,
     options.table_name = table_name;
     options.where_conditions = where_conditions;
     options.operation = ParsedParameters::SELECT;
-    options.aggregate = ArenaString<QueryArena>(agg_func);
+    options.aggregate = Str<QueryArena>(agg_func);
 
     return build_select(options);
   }
 
   // Simple aggregate without WHERE
   RegisterAllocator regs;
-  ArenaVector<VMInstruction, QueryArena> instructions;
+  Vector<VMInstruction, QueryArena> instructions;
   const int cursor_id = 0;
   int agg_reg = regs.get("agg");
   int output_reg = regs.get("output");
@@ -993,7 +993,7 @@ aggregate(const ArenaString<QueryArena> &table_name, const char *agg_func,
 // ============================================================================
 
 // Build SELECT from AST
-static ArenaVector<VMInstruction, QueryArena>
+static Vector<VMInstruction, QueryArena>
 build_select_from_ast(SelectNode *node) {
   // Handle aggregate functions
   if (node->aggregate) {
@@ -1007,7 +1007,7 @@ build_select_from_ast(SelectNode *node) {
       column_index = &col_idx;
     }
 
-    ArenaVector<WhereCondition, QueryArena> conditions =
+    Vector<WhereCondition, QueryArena> conditions =
         extract_where_conditions(node->where, node->table);
 
     return aggregate(node->table, agg->function, column_index, conditions);
@@ -1020,13 +1020,13 @@ build_select_from_ast(SelectNode *node) {
   params.where_conditions = extract_where_conditions(node->where, node->table);
 
   // Extract column list
-  ArenaVector<ArenaString<QueryArena>, QueryArena> select_columns;
+  Vector<Str<QueryArena>, QueryArena> select_columns;
   if (!node->columns.empty()) {
     for (size_t i = 0; i < node->columns.size(); i++) {
       ASTNode *col_node = node->columns[i];
       if (col_node->type == AST_COLUMN_REF) {
         ColumnRefNode *col = (ColumnRefNode *)col_node;
-        select_columns.push_back(ArenaString<QueryArena>(col->name));
+        select_columns.push_back(Str<QueryArena>(col->name));
       }
     }
   }
@@ -1042,14 +1042,14 @@ build_select_from_ast(SelectNode *node) {
 }
 
 // Build INSERT from AST
-static ArenaVector<VMInstruction, QueryArena>
+static Vector<VMInstruction, QueryArena>
 build_insert_from_ast(InsertNode *node) {
-  ArenaVector<SetColumns, QueryArena> values;
+  Vector<SetColumns, QueryArena> values;
 
   // Get table to know column names
   Table *table = get_table(const_cast<char *>(node->table));
   if (!table) {
-    ArenaVector<VMInstruction, QueryArena> vec;
+    Vector<VMInstruction, QueryArena> vec;
     vec.push_back(make_halt());
     return vec;
   }
@@ -1068,7 +1068,7 @@ build_insert_from_ast(InsertNode *node) {
 }
 
 // Build UPDATE from AST
-static ArenaVector<VMInstruction, QueryArena>
+static Vector<VMInstruction, QueryArena>
 build_update_from_ast(UpdateNode *node) {
   ParsedParameters params;
   params.table_name = node->table;
@@ -1082,7 +1082,7 @@ build_update_from_ast(UpdateNode *node) {
       LiteralNode *lit = (LiteralNode *)set->value;
       uint32_t col_idx = resolve_column_index(set->column, node->table);
       params.set_columns.push_back(
-          SetColumns{ArenaString<QueryArena>(set->column), lit->value});
+          SetColumns{Str<QueryArena>(set->column), lit->value});
     }
   }
 
@@ -1090,7 +1090,7 @@ build_update_from_ast(UpdateNode *node) {
 }
 
 // Build DELETE from AST
-static ArenaVector<VMInstruction, QueryArena>
+static Vector<VMInstruction, QueryArena>
 build_delete_from_ast(DeleteNode *node) {
   ParsedParameters params;
   params.table_name = node->table;
@@ -1101,17 +1101,17 @@ build_delete_from_ast(DeleteNode *node) {
 }
 
 // Build CREATE TABLE from AST
-static ArenaVector<VMInstruction, QueryArena>
+static Vector<VMInstruction, QueryArena>
 build_create_table_from_ast(CreateTableNode *node) {
   return build_create_table(node->table, node->columns);
 }
 
 // Build CREATE INDEX from AST
-static ArenaVector<VMInstruction, QueryArena>
+static Vector<VMInstruction, QueryArena>
 build_create_index_from_ast(CreateIndexNode *node) {
   Table *table = get_table(const_cast<char *>(node->table));
   if (!table) {
-    ArenaVector<VMInstruction, QueryArena> vec;
+    Vector<VMInstruction, QueryArena> vec;
     vec.push_back(make_halt());
     return vec;
   }
@@ -1123,34 +1123,34 @@ build_create_index_from_ast(CreateIndexNode *node) {
 }
 
 // Build transaction commands from AST
-static ArenaVector<VMInstruction, QueryArena>
+static Vector<VMInstruction, QueryArena>
 build_begin_from_ast(BeginNode *node) {
-  ArenaVector<VMInstruction, QueryArena> vec;
+  Vector<VMInstruction, QueryArena> vec;
   vec.push_back(make_begin());
   vec.push_back(make_halt());
   return vec;
 }
 
-static ArenaVector<VMInstruction, QueryArena>
+static Vector<VMInstruction, QueryArena>
 build_commit_from_ast(CommitNode *node) {
-  ArenaVector<VMInstruction, QueryArena> vec;
+  Vector<VMInstruction, QueryArena> vec;
   vec.push_back(make_commit());
   vec.push_back(make_halt());
   return vec;
 }
 
-static ArenaVector<VMInstruction, QueryArena>
+static Vector<VMInstruction, QueryArena>
 build_rollback_from_ast(RollbackNode *node) {
-  ArenaVector<VMInstruction, QueryArena> vec;
+  Vector<VMInstruction, QueryArena> vec;
   vec.push_back(make_rollback());
   vec.push_back(make_halt());
   return vec;
 }
 
 // Main entry point - builds VM instructions from AST
-ArenaVector<VMInstruction, QueryArena> build_from_ast(ASTNode *ast) {
+Vector<VMInstruction, QueryArena> build_from_ast(ASTNode *ast) {
   if (!ast) {
-    ArenaVector<VMInstruction, QueryArena> vec;
+    Vector<VMInstruction, QueryArena> vec;
     vec.push_back(make_halt());
     return vec;
   }
@@ -1184,7 +1184,7 @@ ArenaVector<VMInstruction, QueryArena> build_from_ast(ASTNode *ast) {
     return build_rollback_from_ast((RollbackNode *)ast);
 
   default:
-    ArenaVector<VMInstruction, QueryArena> vec;
+    Vector<VMInstruction, QueryArena> vec;
     vec.push_back(make_halt());
     return vec;
   }

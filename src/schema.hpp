@@ -28,7 +28,7 @@ struct Index {
 struct Table {
   TableSchema schema;
   BTree tree;
-  ArenaMap<uint32_t, Index, SchemaArena> indexes;
+  Map<uint32_t, Index, SchemaArena> indexes;
 };
 
 // Schema registry functions
