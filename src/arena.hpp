@@ -89,15 +89,15 @@ template <typename Tag> size_t used() { return Arena<Tag>::used(); }
 
 // Arena-based vector
 template <typename T, typename ArenaTag, size_t InitialCapacity = 16>
-struct ArenaVector {
+struct Vector {
   T *data;
   size_t capacity;
   size_t count;
 
   // Constructor - automatically initializes
-  ArenaVector() : data(nullptr), capacity(0), count(0) {}
+  Vector() : data(nullptr), capacity(0), count(0) {}
 
-  ArenaVector& operator=(const ArenaVector& other) {
+  Vector& operator=(const Vector& other) {
         if (this != &other) {
             clear();
             set(other);
@@ -105,7 +105,7 @@ struct ArenaVector {
         return *this;
     }
 
-  void set(const ArenaVector<T, ArenaTag> & to_copy) {
+  void set(const Vector<T, ArenaTag> & to_copy) {
     if (count != 0) {
       // needs to be empty;
       return;
@@ -119,7 +119,7 @@ struct ArenaVector {
   }
 
   template<typename OtherArenaTag>
-  void set(const ArenaVector<T, OtherArenaTag>& to_copy) {
+  void set(const Vector<T, OtherArenaTag>& to_copy) {
       if(count != 0) {
           return; // or clear() first
       }
@@ -225,23 +225,23 @@ struct ArenaVector {
 };
 
 // Arena-based string
-template <typename ArenaTag, size_t InitialCapacity = 32> struct ArenaString {
+template <typename ArenaTag, size_t InitialCapacity = 32> struct Str {
   char *data;
   size_t len;
   size_t capacity;
 
   // Default constructor
-  ArenaString() : data(nullptr), len(0), capacity(0) {}
+  Str() : data(nullptr), len(0), capacity(0) {}
 
   // From C string
-  ArenaString(const char *str) : data(nullptr), len(0), capacity(0) {
+  Str(const char *str) : data(nullptr), len(0), capacity(0) {
     if (str) {
       assign(str);
     }
   }
 
   // Copy constructor
-  ArenaString(const ArenaString &other) : data(nullptr), len(0), capacity(0) {
+  Str(const Str &other) : data(nullptr), len(0), capacity(0) {
     if (other.data) {
       assign(other.data);
     }
@@ -266,12 +266,12 @@ template <typename ArenaTag, size_t InitialCapacity = 32> struct ArenaString {
   }
 
   // Assignment operators
-  ArenaString &operator=(const char *str) {
+  Str &operator=(const char *str) {
     assign(str);
     return *this;
   }
 
-  ArenaString &operator=(const ArenaString &other) {
+  Str &operator=(const Str &other) {
     if (this != &other && other.data) {
       assign(other.data);
     }
@@ -311,36 +311,36 @@ template <typename ArenaTag, size_t InitialCapacity = 32> struct ArenaString {
     append(buf);
   }
 
-  void append(const ArenaString &other) {
+  void append(const Str &other) {
     if (other.data) {
       append(other.data);
     }
   }
 
   // Concatenation operators
-  ArenaString operator+(const char *str) const {
-    ArenaString result(*this);
+  Str operator+(const char *str) const {
+    Str result(*this);
     result.append(str);
     return result;
   }
 
-  ArenaString operator+(const ArenaString &other) const {
-    ArenaString result(*this);
+  Str operator+(const Str &other) const {
+    Str result(*this);
     result.append(other);
     return result;
   }
 
-  ArenaString &operator+=(const char *str) {
+  Str &operator+=(const char *str) {
     append(str);
     return *this;
   }
 
-  ArenaString &operator+=(const ArenaString &other) {
+  Str &operator+=(const Str &other) {
     append(other);
     return *this;
   }
 
-  ArenaString &operator+=(char c) {
+  Str &operator+=(char c) {
     append(c);
     return *this;
   }
@@ -374,7 +374,7 @@ template <typename ArenaTag, size_t InitialCapacity = 32> struct ArenaString {
     return strcmp(data, str) == 0;
   }
 
-  bool operator==(const ArenaString &other) const {
+  bool operator==(const Str &other) const {
     if (!data && !other.data)
       return true;
     if (!data || !other.data)
@@ -384,9 +384,9 @@ template <typename ArenaTag, size_t InitialCapacity = 32> struct ArenaString {
 
   bool operator!=(const char *str) const { return !(*this == str); }
 
-  bool operator!=(const ArenaString &other) const { return !(*this == other); }
+  bool operator!=(const Str &other) const { return !(*this == other); }
 
-  bool operator<(const ArenaString &other) const {
+  bool operator<(const Str &other) const {
     if (!data && !other.data)
       return false;
     if (!data)
@@ -403,7 +403,7 @@ template <typename ArenaTag, size_t InitialCapacity = 32> struct ArenaString {
     return strstr(data, substr) != nullptr;
   }
 
-  bool contains(const ArenaString &substr) const {
+  bool contains(const Str &substr) const {
     if (!data || !substr.data)
       return false;
     return strstr(data, substr.data) != nullptr;
@@ -420,7 +420,7 @@ template <typename ArenaTag, size_t InitialCapacity = 32> struct ArenaString {
     return -1;
   }
 
-  int find(const ArenaString &substr) const { return find(substr.c_str()); }
+  int find(const Str &substr) const { return find(substr.c_str()); }
 
   // Check if string starts with prefix
   bool starts_with(const char *prefix) const {
@@ -441,7 +441,7 @@ template <typename ArenaTag, size_t InitialCapacity = 32> struct ArenaString {
      return strncmp(data, prefix, prefix_len) == 0;
   }
 
-  bool equals(const ArenaString &str) const {
+  bool equals(const Str &str) const {
      if(len != str.length()) {
          return false;
      }
@@ -450,7 +450,7 @@ template <typename ArenaTag, size_t InitialCapacity = 32> struct ArenaString {
   }
 
 
-  bool starts_with(const ArenaString &prefix) const {
+  bool starts_with(const Str &prefix) const {
     return starts_with(prefix.c_str());
   }
 
@@ -464,7 +464,7 @@ template <typename ArenaTag, size_t InitialCapacity = 32> struct ArenaString {
     return strcmp(data + len - suffix_len, suffix) == 0;
   }
 
-  bool ends_with(const ArenaString &suffix) const {
+  bool ends_with(const Str &suffix) const {
     return ends_with(suffix.c_str());
   }
 };
@@ -472,7 +472,7 @@ template <typename ArenaTag, size_t InitialCapacity = 32> struct ArenaString {
 // Arena-based map using linear search with contiguous storage
 template <typename K, typename V, typename ArenaTag,
           size_t InitialCapacity = 64>
-struct ArenaMap {
+struct Map {
   struct Entry {
     K key;
     V value;
@@ -488,7 +488,7 @@ struct ArenaMap {
   mutable bool has_cached;
 
   // Constructor - automatically initializes
-  ArenaMap()
+  Map()
       : entries(nullptr), capacity(0), count(0), cached_value(nullptr),
         has_cached(false) {}
 
@@ -727,8 +727,8 @@ struct ArenaMap {
   }
 
   // Get all keys
-  ArenaVector<K, ArenaTag> keys() const {
-    ArenaVector<K, ArenaTag> result;
+  Vector<K, ArenaTag> keys() const {
+    Vector<K, ArenaTag> result;
     result.reserve(count);
     for (size_t i = 0; i < count; i++) {
       result.push_back(entries[i].key);
@@ -737,8 +737,8 @@ struct ArenaMap {
   }
 
   // Get all values
-  ArenaVector<V, ArenaTag> values() const {
-    ArenaVector<V, ArenaTag> result;
+  Vector<V, ArenaTag> values() const {
+    Vector<V, ArenaTag> result;
     result.reserve(count);
     for (size_t i = 0; i < count; i++) {
       result.push_back(entries[i].value);
@@ -751,11 +751,11 @@ struct ArenaMap {
 };
 
 template <typename T, typename ArenaTag, size_t InitialCapacity = 16>
-struct ArenaSet {
-  ArenaVector<T, ArenaTag, InitialCapacity> vector;
+struct Set {
+  Vector<T, ArenaTag, InitialCapacity> vector;
 
   // Constructor
-  ArenaSet() {}
+  Set() {}
 
   // Insert an element (only if it doesn't exist)
   void insert(const T &item) { vector.insert_unique(item); }
@@ -794,11 +794,11 @@ struct ArenaSet {
 };
 
 template <typename T, typename ArenaTag, size_t InitialCapacity = 16>
-struct ArenaQueue {
-  ArenaVector<T, ArenaTag, InitialCapacity> vector;
+struct Queue {
+  Vector<T, ArenaTag, InitialCapacity> vector;
 
   // Constructor
-  ArenaQueue() {}
+  Queue() {}
 
   // Add element to the back of the queue
   void push(const T &item) { vector.push_back(item); }

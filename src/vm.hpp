@@ -49,7 +49,7 @@ struct VmEvent {
     } row_info;
   } context;
 };
-ArenaQueue<VmEvent, QueryArena> vm_events();
+Queue<VmEvent, QueryArena> vm_events();
 // Forward declaration for schema
 struct TableSchema;
 
@@ -531,7 +531,7 @@ struct OpenMemTree {
 enum VM_RESULT { OK, ABORT, ERR };
 
 // VM Functions
-VM_RESULT vm_execute(ArenaVector<VMInstruction, QueryArena> &instructions);
+VM_RESULT vm_execute(Vector<VMInstruction, QueryArena> &instructions);
 void vm_init();
 void vm_reset();
 void vm_shutdown();
@@ -746,7 +746,7 @@ inline void debug_print_instruction(const VMInstruction &inst, size_t index) {
   printf("\\n");
 }
 
-inline void debug_print_program(const ArenaVector<VMInstruction, QueryArena> &program) {
+inline void debug_print_program(const Vector<VMInstruction, QueryArena> &program) {
   printf("\\n=== VM Program (%zu instructions) ===\\n", program.size());
   printf("Idx  Opcode       Parameters\\n");
   printf("---  ------------ --------------------------------\\n");

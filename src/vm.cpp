@@ -74,10 +74,10 @@ uint8_t *vb_key(VmCursor *vb) { return vb_column(vb, 0); }
 
 static struct {
   ResultCallback callback;
-  ArenaVector<VMInstruction, QueryArena> program;
+  Vector<VMInstruction, QueryArena> program;
   uint32_t pc;
   bool halted;
-  ArenaQueue<VmEvent, QueryArena> events;
+  Queue<VmEvent, QueryArena> events;
 
   TypedValue registers[REGISTERS];
   VmCursor cursors[CURSORS];
@@ -702,7 +702,7 @@ VM_RESULT vm_step() {
   }
 }
 
-VM_RESULT vm_execute(ArenaVector<VMInstruction, QueryArena> &instructions) {
+VM_RESULT vm_execute(Vector<VMInstruction, QueryArena> &instructions) {
   if (!VM.initialized) {
     vm_init();
   }
@@ -724,6 +724,6 @@ void vm_set_result_callback(ResultCallback callback) {
   VM.callback = callback;
 }
 
-ArenaQueue<VmEvent, QueryArena> vm_events() {
+Queue<VmEvent, QueryArena> vm_events() {
     return VM.events;
 }

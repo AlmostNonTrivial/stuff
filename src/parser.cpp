@@ -679,8 +679,8 @@ ASTNode* parse_statement(const char* sql) {
 
     return ast;
 }
-ArenaVector<ASTNode*, QueryArena> parse_sql(const char* sql) {
-    ArenaVector<ASTNode*, QueryArena> statements;
+Vector<ASTNode*, QueryArena> parse_sql(const char* sql) {
+    Vector<ASTNode*, QueryArena> statements;
 
     // Simple multi-statement parsing
     const char* current = sql;

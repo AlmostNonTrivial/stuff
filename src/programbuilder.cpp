@@ -15,7 +15,7 @@ void err(const char *msg) {
 
 // Helper 8: Comparison Instruction Builder
 inline void
-add_comparison_with_label(ArenaVector<VMInstruction, QueryArena> &instructions,
+add_comparison_with_label(Vector<VMInstruction, QueryArena> &instructions,
                           OpCode op, int reg1, int reg2, const char *label) {
 
   switch (op) {
@@ -42,7 +42,7 @@ add_comparison_with_label(ArenaVector<VMInstruction, QueryArena> &instructions,
 
 // Helper 9: Seek Instruction Builder
 inline void
-add_seek_instruction(ArenaVector<VMInstruction, QueryArena> &instructions,
+add_seek_instruction(Vector<VMInstruction, QueryArena> &instructions,
                      CompareOp op, int cursor_id, int key_reg,
                      const char *label) {
 
@@ -93,8 +93,8 @@ struct RegisterAllocator {
 // ============================================================================
 
 void resolve_labels(
-    ArenaVector<VMInstruction, QueryArena> &program,
-    const ArenaMap<ArenaString<QueryArena>, int, QueryArena> &map) {
+    Vector<VMInstruction, QueryArena> &program,
+    const Map<Str<QueryArena>, int, QueryArena> &map) {
   for (size_t i = 0; i < program.size(); i++) {
     auto &inst = program[i];
     // Check p2 for label (stored as string in p4)
