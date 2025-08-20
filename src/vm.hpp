@@ -25,6 +25,8 @@ enum EventType {
   EVT_TRANSACTION_ROLLBACK
 };
 
+
+
 struct VmEvent {
   EventType type;
   void *data;
@@ -47,7 +49,7 @@ struct VmEvent {
     } row_info;
   } context;
 };
-
+ArenaQueue<VmEvent, QueryArena> vm_events();
 // Forward declaration for schema
 struct TableSchema;
 

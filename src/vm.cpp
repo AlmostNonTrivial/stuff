@@ -77,6 +77,7 @@ static struct {
   ArenaVector<VMInstruction, QueryArena> program;
   uint32_t pc;
   bool halted;
+  ArenaQueue<VmEvent, QueryArena> events;
 
   TypedValue registers[REGISTERS];
   VmCursor cursors[CURSORS];
@@ -116,10 +117,6 @@ bool vm_is_halted() { return VM.halted; }
 VM_RESULT vm_step() {
   VMInstruction *inst = &VM.program[VM.pc];
 
-  if (_debug) {
-    printf("EXEC: ");
-    debug_print_instruction(*inst, VM.pc);
-  }
 
   switch (inst->opcode) {
   case OP_Halt:
@@ -180,7 +177,7 @@ VM_RESULT vm_step() {
 
     Table *table = get_table(table_name);
     if (!table) {
-      if (_debug) printf("ERROR: Table '%s' not found\\n", table_name);
+
       return ERR;
     }
 
@@ -190,7 +187,7 @@ VM_RESULT vm_step() {
     if (index_column != 0) {
       Index *index = get_index(table_name, index_column);
       if (!index) {
-        if (_debug) printf("ERROR: Index on column %d not found\\n", index_column);
+
         return ERR;
       }
 
@@ -412,15 +409,22 @@ VM_RESULT vm_step() {
         // Check for duplicate key in table
         bool exists = btree_cursor_seek(&cursor->btree_cursor, key->data);
         if (exists) {
-          if (_debug) printf("ERROR: Duplicate key\\n");
           return ERR;
         }
       }
+      uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
       success = btree_cursor_insert(&cursor->btree_cursor, key->data, record->data);
+      if(current_root != cursor->btree_cursor.tree->root_page_index) {
+         VmEvent event;
+         event.type = EVT_BTREE_ROOT_CHANGED;
+         event.context.table_info.table_name = cursor->schema->table_name.c_str();
+         event.context.table_info.column = cursor->is_index ? 0 : cursor->column;
+
+         VM.events.push(event);
+      }
     }
 
     if (!success) {
-      if (_debug) printf("ERROR: Insert failed\\n");
       return ERR;
     }
 
@@ -437,6 +441,14 @@ VM_RESULT vm_step() {
       memcursor_delete(&cursor->mem_cursor);
     } else {
       btree_cursor_delete(&cursor->btree_cursor);
+      uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
+      if(current_root != cursor->btree_cursor.tree->root_page_index) {
+         VmEvent event;
+         event.type = EVT_BTREE_ROOT_CHANGED;
+         event.context.table_info.table_name = cursor->schema->table_name.c_str();
+         event.context.table_info.column = cursor->is_index ? 0 : cursor->column;
+         VM.events.push(event);
+      }
     }
 
     VM.pc++;
@@ -449,6 +461,11 @@ VM_RESULT vm_step() {
 
     VmCursor *cursor = &VM.cursors[cursor_id];
     TypedValue *record = &VM.registers[record_reg];
+
+    if(cursor->is_index) {
+        // updates only on b+tree
+        return ERR;
+    }
 
     if (cursor->is_memory) {
       memcursor_update(&cursor->mem_cursor, record->data);
@@ -564,7 +581,6 @@ VM_RESULT vm_step() {
     TableSchema *schema = Opcodes::CreateTable::schema(*inst);
 
     if (get_table(schema->table_name.c_str())) {
-      if (_debug) printf("ERROR: Table already exists\\n");
       return ERR;
     }
 
@@ -577,6 +593,10 @@ VM_RESULT vm_step() {
                                    new_table->schema.record_size, BPLUS);
 
     add_table(new_table);
+    VmEvent event;
+    event.type = EVT_TABLE_CREATED;
+    event.context.table_info.table_name = new_table->schema.table_name.c_str();
+    VM.events.push(event);
     VM.pc++;
     return OK;
   }
@@ -587,12 +607,12 @@ VM_RESULT vm_step() {
 
     Table *table = get_table(table_name);
     if (!table) {
-      if (_debug) printf("ERROR: Table not found for index creation\\n");
+
       return ERR;
     }
 
     if (get_index(table_name, column)) {
-      if (_debug) printf("ERROR: Index already exists\\n");
+
       return ERR;
     }
 
@@ -602,6 +622,13 @@ VM_RESULT vm_step() {
                                table->schema.key_type(), BTREE);
 
     add_index(table_name, index);
+
+    VmEvent event;
+    event.type = EVT_INDEX_CREATED;
+    event.context.table_info.table_name = table_name;
+    event.context.table_info.column = column;
+
+    VM.events.push(event);
     VM.pc++;
     return OK;
   }
@@ -611,7 +638,6 @@ VM_RESULT vm_step() {
 
     Table *table = get_table(table_name);
     if (!table) {
-      if (_debug) printf("ERROR: Table not found for drop\\n");
       return ERR;
     }
 
@@ -621,6 +647,11 @@ VM_RESULT vm_step() {
     }
 
     remove_table(table_name);
+    VmEvent event;
+    event.type = EVT_TABLE_DROPPED;
+    event.context.table_info.table_name = table_name;
+
+    VM.events.push(event);
     VM.pc++;
     return OK;
   }
@@ -631,18 +662,21 @@ VM_RESULT vm_step() {
 
     Table *table = get_table(table_name);
     if (!table) {
-      if (_debug) printf("ERROR: Table not found for index drop\\n");
       return ERR;
     }
 
     Index *index = get_index(table_name, column);
     if (!index) {
-      if (_debug) printf("ERROR: Index not found for drop\\n");
       return ERR;
     }
 
     btree_clear(&index->tree);
     remove_index(table_name, column);
+    VmEvent event;
+    event.type = EVT_INDEX_DROPPED;
+    event.context.table_info.table_name = table_name;
+    event.context.table_info.column = column;
+    VM.events.push(event);
     VM.pc++;
     return OK;
   }
@@ -676,9 +710,6 @@ VM_RESULT vm_execute(ArenaVector<VMInstruction, QueryArena> &instructions) {
   vm_reset();
   VM.program.set(instructions);
 
-  if (_debug) {
-    debug_print_program(VM.program);
-  }
 
   while (!VM.halted && VM.pc < VM.program.size()) {
     VM_RESULT result = vm_step();
@@ -691,4 +722,8 @@ VM_RESULT vm_execute(ArenaVector<VMInstruction, QueryArena> &instructions) {
 
 void vm_set_result_callback(ResultCallback callback) {
   VM.callback = callback;
+}
+
+ArenaQueue<VmEvent, QueryArena> vm_events() {
+    return VM.events;
 }
