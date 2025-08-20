@@ -1,23 +1,84 @@
-// programbuilder.cpp - Simplified version
+// programbuilder.cpp - Simplified version with full table scans only
 #include "programbuilder.hpp"
 #include "arena.hpp"
 #include "defs.hpp"
 #include "schema.hpp"
 #include "vm.hpp"
+#include <algorithm>
 #include <cstring>
 
-// Simple register allocator
-struct RegisterAllocator {
-    int next_reg = 0;
 
-    int alloc() {
-        return next_reg++;
+#define END "end"
+
+
+// Register allocator with named registers for debugging
+struct RegisterAllocator {
+    Map<Str<QueryArena>, uint32_t, QueryArena, REGISTERS> name_to_register;
+    int next_register = 0;
+
+    int get(const char* name) {
+        auto it = name_to_register.find(name);
+        if (it == nullptr) {
+            name_to_register[name] = next_register;
+            return next_register++;
+        }
+        return *it;
     }
 
-    void reset() {
-        next_reg = 0;
+    void clear() {
+        name_to_register.clear();
+        next_register = 0;
     }
 };
+
+// Helper to resolve labels to addresses
+static void resolve_labels(Vector<VMInstruction, QueryArena>& program,
+                          const Map<Str<QueryArena>, int, QueryArena>& labels) {
+    for (size_t i = 0; i < program.size(); i++) {
+        auto& inst = program[i];
+
+        // Check if p2 contains a label reference (stored as string in p4 when p2 == -1)
+        if (inst.p4 && inst.p2 == -1) {
+            auto it = labels.find((const char*)inst.p4);
+            if (it != nullptr) {
+                inst.p2 = *it;
+                inst.p4 = nullptr;
+            }
+        }
+
+        // Check if p3 contains a label reference
+        if (inst.p4 && inst.p3 == -1) {
+            auto it = labels.find((const char*)inst.p4);
+            if (it != nullptr) {
+                inst.p3 = *it;
+                inst.p4 = nullptr;
+            }
+        }
+    }
+}
+
+// Helper functions for creating labeled instructions
+static VMInstruction make_goto_label(const char* label) {
+    return {OP_Goto, 0, -1, 0, (void*)label, 0};
+}
+
+static VMInstruction make_first_label(int cursor_id, const char* empty_label) {
+    VMInstruction inst = Opcodes::First::create(cursor_id, -1);
+    inst.p4 = (void*)empty_label;
+    return inst;
+}
+
+static VMInstruction make_next_label(int cursor_id, const char* loop_label) {
+    VMInstruction inst = Opcodes::Next::create(cursor_id, -1);
+    inst.p4 = (void*)loop_label;
+    return inst;
+}
+
+static VMInstruction make_compare_label(int reg_a, int reg_b, CompareOp op, const char* label) {
+    VMInstruction inst = Opcodes::Compare::create(reg_a, reg_b, -1, op);
+    inst.p4 = (void*)label;
+    return inst;
+}
 
 // Helper to load a value into a register
 static void load_value(Vector<VMInstruction, QueryArena>& program,
@@ -30,7 +91,7 @@ static void load_value(Vector<VMInstruction, QueryArena>& program,
     }
 }
 
-// Extract WHERE conditions from AST (simplified)
+// Extract WHERE conditions from AST
 static Vector<WhereCondition, QueryArena>
 extract_where_conditions(WhereNode* where, const char* table_name) {
     Vector<WhereCondition, QueryArena> conditions;
@@ -75,22 +136,22 @@ extract_where_conditions(WhereNode* where, const char* table_name) {
 static void build_where_checks(Vector<VMInstruction, QueryArena>& program,
                               int cursor_id,
                               const Vector<WhereCondition, QueryArena>& conditions,
-                              int skip_target,
+                              const char* skip_label,
                               RegisterAllocator& regs) {
-    for (auto& cond : conditions) {
-        int col_reg = regs.alloc();
-        int val_reg = regs.alloc();
+    for (size_t i = 0; i < conditions.size(); i++) {
+        int col_reg = regs.get(("where_col_" + std::to_string(i)).c_str());
+        int val_reg = regs.get(("compare_" + std::to_string(i)).c_str());
 
         // Load column value
-        program.push_back(Opcodes::Column::create(cursor_id, cond.column_index, col_reg));
+        program.push_back(Opcodes::Column::create(cursor_id, conditions[i].column_index, col_reg));
 
         // Load comparison value
-        load_value(program, cond.value, val_reg);
+        load_value(program, conditions[i].value, val_reg);
 
         // Compare and jump if NOT matching (we want to skip non-matching rows)
         // Invert the operator for the jump
         CompareOp inverted_op;
-        switch (cond.operator_type) {
+        switch (conditions[i].operator_type) {
             case EQ: inverted_op = NE; break;
             case NE: inverted_op = EQ; break;
             case LT: inverted_op = GE; break;
@@ -100,7 +161,8 @@ static void build_where_checks(Vector<VMInstruction, QueryArena>& program,
             default: inverted_op = NE;
         }
 
-        program.push_back(Opcodes::Compare::create(col_reg, val_reg, skip_target, inverted_op));
+        // Create jump with label
+        program.push_back(make_compare_label(col_reg, val_reg, inverted_op, skip_label));
     }
 }
 
@@ -111,50 +173,55 @@ static Vector<VMInstruction, QueryArena>
 build_select_from_ast(SelectNode* node) {
     Vector<VMInstruction, QueryArena> program;
     RegisterAllocator regs;
+    Map<Str<QueryArena>, int, QueryArena> labels;
 
     const int cursor_id = 0;
+    const int memtree_id = 1;
     Table* table = get_table(node->table);
-    if (!table) {
-        program.push_back(Opcodes::Halt::create());
-        return program;
-    }
 
     // Open table for reading
     program.push_back(Opcodes::OpenRead::create(cursor_id, node->table));
+    program.push_back(Opcodes::OpenMemTree::create(memtree_id, table->schema.key_type(), table->schema.record_size + table->schema.key_type()));
 
     // Extract WHERE conditions
     auto conditions = extract_where_conditions(node->where, node->table);
 
     // Position to first record
-    int empty_jump = program.size() + conditions.size() * 3 + 10; // Rough estimate
-    program.push_back(Opcodes::First::create(cursor_id, empty_jump));
+    program.push_back(make_first_label(cursor_id, "end"));
 
     // Loop start
-    int loop_start = program.size();
+    labels["loop_start"] = program.size();
 
     // Check WHERE conditions (skip to next_row if any fail)
-    int next_row_target = loop_start + conditions.size() * 3 + table->schema.columns.size() + 3;
-    build_where_checks(program, cursor_id, conditions, next_row_target, regs);
+    build_where_checks(program, cursor_id, conditions, "next_row", regs);
 
     // Output row - read all columns
     Vector<int, QueryArena> output_regs;
+
+    int key_reg= regs.get("key");
+    program.push_back(Opcodes::Column::create(cursor_id, 0, key_reg));
     for (size_t i = 0; i < table->schema.columns.size(); i++) {
-        int reg = regs.alloc();
+        int reg = regs.get(("output_col_" + std::to_string(i)).c_str());
         output_regs.push_back(reg);
         program.push_back(Opcodes::Column::create(cursor_id, i, reg));
     }
 
     // Make record from registers and output it
-    int record_reg = regs.alloc();
+    int record_reg = regs.get("record");
     program.push_back(Opcodes::MakeRecord::create(output_regs[0], output_regs.size(), record_reg));
+    program.push_back(Opcodes::Insert::create(memtree_id, key_reg, record_reg));
 
     // Next row
-    program.push_back(Opcodes::Next::create(cursor_id, loop_start));
+    labels["next_row"] = program.size();
+    program.push_back(make_next_label(cursor_id, "loop_start"));
 
     // Done
+    labels["end"] = program.size();
     program.push_back(Opcodes::Close::create(cursor_id));
+    program.push_back(Opcodes::Flush::create(memtree_id));
     program.push_back(Opcodes::Halt::create());
 
+    resolve_labels(program, labels);
     return program;
 }
 
@@ -192,14 +259,14 @@ build_insert_from_ast(InsertNode* node) {
     for (size_t i = 0; i < node->values.size() && i < table->schema.columns.size(); i++) {
         if (node->values[i]->type == AST_LITERAL) {
             LiteralNode* lit = (LiteralNode*)node->values[i];
-            int reg = regs.alloc();
+            int reg = regs.get(("value_" + std::to_string(i)).c_str());
             value_regs.push_back(reg);
             load_value(program, lit->value, reg);
         }
     }
 
     // Build record (excluding key which is at index 0)
-    int record_reg = regs.alloc();
+    int record_reg = regs.get("record");
     if (value_regs.size() > 1) {
         program.push_back(Opcodes::MakeRecord::create(value_regs[1], value_regs.size() - 1, record_reg));
     }
@@ -235,6 +302,7 @@ static Vector<VMInstruction, QueryArena>
 build_delete_from_ast(DeleteNode* node) {
     Vector<VMInstruction, QueryArena> program;
     RegisterAllocator regs;
+    Map<Str<QueryArena>, int, QueryArena> labels;
 
     const int cursor_id = 0;
 
@@ -245,26 +313,27 @@ build_delete_from_ast(DeleteNode* node) {
     auto conditions = extract_where_conditions(node->where, node->table);
 
     // Position to first record
-    int empty_jump = program.size() + conditions.size() * 3 + 5;
-    program.push_back(Opcodes::First::create(cursor_id, empty_jump));
+    program.push_back(make_first_label(cursor_id, "end"));
 
     // Loop start
-    int loop_start = program.size();
+    labels["loop_start"] = program.size();
 
     // Check WHERE conditions
-    int next_row_target = loop_start + conditions.size() * 3 + 2;
-    build_where_checks(program, cursor_id, conditions, next_row_target, regs);
+    build_where_checks(program, cursor_id, conditions, "next_row", regs);
 
     // Delete the record (from table only)
     program.push_back(Opcodes::Delete::create(cursor_id));
 
     // Next row
-    program.push_back(Opcodes::Next::create(cursor_id, loop_start));
+    labels["next_row"] = program.size();
+    program.push_back(make_next_label(cursor_id, "loop_start"));
 
     // Done
+    labels["end"] = program.size();
     program.push_back(Opcodes::Close::create(cursor_id));
     program.push_back(Opcodes::Halt::create());
 
+    resolve_labels(program, labels);
     return program;
 }
 
@@ -275,6 +344,7 @@ static Vector<VMInstruction, QueryArena>
 build_update_from_ast(UpdateNode* node) {
     Vector<VMInstruction, QueryArena> program;
     RegisterAllocator regs;
+    Map<Str<QueryArena>, int, QueryArena> labels;
 
     Table* table = get_table(node->table);
     if (!table) {
@@ -310,20 +380,18 @@ build_update_from_ast(UpdateNode* node) {
     auto conditions = extract_where_conditions(node->where, node->table);
 
     // Position to first record
-    int empty_jump = program.size() + 100; // Rough estimate
-    program.push_back(Opcodes::First::create(table_cursor, empty_jump));
+    program.push_back(make_first_label(table_cursor, "end"));
 
     // Loop start
-    int loop_start = program.size();
+    labels["loop_start"] = program.size();
 
     // Check WHERE conditions
-    int next_row_target = loop_start + 50; // Rough estimate
-    build_where_checks(program, table_cursor, conditions, next_row_target, regs);
+    build_where_checks(program, table_cursor, conditions, "next_row", regs);
 
     // Read all current column values
     Vector<int, QueryArena> current_regs;
     for (size_t i = 0; i < table->schema.columns.size(); i++) {
-        int reg = regs.alloc();
+        int reg = regs.get(("current_col_" + std::to_string(i)).c_str());
         current_regs.push_back(reg);
         program.push_back(Opcodes::Column::create(table_cursor, i, reg));
     }
@@ -338,7 +406,7 @@ build_update_from_ast(UpdateNode* node) {
     }
 
     // Build new record (excluding key)
-    int record_reg = regs.alloc();
+    int record_reg = regs.get("record");
     program.push_back(Opcodes::MakeRecord::create(current_regs[1], current_regs.size() - 1, record_reg));
 
     // Update the table record
@@ -352,7 +420,11 @@ build_update_from_ast(UpdateNode* node) {
     }
 
     // Next row
-    program.push_back(Opcodes::Next::create(table_cursor, loop_start));
+    labels["next_row"] = program.size();
+    program.push_back(make_next_label(table_cursor, "loop_start"));
+
+    // Done
+    labels["end"] = program.size();
 
     // Close all cursors
     program.push_back(Opcodes::Close::create(table_cursor));
@@ -361,6 +433,8 @@ build_update_from_ast(UpdateNode* node) {
     }
 
     program.push_back(Opcodes::Halt::create());
+
+    resolve_labels(program, labels);
     return program;
 }
 
@@ -383,6 +457,7 @@ static Vector<VMInstruction, QueryArena>
 build_create_index_from_ast(CreateIndexNode* node) {
     Vector<VMInstruction, QueryArena> program;
     RegisterAllocator regs;
+    Map<Str<QueryArena>, int, QueryArena> labels;
 
     Table* table = get_table(node->table);
     if (!table) {
@@ -403,14 +478,15 @@ build_create_index_from_ast(CreateIndexNode* node) {
     program.push_back(Opcodes::OpenWrite::create(index_cursor, node->table, col_idx));
 
     // Scan table
-    int empty_jump = program.size() + 7;
-    program.push_back(Opcodes::First::create(table_cursor, empty_jump));
+    VMInstruction first_inst = Opcodes::First::create(table_cursor, -1);
+    first_inst.p4 = (void*)"end";
+    program.push_back(first_inst);
 
-    int loop_start = program.size();
+    labels["loop_start"] = program.size();
 
     // Get key and column value
-    int key_reg = regs.alloc();
-    int col_reg = regs.alloc();
+    int key_reg = regs.get("key");
+    int col_reg = regs.get("column_value");
     program.push_back(Opcodes::Column::create(table_cursor, 0, key_reg));
     program.push_back(Opcodes::Column::create(table_cursor, col_idx, col_reg));
 
@@ -418,12 +494,17 @@ build_create_index_from_ast(CreateIndexNode* node) {
     program.push_back(Opcodes::Insert::create(index_cursor, col_reg, key_reg));
 
     // Next
-    program.push_back(Opcodes::Next::create(table_cursor, loop_start));
+    VMInstruction next_inst = Opcodes::Next::create(table_cursor, -1);
+    next_inst.p4 = (void*)"loop_start";
+    program.push_back(next_inst);
+
+    labels["end"] = program.size();
 
     program.push_back(Opcodes::Close::create(table_cursor));
     program.push_back(Opcodes::Close::create(index_cursor));
     program.push_back(Opcodes::Halt::create());
 
+    resolve_labels(program, labels);
     return program;
 }
 

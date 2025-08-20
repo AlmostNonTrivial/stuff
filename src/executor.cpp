@@ -544,7 +544,7 @@ void execute(const char *sql) {
     Vector<VMInstruction, QueryArena> program = build_from_ast(statement);
 
     debug_print_program(program);
-    if(statement->type == AST_UPDATE){
+    if(statement->type == AST_SELECT){
         _debug = true;
     }
 
