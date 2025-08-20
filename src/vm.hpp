@@ -743,20 +743,20 @@ inline void debug_print_instruction(const VMInstruction &inst, size_t index) {
     printf("p1=%d p2=%d p3=%d p4=%p p5=%d", inst.p1, inst.p2, inst.p3, inst.p4, inst.p5);
   }
 
-  printf("\\n");
+  printf("\n");
 }
 
 inline void debug_print_program(const Vector<VMInstruction, QueryArena> &program) {
-  printf("\\n=== VM Program (%zu instructions) ===\\n", program.size());
-  printf("Idx  Opcode       Parameters\\n");
-  printf("---  ------------ --------------------------------\\n");
+  printf("\n=== VM Program (%zu instructions) ===\n", program.size());
+  printf("Idx  Opcode       Parameters\n");
+  printf("---  ------------ --------------------------------\n");
 
   for (size_t i = 0; i < program.size(); i++) {
     debug_print_instruction(program[i], i);
   }
 
   // Print jump targets for easier navigation
-  printf("\\n=== Jump Targets ===\\n");
+  printf("\n=== Jump Targets ===\n");
   for (size_t i = 0; i < program.size(); i++) {
     const auto &inst = program[i];
     bool is_target = false;
@@ -775,9 +775,9 @@ inline void debug_print_program(const Vector<VMInstruction, QueryArena> &program
     }
 
     if (is_target) {
-      printf("  Label_%zu: instruction [%zu] %s\\n", i, i, opcode_to_string(inst.opcode));
+      printf("  Label_%zu: instruction [%zu] %s\n", i, i, opcode_to_string(inst.opcode));
     }
   }
 
-  printf("\\n");
+  printf("\n");
 }

@@ -104,6 +104,7 @@ void vm_reset() {
   }
 
   VM.program.clear();
+  VM.events.clear();
 }
 
 void vm_init() {
