@@ -186,6 +186,7 @@ OpCode to_opcode(CompareOp op) {
   return OP_Eq;
 }
 
+/* Because the tree scans left to right ... */
 bool ascending(CompareOp op) { return op == GE || op == GT || op == EQ; }
 
 // Helper to resolve column name to index
@@ -260,6 +261,7 @@ void build_where_checks(
     ArenaVector<VMInstruction, QueryArena> &instructions, int cursor_id,
     const ArenaVector<WhereCondition, QueryArena> &conditions,
     const ArenaString<QueryArena> &skip_label, RegisterAllocator &regs) {
+
   for (size_t i = 0; i < conditions.size(); i++) {
     int col_reg = regs.get(("where_col_" + std::to_string(i)).c_str());
     instructions.push_back(
@@ -670,32 +672,30 @@ static ArenaVector<VMInstruction, QueryArena> build_select_index_scan(
   load_value(instructions, index_condition.value, index_key_reg);
 
   // Build seek based on operator type
-  add_seek_instruction(instructions, index_condition.operator_type,
-                       index_cursor_id, index_key_reg, "end");
+  add_seek_instruction(instructions, index_condition.operator_type, index_cursor_id, index_key_reg, "end");
 
   labels["loop_start"] = instructions.size();
 
+
   int current_key_reg = regs.get("current_key");
+  // the col of the index is 0, so make key
   instructions.push_back(make_key(index_cursor_id, current_key_reg));
 
   OpCode negated_op = get_negated_opcode(index_condition.operator_type);
-  add_comparison_with_label(instructions, negated_op, current_key_reg,
-                            index_key_reg, "end");
+  add_comparison_with_label(instructions, negated_op, current_key_reg, index_key_reg, "end");
 
   int rowid_reg = regs.get("rowid");
+  // load the 'record' of the index, which we'll then search for the record for
   instructions.push_back(make_column(index_cursor_id, 1, rowid_reg));
 
-  instructions.push_back(
-      make_seek_eq_label(table_cursor_id, rowid_reg, "next_iteration"));
+  instructions.push_back(make_seek_eq_label(table_cursor_id, rowid_reg, "next_iteration"));
 
-  build_where_checks(instructions, table_cursor_id, remaining_conditions,
-                     "next_iteration", regs);
+  build_where_checks(instructions, table_cursor_id, remaining_conditions, "next_iteration", regs);
 
   if (!aggregate_func.empty()) {
     instructions.push_back(make_agg_step());
   } else {
-    build_select_output(instructions, table_cursor_id, select_columns,
-                        table_name, regs);
+    build_select_output(instructions, table_cursor_id, select_columns, table_name, regs);
   }
 
   labels["next_iteration"] = instructions.size();
@@ -998,10 +998,7 @@ static ArenaVector<VMInstruction, QueryArena> build_update_index_scan(
   const int table_cursor_id = 1;
   const int index_cursor_id = 0;
 
-
-
-  instructions.push_back(
-      make_open_write(index_cursor_id, table_name.c_str(), index_col));
+  instructions.push_back(make_open_write(index_cursor_id, table_name.c_str(), index_col));
   instructions.push_back(make_open_write(table_cursor_id, table_name.c_str()));
 
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
@@ -1348,11 +1345,9 @@ build_create_index(const ArenaString<QueryArena> &table_name,
   const int index_cursor_id = 1;
 
 
-
   instructions.push_back(make_create_index(column_index, table_name.c_str()));
   instructions.push_back(make_open_read(table_cursor_id, table_name.c_str()));
-  instructions.push_back(
-      make_open_write(index_cursor_id, table_name.c_str(), column_index));
+  instructions.push_back(make_open_write(index_cursor_id, table_name.c_str(), column_index));
 
   instructions.push_back(make_rewind_label(table_cursor_id, "end"));
 
@@ -1389,40 +1384,38 @@ build_insert(const ArenaString<QueryArena> &table_name,
 
   // Get indexes for this table
   Table *table = get_table(const_cast<char *>(table_name.c_str()));
-  if (!table) {
-    ArenaVector<VMInstruction, QueryArena> vec;
-    vec.push_back(make_halt());
-    return vec;
-  }
 
+
+  // <column_index, cursorid>
   ArenaMap<uint32_t, int, QueryArena> indexes_to_insert;
   int cursor_id = 1;
 
   instructions.push_back(make_open_write(table_cursor_id, table_name.c_str()));
 
+  // as we make a full record, we need to update all indexes
   for (int i = 0; i < table->indexes.size(); i++) {
-    auto key = table->indexes.key_at(i);
-    indexes_to_insert[*key] = cursor_id++;
-    instructions.push_back(
-        make_open_write(cursor_id - 1, table_name.c_str(), *key));
+    uint32_t column_index = *table->indexes.key_at(i);
+    auto index_cursor = cursor_id++;
+    indexes_to_insert[column_index] = index_cursor;
+    instructions.push_back(make_open_write(index_cursor, table_name.c_str(), column_index));
   }
 
-  // Load values into registers
+  // Load values into registers, full record on insert
   ArenaVector<int, QueryArena> value_regs;
   for (size_t i = 0; i < values.size(); i++) {
+    // key is at value_regs[0]
     int reg = regs.get(("value_" + std::to_string(i)).c_str());
     value_regs.push_back(reg);
     load_value(instructions, values[i].second, reg);
 
     // Find column index for this value
-    uint32_t col_idx =
-        get_column_index(const_cast<char *>(table_name.c_str()),
+    uint32_t col_idx = get_column_index(const_cast<char *>(table_name.c_str()),
                          const_cast<char *>(values[i].first.c_str()));
 
     // Insert into indexes if needed
-    auto idx_it = indexes_to_insert.find(col_idx);
-    if (idx_it != nullptr) {
-      instructions.push_back(make_insert(*idx_it, reg, value_regs[0]));
+    auto index_cursor_id = indexes_to_insert.find(col_idx);
+    if (index_cursor_id != nullptr) {
+      instructions.push_back(make_insert(*index_cursor_id, reg, value_regs[0]));
     }
   }
 
@@ -1430,13 +1423,10 @@ build_insert(const ArenaString<QueryArena> &table_name,
 
   // IMPORTANT FIX: Record excludes column 0 (the key)!
   // Start from value_regs[1] and use (values.size() - 1) columns
-  instructions.push_back(
-      make_record(value_regs[1], (int32_t)(values.size() - 1), record_reg));
+  instructions.push_back(make_record(value_regs[1], (int32_t)(values.size() - 1), record_reg));
 
   // Key is in value_regs[0], record is in record_reg
-  instructions.push_back(
-      make_insert(table_cursor_id, value_regs[0], record_reg));
-
+  instructions.push_back(make_insert(table_cursor_id, value_regs[0], record_reg));
   instructions.push_back(make_close(table_cursor_id));
   instructions.push_back(make_halt());
 

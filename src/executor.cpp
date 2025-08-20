@@ -391,7 +391,13 @@ static void init_executor() {
 
 ExecutionMeta meta;
 
+
+int executed = 0;
 ExecutionMeta *execute(const char *sql) {
+
+    executed++;
+    std::cout  <<executed << ":  "<< sql << '\n';
+
   arena::reset<QueryArena>();
 
   if (!executor_state.initialized) {
@@ -429,11 +435,19 @@ ExecutionMeta *execute(const char *sql) {
 
     // Build and execute program
     ArenaVector<VMInstruction, QueryArena> program = build_from_ast(statement);
+
     debug_print_program(program);
+    if(statement->type == AST_UPDATE){
+        _debug = true;
+    }
     meta.sql = sql;
 
+    // if(statement->type == AST_CREATE_INDEX){
+    //     _debug = true;
+    // }
+
     VM_RESULT result = vm_execute(program);
-    meta.result = result;
+
 
     if (result != OK) {
       success = false;
@@ -444,6 +458,9 @@ ExecutionMeta *execute(const char *sql) {
         executor_state.in_transaction = false;
         rebuild_schema_from_master();
       }
+
+      std::cout << "failed\n";
+      exit(1);
 
       break;
     } else {

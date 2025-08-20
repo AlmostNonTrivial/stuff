@@ -772,7 +772,7 @@ inline VMInstruction make_column(int32_t cursor_id, int32_t column_index, int32_
 inline VMInstruction make_key(int32_t cursor_id, int32_t dest_reg) {
     return Opcodes::Column::create(cursor_id, 0, dest_reg);
 }
-inline VMInstruction make_record(int32_t first_reg, int32_t reg_count, int32_t dest_reg) {
+inline VMInstruction make_record(int32_t first_reg /* of record, not key */, int32_t reg_count, int32_t dest_reg) {
     return Opcodes::MakeRecord::create(first_reg, reg_count, dest_reg);
 }
 inline VMInstruction make_insert(int32_t cursor_id, int32_t key_reg, int32_t record_reg) {

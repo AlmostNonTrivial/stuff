@@ -96,11 +96,29 @@ ArenaString<QueryArena> vm_values_to_row_string(
 }
 
 void print_buf(ArenaVector<ArenaVector<VMValue, QueryArena>, QueryArena> buf){
+    std::cout << "RESULTS =========================================\n";
     for (auto &row : buf) {
     std::cout << vm_values_to_row_string(row).c_str();
       std::cout << "\n";
     }
+
+
+    std::cout << "=================================================\n";
 }
+
+
+/* NOTES
+
+- can we pretty print the schema?
+- what is the point of the rewind? Could we just do first and last?
+- can we print the begining statement
+- because we can have duplicates in index, need to match
+both key and record
+- make sure seek_lt, seek_gt works with jump
+- I think it's the case that seek eq works with next, because the tree
+scans left to right
+- maybe we can create a err opcode that is passed halt
+ */
 
 int main() {
 
@@ -110,20 +128,20 @@ int main() {
 
   std::vector<const char *> queries = {
       "BEGIN; CREATE TABLE X (INT id, INT age, VARCHAR32 name); COMMIT;",
-      "BEGIN; CREATE TABLE Y (INT id, INT age, VARCHAR32 name); COMMIT;",
+      // "BEGIN; CREATE TABLE Y (INT id, INT age, VARCHAR32 name); COMMIT;",
       // "BEGIN; INSERT INTO Y VALUES (1, 16, 'rickstar'); COMMIT;",
-
-      "SELECT * FROM sqlite_master;",
+      // "SELECT * FROM sqlite_master;",
       "BEGIN; INSERT INTO X VALUES (1, 18, 'ricky'); COMMIT;",
+      "BEGIN; CREATE INDEX index_x_name ON X (name);COMMIT;",
       "BEGIN; INSERT INTO X VALUES (2, 22, 'marky'); COMMIT;",
-      "BEGIN; INSERT INTO X VALUES (3, 16, 'marshal'); COMMIT;",
-      "SELECT * FROM sqlite_master;",
+      // "BEGIN; INSERT INTO X VALUES (3, 16, 'marshal'); COMMIT;",
+      // "SELECT * FROM sqlite_master;",
       // "SELECT * FROM Y;",
       // "BEGIN; DELETE FROM X WHERE name = 'ricky';COMMIT;",
-      // "BEGIN; CREATE INDEX index_x_name ON X (name);COMMIT;",
+
       // "SELECT * FROM X;",
-      // "BEGIN; UPDATE X SET name = 'ricksmart' WHERE name = 'ricky';COMMIT;",
-      // "SELECT * FROM X WHERE name = 'ricksmart",
+      "BEGIN; UPDATE X SET name = 'ricksmart' WHERE name = 'ricky';COMMIT;",
+      "SELECT * FROM X WHERE name = 'ricksmart",
       // "SELECT * FROM X;"
       // "SELECT COUNT(*) FROM X;",
 

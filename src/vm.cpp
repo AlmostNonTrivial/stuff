@@ -33,7 +33,7 @@ uint8_t *vb_column(VmCursor *vb, uint32_t col_index) {
     return btree_cursor_key(&vb->btree_cursor);
   }
 
-  if (vb->is_index) {
+  if (vb->is_index) { // index has single column record
     return btree_cursor_record(&vb->btree_cursor);
   }
 
@@ -112,7 +112,7 @@ static void emit_root_changed_event(EventType type, const char *table_name,
 }
 
 static void emit_drop_event(EventType type, const char *table_name,
-                                    uint32_t column) {
+                            uint32_t column) {
   VmEvent event;
   event.type = type;
   event.data = nullptr;
@@ -184,9 +184,6 @@ VM_RESULT vm_step() {
 
   VMInstruction *inst = &VM.program[VM.pc];
 
-  if (_debug) {
-    debug_print_instruction(*inst, VM.pc);
-  }
 
   switch (inst->opcode) {
   case OP_Halt:
@@ -209,7 +206,7 @@ VM_RESULT vm_step() {
   case OP_String: {
     int32_t dest_reg = Opcodes::String::dest_reg(*inst);
     int32_t size = Opcodes::String::size(*inst);
-    const void* str = Opcodes::String::str(*inst);
+    const void *str = Opcodes::String::str(*inst);
     vm_set_value(&VM.registers[dest_reg], (DataType)size, str);
     VM.pc++;
     return OK;
@@ -236,14 +233,14 @@ VM_RESULT vm_step() {
   case OP_OpenRead:
   case OP_OpenWrite: {
     int32_t cursor_id = (inst->opcode == OP_OpenRead)
-        ? Opcodes::OpenRead::cursor_id(*inst)
-        : Opcodes::OpenWrite::cursor_id(*inst);
-    const char* table_name = (inst->opcode == OP_OpenRead)
-        ? Opcodes::OpenRead::table_name(*inst)
-        : Opcodes::OpenWrite::table_name(*inst);
+                            ? Opcodes::OpenRead::cursor_id(*inst)
+                            : Opcodes::OpenWrite::cursor_id(*inst);
+    const char *table_name = (inst->opcode == OP_OpenRead)
+                                 ? Opcodes::OpenRead::table_name(*inst)
+                                 : Opcodes::OpenWrite::table_name(*inst);
     int32_t index_column = (inst->opcode == OP_OpenRead)
-        ? Opcodes::OpenRead::index_col(*inst)
-        : Opcodes::OpenWrite::index_col(*inst);
+                               ? Opcodes::OpenRead::index_col(*inst)
+                               : Opcodes::OpenWrite::index_col(*inst);
 
     Table *table = get_table(table_name);
     if (!table) {
@@ -281,13 +278,15 @@ VM_RESULT vm_step() {
   case OP_Last:
   case OP_Rewind:
   case OP_First: {
-    int32_t cursor_id = (inst->opcode == OP_Last) ? Opcodes::Last::cursor_id(*inst) :
-                       (inst->opcode == OP_Rewind) ? Opcodes::Rewind::cursor_id(*inst) :
-                       Opcodes::First::cursor_id(*inst);
+    int32_t cursor_id =
+        (inst->opcode == OP_Last)     ? Opcodes::Last::cursor_id(*inst)
+        : (inst->opcode == OP_Rewind) ? Opcodes::Rewind::cursor_id(*inst)
+                                      : Opcodes::First::cursor_id(*inst);
 
-    int32_t jump_if_empty = (inst->opcode == OP_Last) ? Opcodes::Last::jump_if_empty(*inst) :
-                            (inst->opcode == OP_Rewind) ? Opcodes::Rewind::jump_if_empty(*inst) :
-                            Opcodes::First::jump_if_empty(*inst);
+    int32_t jump_if_empty =
+        (inst->opcode == OP_Last)     ? Opcodes::Last::jump_if_empty(*inst)
+        : (inst->opcode == OP_Rewind) ? Opcodes::Rewind::jump_if_empty(*inst)
+                                      : Opcodes::First::jump_if_empty(*inst);
 
     if (!VM.cursors.contains(cursor_id)) {
       return ERR;
@@ -313,12 +312,12 @@ VM_RESULT vm_step() {
   case OP_Next:
   case OP_Prev: {
     int32_t cursor_id = (inst->opcode == OP_Next)
-        ? Opcodes::Next::cursor_id(*inst)
-        : Opcodes::Prev::cursor_id(*inst);
+                            ? Opcodes::Next::cursor_id(*inst)
+                            : Opcodes::Prev::cursor_id(*inst);
 
     int32_t jump_if_done = (inst->opcode == OP_Next)
-        ? Opcodes::Next::jump_if_done(*inst)
-        : Opcodes::Prev::jump_if_done(*inst);
+                               ? Opcodes::Next::jump_if_done(*inst)
+                               : Opcodes::Prev::jump_if_done(*inst);
 
     if (!VM.cursors.contains(cursor_id)) {
       return ERR;
@@ -344,32 +343,32 @@ VM_RESULT vm_step() {
   case OP_SeekLT: {
     int32_t cursor_id, key_reg, jump_if_not_found;
 
-    switch(inst->opcode) {
-      case OP_SeekEQ:
-        cursor_id = Opcodes::SeekEQ::cursor_id(*inst);
-        key_reg = Opcodes::SeekEQ::key_reg(*inst);
-        jump_if_not_found = Opcodes::SeekEQ::jump_if_not_found(*inst);
-        break;
-      case OP_SeekGT:
-        cursor_id = Opcodes::SeekGT::cursor_id(*inst);
-        key_reg = Opcodes::SeekGT::key_reg(*inst);
-        jump_if_not_found = Opcodes::SeekGT::jump_if_not_found(*inst);
-        break;
-      case OP_SeekGE:
-        cursor_id = Opcodes::SeekGE::cursor_id(*inst);
-        key_reg = Opcodes::SeekGE::key_reg(*inst);
-        jump_if_not_found = Opcodes::SeekGE::jump_if_not_found(*inst);
-        break;
-      case OP_SeekLE:
-        cursor_id = Opcodes::SeekLE::cursor_id(*inst);
-        key_reg = Opcodes::SeekLE::key_reg(*inst);
-        jump_if_not_found = Opcodes::SeekLE::jump_if_not_found(*inst);
-        break;
-      case OP_SeekLT:
-        cursor_id = Opcodes::SeekLT::cursor_id(*inst);
-        key_reg = Opcodes::SeekLT::key_reg(*inst);
-        jump_if_not_found = Opcodes::SeekLT::jump_if_not_found(*inst);
-        break;
+    switch (inst->opcode) {
+    case OP_SeekEQ:
+      cursor_id = Opcodes::SeekEQ::cursor_id(*inst);
+      key_reg = Opcodes::SeekEQ::key_reg(*inst);
+      jump_if_not_found = Opcodes::SeekEQ::jump_if_not_found(*inst);
+      break;
+    case OP_SeekGT:
+      cursor_id = Opcodes::SeekGT::cursor_id(*inst);
+      key_reg = Opcodes::SeekGT::key_reg(*inst);
+      jump_if_not_found = Opcodes::SeekGT::jump_if_not_found(*inst);
+      break;
+    case OP_SeekGE:
+      cursor_id = Opcodes::SeekGE::cursor_id(*inst);
+      key_reg = Opcodes::SeekGE::key_reg(*inst);
+      jump_if_not_found = Opcodes::SeekGE::jump_if_not_found(*inst);
+      break;
+    case OP_SeekLE:
+      cursor_id = Opcodes::SeekLE::cursor_id(*inst);
+      key_reg = Opcodes::SeekLE::key_reg(*inst);
+      jump_if_not_found = Opcodes::SeekLE::jump_if_not_found(*inst);
+      break;
+    case OP_SeekLT:
+      cursor_id = Opcodes::SeekLT::cursor_id(*inst);
+      key_reg = Opcodes::SeekLT::key_reg(*inst);
+      jump_if_not_found = Opcodes::SeekLT::jump_if_not_found(*inst);
+      break;
     }
 
     if (!VM.cursors.contains(cursor_id)) {
@@ -397,7 +396,7 @@ VM_RESULT vm_step() {
       found = btree_cursor_seek(&cursor->btree_cursor, key->data);
       break;
     }
-
+    // MAKE SURE THIS WORKS WITH GT/LT
     if (!found && jump_if_not_found > 0) {
       VM.pc = jump_if_not_found;
     } else {
@@ -417,35 +416,9 @@ VM_RESULT vm_step() {
 
     VmCursor *cursor = VM.cursors.find(cursor_id);
 
-    if (cursor->is_index) {
-      // For index cursors:
-      // Column 0 = the indexed value (key)
-      // Column 1 = the rowid (stored as record)
-      if (col_index == 0) {
-        // Get the indexed column value
-        const uint8_t *key_data = btree_cursor_key(&cursor->btree_cursor);
-        DataType key_type = cursor->schema->columns[cursor->column].type;
-        vm_set_value(&VM.registers[dest_reg], key_type, key_data);
-      } else {
-        // Get the rowid from the record
-        uint8_t *record_data = btree_cursor_record(&cursor->btree_cursor);
-        // The record in an index is always a uint32 rowid
-        vm_set_value(&VM.registers[dest_reg], TYPE_UINT32, record_data);
-      }
-    } else {
-      // For table cursors, handle normally
-      if (col_index == 0) {
-        // Column 0 is the primary key/rowid
-        const uint8_t *key_data = vb_key(cursor);
-        DataType type = vb_key_type(cursor);
-        vm_set_value(&VM.registers[dest_reg], type, key_data);
-      } else {
-        // Regular column access
-        uint8_t *col_data = vb_column(cursor, col_index);
-        DataType type = vb_column_type(cursor, col_index);
-        vm_set_value(&VM.registers[dest_reg], type, col_data);
-      }
-    }
+    uint8_t *col_data = vb_column(cursor, col_index);
+    DataType type = vb_column_type(cursor, col_index);
+    vm_set_value(&VM.registers[dest_reg], type, col_data);
 
     VM.pc++;
     return OK;
@@ -493,9 +466,13 @@ VM_RESULT vm_step() {
 
     uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
 
-    bool exists = btree_cursor_seek(&cursor->btree_cursor, (void *)key->data);
-    if (exists) {
-      return ERR;
+    if (!cursor->is_index) {
+      // index can have duplicates, so we might need to match key and record
+      bool exists = btree_cursor_seek(&cursor->btree_cursor, (void *)key->data);
+
+      if (exists) {
+        return ERR;
+      }
     }
 
     bool success =
@@ -507,9 +484,12 @@ VM_RESULT vm_step() {
     // Handle root page changes
     if (cursor->btree_cursor.tree->root_page_index != current_root) {
       if (cursor->is_index) {
-        emit_root_changed_event(EVT_BTREE_ROOT_CHANGED, cursor->schema->table_name.c_str(), cursor->column);
+        emit_root_changed_event(EVT_BTREE_ROOT_CHANGED,
+                                cursor->schema->table_name.c_str(),
+                                cursor->column);
       } else {
-        emit_root_changed_event(EVT_BTREE_ROOT_CHANGED, cursor->schema->table_name.c_str(), 0);
+        emit_root_changed_event(EVT_BTREE_ROOT_CHANGED,
+                                cursor->schema->table_name.c_str(), 0);
       }
     }
 
@@ -591,37 +571,37 @@ VM_RESULT vm_step() {
   case OP_Ge: {
     int32_t reg_a, reg_b, jump_target;
 
-    switch(inst->opcode) {
-      case OP_Eq:
-        reg_a = Opcodes::Eq::reg_a(*inst);
-        reg_b = Opcodes::Eq::reg_b(*inst);
-        jump_target = Opcodes::Eq::jump_target(*inst);
-        break;
-      case OP_Ne:
-        reg_a = Opcodes::Ne::reg_a(*inst);
-        reg_b = Opcodes::Ne::reg_b(*inst);
-        jump_target = Opcodes::Ne::jump_target(*inst);
-        break;
-      case OP_Lt:
-        reg_a = Opcodes::Lt::reg_a(*inst);
-        reg_b = Opcodes::Lt::reg_b(*inst);
-        jump_target = Opcodes::Lt::jump_target(*inst);
-        break;
-      case OP_Le:
-        reg_a = Opcodes::Le::reg_a(*inst);
-        reg_b = Opcodes::Le::reg_b(*inst);
-        jump_target = Opcodes::Le::jump_target(*inst);
-        break;
-      case OP_Gt:
-        reg_a = Opcodes::Gt::reg_a(*inst);
-        reg_b = Opcodes::Gt::reg_b(*inst);
-        jump_target = Opcodes::Gt::jump_target(*inst);
-        break;
-      case OP_Ge:
-        reg_a = Opcodes::Ge::reg_a(*inst);
-        reg_b = Opcodes::Ge::reg_b(*inst);
-        jump_target = Opcodes::Ge::jump_target(*inst);
-        break;
+    switch (inst->opcode) {
+    case OP_Eq:
+      reg_a = Opcodes::Eq::reg_a(*inst);
+      reg_b = Opcodes::Eq::reg_b(*inst);
+      jump_target = Opcodes::Eq::jump_target(*inst);
+      break;
+    case OP_Ne:
+      reg_a = Opcodes::Ne::reg_a(*inst);
+      reg_b = Opcodes::Ne::reg_b(*inst);
+      jump_target = Opcodes::Ne::jump_target(*inst);
+      break;
+    case OP_Lt:
+      reg_a = Opcodes::Lt::reg_a(*inst);
+      reg_b = Opcodes::Lt::reg_b(*inst);
+      jump_target = Opcodes::Lt::jump_target(*inst);
+      break;
+    case OP_Le:
+      reg_a = Opcodes::Le::reg_a(*inst);
+      reg_b = Opcodes::Le::reg_b(*inst);
+      jump_target = Opcodes::Le::jump_target(*inst);
+      break;
+    case OP_Gt:
+      reg_a = Opcodes::Gt::reg_a(*inst);
+      reg_b = Opcodes::Gt::reg_b(*inst);
+      jump_target = Opcodes::Gt::jump_target(*inst);
+      break;
+    case OP_Ge:
+      reg_a = Opcodes::Ge::reg_a(*inst);
+      reg_b = Opcodes::Ge::reg_b(*inst);
+      jump_target = Opcodes::Ge::jump_target(*inst);
+      break;
     }
 
     VMValue *a = &VM.registers[reg_a];
@@ -911,10 +891,6 @@ VM_RESULT vm_execute(ArenaVector<VMInstruction, QueryArena> &instructions) {
 
   vm_reset();
   VM.program.set(instructions);
-
-  if (_debug) {
-    debug_print_program(VM.program);
-  }
 
   while (!VM.halted && VM.pc < VM.program.size()) {
     VM_RESULT result = vm_step();
