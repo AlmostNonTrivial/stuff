@@ -102,12 +102,22 @@ static void emit_event(EventType type, void *data = nullptr) {
 }
 
 static void emit_root_changed_event(EventType type, const char *table_name,
-                                    uint32_t root_page = 0) {
+                                    uint32_t column) {
   VmEvent event;
   event.type = type;
   event.data = nullptr;
   event.context.table_info.table_name = table_name;
-  event.context.table_info.root_page = root_page;
+  event.context.table_info.column = column;
+  VM.event_queue.push(event);
+}
+
+static void emit_drop_event(EventType type, const char *table_name,
+                                    uint32_t column) {
+  VmEvent event;
+  event.type = type;
+  event.data = nullptr;
+  event.context.table_info.table_name = table_name;
+  event.context.table_info.column = column;
   VM.event_queue.push(event);
 }
 
@@ -176,13 +186,12 @@ VM_RESULT vm_step() {
   VMInstruction *inst = &VM.program[VM.pc];
 
   if (_debug) {
-      // for(int i = 0; i < VM.program.size(); i++) {
-      //     auto& inst = VM.program[i];
-      //     printf("[%d] op=%d, p1=%d, p2=%d, p3=%d\n",
-      //            i, inst.opcode, inst.p1, inst.p2, inst.p3);
-      // }
-      // exit(1);
-
+    // for(int i = 0; i < VM.program.size(); i++) {
+    //     auto& inst = VM.program[i];
+    //     printf("[%d] op=%d, p1=%d, p2=%d, p3=%d\n",
+    //            i, inst.opcode, inst.p1, inst.p2, inst.p3);
+    // }
+    // exit(1);
   }
 
   switch (inst->opcode) {
@@ -234,24 +243,20 @@ VM_RESULT vm_step() {
     uint32_t cursor_id = inst->p2;
     VmCursor &cursor = VM.cursors[cursor_id];
 
-    // need a copy because we might alter the root
-    // we we might need to rollback.
-    BTree *tree = (BTree *)arena::alloc<QueryArena>(sizeof(BTree));
-
+    // directly mutate tree, rollback will reload everything
+    // from master catalog
     if (index_column != 0) {
       Index *index = get_index(table_name, index_column);
       if (!index) {
         return ERR;
       }
 
-      memcpy(tree, &index->tree, sizeof(BTree));
-      cursor.btree_cursor.tree = tree;
+      cursor.btree_cursor.tree = &index->tree;
       cursor.column = index_column;
       cursor.is_index = true;
     } else {
 
-      memcpy(tree, &table->tree, sizeof(BTree));
-      cursor.btree_cursor.tree = tree;
+      cursor.btree_cursor.tree = &table->tree;
       cursor.is_index = false;
     }
 
@@ -351,110 +356,106 @@ VM_RESULT vm_step() {
   }
 
   case OP_Column: {
-      if (!VM.cursors.contains(inst->p1)) {
-        return ERR;
-      }
+    if (!VM.cursors.contains(inst->p1)) {
+      return ERR;
+    }
 
-      VmCursor *cursor = VM.cursors.find(inst->p1);
-      uint32_t col_index = inst->p2;
+    VmCursor *cursor = VM.cursors.find(inst->p1);
+    uint32_t col_index = inst->p2;
 
-      if (cursor->is_index) {
-        // For index cursors:
-        // Column 0 = the indexed value (key)
-        // Column 1 = the rowid (stored as record)
-        if (col_index == 0) {
-          // Get the indexed column value
-          const uint8_t *key_data = btree_cursor_key(&cursor->btree_cursor);
-          DataType key_type = cursor->schema->columns[cursor->column].type;
-          vm_set_value(&VM.registers[inst->p3], key_type, key_data);
-        } else {
-          // Get the rowid from the record
-          uint8_t *record_data = btree_cursor_record(&cursor->btree_cursor);
-          // The record in an index is always a uint32 rowid
-          vm_set_value(&VM.registers[inst->p3], TYPE_UINT32, record_data);
-        }
+    if (cursor->is_index) {
+      // For index cursors:
+      // Column 0 = the indexed value (key)
+      // Column 1 = the rowid (stored as record)
+      if (col_index == 0) {
+        // Get the indexed column value
+        const uint8_t *key_data = btree_cursor_key(&cursor->btree_cursor);
+        DataType key_type = cursor->schema->columns[cursor->column].type;
+        vm_set_value(&VM.registers[inst->p3], key_type, key_data);
       } else {
-        // For table cursors, handle normally
-        if (col_index == 0) {
-          // Column 0 is the primary key/rowid
-          const uint8_t *key_data = vb_key(cursor);
-          DataType type = vb_key_type(cursor);
-          vm_set_value(&VM.registers[inst->p3], type, key_data);
-        } else {
-          // Regular column access
-          uint8_t *col_data = vb_column(cursor, col_index);
-          DataType type = vb_column_type(cursor, col_index);
-          vm_set_value(&VM.registers[inst->p3], type, col_data);
-        }
+        // Get the rowid from the record
+        uint8_t *record_data = btree_cursor_record(&cursor->btree_cursor);
+        // The record in an index is always a uint32 rowid
+        vm_set_value(&VM.registers[inst->p3], TYPE_UINT32, record_data);
       }
+    } else {
+      // For table cursors, handle normally
+      if (col_index == 0) {
+        // Column 0 is the primary key/rowid
+        const uint8_t *key_data = vb_key(cursor);
+        DataType type = vb_key_type(cursor);
+        vm_set_value(&VM.registers[inst->p3], type, key_data);
+      } else {
+        // Regular column access
+        uint8_t *col_data = vb_column(cursor, col_index);
+        DataType type = vb_column_type(cursor, col_index);
+        vm_set_value(&VM.registers[inst->p3], type, col_data);
+      }
+    }
 
-      VM.pc++;
-      return OK;
+    VM.pc++;
+    return OK;
   }
 
   case OP_MakeRecord: {
-      uint32_t total_size = 0;
-      for (int i = 0; i < inst->p2; i++) {
-        VMValue *val = &VM.registers[inst->p1 + i];
-        total_size += VMValue::get_size(val->type);
-      }
+    uint32_t total_size = 0;
+    for (int i = 0; i < inst->p2; i++) {
+      VMValue *val = &VM.registers[inst->p1 + i];
+      total_size += VMValue::get_size(val->type);
+    }
 
-      uint8_t *record = (uint8_t *)arena::alloc<QueryArena>(total_size);
+    uint8_t *record = (uint8_t *)arena::alloc<QueryArena>(total_size);
 
-      uint32_t offset = 0;
-      // Start at 0 to include all columns!
-      for (int i = 0; i < inst->p2; i++) {
-        VMValue *val = &VM.registers[inst->p1 + i];
-        uint32_t size = VMValue::get_size(val->type);
-        memcpy(record + offset, val->data, size);
-        offset += size;
-      }
+    uint32_t offset = 0;
+    // Start at 0 to include all columns!
+    for (int i = 0; i < inst->p2; i++) {
+      VMValue *val = &VM.registers[inst->p1 + i];
+      uint32_t size = VMValue::get_size(val->type);
+      memcpy(record + offset, val->data, size);
+      offset += size;
+    }
 
-      VM.registers[inst->p3].type = TYPE_UINT32;
-      VM.registers[inst->p3].data = record;
-      VM.pc++;
-      return OK;
+    VM.registers[inst->p3].type = TYPE_UINT32;
+    VM.registers[inst->p3].data = record;
+    VM.pc++;
+    return OK;
   }
   case OP_Insert: {
-      if (!VM.cursors.contains(inst->p1)) {
-        return ERR;
+    if (!VM.cursors.contains(inst->p1)) {
+      return ERR;
+    }
+
+    VmCursor *cursor = VM.cursors.find(inst->p1);
+    VMValue *key = &VM.registers[inst->p2];
+    VMValue *record = &VM.registers[inst->p3];
+
+    uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
+
+    bool exists = btree_cursor_seek(&cursor->btree_cursor, (void *)key->data);
+    if (exists) {
+      return ERR;
+    }
+
+    // FIX: Just use record->data directly!
+    // The record was already built correctly by MakeRecord
+    bool success =
+        btree_cursor_insert(&cursor->btree_cursor, key->data, record->data);
+    if (!success) {
+      return ERR;
+    }
+
+    // Handle root page changes
+    if (cursor->btree_cursor.tree->root_page_index != current_root) {
+      if (cursor->is_index) {
+        emit_root_changed_event(EVT_BTREE_ROOT_CHANGED, cursor->schema->table_name.c_str(), cursor->column);
+      } else {
+        emit_root_changed_event(EVT_BTREE_ROOT_CHANGED,cursor->schema->table_name.c_str(), 0);
       }
+    }
 
-      VmCursor *cursor = VM.cursors.find(inst->p1);
-      VMValue *key = &VM.registers[inst->p2];
-      VMValue *record = &VM.registers[inst->p3];
-
-      uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
-
-      bool exists = btree_cursor_seek(&cursor->btree_cursor, (void *)key->data);
-      if (exists) {
-        return ERR;
-      }
-
-      // FIX: Just use record->data directly!
-      // The record was already built correctly by MakeRecord
-      bool success =
-          btree_cursor_insert(&cursor->btree_cursor, key->data, record->data);
-      if (!success) {
-        return ERR;
-      }
-
-      // Handle root page changes
-      if (cursor->btree_cursor.tree->root_page_index != current_root) {
-        if (cursor->is_index) {
-          get_table(cursor->schema->table_name.c_str())
-              ->indexes[cursor->column]
-              .tree.root_page_index = cursor->btree_cursor.tree->root_page_index;
-        } else {
-          emit_root_changed_event(EVT_BTREE_ROOT_CHANGED,
-                                  cursor->schema->table_name.c_str(),
-                                  cursor->btree_cursor.tree->root_page_index);
-        }
-      }
-
-      emit_row_event(EVT_ROWS_INSERTED, 1);
-      VM.pc++;
-      return OK;
+    emit_row_event(EVT_ROWS_INSERTED, 1);
+    VM.pc++;
+    return OK;
   }
 
   case OP_Delete: {
@@ -677,7 +678,7 @@ VM_RESULT vm_step() {
       return ERR;
     }
 
-    // Create table structure in arena
+    // will be copied over to into the schema.
     Table *new_table = (Table *)arena::alloc<QueryArena>(sizeof(Table));
     new_table->schema = *schema;
 
@@ -688,14 +689,11 @@ VM_RESULT vm_step() {
     new_table->tree = btree_create(new_table->schema.key_type(),
                                    new_table->schema.record_size, BPLUS);
 
-    // Emit event with table data
+    add_table(new_table);
     VmEvent event;
     event.type = EVT_TABLE_CREATED;
-    event.data = new_table;
     event.context.table_info.table_name = schema->table_name.c_str();
-    event.context.table_info.root_page = new_table->tree.root_page_index;
     VM.event_queue.push(event);
-
     VM.pc++;
     return OK;
   }
@@ -720,14 +718,13 @@ VM_RESULT vm_step() {
     index->tree = btree_create(table->schema.columns[column].type,
                                table->schema.key_type(), BTREE);
 
+    // apply immediatly in memory,
     add_index(table_name, index);
     // Emit event
     VmEvent event;
     event.type = EVT_INDEX_CREATED;
-    event.data = index;
     event.context.index_info.table_name = table_name;
     event.context.index_info.column_index = column;
-    event.context.index_info.index_name = nullptr;
     VM.event_queue.push(event);
 
     VM.pc++;
@@ -748,7 +745,8 @@ VM_RESULT vm_step() {
       btree_clear(&table->indexes.value_at(i)->tree);
     }
 
-    emit_root_changed_event(EVT_TABLE_DROPPED, table_name);
+    remove_table(table_name);
+    emit_drop_event(EVT_TABLE_DROPPED, table_name, 0);
     VM.pc++;
     return OK;
   }
@@ -768,25 +766,29 @@ VM_RESULT vm_step() {
     }
 
     btree_clear(&index->tree);
-    emit_index_event(EVT_INDEX_DROPPED, table_name, column);
+    remove_index(table_name, column);
+    emit_drop_event(EVT_INDEX_DROPPED, table_name, column);
     VM.pc++;
     return OK;
   }
 
+  /*
+   * the executor needs make sure that
+   * the master cataglog is synced within the transaction,
+   * we can't let the program just commit, we let the executor
+   * handle the transaction
+   */
   case OP_Begin:
-    btree_begin_transaction();
     emit_event(EVT_TRANSACTION_BEGIN);
     VM.pc++;
     return OK;
 
   case OP_Commit:
-    btree_commit();
     emit_event(EVT_TRANSACTION_COMMIT);
     VM.pc++;
     return OK;
 
   case OP_Rollback:
-    btree_rollback();
     emit_event(EVT_TRANSACTION_ROLLBACK);
     VM.pc++;
     return ABORT;

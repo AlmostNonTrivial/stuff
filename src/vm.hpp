@@ -209,6 +209,11 @@ enum EventType {
     EVT_TRANSACTION_COMMIT,
     EVT_TRANSACTION_ROLLBACK
 };
+
+
+// create/drop indexes/tables
+// root change
+// rollback, commit
 struct VmEvent {
     EventType type;
     void* data;
@@ -218,6 +223,7 @@ struct VmEvent {
         struct {
             const char* table_name;
             uint32_t root_page;
+            uint32_t column; // non zero if index
         } table_info;
 
         struct {
