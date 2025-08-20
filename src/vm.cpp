@@ -583,13 +583,13 @@ VM_RESULT vm_step() {
   }
 
   case Op_Flush: {
-    for (auto &row : VM.output_buffer) {
-      for (auto &val : row) {
-        print_ptr(val.data, val.type);
-      }
-      std::cout << "\n";
-    }
-    VM.output_buffer.clear();
+    // for (auto &row : VM.output_buffer) {
+    //   for (auto &val : row) {
+    //     print_ptr(val.data, val.type);
+    //   }
+    //   std::cout << "\n";
+    // }
+    // VM.output_buffer.clear();
     VM.pc++;
     return OK;
   }
