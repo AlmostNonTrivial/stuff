@@ -91,11 +91,3 @@ void debug_type(uint8_t *data, DataType type) {
         return 0;
       }
     }
-
-  /*
-
-  Hey mate, I'm sorry to hear that, I'd offer
-  to marry you, but Jacob already has
-
-
-   */

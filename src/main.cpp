@@ -29,12 +29,75 @@
 //
 //
 //
+//
+// In schema.hpp or a utility header
+ArenaString<QueryArena> vm_values_to_string(
+    const ArenaVector<VMValue, QueryArena>& values,
+    const char* delimiter = ", ") {
+
+    ArenaString<QueryArena> result;
+
+    for (size_t i = 0; i < values.size(); i++) {
+        const VMValue& val = values[i];
+
+        if (i > 0 && delimiter) {
+            result.append(delimiter);
+        }
+
+        switch (val.type) {
+            case TYPE_UINT32: {
+                char buffer[32];
+                snprintf(buffer, sizeof(buffer), "%u", *(uint32_t*)val.data);
+                result.append(buffer);
+                break;
+            }
+
+            case TYPE_UINT64: {
+                char buffer[32];
+                snprintf(buffer, sizeof(buffer), "%lu", *(uint64_t*)val.data);
+                result.append(buffer);
+                break;
+            }
+
+            case TYPE_VARCHAR32:
+            case TYPE_VARCHAR256: {
+                // Add quotes for string values
+                result.append("'");
+
+                // Append string data, handling null termination
+                size_t max_len = (val.type == TYPE_VARCHAR32) ? 32 : 256;
+                for (size_t j = 0; j < max_len && val.data[j] != 0; j++) {
+                    result.append(val.data[j]);
+                }
+
+                result.append("'");
+                break;
+            }
+
+            case TYPE_NULL:
+                result.append("NULL");
+                break;
+
+            default:
+                result.append("<unknown>");
+                break;
+        }
+    }
+
+    return result;
+}
+ArenaString<QueryArena> vm_values_to_row_string(
+    const ArenaVector<VMValue, QueryArena>& values) {
+
+    ArenaString<QueryArena> result("(");
+    result.append(vm_values_to_string(values, ", ").c_str());
+    result.append(")");
+    return result;
+}
 
 void print_buf(ArenaVector<ArenaVector<VMValue, QueryArena>, QueryArena> buf){
     for (auto &row : buf) {
-      for (auto &val : row) {
-        print_ptr(val.data, val.type);
-      }
+    std::cout << vm_values_to_row_string(row).c_str();
       std::cout << "\n";
     }
 }
@@ -70,5 +133,6 @@ int main() {
     ExecutionMeta * meta = execute(query);
     auto output = vm_output_buffer();
     print_buf(output);
+    std::cout << '\n';
   }
 }
