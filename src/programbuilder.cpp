@@ -234,10 +234,6 @@ build_insert_from_ast(InsertNode* node) {
     RegisterAllocator regs;
 
     Table* table = get_table(node->table);
-    if (!table) {
-        program.push_back(Opcodes::Halt::create());
-        return program;
-    }
 
     const int table_cursor = 0;
     int next_cursor = 1;
@@ -245,18 +241,18 @@ build_insert_from_ast(InsertNode* node) {
     // Open table for writing
     program.push_back(Opcodes::OpenWrite::create(table_cursor, node->table));
 
-    // Open cursors for each index
-    Vector<std::pair<int, uint32_t>, QueryArena> index_cursors; // cursor_id, column_index
-    for (size_t i = 0; i < table->indexes.size(); i++) {
-        uint32_t col_idx = *table->indexes.key_at(i);
-        program.push_back(Opcodes::OpenWrite::create(next_cursor, node->table, col_idx));
-        index_cursors.push_back({next_cursor, col_idx});
-        next_cursor++;
-    }
+    // // Open cursors for each index
+    // Vector<std::pair<int, uint32_t>, QueryArena> index_cursors; // cursor_id, column_index
+    // for (size_t i = 0; i < table->indexes.size(); i++) {
+    //     uint32_t col_idx = *table->indexes.key_at(i);
+    //     program.push_back(Opcodes::OpenWrite::create(next_cursor, node->table, col_idx));
+    //     index_cursors.push_back({next_cursor, col_idx});
+    //     next_cursor++;
+    // }
 
     // Load values into registers
     Vector<int, QueryArena> value_regs;
-    for (size_t i = 0; i < node->values.size() && i < table->schema.columns.size(); i++) {
+    for (size_t i = 0; i < table->schema.columns.size(); i++) {
         if (node->values[i]->type == AST_LITERAL) {
             LiteralNode* lit = (LiteralNode*)node->values[i];
             int reg = regs.get(("value_" + std::to_string(i)).c_str());
@@ -267,29 +263,28 @@ build_insert_from_ast(InsertNode* node) {
 
     // Build record (excluding key which is at index 0)
     int record_reg = regs.get("record");
-    if (value_regs.size() > 1) {
-        program.push_back(Opcodes::MakeRecord::create(value_regs[1], value_regs.size() - 1, record_reg));
-    }
+    program.push_back(Opcodes::MakeRecord::create(value_regs[1], value_regs.size() - 1, record_reg));
+
 
     // Insert into table
     program.push_back(Opcodes::Insert::create(table_cursor, value_regs[0], record_reg));
 
-    // Insert into indexes
-    for (auto& idx : index_cursors) {
-        int cursor = idx.first;
-        uint32_t col_idx = idx.second;
+    // // Insert into indexes
+    // for (auto& idx : index_cursors) {
+    //     int cursor = idx.first;
+    //     uint32_t col_idx = idx.second;
 
-        // Find the register containing this column's value
-        if (col_idx < value_regs.size()) {
-            program.push_back(Opcodes::Insert::create(cursor, value_regs[col_idx], value_regs[0]));
-        }
-    }
+    //     // Find the register containing this column's value
+    //     if (col_idx < value_regs.size()) {
+    //         program.push_back(Opcodes::Insert::create(cursor, value_regs[col_idx], value_regs[0]));
+    //     }
+    // }
 
     // Close all cursors
     program.push_back(Opcodes::Close::create(table_cursor));
-    for (auto& idx : index_cursors) {
-        program.push_back(Opcodes::Close::create(idx.first));
-    }
+    // for (auto& idx : index_cursors) {
+    //     program.push_back(Opcodes::Close::create(idx.first));
+    // }
 
     program.push_back(Opcodes::Halt::create());
     return program;

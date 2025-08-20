@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 bool _debug;
@@ -86,7 +87,8 @@ static struct {
 
 static void vm_set_value(TypedValue *val, DataType type, const void *data) {
   val->type = type;
-  val->data = (uint8_t *)data;
+  val->data = (uint8_t*)arena::alloc<QueryArena>((uint32_t)type);
+  memcpy(val->data, data, (uint32_t)type);
 }
 
 // Public VM functions
@@ -133,6 +135,7 @@ VM_RESULT vm_step() {
     int32_t value = Opcodes::Integer::value(*inst);
     uint32_t val = (uint32_t)value;
     vm_set_value(&VM.registers[dest_reg], TYPE_UINT32, &val);
+
     VM.pc++;
     return OK;
   }

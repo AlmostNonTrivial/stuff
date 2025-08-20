@@ -45,10 +45,11 @@ int main() {
 
     std::vector<const char *> queries = {
         "BEGIN; CREATE TABLE X (INT id, INT age, VARCHAR32 name); COMMIT;",
-        "BEGIN; INSERT INTO X VALUES (1, 18, 'ricky'); COMMIT;",
+
+        "BEGIN; INSERT INTO X VALUES (2, 18, 'ricky'); COMMIT;",
+        "BEGIN; INSERT INTO X VALUES (1, 22, 'marky'); COMMIT;",
         // "BEGIN; CREATE INDEX index_x_name ON X (name);COMMIT;",
-        "BEGIN; INSERT INTO X VALUES (2, 22, 'marky'); COMMIT;",
-        "BEGIN; UPDATE X SET name = 'ricksmart' WHERE name = 'ricky';COMMIT;",
+        // "BEGIN; UPDATE X SET name = 'ricksmart' WHERE name = 'ricky';COMMIT;",
         "SELECT * FROM X;",
     };
 
