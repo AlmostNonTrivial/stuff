@@ -5,18 +5,37 @@
 #include "vm.hpp"
 #include <vector>
 
-// Simple callback that just prints raw results
+// In main.cpp, replace print_result_callback with:
 void print_result_callback(void* result, size_t result_size) {
-
-    // Just print the raw bytes as hex for now
     uint8_t* data = (uint8_t*)result;
-    printf("Result (%zu bytes): ", result_size);
 
-    // Print first few bytes as hex
-    for (size_t i = 0; i < result_size && i < 32; i++) {
-        printf("%02x ", data[i]);
+    // Expected layout: id (4 bytes) + age (4 bytes) + name (32 bytes)
+    // Total: 40 bytes
+
+    // Extract id (first 4 bytes - this is the key)
+    uint32_t id;
+    memcpy(&id, data, sizeof(uint32_t));
+    data += sizeof(uint32_t);
+
+    // Extract age (next 4 bytes)
+    uint32_t age;
+    memcpy(&age, data, sizeof(uint32_t));
+    data += sizeof(uint32_t);
+
+    // Extract name (next 32 bytes)
+    char name[33];  // +1 for null terminator
+    memcpy(name, data, 32);
+    name[32] = '\0';  // Ensure null termination
+
+    // Clean up name (remove trailing nulls for display)
+    for (int i = 31; i >= 0; i--) {
+        if (name[i] != '\0' && name[i] != ' ') {
+            name[i + 1] = '\0';
+            break;
+        }
     }
-    printf("\n");
+
+    printf("Row: id=%u, age=%u, name='%s'\n", id, age, name);
 }
 
 int main() {

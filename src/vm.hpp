@@ -1,12 +1,17 @@
 #pragma once
 #include "arena.hpp"
 #include "btree.hpp"
+#include "schema.hpp"
 #include "defs.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 
+struct QueryContext {
+    TableSchema* schema;
+    bool has_key_prefix;  // true for SELECT results that include key
+};
 typedef void (*ResultCallback)(void *result, size_t result_size);
 inline const char *datatype_to_string(DataType type);
 extern bool _debug;

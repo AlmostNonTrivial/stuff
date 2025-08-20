@@ -78,7 +78,7 @@ static struct {
   uint32_t pc;
   bool halted;
   Queue<VmEvent, QueryArena> events;
-
+  QueryContext current_query_context;
   TypedValue registers[REGISTERS];
   VmCursor cursors[CURSORS];
   bool initialized;
@@ -607,15 +607,6 @@ VM_RESULT vm_step() {
     int32_t column = Opcodes::CreateIndex::column_index(*inst);
 
     Table *table = get_table(table_name);
-    if (!table) {
-
-      return ERR;
-    }
-
-    if (get_index(table_name, column)) {
-
-      return ERR;
-    }
 
     Index *index = (Index *)arena::alloc<QueryArena>(sizeof(Index));
     index->column_index = column;
