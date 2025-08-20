@@ -57,7 +57,47 @@ struct Aggregator {
     count = 0;
   }
 };
+struct KeyBuffer {
+  DataType key_type;
+  ArenaVector<uint8_t *, QueryArena> keys;
+  size_t current_index;
 
+  void reset(DataType type) {
+    key_type = type;
+    keys.clear();
+    current_index = 0;
+  }
+
+  void add(const uint8_t *key_data) {
+    uint32_t size = VMValue::get_size(key_type);
+    uint8_t *copy = (uint8_t *)arena::alloc<QueryArena>(size);
+    memcpy(copy, key_data, size);
+    keys.push_back(copy);
+  }
+
+  void sort() {
+    std::sort(keys.begin(), keys.end(),
+              [this](const uint8_t *a, const uint8_t *b) {
+                return cmp(key_type, a, b) < 0;
+              });
+    current_index = 0;
+  }
+
+  bool has_next() const { return current_index < keys.size(); }
+
+  uint8_t *next() {
+    if (current_index < keys.size()) {
+      return keys[current_index++];
+    }
+    return nullptr;
+  }
+
+  void rewind() { current_index = 0; }
+
+  bool is_empty() const { return keys.empty(); }
+
+  size_t size() const { return keys.size(); }
+};
 /*------------VM STATE---------------- */
 
 static struct {
@@ -72,6 +112,7 @@ static struct {
   int32_t compare_result;
   ArenaVector<ArenaVector<VMValue, QueryArena>, QueryArena> output_buffer;
   Aggregator aggregator;
+  KeyBuffer key_buffer;
 
   bool initialized;
 } VM = {};
@@ -162,6 +203,7 @@ void vm_reset() {
     VM.registers[i].data = nullptr;
   }
 
+  VM.key_buffer.reset(TYPE_NULL);
   VM.program.clear();
   VM.cursors.clear();
   VM.event_queue.clear();
@@ -183,7 +225,6 @@ ArenaQueue<VmEvent, QueryArena> &vm_events() { return VM.event_queue; }
 VM_RESULT vm_step() {
 
   VMInstruction *inst = &VM.program[VM.pc];
-
 
   switch (inst->opcode) {
   case OP_Halt:
@@ -493,7 +534,7 @@ VM_RESULT vm_step() {
       }
     }
 
-    emit_row_event(EVT_ROWS_INSERTED, 1);
+    // emit_row_event(EVT_ROWS_INSERTED, 1);
     VM.pc++;
     return OK;
   }
@@ -513,12 +554,15 @@ VM_RESULT vm_step() {
       emit_event(EVT_BTREE_ROOT_CHANGED, cursor->btree_cursor.tree);
     }
 
-    emit_row_event(EVT_ROWS_DELETED, 1);
+    // emit_row_event(EVT_ROWS_DELETED, 1);
     VM.pc++;
     return OK;
   }
 
   case OP_Update: {
+
+    DataType keytype;
+
     int32_t cursor_id = Opcodes::Update::cursor_id(*inst);
     int32_t record_reg = Opcodes::Update::record_reg(*inst);
 
@@ -530,7 +574,7 @@ VM_RESULT vm_step() {
     VMValue *record = &VM.registers[record_reg];
 
     btree_cursor_update(&cursor->btree_cursor, record->data);
-    emit_row_event(EVT_ROWS_UPDATED, 1);
+    // emit_row_event(EVT_ROWS_UPDATED, 1);
     VM.pc++;
     return OK;
   }
@@ -853,6 +897,68 @@ VM_RESULT vm_step() {
     remove_index(table_name, column);
     emit_drop_event(EVT_INDEX_DROPPED, table_name, column);
     VM.pc++;
+    return OK;
+  }
+  case OP_KeyBufferReset: {
+    DataType key_type = Opcodes::KeyBufferReset::key_type(*inst);
+    VM.key_buffer.reset(key_type);
+    VM.pc++;
+    return OK;
+  }
+
+  case OP_KeyBufferAdd: {
+    int32_t cursor_id = Opcodes::KeyBufferAdd::cursor_id(*inst);
+
+    if (!VM.cursors.contains(cursor_id)) {
+      return ERR;
+    }
+
+    VmCursor *cursor = VM.cursors.find(cursor_id);
+    uint8_t *key = vb_key(cursor);
+
+    if (key) {
+      VM.key_buffer.add(key);
+    }
+
+    VM.pc++;
+    return OK;
+  }
+
+  case OP_KeyBufferSort: {
+    VM.key_buffer.sort();
+    VM.pc++;
+    return OK;
+  }
+
+  case OP_KeyBufferNext: {
+    int32_t dest_reg = Opcodes::KeyBufferNext::dest_reg(*inst);
+    int32_t jump_if_done = Opcodes::KeyBufferNext::jump_if_done(*inst);
+
+    uint8_t *key = VM.key_buffer.next();
+
+    if (key) {
+      vm_set_value(&VM.registers[dest_reg], VM.key_buffer.key_type, key);
+      VM.pc++;
+    } else {
+      if (jump_if_done > 0) {
+        VM.pc = jump_if_done;
+      } else {
+        VM.pc++;
+      }
+    }
+    return OK;
+  }
+
+  case OP_KeyBufferRewind: {
+    int32_t jump_if_empty = Opcodes::KeyBufferRewind::jump_if_empty(*inst);
+
+    VM.key_buffer.rewind();
+
+    if (VM.key_buffer.is_empty() && jump_if_empty > 0) {
+      VM.pc = jump_if_empty;
+    } else {
+      VM.pc++;
+    }
     return OK;
   }
 
