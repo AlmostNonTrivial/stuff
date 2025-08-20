@@ -1,10 +1,11 @@
 #pragma once
 
 #include <iostream>
-#include <cstdint>
+
 #define PAGE_SIZE 2048
+#include <cstdint>
 
-
+struct QueryArena {};
 // #define FAIL(msg) ((std::cout << msg << std::endl; exit(1)))
 
 enum DataType : uint32_t {

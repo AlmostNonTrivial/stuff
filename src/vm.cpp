@@ -2,6 +2,7 @@
 #include "arena.hpp"
 #include "btree.hpp"
 #include "defs.hpp"
+#include "memtree.hpp"
 #include "pager.hpp"
 #include "schema.hpp"
 #include "stack_containers.hpp"
@@ -17,10 +18,137 @@ bool _debug;
 
 struct VmCursor {
   BtCursor btree_cursor;
+  MemCursor mem_cursor;
   TableSchema *schema;
   bool is_index;
   uint32_t column; // for index
+
+  bool is_memory;
+  MemTree mem_tree;
 };
+
+
+// Helper functions for unified cursor operations
+static bool cursor_seek(VmCursor* cursor, const void* key) {
+  if (cursor->is_memory) {
+    return memcursor_seek(&cursor->mem_cursor, key);
+  }
+  return btree_cursor_seek(&cursor->btree_cursor, key);
+}
+
+static bool cursor_seek_ge(VmCursor* cursor, const void* key) {
+  if (cursor->is_memory) {
+    return memcursor_seek_ge(&cursor->mem_cursor, key);
+  }
+  return btree_cursor_seek_ge(&cursor->btree_cursor, key);
+}
+
+static bool cursor_seek_gt(VmCursor* cursor, const void* key) {
+  if (cursor->is_memory) {
+    return memcursor_seek_gt(&cursor->mem_cursor, key);
+  }
+  return btree_cursor_seek_gt(&cursor->btree_cursor, key);
+}
+
+static bool cursor_seek_le(VmCursor* cursor, const void* key) {
+  if (cursor->is_memory) {
+    return memcursor_seek_le(&cursor->mem_cursor, key);
+  }
+  return btree_cursor_seek_le(&cursor->btree_cursor, key);
+}
+
+static bool cursor_seek_lt(VmCursor* cursor, const void* key) {
+  if (cursor->is_memory) {
+    return memcursor_seek_lt(&cursor->mem_cursor, key);
+  }
+  return btree_cursor_seek_lt(&cursor->btree_cursor, key);
+}
+
+static bool cursor_first(VmCursor* cursor) {
+  if (cursor->is_memory) {
+    return memcursor_first(&cursor->mem_cursor);
+  }
+  return btree_cursor_first(&cursor->btree_cursor);
+}
+
+static bool cursor_last(VmCursor* cursor) {
+  if (cursor->is_memory) {
+    return memcursor_last(&cursor->mem_cursor);
+  }
+  return btree_cursor_last(&cursor->btree_cursor);
+}
+
+static bool cursor_next(VmCursor* cursor) {
+  if (cursor->is_memory) {
+    return memcursor_next(&cursor->mem_cursor);
+  }
+  return btree_cursor_next(&cursor->btree_cursor);
+}
+
+static bool cursor_previous(VmCursor* cursor) {
+  if (cursor->is_memory) {
+    return memcursor_previous(&cursor->mem_cursor);
+  }
+  return btree_cursor_previous(&cursor->btree_cursor);
+}
+
+static bool cursor_insert(VmCursor* cursor, const void* key, const uint8_t* record) {
+  if (cursor->is_memory) {
+    return memcursor_insert(&cursor->mem_cursor, key, record);
+  }
+  return btree_cursor_insert(&cursor->btree_cursor, key, record);
+}
+
+static bool cursor_delete(VmCursor* cursor) {
+  if (cursor->is_memory) {
+    return memcursor_delete(&cursor->mem_cursor);
+  }
+  return btree_cursor_delete(&cursor->btree_cursor);
+}
+
+static bool cursor_update(VmCursor* cursor, const uint8_t* record) {
+  if (cursor->is_memory) {
+    return memcursor_update(&cursor->mem_cursor, record);
+  }
+  return btree_cursor_update(&cursor->btree_cursor, record);
+}
+
+static uint8_t* cursor_key(VmCursor* cursor) {
+  if (cursor->is_memory) {
+    return memcursor_key(&cursor->mem_cursor);
+  }
+  return btree_cursor_key(&cursor->btree_cursor);
+}
+
+static uint8_t* cursor_record(VmCursor* cursor) {
+  if (cursor->is_memory) {
+    return memcursor_record(&cursor->mem_cursor);
+  }
+  return btree_cursor_record(&cursor->btree_cursor);
+}
+
+// Modified vb_column for memory cursors
+static uint8_t* vb_column(VmCursor* vb, uint32_t col_index) {
+  if (vb->is_memory) {
+    if (col_index == 0) {
+      return memcursor_key(&vb->mem_cursor);
+    }
+    // For memory trees, the record is the whole value
+    return memcursor_record(&vb->mem_cursor);
+  }
+
+  // Original btree logic
+  if (col_index == 0) {
+    return btree_cursor_key(&vb->btree_cursor);
+  }
+
+  if (vb->is_index) {
+    return btree_cursor_record(&vb->btree_cursor);
+  }
+
+  uint8_t *record = btree_cursor_record(&vb->btree_cursor);
+  return record + vb->schema->column_offsets[col_index];
+}
 
 DataType vb_column_type(VmCursor *vb, uint32_t col_index) {
   return vb->schema->columns[col_index].type;
@@ -57,47 +185,7 @@ struct Aggregator {
     count = 0;
   }
 };
-struct KeyBuffer {
-  DataType key_type;
-  ArenaVector<uint8_t *, QueryArena> keys;
-  size_t current_index;
 
-  void reset(DataType type) {
-    key_type = type;
-    keys.clear();
-    current_index = 0;
-  }
-
-  void add(const uint8_t *key_data) {
-    uint32_t size = VMValue::get_size(key_type);
-    uint8_t *copy = (uint8_t *)arena::alloc<QueryArena>(size);
-    memcpy(copy, key_data, size);
-    keys.push_back(copy);
-  }
-
-  void sort() {
-    std::sort(keys.begin(), keys.end(),
-              [this](const uint8_t *a, const uint8_t *b) {
-                return cmp(key_type, a, b) < 0;
-              });
-    current_index = 0;
-  }
-
-  bool has_next() const { return current_index < keys.size(); }
-
-  uint8_t *next() {
-    if (current_index < keys.size()) {
-      return keys[current_index++];
-    }
-    return nullptr;
-  }
-
-  void rewind() { current_index = 0; }
-
-  bool is_empty() const { return keys.empty(); }
-
-  size_t size() const { return keys.size(); }
-};
 /*------------VM STATE---------------- */
 
 static struct {
@@ -112,7 +200,6 @@ static struct {
   int32_t compare_result;
   ArenaVector<ArenaVector<VMValue, QueryArena>, QueryArena> output_buffer;
   Aggregator aggregator;
-  KeyBuffer key_buffer;
 
   bool initialized;
 } VM = {};
@@ -203,7 +290,6 @@ void vm_reset() {
     VM.registers[i].data = nullptr;
   }
 
-  VM.key_buffer.reset(TYPE_NULL);
   VM.program.clear();
   VM.cursors.clear();
   VM.event_queue.clear();
@@ -225,6 +311,7 @@ ArenaQueue<VmEvent, QueryArena> &vm_events() { return VM.event_queue; }
 VM_RESULT vm_step() {
 
   VMInstruction *inst = &VM.program[VM.pc];
+
 
   switch (inst->opcode) {
   case OP_Halt:
@@ -561,7 +648,12 @@ VM_RESULT vm_step() {
 
   case OP_Update: {
 
+
     DataType keytype;
+
+
+
+
 
     int32_t cursor_id = Opcodes::Update::cursor_id(*inst);
     int32_t record_reg = Opcodes::Update::record_reg(*inst);
@@ -702,18 +794,7 @@ VM_RESULT vm_step() {
     return OK;
   }
 
-  case Op_Sort: {
-    int32_t col = Opcodes::Sort::column_index(*inst);
-    bool desc = Opcodes::Sort::descending(*inst);
 
-    std::sort(VM.output_buffer.begin(), VM.output_buffer.end(),
-              [col, desc](const auto &a, const auto &b) {
-                int cmp_result = cmp(a[col].type, a[col].data, b[col].data);
-                return desc ? (cmp_result > 0) : (cmp_result < 0);
-              });
-    VM.pc++;
-    return OK;
-  }
 
   case Op_Flush: {
     VM.pc++;
@@ -793,6 +874,28 @@ VM_RESULT vm_step() {
     vm_set_value(&VM.registers[dest_reg], TYPE_UINT32, &result);
 
     VM.aggregator.reset();
+    VM.pc++;
+    return OK;
+  }
+
+  case OP_OpenMemTree: {
+    int32_t cursor_id = Opcodes::OpenMemTree::cursor_id(*inst);
+    DataType key_type = Opcodes::OpenMemTree::key_type(*inst);
+    int32_t record_size = Opcodes::OpenMemTree::record_size(*inst);
+
+    VmCursor& cursor = VM.cursors[cursor_id];
+
+    // Initialize memory tree
+    cursor.mem_tree = memtree_create(key_type, record_size);
+    cursor.mem_cursor.tree = &cursor.mem_tree;
+    cursor.mem_cursor.state = MemCursor::INVALID;
+    cursor.mem_cursor.current = nullptr;
+
+    // Mark as memory cursor
+    cursor.is_memory = true;
+    cursor.is_index = false;
+    cursor.schema = nullptr;  // Memory trees don't have schemas
+
     VM.pc++;
     return OK;
   }
@@ -897,68 +1000,6 @@ VM_RESULT vm_step() {
     remove_index(table_name, column);
     emit_drop_event(EVT_INDEX_DROPPED, table_name, column);
     VM.pc++;
-    return OK;
-  }
-  case OP_KeyBufferReset: {
-    DataType key_type = Opcodes::KeyBufferReset::key_type(*inst);
-    VM.key_buffer.reset(key_type);
-    VM.pc++;
-    return OK;
-  }
-
-  case OP_KeyBufferAdd: {
-    int32_t cursor_id = Opcodes::KeyBufferAdd::cursor_id(*inst);
-
-    if (!VM.cursors.contains(cursor_id)) {
-      return ERR;
-    }
-
-    VmCursor *cursor = VM.cursors.find(cursor_id);
-    uint8_t *key = vb_key(cursor);
-
-    if (key) {
-      VM.key_buffer.add(key);
-    }
-
-    VM.pc++;
-    return OK;
-  }
-
-  case OP_KeyBufferSort: {
-    VM.key_buffer.sort();
-    VM.pc++;
-    return OK;
-  }
-
-  case OP_KeyBufferNext: {
-    int32_t dest_reg = Opcodes::KeyBufferNext::dest_reg(*inst);
-    int32_t jump_if_done = Opcodes::KeyBufferNext::jump_if_done(*inst);
-
-    uint8_t *key = VM.key_buffer.next();
-
-    if (key) {
-      vm_set_value(&VM.registers[dest_reg], VM.key_buffer.key_type, key);
-      VM.pc++;
-    } else {
-      if (jump_if_done > 0) {
-        VM.pc = jump_if_done;
-      } else {
-        VM.pc++;
-      }
-    }
-    return OK;
-  }
-
-  case OP_KeyBufferRewind: {
-    int32_t jump_if_empty = Opcodes::KeyBufferRewind::jump_if_empty(*inst);
-
-    VM.key_buffer.rewind();
-
-    if (VM.key_buffer.is_empty() && jump_if_empty > 0) {
-      VM.pc = jump_if_empty;
-    } else {
-      VM.pc++;
-    }
     return OK;
   }
 

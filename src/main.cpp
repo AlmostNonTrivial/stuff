@@ -148,7 +148,7 @@ int main() {
   };
 
   for (auto query : queries) {
-    ExecutionMeta * meta = execute(query);
+    execute(query);
     auto output = vm_output_buffer();
     print_buf(output);
     std::cout << '\n';

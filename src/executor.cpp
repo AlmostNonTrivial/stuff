@@ -389,11 +389,11 @@ static void init_executor() {
   }
 }
 
-ExecutionMeta meta;
+
 
 
 int executed = 0;
-ExecutionMeta *execute(const char *sql) {
+void execute(const char *sql) {
 
     executed++;
     std::cout  <<executed << ":  "<< sql << '\n';

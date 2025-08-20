@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
-#include <queue>
 #include <sys/types.h>
 
 // Constants
@@ -220,7 +219,7 @@ static BTreeNode *create_node(BTree &tree, bool is_leaf) {
   node->num_keys = 0;
   node->is_leaf = is_leaf ? 1 : 0;
 
-  pager_mark_dirty(page_index);
+  mark_dirty(node);
   return node;
 }
 
@@ -477,9 +476,7 @@ static bool insert(BTree &tree, BTreeNode *node, uint8_t *key,
 }
 
 static void insert_element(BTree &tree, void *key, const uint8_t *data) {
-
-
-  if (tree.root_page_index == 0) {
+if (tree.root_page_index == 0) {
     BTreeNode *root = create_node(tree, true);
     tree.root_page_index = root->index;
   }

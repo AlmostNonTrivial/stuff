@@ -10,7 +10,7 @@
 inline const char *datatype_to_string(DataType type);
 extern bool _debug;
 
-struct QueryArena {};
+
 
 // VM value - uses arena allocation for data
 struct VMValue {
@@ -96,13 +96,9 @@ enum OpCode : uint32_t {
   OP_AggFinal = 95,
 
   // Sorting and output
-  Op_Sort = 96,
   Op_Flush = 97,
-  OP_KeyBufferReset = 100,
-  OP_KeyBufferAdd = 101,
-  OP_KeyBufferSort = 102,
-  OP_KeyBufferNext = 103,
-  OP_KeyBufferRewind = 104,
+  Op_OpenMemTree = 98
+
 };
 
 struct VMInstruction {
@@ -773,81 +769,34 @@ struct AggFinal {
   }
 };
 
-// Sorting and Output
-struct Sort {
-  static VMInstruction create(int32_t column_index, bool descending = false) {
-    return {Op_Sort, column_index, descending ? 1 : 0, 0, nullptr, 0};
-  }
-  static int32_t column_index(const VMInstruction &inst) { return inst.p1; }
-  static bool descending(const VMInstruction &inst) { return inst.p2 != 0; }
-  static void print(const VMInstruction &inst) {
-    printf("col=%d %s", column_index(inst), descending(inst) ? "DESC" : "ASC");
-  }
-};
 
 struct Flush {
   static VMInstruction create() { return {Op_Flush, 0, 0, 0, nullptr, 0}; }
   static void print(const VMInstruction &inst) { /* No parameters */ }
 };
 
-struct KeyBufferReset {
-  static VMInstruction create(DataType key_type) {
-    return {OP_KeyBufferReset, (int32_t)key_type, 0, 0, nullptr, 0};
+struct OpenMemTree {
+  static VMInstruction create(int32_t cursor_id, DataType key_type,
+                              int32_t record_size) {
+    return {Op_OpenMemTree, cursor_id, (int32_t)key_type, record_size,
+            nullptr, 0};
   }
-  static DataType key_type(const VMInstruction &inst) {
-    return (DataType)inst.p1;
-  }
-  static void print(const VMInstruction &inst) {
-    printf("type=%s", datatype_to_string(key_type(inst)));
-  }
-};
 
-struct KeyBufferAdd {
-  static VMInstruction create(int32_t cursor_id) {
-    return {OP_KeyBufferAdd, cursor_id, 0, 0, nullptr, 0};
-  }
   static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
+  static DataType key_type(const VMInstruction &inst) {
+    return (DataType)inst.p2;
+  }
+  static int32_t record_size(const VMInstruction &inst) { return inst.p3; }
+
   static void print(const VMInstruction &inst) {
-    printf("cursor=%d", cursor_id(inst));
+    printf("cursor=%d key_type=%s record_size=%d",
+           cursor_id(inst),
+           datatype_to_string(key_type(inst)),
+           record_size(inst));
   }
 };
 
-struct KeyBufferSort {
-  static VMInstruction create() {
-    return {OP_KeyBufferSort, 0, 0, 0, nullptr, 0};
-  }
-  static void print(const VMInstruction &inst) { /* No params */ }
-};
 
-struct KeyBufferNext {
-  static VMInstruction create(int32_t dest_reg, int32_t jump_if_done) {
-    return {OP_KeyBufferNext, dest_reg, jump_if_done, 0, nullptr, 0};
-  }
-  static VMInstruction create_label(int32_t dest_reg, const char *label) {
-    return {OP_KeyBufferNext, dest_reg, -1, 0, (void *)label, 0};
-  }
-  static int32_t dest_reg(const VMInstruction &inst) { return inst.p1; }
-  static int32_t jump_if_done(const VMInstruction &inst) { return inst.p2; }
-  static void print(const VMInstruction &inst) {
-    printf("-> r%d", dest_reg(inst));
-    if (jump_if_done(inst) >= 0)
-      printf(" done->%d", jump_if_done(inst));
-  }
-};
-
-struct KeyBufferRewind {
-  static VMInstruction create(int32_t jump_if_empty) {
-    return {OP_KeyBufferRewind, 0, jump_if_empty, 0, nullptr, 0};
-  }
-  static VMInstruction create_label(const char *label) {
-    return {OP_KeyBufferRewind, 0, -1, 0, (void *)label, 0};
-  }
-  static int32_t jump_if_empty(const VMInstruction &inst) { return inst.p2; }
-  static void print(const VMInstruction &inst) {
-    if (jump_if_empty(inst) >= 0)
-      printf(" empty->%d", jump_if_empty(inst));
-  }
-};
 
 } // namespace Opcodes
 
@@ -1026,8 +975,9 @@ inline VMInstruction make_agg_final(int32_t dest_reg) {
 }
 
 // Sorting and output
-inline VMInstruction make_sort(int32_t column_index, bool descending = false) {
-  return Opcodes::Sort::create(column_index, descending);
+inline VMInstruction make_open_memtree(int32_t cursor_id, DataType key_type,
+                                       int32_t record_size) {
+  return Opcodes::OpenMemTree::create(cursor_id, key_type, record_size);
 }
 inline VMInstruction make_flush() { return Opcodes::Flush::create(); }
 
@@ -1087,30 +1037,6 @@ inline VMInstruction make_gt_label(int32_t reg_a, int32_t reg_b,
 inline VMInstruction make_ge_label(int32_t reg_a, int32_t reg_b,
                                    const char *label) {
   return Opcodes::Ge::create_label(reg_a, reg_b, label);
-}
-
-inline VMInstruction make_key_buffer_reset(DataType key_type) {
-  return Opcodes::KeyBufferReset::create(key_type);
-}
-inline VMInstruction make_key_buffer_add(int32_t cursor_id) {
-  return Opcodes::KeyBufferAdd::create(cursor_id);
-}
-inline VMInstruction make_key_buffer_sort() {
-  return Opcodes::KeyBufferSort::create();
-}
-inline VMInstruction make_key_buffer_next(int32_t dest_reg,
-                                          int32_t jump_if_done = -1) {
-  return Opcodes::KeyBufferNext::create(dest_reg, jump_if_done);
-}
-inline VMInstruction make_key_buffer_next_label(int32_t dest_reg,
-                                                const char *label) {
-  return Opcodes::KeyBufferNext::create_label(dest_reg, label);
-}
-inline VMInstruction make_key_buffer_rewind(int32_t jump_if_empty = -1) {
-  return Opcodes::KeyBufferRewind::create(jump_if_empty);
-}
-inline VMInstruction make_key_buffer_rewind_label(const char *label) {
-  return Opcodes::KeyBufferRewind::create_label(label);
 }
 
 // ============================================================================
