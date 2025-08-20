@@ -1,5 +1,6 @@
 #pragma once
 
+#include "defs.hpp"
 #include "vm.hpp"
 #include "arena.hpp"
 #include <vector>
@@ -42,7 +43,7 @@ struct ColumnRefNode : ASTNode {
 };
 
 struct LiteralNode : ASTNode {
-    VMValue value;
+    TypedValue value;
 };
 
 struct BinaryOpNode : ASTNode {

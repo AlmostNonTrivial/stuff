@@ -70,26 +70,26 @@ static char *generate_index_sql(const char *table_name, uint32_t column_index,
 // Execute SQL through VM without triggering recursive events
 static VM_RESULT execute_internal(const char *sql) {
   // Save and clear event queue to prevent recursive processing
-  auto saved_events = vm_events();
-  ArenaQueue<VmEvent, QueryArena> empty_queue;
-  vm_events() = empty_queue;
+  // auto saved_events = vm_events();
+  // ArenaQueue<VmEvent, QueryArena> empty_queue;
+  // vm_events() = empty_queue;
 
-  ArenaVector<ASTNode *, QueryArena> stmts = parse_sql(sql);
-  if (stmts.empty()) {
-    vm_events() = saved_events;
-    return ERR;
-  }
+  // ArenaVector<ASTNode *, QueryArena> stmts = parse_sql(sql);
+  // if (stmts.empty()) {
+  //   vm_events() = saved_events;
+  //   return ERR;
+  // }
 
-  ArenaVector<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
-  VM_RESULT result = vm_execute(program);
+  // ArenaVector<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
+  // VM_RESULT result = vm_execute(program);
 
-  // Clear any events from internal operation
-  vm_events().clear();
+  // // Clear any events from internal operation
+  // // vm_events().clear();
 
-  // Restore original event queue
-  vm_events() = saved_events;
+  // // // Restore original event queue
+  // // vm_events() = saved_events;
 
-  return result;
+  // return result;
 }
 
 static void insert_master_table_entry(const char *type, const char *name,
@@ -183,196 +183,200 @@ static void rebuild_schema_from_master() {
   if (stmts.empty())
     return;
 
-  ArenaVector<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
-  vm_execute(program);
+  // ArenaVector<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
+  // vm_execute(program);
 
-  // Process results to rebuild tables and indexes
-  auto& output = vm_output_buffer();
-  for (auto &row : output) {
-    if (row.size() < 6)
-      continue;
 
-    uint32_t id = *(uint32_t *)row[0].data;
-    const char *type = (const char *)row[1].data;
-    const char *name = (const char *)row[2].data;
-    const char *tbl_name = (const char *)row[3].data;
-    uint32_t rootpage = *(uint32_t *)row[4].data;
-    const char *sql = (const char *)row[5].data;
 
-    // Update next ID counter
-    if (id >= executor_state.next_master_id) {
-      executor_state.next_master_id = id + 1;
-    }
+  // need to set result callback
 
-    if (strcmp(type, "table") == 0 && strcmp(name, "sqlite_master") != 0) {
-      // Parse CREATE TABLE to rebuild schema
-      ArenaVector<ASTNode *, QueryArena> create_stmts = parse_sql(sql);
-      if (!create_stmts.empty() && create_stmts[0]->type == AST_CREATE_TABLE) {
-        CreateTableNode *node = (CreateTableNode *)create_stmts[0];
 
-        Table *table = (Table *)arena::alloc<QueryArena>(sizeof(Table));
-        table->schema.table_name = name;
-        table->schema.columns.set(node->columns);
 
-        calculate_column_offsets(&table->schema);
+  // for (auto &row : output) {
+  //   if (row.size() < 6)
+  //     continue;
 
-        // Restore btree with existing root page
-        table->tree = btree_create(table->schema.key_type(),
-                                  table->schema.record_size, BPLUS);
-        table->tree.root_page_index = rootpage;
+  //   uint32_t id = *(uint32_t *)row[0].data;
+  //   const char *type = (const char *)row[1].data;
+  //   const char *name = (const char *)row[2].data;
+  //   const char *tbl_name = (const char *)row[3].data;
+  //   uint32_t rootpage = *(uint32_t *)row[4].data;
+  //   const char *sql = (const char *)row[5].data;
 
-        add_table(table);
-      }
-    }
-    else if (strcmp(type, "index") == 0) {
-      Table *table = get_table(tbl_name);
-      if (table) {
-        // Extract column index from name (format: idx_tablename_columnindex)
-        char expected_prefix[256];
-        snprintf(expected_prefix, sizeof(expected_prefix), "idx_%s_", tbl_name);
+  //   // Update next ID counter
+  //   if (id >= executor_state.next_master_id) {
+  //     executor_state.next_master_id = id + 1;
+  //   }
 
-        if (strncmp(name, expected_prefix, strlen(expected_prefix)) == 0) {
-          const char *col_idx_str = name + strlen(expected_prefix);
-          uint32_t col_idx = atoi(col_idx_str);
+  //   if (strcmp(type, "table") == 0 && strcmp(name, "sqlite_master") != 0) {
+  //     // Parse CREATE TABLE to rebuild schema
+  //     ArenaVector<ASTNode *, QueryArena> create_stmts = parse_sql(sql);
+  //     if (!create_stmts.empty() && create_stmts[0]->type == AST_CREATE_TABLE) {
+  //       CreateTableNode *node = (CreateTableNode *)create_stmts[0];
 
-          if (col_idx > 0 && col_idx < table->schema.columns.size()) {
-            Index *index = (Index *)arena::alloc<QueryArena>(sizeof(Index));
-            index->column_index = col_idx;
-            index->index_name = name;
-            index->tree = btree_create(table->schema.columns[col_idx].type,
-                                     table->schema.key_type(), BTREE);
-            index->tree.root_page_index = rootpage;
+  //       Table *table = (Table *)arena::alloc<QueryArena>(sizeof(Table));
+  //       table->schema.table_name = name;
+  //       table->schema.columns.set(node->columns);
 
-            add_index(tbl_name, index);
-          }
-        }
-      }
-    }
-  }
+  //       calculate_column_offsets(&table->schema);
+
+  //       // Restore btree with existing root page
+  //       table->tree = btree_create(table->schema.key_type(),
+  //                                 table->schema.record_size, BPLUS);
+  //       table->tree.root_page_index = rootpage;
+
+  //       add_table(table);
+  //     }
+  //   }
+  //   else if (strcmp(type, "index") == 0) {
+  //     Table *table = get_table(tbl_name);
+  //     if (table) {
+  //       // Extract column index from name (format: idx_tablename_columnindex)
+  //       char expected_prefix[256];
+  //       snprintf(expected_prefix, sizeof(expected_prefix), "idx_%s_", tbl_name);
+
+  //       if (strncmp(name, expected_prefix, strlen(expected_prefix)) == 0) {
+  //         const char *col_idx_str = name + strlen(expected_prefix);
+  //         uint32_t col_idx = atoi(col_idx_str);
+
+  //         if (col_idx > 0 && col_idx < table->schema.columns.size()) {
+  //           Index *index = (Index *)arena::alloc<QueryArena>(sizeof(Index));
+  //           index->column_index = col_idx;
+  //           index->index_name = name;
+  //           index->tree = btree_create(table->schema.columns[col_idx].type,
+  //                                    table->schema.key_type(), BTREE);
+  //           index->tree.root_page_index = rootpage;
+
+  //           add_index(tbl_name, index);
+  //         }
+  //       }
+  //     }
+  //   }
+  // }
 }
 
-static void process_vm_events() {
-  auto &events = vm_events();
+// static void process_vm_events() {
+//   auto &events = ();
 
-  while (!events.empty()) {
-    VmEvent event = events.front();
-    events.pop();
+//   while (!events.empty()) {
+//     VmEvent event = events.front();
+//     events.pop();
 
-    switch (event.type) {
-    case EVT_TABLE_CREATED: {
-      const char *table_name = event.context.table_info.table_name;
-      Table *table = get_table(table_name);
+//     switch (event.type) {
+//     case EVT_TABLE_CREATED: {
+//       const char *table_name = event.context.table_info.table_name;
+//       Table *table = get_table(table_name);
 
-      if (executor_state.master_table_exists && table &&
-          strcmp(table_name, "sqlite_master") != 0) {
-        char* sql = generate_create_sql(&table->schema);
-        insert_master_table_entry("table",
-            table_name,
-            table_name,
-            table->tree.root_page_index,
-            sql);
-      }
-      break;
-    }
+//       if (executor_state.master_table_exists && table &&
+//           strcmp(table_name, "sqlite_master") != 0) {
+//         char* sql = generate_create_sql(&table->schema);
+//         insert_master_table_entry("table",
+//             table_name,
+//             table_name,
+//             table->tree.root_page_index,
+//             sql);
+//       }
+//       break;
+//     }
 
-    case EVT_INDEX_CREATED: {
-      const char *table_name = event.context.index_info.table_name;
-      uint32_t column_index = event.context.index_info.column_index;
-      Index *index = get_index(table_name, column_index);
+//     case EVT_INDEX_CREATED: {
+//       const char *table_name = event.context.index_info.table_name;
+//       uint32_t column_index = event.context.index_info.column_index;
+//       Index *index = get_index(table_name, column_index);
 
-      if (executor_state.master_table_exists && index) {
-        char index_name[256];
-        snprintf(index_name, sizeof(index_name), "idx_%s_%u",
-                table_name, column_index);
+//       if (executor_state.master_table_exists && index) {
+//         char index_name[256];
+//         snprintf(index_name, sizeof(index_name), "idx_%s_%u",
+//                 table_name, column_index);
 
-        char* sql = generate_index_sql(table_name, column_index, index_name);
-        insert_master_table_entry("index",
-            index_name,
-            table_name,
-            index->tree.root_page_index,
-            sql);
-      }
-      break;
-    }
+//         char* sql = generate_index_sql(table_name, column_index, index_name);
+//         insert_master_table_entry("index",
+//             index_name,
+//             table_name,
+//             index->tree.root_page_index,
+//             sql);
+//       }
+//       break;
+//     }
 
-    case EVT_TABLE_DROPPED: {
-      const char *table_name = event.context.table_info.table_name;
+//     case EVT_TABLE_DROPPED: {
+//       const char *table_name = event.context.table_info.table_name;
 
-      // Delete table and all its indexes from master
-      delete_master_table_entry(table_name);
+//       // Delete table and all its indexes from master
+//       delete_master_table_entry(table_name);
 
-      // Also delete all indexes for this table
-      char buffer[512];
-      snprintf(buffer, sizeof(buffer),
-               "DELETE FROM sqlite_master WHERE type = 'index' AND tbl_name = '%s'",
-               table_name);
-      execute_internal(buffer);
-      break;
-    }
+//       // Also delete all indexes for this table
+//       char buffer[512];
+//       snprintf(buffer, sizeof(buffer),
+//                "DELETE FROM sqlite_master WHERE type = 'index' AND tbl_name = '%s'",
+//                table_name);
+//       execute_internal(buffer);
+//       break;
+//     }
 
-    case EVT_INDEX_DROPPED: {
-      const char *table_name = event.context.index_info.table_name;
-      uint32_t column_index = event.context.index_info.column_index;
+//     case EVT_INDEX_DROPPED: {
+//       const char *table_name = event.context.index_info.table_name;
+//       uint32_t column_index = event.context.index_info.column_index;
 
-      char index_name[256];
-      snprintf(index_name, sizeof(index_name), "idx_%s_%u",
-              table_name, column_index);
-      delete_master_table_entry(index_name);
-      break;
-    }
+//       char index_name[256];
+//       snprintf(index_name, sizeof(index_name), "idx_%s_%u",
+//               table_name, column_index);
+//       delete_master_table_entry(index_name);
+//       break;
+//     }
 
-    case EVT_BTREE_ROOT_CHANGED: {
-      const char *table_name = event.context.table_info.table_name;
-      uint32_t column = event.context.table_info.column;
+//     case EVT_BTREE_ROOT_CHANGED: {
+//       const char *table_name = event.context.table_info.table_name;
+//       uint32_t column = event.context.table_info.column;
 
-      if (executor_state.master_table_exists) {
-        if (column == 0) {
-          // Table root changed
-          Table *table = get_table(table_name);
-          if (table) {
-            update_master_table_rootpage(table_name, table->tree.root_page_index);
-          }
-        } else {
-          // Index root changed
-          Index *index = get_index(table_name, column);
-          if (index) {
-            char index_name[256];
-            snprintf(index_name, sizeof(index_name), "idx_%s_%u",
-                    table_name, column);
-            update_master_table_rootpage(index_name, index->tree.root_page_index);
-          }
-        }
-      }
-      break;
-    }
+//       if (executor_state.master_table_exists) {
+//         if (column == 0) {
+//           // Table root changed
+//           Table *table = get_table(table_name);
+//           if (table) {
+//             update_master_table_rootpage(table_name, table->tree.root_page_index);
+//           }
+//         } else {
+//           // Index root changed
+//           Index *index = get_index(table_name, column);
+//           if (index) {
+//             char index_name[256];
+//             snprintf(index_name, sizeof(index_name), "idx_%s_%u",
+//                     table_name, column);
+//             update_master_table_rootpage(index_name, index->tree.root_page_index);
+//           }
+//         }
+//       }
+//       break;
+//     }
 
-    case EVT_TRANSACTION_BEGIN:
-      if (!executor_state.in_transaction) {
-        btree_begin_transaction();
-        executor_state.in_transaction = true;
-      }
-      break;
+//     case EVT_TRANSACTION_BEGIN:
+//       if (!executor_state.in_transaction) {
+//         btree_begin_transaction();
+//         executor_state.in_transaction = true;
+//       }
+//       break;
 
-    case EVT_TRANSACTION_COMMIT:
-      if (executor_state.in_transaction) {
-        btree_commit();
-        executor_state.in_transaction = false;
-      }
-      break;
+//     case EVT_TRANSACTION_COMMIT:
+//       if (executor_state.in_transaction) {
+//         btree_commit();
+//         executor_state.in_transaction = false;
+//       }
+//       break;
 
-    case EVT_TRANSACTION_ROLLBACK:
-      if (executor_state.in_transaction) {
-        btree_rollback();
-        executor_state.in_transaction = false;
-        rebuild_schema_from_master();
-      }
-      break;
+//     case EVT_TRANSACTION_ROLLBACK:
+//       if (executor_state.in_transaction) {
+//         btree_rollback();
+//         executor_state.in_transaction = false;
+//         rebuild_schema_from_master();
+//       }
+//       break;
 
-    default:
-      break;
-    }
-  }
-}
+//     default:
+//       break;
+//     }
+//   }
+// }
 
 static void init_executor() {
   executor_state.initialized = true;
@@ -465,7 +469,7 @@ void execute(const char *sql) {
       break;
     } else {
       // Process events immediately after each statement
-      process_vm_events();
+      // process_vm_events();
 
       // Auto-commit after write if we auto-began
       if (auto_transaction && is_write) {

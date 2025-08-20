@@ -19,6 +19,12 @@ enum DataType : uint32_t {
     TYPE_VARCHAR256 = 256 // Variable char up to 256 bytes
 };
 
+// VM value - uses arena allocation for data
+struct TypedValue {
+  DataType type;
+  uint8_t *data; // Points to arena-allocated memory
+};
+
 
 enum CompareOp {
     EQ = 0,

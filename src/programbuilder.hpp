@@ -8,7 +8,7 @@
 
 struct SetColumns {
     ArenaString<QueryArena> first;
-    VMValue second;
+    TypedValue second;
 };
 
 
@@ -16,7 +16,7 @@ struct WhereCondition {
   ArenaString<QueryArena> column_name;
   uint32_t column_index;
   CompareOp operator_type;
-  VMValue value;
+  TypedValue value;
   double selectivity = 0.5;
 };
 

@@ -6,25 +6,46 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+
 typedef void (*ResultCallback)(void *result, size_t result_size);
 inline const char *datatype_to_string(DataType type);
 extern bool _debug;
 
+enum EventType {
+  EVT_TABLE_CREATED,
+  EVT_TABLE_DROPPED,
+  EVT_INDEX_CREATED,
+  EVT_INDEX_DROPPED,
+  EVT_BTREE_ROOT_CHANGED,
+  EVT_ROWS_INSERTED,
+  EVT_ROWS_DELETED,
+  EVT_ROWS_UPDATED,
+  EVT_TRANSACTION_BEGIN,
+  EVT_TRANSACTION_COMMIT,
+  EVT_TRANSACTION_ROLLBACK
+};
 
+struct VmEvent {
+  EventType type;
+  void *data;
 
-// VM value - uses arena allocation for data
-struct VMValue {
-  DataType type;
   union {
-    uint32_t u32;
-    uint64_t u64;
-    int32_t i32;
-    int64_t i64;
-    uint8_t *data; // Points to arena-allocated memory
-  };
+    struct {
+      const char *table_name;
+      uint32_t root_page;
+      uint32_t column;
+    } table_info;
 
-  // Helper to get size based on type
-  static uint32_t get_size(DataType t) { return static_cast<uint32_t>(t); }
+    struct {
+      const char *table_name;
+      uint32_t column_index;
+      const char *index_name;
+    } index_info;
+
+    struct {
+      uint32_t count;
+    } row_info;
+  } context;
 };
 
 // Forward declaration for schema
@@ -40,18 +61,13 @@ enum OpCode : uint32_t {
   OP_OpenRead = 10,
   OP_OpenWrite = 11,
   OP_Close = 12,
-  OP_Rewind = 13,
-  OP_Next = 14,
-  OP_Prev = 15,
-  OP_First = 16,
-  OP_Last = 17,
+  OP_First = 13,
+  OP_Last = 14,
+  OP_Next = 15,
+  OP_Prev = 16,
 
-  // Seek operations
-  OP_SeekGE = 20,
-  OP_SeekGT = 21,
-  OP_SeekLE = 22,
-  OP_SeekLT = 23,
-  OP_SeekEQ = 24,
+  // Unified Seek operation
+  OP_Seek = 20,
 
   // Data operations
   OP_Column = 30,
@@ -66,18 +82,10 @@ enum OpCode : uint32_t {
   OP_Copy = 43,
   OP_Move = 44,
 
-  // Comparison operations
-  OP_Compare = 55,
-  OP_Jump = 56,
-  OP_Eq = 57,
-  OP_Ne = 58,
-  OP_Lt = 59,
-  OP_Le = 60,
-  OP_Gt = 61,
-  OP_Ge = 62,
+  // Unified Comparison operation
+  OP_Compare = 50,
 
-  // Results
-  OP_ResultRow = 70,
+  OP_Flush = 71,
 
   // Schema operations
   OP_CreateTable = 80,
@@ -90,15 +98,8 @@ enum OpCode : uint32_t {
   OP_Commit = 91,
   OP_Rollback = 92,
 
-  // Aggregation
-  OP_AggReset = 93,
-  OP_AggStep = 94,
-  OP_AggFinal = 95,
-
-  // Sorting and output
-  Op_Flush = 97,
-  Op_OpenMemTree = 98
-
+  // Memory tree
+  OP_OpenMemTree = 98,
 };
 
 struct VMInstruction {
@@ -111,8 +112,7 @@ struct VMInstruction {
 };
 
 // ============================================================================
-// Opcode Descriptors - Each opcode knows how to create, access, and print
-// itself
+// Opcode Descriptors
 // ============================================================================
 
 namespace Opcodes {
@@ -130,7 +130,7 @@ inline void print_string_value(const void *data, DataType type) {
     if (str[i] >= 32 && str[i] < 127) {
       printf("%c", str[i]);
     } else {
-      printf("\\x%02x", (unsigned char)str[i]);
+      printf("\\\\x%02x", (unsigned char)str[i]);
     }
   }
   printf("\"");
@@ -176,9 +176,9 @@ struct Halt {
 struct OpenRead {
   static VMInstruction create(int32_t cursor_id, const char *table_name,
                               int32_t index_col = 0) {
-    return {OP_OpenRead, 0, cursor_id, index_col, (void *)table_name, 0};
+    return {OP_OpenRead, cursor_id, 0, index_col, (void *)table_name, 0};
   }
-  static int32_t cursor_id(const VMInstruction &inst) { return inst.p2; }
+  static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
   static int32_t index_col(const VMInstruction &inst) { return inst.p3; }
   static const char *table_name(const VMInstruction &inst) {
     return (const char *)inst.p4;
@@ -195,9 +195,9 @@ struct OpenRead {
 struct OpenWrite {
   static VMInstruction create(int32_t cursor_id, const char *table_name,
                               int32_t index_col = 0) {
-    return {OP_OpenWrite, 0, cursor_id, index_col, (void *)table_name, 0};
+    return {OP_OpenWrite, cursor_id, 0, index_col, (void *)table_name, 0};
   }
-  static int32_t cursor_id(const VMInstruction &inst) { return inst.p2; }
+  static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
   static int32_t index_col(const VMInstruction &inst) { return inst.p3; }
   static const char *table_name(const VMInstruction &inst) {
     return (const char *)inst.p4;
@@ -218,54 +218,6 @@ struct Close {
   static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
   static void print(const VMInstruction &inst) {
     printf("cursor=%d", cursor_id(inst));
-  }
-};
-
-struct Rewind {
-  static VMInstruction create(int32_t cursor_id, int32_t jump_if_empty = -1) {
-    return {OP_Rewind, cursor_id, jump_if_empty, 0, nullptr, 0};
-  }
-  static VMInstruction create_label(int32_t cursor_id, const char *label) {
-    return {OP_Rewind, cursor_id, -1, 0, (void *)label, 0};
-  }
-  static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
-  static int32_t jump_if_empty(const VMInstruction &inst) { return inst.p2; }
-  static void print(const VMInstruction &inst) {
-    printf("cursor=%d", cursor_id(inst));
-    if (jump_if_empty(inst) >= 0)
-      printf(" empty->%d", jump_if_empty(inst));
-  }
-};
-
-struct Next {
-  static VMInstruction create(int32_t cursor_id, int32_t jump_if_done = -1) {
-    return {OP_Next, cursor_id, jump_if_done, 0, nullptr, 0};
-  }
-  static VMInstruction create_label(int32_t cursor_id, const char *label) {
-    return {OP_Next, cursor_id, -1, 0, (void *)label, 0};
-  }
-  static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
-  static int32_t jump_if_done(const VMInstruction &inst) { return inst.p2; }
-  static void print(const VMInstruction &inst) {
-    printf("cursor=%d", cursor_id(inst));
-    if (jump_if_done(inst) >= 0)
-      printf(" done->%d", jump_if_done(inst));
-  }
-};
-
-struct Prev {
-  static VMInstruction create(int32_t cursor_id, int32_t jump_if_done = -1) {
-    return {OP_Prev, cursor_id, jump_if_done, 0, nullptr, 0};
-  }
-  static VMInstruction create_label(int32_t cursor_id, const char *label) {
-    return {OP_Prev, cursor_id, -1, 0, (void *)label, 0};
-  }
-  static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
-  static int32_t jump_if_done(const VMInstruction &inst) { return inst.p2; }
-  static void print(const VMInstruction &inst) {
-    printf("cursor=%d", cursor_id(inst));
-    if (jump_if_done(inst) >= 0)
-      printf(" done->%d", jump_if_done(inst));
   }
 };
 
@@ -295,109 +247,48 @@ struct Last {
   }
 };
 
-// Seek Operations
-struct SeekGE {
-  static VMInstruction create(int32_t cursor_id, int32_t key_reg,
-                              int32_t jump_if_not_found = -1) {
-    return {OP_SeekGE, cursor_id, key_reg, jump_if_not_found, nullptr, 0};
-  }
-  static VMInstruction create_label(int32_t cursor_id, int32_t key_reg,
-                                    const char *label) {
-    return {OP_SeekGE, cursor_id, key_reg, -1, (void *)label, 0};
+struct Next {
+  static VMInstruction create(int32_t cursor_id, int32_t jump_if_done = -1) {
+    return {OP_Next, cursor_id, jump_if_done, 0, nullptr, 0};
   }
   static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
-  static int32_t key_reg(const VMInstruction &inst) { return inst.p2; }
-  static int32_t jump_if_not_found(const VMInstruction &inst) {
-    return inst.p3;
-  }
+  static int32_t jump_if_done(const VMInstruction &inst) { return inst.p2; }
   static void print(const VMInstruction &inst) {
-    printf("cursor=%d key=r%d", cursor_id(inst), key_reg(inst));
-    if (jump_if_not_found(inst) >= 0)
-      printf(" notfound->%d", jump_if_not_found(inst));
+    printf("cursor=%d", cursor_id(inst));
+    if (jump_if_done(inst) >= 0)
+      printf(" done->%d", jump_if_done(inst));
   }
 };
 
-struct SeekGT {
-  static VMInstruction create(int32_t cursor_id, int32_t key_reg,
-                              int32_t jump_if_not_found = -1) {
-    return {OP_SeekGT, cursor_id, key_reg, jump_if_not_found, nullptr, 0};
-  }
-  static VMInstruction create_label(int32_t cursor_id, int32_t key_reg,
-                                    const char *label) {
-    return {OP_SeekGT, cursor_id, key_reg, -1, (void *)label, 0};
+struct Prev {
+  static VMInstruction create(int32_t cursor_id, int32_t jump_if_done = -1) {
+    return {OP_Prev, cursor_id, jump_if_done, 0, nullptr, 0};
   }
   static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
-  static int32_t key_reg(const VMInstruction &inst) { return inst.p2; }
-  static int32_t jump_if_not_found(const VMInstruction &inst) {
-    return inst.p3;
-  }
+  static int32_t jump_if_done(const VMInstruction &inst) { return inst.p2; }
   static void print(const VMInstruction &inst) {
-    printf("cursor=%d key=r%d", cursor_id(inst), key_reg(inst));
-    if (jump_if_not_found(inst) >= 0)
-      printf(" notfound->%d", jump_if_not_found(inst));
+    printf("cursor=%d", cursor_id(inst));
+    if (jump_if_done(inst) >= 0)
+      printf(" done->%d", jump_if_done(inst));
   }
 };
 
-struct SeekLE {
+// Unified Seek operation
+struct Seek {
   static VMInstruction create(int32_t cursor_id, int32_t key_reg,
-                              int32_t jump_if_not_found = -1) {
-    return {OP_SeekLE, cursor_id, key_reg, jump_if_not_found, nullptr, 0};
-  }
-  static VMInstruction create_label(int32_t cursor_id, int32_t key_reg,
-                                    const char *label) {
-    return {OP_SeekLE, cursor_id, key_reg, -1, (void *)label, 0};
+                              int32_t jump_if_not, CompareOp op) {
+    return {OP_Seek, cursor_id, key_reg, jump_if_not, nullptr, (uint8_t)op};
   }
   static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
   static int32_t key_reg(const VMInstruction &inst) { return inst.p2; }
-  static int32_t jump_if_not_found(const VMInstruction &inst) {
-    return inst.p3;
-  }
+  static int32_t jump_if_not(const VMInstruction &inst) { return inst.p3; }
+  static CompareOp op(const VMInstruction &inst) { return (CompareOp)inst.p5; }
   static void print(const VMInstruction &inst) {
-    printf("cursor=%d key=r%d", cursor_id(inst), key_reg(inst));
-    if (jump_if_not_found(inst) >= 0)
-      printf(" notfound->%d", jump_if_not_found(inst));
-  }
-};
-
-struct SeekLT {
-  static VMInstruction create(int32_t cursor_id, int32_t key_reg,
-                              int32_t jump_if_not_found = -1) {
-    return {OP_SeekLT, cursor_id, key_reg, jump_if_not_found, nullptr, 0};
-  }
-  static VMInstruction create_label(int32_t cursor_id, int32_t key_reg,
-                                    const char *label) {
-    return {OP_SeekLT, cursor_id, key_reg, -1, (void *)label, 0};
-  }
-  static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
-  static int32_t key_reg(const VMInstruction &inst) { return inst.p2; }
-  static int32_t jump_if_not_found(const VMInstruction &inst) {
-    return inst.p3;
-  }
-  static void print(const VMInstruction &inst) {
-    printf("cursor=%d key=r%d", cursor_id(inst), key_reg(inst));
-    if (jump_if_not_found(inst) >= 0)
-      printf(" notfound->%d", jump_if_not_found(inst));
-  }
-};
-
-struct SeekEQ {
-  static VMInstruction create(int32_t cursor_id, int32_t key_reg,
-                              int32_t jump_if_not_found = -1) {
-    return {OP_SeekEQ, cursor_id, key_reg, jump_if_not_found, nullptr, 0};
-  }
-  static VMInstruction create_label(int32_t cursor_id, int32_t key_reg,
-                                    const char *label) {
-    return {OP_SeekEQ, cursor_id, key_reg, -1, (void *)label, 0};
-  }
-  static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
-  static int32_t key_reg(const VMInstruction &inst) { return inst.p2; }
-  static int32_t jump_if_not_found(const VMInstruction &inst) {
-    return inst.p3;
-  }
-  static void print(const VMInstruction &inst) {
-    printf("cursor=%d key=r%d", cursor_id(inst), key_reg(inst));
-    if (jump_if_not_found(inst) >= 0)
-      printf(" notfound->%d", jump_if_not_found(inst));
+    const char *op_str[] = {"EQ", "NE", "LT", "LE", "GT", "GE"};
+    printf("cursor=%d key=r%d op=%s", cursor_id(inst), key_reg(inst),
+           op_str[op(inst)]);
+    if (jump_if_not(inst) >= 0)
+      printf(" notfound->%d", jump_if_not(inst));
   }
 };
 
@@ -514,155 +405,32 @@ struct Move {
   }
 };
 
-// Comparison Operations
+// Unified Comparison operation
 struct Compare {
-  static VMInstruction create(int32_t reg_a, int32_t reg_b) {
-    return {OP_Compare, reg_a, 0, reg_b, nullptr, 0};
-  }
-  static int32_t reg_a(const VMInstruction &inst) { return inst.p1; }
-  static int32_t reg_b(const VMInstruction &inst) { return inst.p3; }
-  static void print(const VMInstruction &inst) {
-    printf("r%d cmp r%d", reg_a(inst), reg_b(inst));
-  }
-};
-
-struct Jump {
-  static VMInstruction create(int32_t jump_lt, int32_t jump_eq,
-                              int32_t jump_gt) {
-    return {OP_Jump, jump_lt, jump_eq, jump_gt, nullptr, 0};
-  }
-  static int32_t jump_lt(const VMInstruction &inst) { return inst.p1; }
-  static int32_t jump_eq(const VMInstruction &inst) { return inst.p2; }
-  static int32_t jump_gt(const VMInstruction &inst) { return inst.p3; }
-  static void print(const VMInstruction &inst) {
-    printf("lt->%d eq->%d gt->%d", jump_lt(inst), jump_eq(inst), jump_gt(inst));
-  }
-};
-
-struct Eq {
   static VMInstruction create(int32_t reg_a, int32_t reg_b,
-                              int32_t jump_target = -1) {
-    return {OP_Eq, reg_a, jump_target, reg_b, nullptr, 0};
-  }
-  static VMInstruction create_label(int32_t reg_a, int32_t reg_b,
-                                    const char *label) {
-    return {OP_Eq, reg_a, -1, reg_b, (void *)label, 0};
+                              int32_t jump_target, CompareOp op) {
+    return {OP_Compare, reg_a, reg_b, jump_target, nullptr, (uint8_t)op};
   }
   static int32_t reg_a(const VMInstruction &inst) { return inst.p1; }
-  static int32_t reg_b(const VMInstruction &inst) { return inst.p3; }
-  static int32_t jump_target(const VMInstruction &inst) { return inst.p2; }
+  static int32_t reg_b(const VMInstruction &inst) { return inst.p2; }
+  static int32_t jump_target(const VMInstruction &inst) { return inst.p3; }
+  static CompareOp op(const VMInstruction &inst) { return (CompareOp)inst.p5; }
   static void print(const VMInstruction &inst) {
-    printf("r%d == r%d", reg_a(inst), reg_b(inst));
+    const char *op_str[] = {"==", "!=", "<", "<=", ">", ">="};
+    printf("r%d %s r%d", reg_a(inst), op_str[op(inst)], reg_b(inst));
     if (jump_target(inst) >= 0)
       printf(" true->%d", jump_target(inst));
   }
 };
 
-struct Ne {
-  static VMInstruction create(int32_t reg_a, int32_t reg_b,
-                              int32_t jump_target = -1) {
-    return {OP_Ne, reg_a, jump_target, reg_b, nullptr, 0};
-  }
-  static VMInstruction create_label(int32_t reg_a, int32_t reg_b,
-                                    const char *label) {
-    return {OP_Ne, reg_a, -1, reg_b, (void *)label, 0};
-  }
-  static int32_t reg_a(const VMInstruction &inst) { return inst.p1; }
-  static int32_t reg_b(const VMInstruction &inst) { return inst.p3; }
-  static int32_t jump_target(const VMInstruction &inst) { return inst.p2; }
-  static void print(const VMInstruction &inst) {
-    printf("r%d != r%d", reg_a(inst), reg_b(inst));
-    if (jump_target(inst) >= 0)
-      printf(" true->%d", jump_target(inst));
-  }
-};
 
-struct Lt {
-  static VMInstruction create(int32_t reg_a, int32_t reg_b,
-                              int32_t jump_target = -1) {
-    return {OP_Lt, reg_a, jump_target, reg_b, nullptr, 0};
+struct Flush {
+  static VMInstruction create(int32_t cursor_id) {
+    return {OP_Flush, cursor_id, 0, 0, nullptr, 0};
   }
-  static VMInstruction create_label(int32_t reg_a, int32_t reg_b,
-                                    const char *label) {
-    return {OP_Lt, reg_a, -1, reg_b, (void *)label, 0};
-  }
-  static int32_t reg_a(const VMInstruction &inst) { return inst.p1; }
-  static int32_t reg_b(const VMInstruction &inst) { return inst.p3; }
-  static int32_t jump_target(const VMInstruction &inst) { return inst.p2; }
+  static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
   static void print(const VMInstruction &inst) {
-    printf("r%d < r%d", reg_a(inst), reg_b(inst));
-    if (jump_target(inst) >= 0)
-      printf(" true->%d", jump_target(inst));
-  }
-};
-
-struct Le {
-  static VMInstruction create(int32_t reg_a, int32_t reg_b,
-                              int32_t jump_target = -1) {
-    return {OP_Le, reg_a, jump_target, reg_b, nullptr, 0};
-  }
-  static VMInstruction create_label(int32_t reg_a, int32_t reg_b,
-                                    const char *label) {
-    return {OP_Le, reg_a, -1, reg_b, (void *)label, 0};
-  }
-  static int32_t reg_a(const VMInstruction &inst) { return inst.p1; }
-  static int32_t reg_b(const VMInstruction &inst) { return inst.p3; }
-  static int32_t jump_target(const VMInstruction &inst) { return inst.p2; }
-  static void print(const VMInstruction &inst) {
-    printf("r%d <= r%d", reg_a(inst), reg_b(inst));
-    if (jump_target(inst) >= 0)
-      printf(" true->%d", jump_target(inst));
-  }
-};
-
-struct Gt {
-  static VMInstruction create(int32_t reg_a, int32_t reg_b,
-                              int32_t jump_target = -1) {
-    return {OP_Gt, reg_a, jump_target, reg_b, nullptr, 0};
-  }
-  static VMInstruction create_label(int32_t reg_a, int32_t reg_b,
-                                    const char *label) {
-    return {OP_Gt, reg_a, -1, reg_b, (void *)label, 0};
-  }
-  static int32_t reg_a(const VMInstruction &inst) { return inst.p1; }
-  static int32_t reg_b(const VMInstruction &inst) { return inst.p3; }
-  static int32_t jump_target(const VMInstruction &inst) { return inst.p2; }
-  static void print(const VMInstruction &inst) {
-    printf("r%d > r%d", reg_a(inst), reg_b(inst));
-    if (jump_target(inst) >= 0)
-      printf(" true->%d", jump_target(inst));
-  }
-};
-
-struct Ge {
-  static VMInstruction create(int32_t reg_a, int32_t reg_b,
-                              int32_t jump_target = -1) {
-    return {OP_Ge, reg_a, jump_target, reg_b, nullptr, 0};
-  }
-  static VMInstruction create_label(int32_t reg_a, int32_t reg_b,
-                                    const char *label) {
-    return {OP_Ge, reg_a, -1, reg_b, (void *)label, 0};
-  }
-  static int32_t reg_a(const VMInstruction &inst) { return inst.p1; }
-  static int32_t reg_b(const VMInstruction &inst) { return inst.p3; }
-  static int32_t jump_target(const VMInstruction &inst) { return inst.p2; }
-  static void print(const VMInstruction &inst) {
-    printf("r%d >= r%d", reg_a(inst), reg_b(inst));
-    if (jump_target(inst) >= 0)
-      printf(" true->%d", jump_target(inst));
-  }
-};
-
-// Results
-struct ResultRow {
-  static VMInstruction create(int32_t first_reg, int32_t reg_count) {
-    return {OP_ResultRow, first_reg, reg_count, 0, nullptr, 0};
-  }
-  static int32_t first_reg(const VMInstruction &inst) { return inst.p1; }
-  static int32_t reg_count(const VMInstruction &inst) { return inst.p2; }
-  static void print(const VMInstruction &inst) {
-    printf("r%d..r%d (%d cols)", first_reg(inst),
-           first_reg(inst) + reg_count(inst) - 1, reg_count(inst));
+    printf("cursor=%d", cursor_id(inst));
   }
 };
 
@@ -733,61 +501,17 @@ struct Rollback {
   static void print(const VMInstruction &inst) { /* No parameters */ }
 };
 
-// Aggregation
-struct AggReset {
-  static VMInstruction create(const char *function_name) {
-    return {OP_AggReset, 0, 0, 0, (void *)function_name, 0};
-  }
-  static const char *function_name(const VMInstruction &inst) {
-    return (const char *)inst.p4;
-  }
-  static void print(const VMInstruction &inst) {
-    printf("func=\"%s\"", function_name(inst) ? function_name(inst) : "?");
-  }
-};
-
-struct AggStep {
-  static VMInstruction create(int32_t value_reg = -1) {
-    return {OP_AggStep, value_reg, 0, 0, nullptr, 0};
-  }
-  static int32_t value_reg(const VMInstruction &inst) { return inst.p1; }
-  static void print(const VMInstruction &inst) {
-    if (value_reg(inst) >= 0)
-      printf("value=r%d", value_reg(inst));
-    else
-      printf("COUNT(*)");
-  }
-};
-
-struct AggFinal {
-  static VMInstruction create(int32_t dest_reg) {
-    return {OP_AggFinal, dest_reg, 0, 0, nullptr, 0};
-  }
-  static int32_t dest_reg(const VMInstruction &inst) { return inst.p1; }
-  static void print(const VMInstruction &inst) {
-    printf("-> r%d", dest_reg(inst));
-  }
-};
-
-
-struct Flush {
-  static VMInstruction create() { return {Op_Flush, 0, 0, 0, nullptr, 0}; }
-  static void print(const VMInstruction &inst) { /* No parameters */ }
-};
-
 struct OpenMemTree {
   static VMInstruction create(int32_t cursor_id, DataType key_type,
                               int32_t record_size) {
-    return {Op_OpenMemTree, cursor_id, (int32_t)key_type, record_size,
+    return {OP_OpenMemTree, cursor_id, (int32_t)key_type, record_size,
             nullptr, 0};
   }
-
   static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
   static DataType key_type(const VMInstruction &inst) {
     return (DataType)inst.p2;
   }
   static int32_t record_size(const VMInstruction &inst) { return inst.p3; }
-
   static void print(const VMInstruction &inst) {
     printf("cursor=%d key_type=%s record_size=%d",
            cursor_id(inst),
@@ -796,248 +520,22 @@ struct OpenMemTree {
   }
 };
 
-
-
 } // namespace Opcodes
 
-// ============================================================================
-// Compatibility layer - old-style make_* functions redirect to new descriptors
-// ============================================================================
+// VM Runtime Definitions
+#define REGISTERS 20
+#define CURSORS 10
 
-// Control flow
-inline VMInstruction make_trace(const char *message) {
-  return Opcodes::Trace::create(message);
-}
-inline VMInstruction make_goto(int32_t target) {
-  return Opcodes::Goto::create(target);
-}
-inline VMInstruction make_halt(int32_t exit_code = 0) {
-  return Opcodes::Halt::create(exit_code);
-}
+enum VM_RESULT { OK, ABORT, ERR };
 
-// Cursor operations
-inline VMInstruction make_open_read(int32_t cursor_id, const char *table_name,
-                                    int32_t index_col = 0) {
-  return Opcodes::OpenRead::create(cursor_id, table_name, index_col);
-}
-inline VMInstruction make_open_write(int32_t cursor_id, const char *table_name,
-                                     int32_t index_col = 0) {
-  return Opcodes::OpenWrite::create(cursor_id, table_name, index_col);
-}
-inline VMInstruction make_close(int32_t cursor_id) {
-  return Opcodes::Close::create(cursor_id);
-}
-inline VMInstruction make_rewind(int32_t cursor_id,
-                                 int32_t jump_if_empty = -1) {
-  return Opcodes::Rewind::create(cursor_id, jump_if_empty);
-}
-inline VMInstruction make_next(int32_t cursor_id, int32_t jump_if_done = -1) {
-  return Opcodes::Next::create(cursor_id, jump_if_done);
-}
-inline VMInstruction make_prev(int32_t cursor_id, int32_t jump_if_done = -1) {
-  return Opcodes::Prev::create(cursor_id, jump_if_done);
-}
-inline VMInstruction make_first(int32_t cursor_id, int32_t jump_if_empty = -1) {
-  return Opcodes::First::create(cursor_id, jump_if_empty);
-}
-inline VMInstruction make_last(int32_t cursor_id, int32_t jump_if_empty = -1) {
-  return Opcodes::Last::create(cursor_id, jump_if_empty);
-}
+// VM Functions
+VM_RESULT vm_execute(ArenaVector<VMInstruction, QueryArena> &instructions);
+void vm_init();
+void vm_reset();
+void vm_shutdown();
+void vm_set_result_callback(ResultCallback callback);
 
-// Seek operations
-inline VMInstruction make_seek_ge(int32_t cursor_id, int32_t key_reg,
-                                  int32_t jump_if_not_found = -1) {
-  return Opcodes::SeekGE::create(cursor_id, key_reg, jump_if_not_found);
-}
-inline VMInstruction make_seek_gt(int32_t cursor_id, int32_t key_reg,
-                                  int32_t jump_if_not_found = -1) {
-  return Opcodes::SeekGT::create(cursor_id, key_reg, jump_if_not_found);
-}
-inline VMInstruction make_seek_le(int32_t cursor_id, int32_t key_reg,
-                                  int32_t jump_if_not_found = -1) {
-  return Opcodes::SeekLE::create(cursor_id, key_reg, jump_if_not_found);
-}
-inline VMInstruction make_seek_lt(int32_t cursor_id, int32_t key_reg,
-                                  int32_t jump_if_not_found = -1) {
-  return Opcodes::SeekLT::create(cursor_id, key_reg, jump_if_not_found);
-}
-inline VMInstruction make_seek_eq(int32_t cursor_id, int32_t key_reg,
-                                  int32_t jump_if_not_found = -1) {
-  return Opcodes::SeekEQ::create(cursor_id, key_reg, jump_if_not_found);
-}
 
-// Data operations
-inline VMInstruction make_column(int32_t cursor_id, int32_t column_index,
-                                 int32_t dest_reg) {
-  return Opcodes::Column::create(cursor_id, column_index, dest_reg);
-}
-inline VMInstruction make_key(int32_t cursor_id, int32_t dest_reg) {
-  return Opcodes::Column::create(cursor_id, 0, dest_reg);
-}
-inline VMInstruction make_record(int32_t first_reg /* of record, not key */,
-                                 int32_t reg_count, int32_t dest_reg) {
-  return Opcodes::MakeRecord::create(first_reg, reg_count, dest_reg);
-}
-inline VMInstruction make_insert(int32_t cursor_id, int32_t key_reg,
-                                 int32_t record_reg) {
-  return Opcodes::Insert::create(cursor_id, key_reg, record_reg);
-}
-inline VMInstruction make_delete(int32_t cursor_id) {
-  return Opcodes::Delete::create(cursor_id);
-}
-inline VMInstruction make_update(int32_t cursor_id, int32_t record_reg) {
-  return Opcodes::Update::create(cursor_id, record_reg);
-}
-
-// Register operations
-inline VMInstruction make_integer(int32_t dest_reg, int32_t value) {
-  return Opcodes::Integer::create(dest_reg, value);
-}
-inline VMInstruction make_string(int32_t dest_reg, int32_t size,
-                                 const void *str) {
-  return Opcodes::String::create(dest_reg, size, str);
-}
-inline VMInstruction make_copy(int32_t src_reg, int32_t dest_reg) {
-  return Opcodes::Copy::create(src_reg, dest_reg);
-}
-inline VMInstruction make_move(int32_t src_reg, int32_t dest_reg) {
-  return Opcodes::Move::create(src_reg, dest_reg);
-}
-
-// Comparison operations
-inline VMInstruction make_compare(int32_t reg_a, int32_t reg_b) {
-  return Opcodes::Compare::create(reg_a, reg_b);
-}
-inline VMInstruction make_jump(int32_t jump_lt, int32_t jump_eq,
-                               int32_t jump_gt) {
-  return Opcodes::Jump::create(jump_lt, jump_eq, jump_gt);
-}
-inline VMInstruction make_eq(int32_t reg_a, int32_t reg_b,
-                             int32_t jump_target = -1) {
-  return Opcodes::Eq::create(reg_a, reg_b, jump_target);
-}
-inline VMInstruction make_ne(int32_t reg_a, int32_t reg_b,
-                             int32_t jump_target = -1) {
-  return Opcodes::Ne::create(reg_a, reg_b, jump_target);
-}
-inline VMInstruction make_lt(int32_t reg_a, int32_t reg_b,
-                             int32_t jump_target = -1) {
-  return Opcodes::Lt::create(reg_a, reg_b, jump_target);
-}
-inline VMInstruction make_le(int32_t reg_a, int32_t reg_b,
-                             int32_t jump_target = -1) {
-  return Opcodes::Le::create(reg_a, reg_b, jump_target);
-}
-inline VMInstruction make_gt(int32_t reg_a, int32_t reg_b,
-                             int32_t jump_target = -1) {
-  return Opcodes::Gt::create(reg_a, reg_b, jump_target);
-}
-inline VMInstruction make_ge(int32_t reg_a, int32_t reg_b,
-                             int32_t jump_target = -1) {
-  return Opcodes::Ge::create(reg_a, reg_b, jump_target);
-}
-
-// Results
-inline VMInstruction make_result_row(int32_t first_reg, int32_t reg_count) {
-  return Opcodes::ResultRow::create(first_reg, reg_count);
-}
-
-// Schema operations
-inline VMInstruction make_create_table(TableSchema *schema) {
-  return Opcodes::CreateTable::create(schema);
-}
-inline VMInstruction make_drop_table(const char *table_name) {
-  return Opcodes::DropTable::create(table_name);
-}
-inline VMInstruction make_create_index(int32_t column_index,
-                                       const char *table_name) {
-  return Opcodes::CreateIndex::create(column_index, table_name);
-}
-inline VMInstruction make_drop_index(int32_t column_index,
-                                     const char *table_name) {
-  return Opcodes::DropIndex::create(column_index, table_name);
-}
-
-// Transactions
-inline VMInstruction make_begin() { return Opcodes::Begin::create(); }
-inline VMInstruction make_commit() { return Opcodes::Commit::create(); }
-inline VMInstruction make_rollback() { return Opcodes::Rollback::create(); }
-
-// Aggregation
-inline VMInstruction make_agg_reset(const char *function_name) {
-  return Opcodes::AggReset::create(function_name);
-}
-inline VMInstruction make_agg_step(int32_t value_reg = -1) {
-  return Opcodes::AggStep::create(value_reg);
-}
-inline VMInstruction make_agg_final(int32_t dest_reg) {
-  return Opcodes::AggFinal::create(dest_reg);
-}
-
-// Sorting and output
-inline VMInstruction make_open_memtree(int32_t cursor_id, DataType key_type,
-                                       int32_t record_size) {
-  return Opcodes::OpenMemTree::create(cursor_id, key_type, record_size);
-}
-inline VMInstruction make_flush() { return Opcodes::Flush::create(); }
-
-// Label-based factories (for unresolved jumps)
-inline VMInstruction make_goto_label(const char *label) {
-  return Opcodes::Goto::create_label(label);
-}
-inline VMInstruction make_rewind_label(int32_t cursor_id, const char *label) {
-  return Opcodes::Rewind::create_label(cursor_id, label);
-}
-inline VMInstruction make_next_label(int32_t cursor_id, const char *label) {
-  return Opcodes::Next::create_label(cursor_id, label);
-}
-inline VMInstruction make_prev_label(int32_t cursor_id, const char *label) {
-  return Opcodes::Prev::create_label(cursor_id, label);
-}
-inline VMInstruction make_seek_ge_label(int32_t cursor_id, int32_t key_reg,
-                                        const char *label) {
-  return Opcodes::SeekGE::create_label(cursor_id, key_reg, label);
-}
-inline VMInstruction make_seek_gt_label(int32_t cursor_id, int32_t key_reg,
-                                        const char *label) {
-  return Opcodes::SeekGT::create_label(cursor_id, key_reg, label);
-}
-inline VMInstruction make_seek_le_label(int32_t cursor_id, int32_t key_reg,
-                                        const char *label) {
-  return Opcodes::SeekLE::create_label(cursor_id, key_reg, label);
-}
-inline VMInstruction make_seek_lt_label(int32_t cursor_id, int32_t key_reg,
-                                        const char *label) {
-  return Opcodes::SeekLT::create_label(cursor_id, key_reg, label);
-}
-inline VMInstruction make_seek_eq_label(int32_t cursor_id, int32_t key_reg,
-                                        const char *label) {
-  return Opcodes::SeekEQ::create_label(cursor_id, key_reg, label);
-}
-inline VMInstruction make_eq_label(int32_t reg_a, int32_t reg_b,
-                                   const char *label) {
-  return Opcodes::Eq::create_label(reg_a, reg_b, label);
-}
-inline VMInstruction make_ne_label(int32_t reg_a, int32_t reg_b,
-                                   const char *label) {
-  return Opcodes::Ne::create_label(reg_a, reg_b, label);
-}
-inline VMInstruction make_lt_label(int32_t reg_a, int32_t reg_b,
-                                   const char *label) {
-  return Opcodes::Lt::create_label(reg_a, reg_b, label);
-}
-inline VMInstruction make_le_label(int32_t reg_a, int32_t reg_b,
-                                   const char *label) {
-  return Opcodes::Le::create_label(reg_a, reg_b, label);
-}
-inline VMInstruction make_gt_label(int32_t reg_a, int32_t reg_b,
-                                   const char *label) {
-  return Opcodes::Gt::create_label(reg_a, reg_b, label);
-}
-inline VMInstruction make_ge_label(int32_t reg_a, int32_t reg_b,
-                                   const char *label) {
-  return Opcodes::Ge::create_label(reg_a, reg_b, label);
-}
 
 // ============================================================================
 // Debug Functions
@@ -1045,288 +543,218 @@ inline VMInstruction make_ge_label(int32_t reg_a, int32_t reg_b,
 
 inline const char *opcode_to_string(OpCode op) {
   switch (op) {
-  case OP_Trace:
-    return "Trace";
-  case OP_Goto:
-    return "Goto";
-  case OP_Halt:
-    return "Halt";
-  case OP_OpenRead:
-    return "OpenRead";
-  case OP_OpenWrite:
-    return "OpenWrite";
-  case OP_Close:
-    return "Close";
-  case OP_Rewind:
-    return "Rewind";
-  case OP_Next:
-    return "Next";
-  case OP_Prev:
-    return "Prev";
-  case OP_First:
-    return "First";
-  case OP_Last:
-    return "Last";
-  case OP_SeekGE:
-    return "SeekGE";
-  case OP_SeekGT:
-    return "SeekGT";
-  case OP_SeekLE:
-    return "SeekLE";
-  case OP_SeekLT:
-    return "SeekLT";
-  case OP_SeekEQ:
-    return "SeekEQ";
-  case OP_Column:
-    return "Column";
-  case OP_MakeRecord:
-    return "MakeRecord";
-  case OP_Insert:
-    return "Insert";
-  case OP_Delete:
-    return "Delete";
-  case OP_Update:
-    return "Update";
-  case OP_Integer:
-    return "Integer";
-  case OP_String:
-    return "String";
-  case OP_Copy:
-    return "Copy";
-  case OP_Move:
-    return "Move";
-  case OP_Compare:
-    return "Compare";
-  case OP_Jump:
-    return "Jump";
-  case OP_Eq:
-    return "Eq";
-  case OP_Ne:
-    return "Ne";
-  case OP_Lt:
-    return "Lt";
-  case OP_Le:
-    return "Le";
-  case OP_Gt:
-    return "Gt";
-  case OP_Ge:
-    return "Ge";
-  case OP_ResultRow:
-    return "ResultRow";
-  case OP_CreateTable:
-    return "CreateTable";
-  case OP_DropTable:
-    return "DropTable";
-  case OP_CreateIndex:
-    return "CreateIndex";
-  case OP_DropIndex:
-    return "DropIndex";
-  case OP_Begin:
-    return "Begin";
-  case OP_Commit:
-    return "Commit";
-  case OP_Rollback:
-    return "Rollback";
-  case OP_AggReset:
-    return "AggReset";
-  case OP_AggStep:
-    return "AggStep";
-  case OP_AggFinal:
-    return "AggFinal";
-  case Op_OpenMemTree:
-    return "OpenMemTree";
-  case Op_Flush:
-    return "Flush";
-  default:
-    return "Unknown";
+  case OP_Trace: return "Trace";
+  case OP_Goto: return "Goto";
+  case OP_Halt: return "Halt";
+  case OP_OpenRead: return "OpenRead";
+  case OP_OpenWrite: return "OpenWrite";
+  case OP_Close: return "Close";
+  case OP_First: return "First";
+  case OP_Last: return "Last";
+  case OP_Next: return "Next";
+  case OP_Prev: return "Prev";
+  case OP_Seek: return "Seek";
+  case OP_Column: return "Column";
+  case OP_MakeRecord: return "MakeRecord";
+  case OP_Insert: return "Insert";
+  case OP_Delete: return "Delete";
+  case OP_Update: return "Update";
+  case OP_Integer: return "Integer";
+  case OP_String: return "String";
+  case OP_Copy: return "Copy";
+  case OP_Move: return "Move";
+  case OP_Compare: return "Compare";
+  case OP_Flush: return "Flush";
+  case OP_CreateTable: return "CreateTable";
+  case OP_DropTable: return "DropTable";
+  case OP_CreateIndex: return "CreateIndex";
+  case OP_DropIndex: return "DropIndex";
+  case OP_Begin: return "Begin";
+  case OP_Commit: return "Commit";
+  case OP_Rollback: return "Rollback";
+  case OP_OpenMemTree: return "OpenMemTree";
+  default: return "Unknown";
   }
 }
 
 inline const char *datatype_to_string(DataType type) {
   switch (type) {
-  case TYPE_NULL:
-    return "NULL";
-  case TYPE_UINT32:
-    return "UINT32";
-  case TYPE_UINT64:
-    return "UINT64";
-  case TYPE_VARCHAR32:
-    return "VARCHAR32";
-  case TYPE_VARCHAR256:
-    return "VARCHAR256";
-  default:
-    return "UNKNOWN";
+  case TYPE_NULL: return "NULL";
+  case TYPE_UINT32: return "UINT32";
+  case TYPE_UINT64: return "UINT64";
+  case TYPE_VARCHAR32: return "VARCHAR32";
+  case TYPE_VARCHAR256: return "VARCHAR256";
+  default: return "UNKNOWN";
+  }
+}
+
+inline const char *compare_op_to_string(CompareOp op) {
+  switch (op) {
+  case EQ: return "EQ";
+  case NE: return "NE";
+  case LT: return "LT";
+  case LE: return "LE";
+  case GT: return "GT";
+  case GE: return "GE";
+  default: return "??";
   }
 }
 
 inline void debug_print_instruction(const VMInstruction &inst, size_t index) {
   printf("[%3zu] %-12s ", index, opcode_to_string(inst.opcode));
 
-  // Use the appropriate descriptor's print function
   switch (inst.opcode) {
   case OP_Trace:
-    Opcodes::Trace::print(inst);
+    printf("msg=\"%s\"", inst.p4 ? (const char*)inst.p4 : "");
     break;
+
   case OP_Goto:
-    Opcodes::Goto::print(inst);
+    printf("-> %d", inst.p2);
     break;
+
   case OP_Halt:
-    Opcodes::Halt::print(inst);
+    printf("exit_code=%d", inst.p1);
     break;
+
   case OP_OpenRead:
-    Opcodes::OpenRead::print(inst);
-    break;
   case OP_OpenWrite:
-    Opcodes::OpenWrite::print(inst);
+    printf("cursor=%d table=\\"%s\\"", inst.p1, inst.p4 ? (const char*)inst.p4 : "?");
+    if (inst.p3 != 0) {
+      printf(" index_col=%d", inst.p3);
+    }
     break;
+
   case OP_Close:
-    Opcodes::Close::print(inst);
+    printf("cursor=%d", inst.p1);
     break;
-  case OP_Rewind:
-    Opcodes::Rewind::print(inst);
-    break;
-  case OP_Next:
-    Opcodes::Next::print(inst);
-    break;
-  case OP_Prev:
-    Opcodes::Prev::print(inst);
-    break;
+
   case OP_First:
-    Opcodes::First::print(inst);
-    break;
   case OP_Last:
-    Opcodes::Last::print(inst);
+    printf("cursor=%d", inst.p1);
+    if (inst.p2 >= 0) {
+      printf(" empty->%d", inst.p2);
+    }
     break;
-  case OP_SeekGE:
-    Opcodes::SeekGE::print(inst);
+
+  case OP_Next:
+  case OP_Prev:
+    printf("cursor=%d", inst.p1);
+    if (inst.p2 >= 0) {
+      printf(" done->%d", inst.p2);
+    }
     break;
-  case OP_SeekGT:
-    Opcodes::SeekGT::print(inst);
+
+  case OP_Seek:
+    printf("cursor=%d key=r%d op=%s", inst.p1, inst.p2, compare_op_to_string((CompareOp)inst.p5));
+    if (inst.p3 >= 0) {
+      printf(" notfound->%d", inst.p3);
+    }
     break;
-  case OP_SeekLE:
-    Opcodes::SeekLE::print(inst);
-    break;
-  case OP_SeekLT:
-    Opcodes::SeekLT::print(inst);
-    break;
-  case OP_SeekEQ:
-    Opcodes::SeekEQ::print(inst);
-    break;
+
   case OP_Column:
-    Opcodes::Column::print(inst);
+    printf("cursor=%d col=%d -> r%d", inst.p1, inst.p2, inst.p3);
     break;
+
   case OP_MakeRecord:
-    Opcodes::MakeRecord::print(inst);
+    printf("r%d..r%d (%d regs) -> r%d", inst.p1, inst.p1 + inst.p2 - 1, inst.p2, inst.p3);
     break;
+
   case OP_Insert:
-    Opcodes::Insert::print(inst);
+    printf("cursor=%d key=r%d record=r%d", inst.p1, inst.p2, inst.p3);
     break;
+
   case OP_Delete:
-    Opcodes::Delete::print(inst);
+    printf("cursor=%d", inst.p1);
     break;
+
   case OP_Update:
-    Opcodes::Update::print(inst);
+    printf("cursor=%d record=r%d", inst.p1, inst.p2);
     break;
+
   case OP_Integer:
-    Opcodes::Integer::print(inst);
+    printf("r%d = %d", inst.p1, inst.p2);
     break;
+
   case OP_String:
-    Opcodes::String::print(inst);
+    printf("r%d = ", inst.p1);
+    if (inst.p4) {
+      printf("\"");
+      const char *str = (const char *)inst.p4;
+      for (size_t i = 0; i < (size_t)inst.p2 && str[i]; i++) {
+        if (str[i] >= 32 && str[i] < 127) {
+          printf("%c", str[i]);
+        } else {
+          printf("\\\\x%02x", (unsigned char)str[i]);
+        }
+      }
+      printf("\"");
+    } else {
+      printf("NULL");
+    }
+    printf(" (type=%s)", datatype_to_string((DataType)inst.p2));
     break;
+
   case OP_Copy:
-    Opcodes::Copy::print(inst);
+    printf("r%d -> r%d", inst.p1, inst.p2);
     break;
+
   case OP_Move:
-    Opcodes::Move::print(inst);
+    printf("r%d => r%d", inst.p1, inst.p2);
     break;
+
   case OP_Compare:
-    Opcodes::Compare::print(inst);
+    printf("r%d %s r%d", inst.p1, compare_op_to_string((CompareOp)inst.p5), inst.p2);
+    if (inst.p3 >= 0) {
+      printf(" true->%d", inst.p3);
+    }
     break;
-  case OP_Jump:
-    Opcodes::Jump::print(inst);
+
+  case OP_Flush:
+    printf("cursor=%d", inst.p1);
     break;
-  case OP_Eq:
-    Opcodes::Eq::print(inst);
-    break;
-  case OP_Ne:
-    Opcodes::Ne::print(inst);
-    break;
-  case OP_Lt:
-    Opcodes::Lt::print(inst);
-    break;
-  case OP_Le:
-    Opcodes::Le::print(inst);
-    break;
-  case OP_Gt:
-    Opcodes::Gt::print(inst);
-    break;
-  case OP_Ge:
-    Opcodes::Ge::print(inst);
-    break;
-  case OP_ResultRow:
-    Opcodes::ResultRow::print(inst);
-    break;
+
   case OP_CreateTable:
-    Opcodes::CreateTable::print(inst);
+    printf("schema=%p", inst.p4);
     break;
+
   case OP_DropTable:
-    Opcodes::DropTable::print(inst);
+    printf("table=\"%s\"", inst.p4 ? (const char*)inst.p4 : "?");
     break;
+
   case OP_CreateIndex:
-    Opcodes::CreateIndex::print(inst);
-    break;
   case OP_DropIndex:
-    Opcodes::DropIndex::print(inst);
+    printf("col=%d table=\"%s\"", inst.p1, inst.p4 ? (const char*)inst.p4 : "?");
     break;
+
   case OP_Begin:
-    Opcodes::Begin::print(inst);
-    break;
   case OP_Commit:
-    Opcodes::Commit::print(inst);
-    break;
   case OP_Rollback:
-    Opcodes::Rollback::print(inst);
+    // No parameters
     break;
-  case OP_AggReset:
-    Opcodes::AggReset::print(inst);
-    break;
-  case OP_AggStep:
-    Opcodes::AggStep::print(inst);
-    break;
-  case OP_AggFinal:
-    Opcodes::AggFinal::print(inst);
-    break;
-case Op_OpenMemTree:
-    Opcodes::OpenMemTree::print(inst);
-  case Op_Flush:
-    Opcodes::Flush::print(inst);
+
+  case OP_OpenMemTree:
+    printf("cursor=%d key_type=%s record_size=%d",
+           inst.p1, datatype_to_string((DataType)inst.p2), inst.p3);
     break;
 
   default:
-    printf("p1=%d p2=%d p3=%d p4=%p p5=%d", inst.p1, inst.p2, inst.p3, inst.p4,
-           inst.p5);
+    printf("p1=%d p2=%d p3=%d p4=%p p5=%d", inst.p1, inst.p2, inst.p3, inst.p4, inst.p5);
   }
 
-  // Check for unresolved labels
-  if (inst.p4 && (inst.p2 == -1 || inst.p3 == -1)) {
-    printf(" [unresolved label: \"%s\"]", (const char *)inst.p4);
-  }
-
-  printf("\n");
+  printf("\\n");
 }
 
-inline void
-debug_print_program(const ArenaVector<VMInstruction, QueryArena> &program) {
-  printf("\n=== VM Program (%zu instructions) ===\n", program.size());
-  printf("Idx  Opcode       Parameters\n");
-  printf("---  ------------ --------------------------------\n");
+inline void debug_print_program(const ArenaVector<VMInstruction, QueryArena> &program) {
+  printf("\\n=== VM Program (%zu instructions) ===\\n", program.size());
+  printf("Idx  Opcode       Parameters\\n");
+  printf("---  ------------ --------------------------------\\n");
 
   for (size_t i = 0; i < program.size(); i++) {
     debug_print_instruction(program[i], i);
   }
 
   // Print jump targets for easier navigation
-  printf("\n=== Jump Targets ===\n");
+  printf("\\n=== Jump Targets ===\\n");
   for (size_t i = 0; i < program.size(); i++) {
     const auto &inst = program[i];
     bool is_target = false;
@@ -1335,77 +763,19 @@ debug_print_program(const ArenaVector<VMInstruction, QueryArena> &program) {
     for (size_t j = 0; j < program.size(); j++) {
       const auto &check = program[j];
       if ((check.opcode == OP_Goto && check.p2 == (int)i) ||
-          (check.opcode >= OP_Eq && check.opcode <= OP_Ge &&
-           check.p2 == (int)i) ||
-          (check.opcode == OP_Jump &&
-           (check.p1 == (int)i || check.p2 == (int)i || check.p3 == (int)i)) ||
-          ((check.opcode == OP_Next || check.opcode == OP_Prev) &&
-           check.p2 == (int)i) ||
-          ((check.opcode == OP_Rewind || check.opcode == OP_First ||
-            check.opcode == OP_Last) &&
-           check.p2 == (int)i) ||
-          ((check.opcode >= OP_SeekGE && check.opcode <= OP_SeekEQ) &&
-           check.p3 == (int)i)) {
+          (check.opcode == OP_Compare && check.p3 == (int)i) ||
+          ((check.opcode == OP_Next || check.opcode == OP_Prev) && check.p2 == (int)i) ||
+          ((check.opcode == OP_First || check.opcode == OP_Last) && check.p2 == (int)i) ||
+          (check.opcode == OP_Seek && check.p3 == (int)i)) {
         is_target = true;
         break;
       }
     }
 
     if (is_target) {
-      printf("  Label_%zu: instruction [%zu] %s\n", i, i,
-             opcode_to_string(inst.opcode));
+      printf("  Label_%zu: instruction [%zu] %s\\n", i, i, opcode_to_string(inst.opcode));
     }
   }
 
-  printf("\n");
+  printf("\\n");
 }
-
-// ============================================================================
-// VM Runtime Definitions
-// ============================================================================
-
-#define REGISTER_COUNT 20
-
-enum VM_RESULT { OK, ABORT, ERR };
-
-enum EventType {
-  EVT_TABLE_CREATED,
-  EVT_TABLE_DROPPED,
-  EVT_INDEX_CREATED,
-  EVT_INDEX_DROPPED,
-  EVT_BTREE_ROOT_CHANGED,
-  EVT_ROWS_INSERTED,
-  EVT_ROWS_DELETED,
-  EVT_ROWS_UPDATED,
-  EVT_TRANSACTION_BEGIN,
-  EVT_TRANSACTION_COMMIT,
-  EVT_TRANSACTION_ROLLBACK
-};
-
-struct VmEvent {
-  EventType type;
-  void *data;
-
-  union {
-    struct {
-      const char *table_name;
-      uint32_t root_page;
-      uint32_t column;
-    } table_info;
-
-    struct {
-      const char *table_name;
-      uint32_t column_index;
-      const char *index_name;
-    } index_info;
-
-    struct {
-      uint32_t count;
-    } row_info;
-  } context;
-};
-
-// VM Functions
-VM_RESULT vm_execute(ArenaVector<VMInstruction, QueryArena> &instructions);
-ArenaQueue<VmEvent, QueryArena> &vm_events();
-ArenaVector<ArenaVector<VMValue, QueryArena>, QueryArena> &vm_output_buffer();
