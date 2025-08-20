@@ -137,8 +137,8 @@ static void create_master_table() {
   // Columns: id (key), type, name, tbl_name, rootpage, sql
   schema->columns.push_back({"id", TYPE_UINT32});
   schema->columns.push_back({"type", TYPE_VARCHAR32});
-  schema->columns.push_back({"name", TYPE_VARCHAR256});
-  schema->columns.push_back({"tbl_name", TYPE_VARCHAR256});
+  schema->columns.push_back({"name", TYPE_VARCHAR32});
+  schema->columns.push_back({"tbl_name", TYPE_VARCHAR32});
   schema->columns.push_back({"rootpage", TYPE_UINT32});
   schema->columns.push_back({"sql", TYPE_VARCHAR256});
 

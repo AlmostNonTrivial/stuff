@@ -148,7 +148,8 @@ BTree btree_create(DataType key, uint32_t record_size, TreeType tree_type) {
   constexpr uint32_t USABLE_SPACE = PAGE_SIZE - NODE_HEADER_SIZE;
 
   if ((record_size * MIN_ENTRY_COUNT) > USABLE_SPACE) {
-    exit(0);
+    std::cout <<"btree record to big\n";
+    exit(1);
     tree.tree_type = INVALID;
     return tree;
   }

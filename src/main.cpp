@@ -26,6 +26,18 @@
 //     "INSERT INTO sqlite_master VALUES (%d, 0, '%s', %d, '%s');",
 //     new_id, schema->table_name, root_page, create_sql);
 // }
+//
+//
+//
+
+void print_buf(ArenaVector<ArenaVector<VMValue, QueryArena>, QueryArena> buf){
+    for (auto &row : buf) {
+      for (auto &val : row) {
+        print_ptr(val.data, val.type);
+      }
+      std::cout << "\n";
+    }
+}
 
 int main() {
 
@@ -35,18 +47,20 @@ int main() {
 
   std::vector<const char *> queries = {
       "BEGIN; CREATE TABLE X (INT id, INT age, VARCHAR32 name); COMMIT;",
-      // "BEGIN; CREATE TABLE Y (INT id, INT age, VARCHAR32 name); COMMIT;",
+      "BEGIN; CREATE TABLE Y (INT id, INT age, VARCHAR32 name); COMMIT;",
       // "BEGIN; INSERT INTO Y VALUES (1, 16, 'rickstar'); COMMIT;",
+
+      "SELECT * FROM sqlite_master;",
       "BEGIN; INSERT INTO X VALUES (1, 18, 'ricky'); COMMIT;",
       "BEGIN; INSERT INTO X VALUES (2, 22, 'marky'); COMMIT;",
       "BEGIN; INSERT INTO X VALUES (3, 16, 'marshal'); COMMIT;",
-      // "SELECT * FROM X;",
+      "SELECT * FROM sqlite_master;",
       // "SELECT * FROM Y;",
       // "BEGIN; DELETE FROM X WHERE name = 'ricky';COMMIT;",
-      "BEGIN; CREATE INDEX index_x_name ON X (name);COMMIT;",
-      "SELECT * FROM X;",
-      "BEGIN; UPDATE X SET name = 'ricksmart' WHERE name = 'ricky';COMMIT;",
-      "SELECT * FROM X WHERE name = 'ricksmart",
+      // "BEGIN; CREATE INDEX index_x_name ON X (name);COMMIT;",
+      // "SELECT * FROM X;",
+      // "BEGIN; UPDATE X SET name = 'ricksmart' WHERE name = 'ricky';COMMIT;",
+      // "SELECT * FROM X WHERE name = 'ricksmart",
       // "SELECT * FROM X;"
       // "SELECT COUNT(*) FROM X;",
 
@@ -55,6 +69,6 @@ int main() {
   for (auto query : queries) {
     ExecutionMeta * meta = execute(query);
     auto output = vm_output_buffer();
+    print_buf(output);
   }
-
 }

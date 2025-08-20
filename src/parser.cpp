@@ -6,43 +6,74 @@
 #include <cctype>
 #include <unordered_map>
 
+// In parser.cpp, replace the global keyword_map with:
 
-// TODO, what should I do about this?
-// Global keyword map - initialized once
-static std::unordered_map<std::string, TokenType> keyword_map = {
-        {"SELECT", TOK_SELECT}, {"FROM", TOK_FROM}, {"WHERE", TOK_WHERE},
-        {"ORDER", TOK_ORDER}, {"BY", TOK_BY}, {"INSERT", TOK_INSERT},
-        {"INTO", TOK_INTO}, {"VALUES", TOK_VALUES}, {"UPDATE", TOK_UPDATE},
-        {"SET", TOK_SET}, {"DELETE", TOK_DELETE}, {"CREATE", TOK_CREATE},
-        {"TABLE", TOK_TABLE}, {"INDEX", TOK_INDEX}, {"ON", TOK_ON},
-        {"BEGIN", TOK_BEGIN}, {"COMMIT", TOK_COMMIT}, {"ROLLBACK", TOK_ROLLBACK},
-        {"AND", TOK_AND}, {"OR", TOK_OR}, {"ASC", TOK_ASC}, {"DESC", TOK_DESC},
-        {"COUNT", TOK_COUNT}, {"MIN", TOK_MIN}, {"MAX", TOK_MAX},
-        {"SUM", TOK_SUM}, {"AVG", TOK_AVG},
+struct KeywordEntry {
+    const char* keyword;
+    TokenType token;
+};
 
-        // Type keywords
-        {"INT", TOK_INT}, {"INT32", TOK_INT32}, {"INT64", TOK_INT64},
-        {"VARCHAR", TOK_VARCHAR}, {"VARCHAR32", TOK_VARCHAR32},
-        {"VARCHAR256", TOK_VARCHAR256}, {"VAR32", TOK_VAR32}
-    };
+static const KeywordEntry keywords[] = {
+    {"SELECT", TOK_SELECT},
+    {"FROM", TOK_FROM},
+    {"WHERE", TOK_WHERE},
+    {"ORDER", TOK_ORDER},
+    {"BY", TOK_BY},
+    {"INSERT", TOK_INSERT},
+    {"INTO", TOK_INTO},
+    {"VALUES", TOK_VALUES},
+    {"UPDATE", TOK_UPDATE},
+    {"SET", TOK_SET},
+    {"DELETE", TOK_DELETE},
+    {"CREATE", TOK_CREATE},
+    {"TABLE", TOK_TABLE},
+    {"INDEX", TOK_INDEX},
+    {"ON", TOK_ON},
+    {"BEGIN", TOK_BEGIN},
+    {"COMMIT", TOK_COMMIT},
+    {"ROLLBACK", TOK_ROLLBACK},
+    {"AND", TOK_AND},
+    {"OR", TOK_OR},
+    {"ASC", TOK_ASC},
+    {"DESC", TOK_DESC},
+    {"COUNT", TOK_COUNT},
+    {"MIN", TOK_MIN},
+    {"MAX", TOK_MAX},
+    {"SUM", TOK_SUM},
+    {"AVG", TOK_AVG},
+    // Type keywords
+    {"INT", TOK_INT},
+    {"INT32", TOK_INT32},
+    {"INT64", TOK_INT64},
+    {"VARCHAR", TOK_VARCHAR},
+    {"VARCHAR32", TOK_VARCHAR32},
+    {"VARCHAR256", TOK_VARCHAR256},
+    {"VAR32", TOK_VAR32}
+};
 
+static const size_t NUM_KEYWORDS = sizeof(keywords) / sizeof(keywords[0]);
 
-
-
-// Check if identifier is a keyword
+// Replace check_keyword function:
 static TokenType check_keyword(const char* start, size_t len) {
-    // Create temporary string for comparison
-    std::string keyword(start, len);
-
-    // Convert to uppercase for case-insensitive comparison
-    for (char& c : keyword) {
-        c = toupper(c);
+    // Convert to uppercase for comparison
+    char upper[32];  // Max keyword length
+    if (len >= sizeof(upper)) {
+        return TOK_IDENTIFIER;
     }
 
-    auto it = keyword_map.find(keyword);
-    if (it != keyword_map.end()) {
-        return it->second;
+    for (size_t i = 0; i < len; i++) {
+        upper[i] = toupper(start[i]);
     }
+    upper[len] = '\0';
+
+    // Linear search through keywords
+    for (size_t i = 0; i < NUM_KEYWORDS; i++) {
+        if (strlen(keywords[i].keyword) == len &&
+            memcmp(keywords[i].keyword, upper, len) == 0) {
+            return keywords[i].token;
+        }
+    }
+
     return TOK_IDENTIFIER;
 }
 
@@ -671,6 +702,8 @@ ArenaVector<ASTNode*, QueryArena> parse_sql(const char* sql) {
         ASTNode* ast = parse_statement(single_sql);
         if (ast) {
             statements.push_back(ast);
+        } else {
+            std::cout << "Parser error on: " << sql << '\n';
         }
 
         current = (*end == ';') ? end + 1 : end;
