@@ -1,6 +1,8 @@
 // btree.hpp
 #pragma once
 #include "defs.hpp"
+#include <cstdint>
+
 enum TreeType : uint32_t { BPLUS = 0, BTREE = 1, MEM = 2, INVALID = 3 };
 
 // B+Tree control structure
@@ -13,6 +15,8 @@ struct BTree {
   uint32_t internal_split_index;
   uint32_t leaf_split_index;
   uint32_t record_size; // Total size of each record
+  DataType node_key_size;
+  TreeType tree_type;
   bool in_memory;
 };
 

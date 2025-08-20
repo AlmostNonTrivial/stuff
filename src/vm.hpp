@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-
+typedef void (*ResultCallback)(void *result, size_t result_size);
 inline const char *datatype_to_string(DataType type);
 extern bool _debug;
 
@@ -1133,20 +1133,10 @@ inline const char *opcode_to_string(OpCode op) {
     return "AggStep";
   case OP_AggFinal:
     return "AggFinal";
-  case Op_Sort:
-    return "Sort";
+  case Op_OpenMemTree:
+    return "OpenMemTree";
   case Op_Flush:
     return "Flush";
-  case OP_KeyBufferReset:
-    return "KeyBufferReset";
-  case OP_KeyBufferAdd:
-    return "KeyBufferAdd";
-  case OP_KeyBufferSort:
-    return "KeyBufferSort";
-  case OP_KeyBufferNext:
-    return "KeyBufferNext";
-  case OP_KeyBufferRewind:
-    return "KeyBufferRewind";
   default:
     return "Unknown";
   }
@@ -1306,27 +1296,12 @@ inline void debug_print_instruction(const VMInstruction &inst, size_t index) {
   case OP_AggFinal:
     Opcodes::AggFinal::print(inst);
     break;
-  case Op_Sort:
-    Opcodes::Sort::print(inst);
-    break;
+case Op_OpenMemTree:
+    Opcodes::OpenMemTree::print(inst);
   case Op_Flush:
     Opcodes::Flush::print(inst);
     break;
-  case OP_KeyBufferReset:
-    Opcodes::KeyBufferReset::print(inst);
-    break;
-  case OP_KeyBufferAdd:
-    Opcodes::KeyBufferAdd::print(inst);
-    break;
-  case OP_KeyBufferSort:
-    Opcodes::KeyBufferSort::print(inst);
-    break;
-  case OP_KeyBufferNext:
-    Opcodes::KeyBufferNext::print(inst);
-    break;
-  case OP_KeyBufferRewind:
-    Opcodes::KeyBufferRewind::print(inst);
-    break;
+
   default:
     printf("p1=%d p2=%d p3=%d p4=%p p5=%d", inst.p1, inst.p2, inst.p3, inst.p4,
            inst.p5);

@@ -440,7 +440,7 @@ void execute(const char *sql) {
     if(statement->type == AST_UPDATE){
         _debug = true;
     }
-    meta.sql = sql;
+
 
     // if(statement->type == AST_CREATE_INDEX){
     //     _debug = true;
@@ -475,6 +475,4 @@ void execute(const char *sql) {
       }
     }
   }
-
-  return &meta;
 }

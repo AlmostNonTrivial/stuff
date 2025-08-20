@@ -156,18 +156,6 @@ DataType vb_column_type(VmCursor *vb, uint32_t col_index) {
 
 DataType vb_key_type(VmCursor *vb) { return vb->schema->columns[0].type; }
 
-uint8_t *vb_column(VmCursor *vb, uint32_t col_index) {
-  if (col_index == 0) {
-    return btree_cursor_key(&vb->btree_cursor);
-  }
-
-  if (vb->is_index) { // index has single column record
-    return btree_cursor_record(&vb->btree_cursor);
-  }
-
-  uint8_t *record = btree_cursor_record(&vb->btree_cursor);
-  return record + vb->schema->column_offsets[col_index];
-}
 
 uint8_t *vb_key(VmCursor *vb) { return vb_column(vb, 0); }
 
@@ -189,36 +177,28 @@ struct Aggregator {
 /*------------VM STATE---------------- */
 
 static struct {
+  ResultCallback callback;
   ArenaVector<VMInstruction, QueryArena> program;
   uint32_t pc;
   bool halted;
 
+
   VMValue registers[REGISTER_COUNT];
   ArenaMap<uint32_t, VmCursor, QueryArena, 20> cursors;
   ArenaQueue<VmEvent, QueryArena> event_queue;
-
   int32_t compare_result;
-  ArenaVector<ArenaVector<VMValue, QueryArena>, QueryArena> output_buffer;
-  Aggregator aggregator;
+
 
   bool initialized;
 } VM = {};
 
-static void vm_set_value(VMValue *val, DataType type, const void *data) {
+static void vm_set_value(VMValue *val, DataType type,const void *data) {
+  /*
+   * Because everything is in the query arena is freed, together
+   * we don't need to copy it.
+   */
   val->type = type;
-  uint32_t size = VMValue::get_size(type);
-  val->data = (uint8_t *)arena::alloc<QueryArena>(size);
-
-  if (data) {
-    if (type == TYPE_VARCHAR32 || type == TYPE_VARCHAR256) {
-      memset(val->data, 0, size);
-      memcpy(val->data, data, size);
-    } else {
-      memcpy(val->data, data, size);
-    }
-  } else {
-    memset(val->data, 0, size);
-  }
+  val->data = (uint8_t*)data;
 }
 
 // Event emission helpers
@@ -269,15 +249,12 @@ static void emit_row_event(EventType type, uint32_t count) {
   VM.event_queue.push(event);
 }
 
-ArenaVector<ArenaVector<VMValue, QueryArena>, QueryArena> &vm_output_buffer() {
-  return VM.output_buffer;
-}
+
 
 void vm_shutdown() {
   VM.initialized = false;
   VM.cursors.clear();
   VM.event_queue.clear();
-  VM.output_buffer.clear();
 }
 
 void vm_reset() {
@@ -293,8 +270,6 @@ void vm_reset() {
   VM.program.clear();
   VM.cursors.clear();
   VM.event_queue.clear();
-  VM.output_buffer.clear();
-  VM.aggregator.reset();
 }
 
 // Public VM functions
@@ -789,7 +764,7 @@ VM_RESULT vm_step() {
       row.push_back(copy);
     }
 
-    VM.output_buffer.push_back(row);
+    // VM.output_buffer.push_back(row);
     VM.pc++;
     return OK;
   }
@@ -797,6 +772,7 @@ VM_RESULT vm_step() {
 
 
   case Op_Flush: {
+    // VM.callback();
     VM.pc++;
     return OK;
   }
@@ -843,42 +819,45 @@ VM_RESULT vm_step() {
   }
 
   case OP_AggReset: {
-    VM.aggregator.reset();
-    const char *function_name = Opcodes::AggReset::function_name(*inst);
+      // should just clear mem tree
+    // VM.aggregator.reset();
+    // const char *function_name = Opcodes::AggReset::function_name(*inst);
 
-    if (strcmp(function_name, "COUNT") == 0) {
-      VM.aggregator.type = Aggregator::COUNT;
-    } else if (strcmp(function_name, "MIN") == 0) {
-      VM.aggregator.type = Aggregator::MIN;
-    } else if (strcmp(function_name, "AVG") == 0) {
-      VM.aggregator.type = Aggregator::AVG;
-    } else if (strcmp(function_name, "MAX") == 0) {
-      VM.aggregator.type = Aggregator::MAX;
-    } else if (strcmp(function_name, "SUM") == 0) {
-      VM.aggregator.type = Aggregator::SUM;
-    }
+    // if (strcmp(function_name, "COUNT") == 0) {
+    //   VM.aggregator.type = Aggregator::COUNT;
+    // } else if (strcmp(function_name, "MIN") == 0) {
+    //   VM.aggregator.type = Aggregator::MIN;
+    // } else if (strcmp(function_name, "AVG") == 0) {
+    //   VM.aggregator.type = Aggregator::AVG;
+    // } else if (strcmp(function_name, "MAX") == 0) {
+    //   VM.aggregator.type = Aggregator::MAX;
+    // } else if (strcmp(function_name, "SUM") == 0) {
+    //   VM.aggregator.type = Aggregator::SUM;
+    // }
 
     VM.pc++;
     return OK;
   }
 
   case OP_AggFinal: {
-    int32_t dest_reg = Opcodes::AggFinal::dest_reg(*inst);
-    uint32_t result;
-    if (VM.aggregator.type == Aggregator::AVG && VM.aggregator.count > 0) {
-      result = (uint32_t)(VM.aggregator.accumulator / VM.aggregator.count);
-    } else {
-      result = (uint32_t)VM.aggregator.accumulator;
-    }
 
-    vm_set_value(&VM.registers[dest_reg], TYPE_UINT32, &result);
+      // should just output from mem tree
+    // int32_t dest_reg = Opcodes::AggFinal::dest_reg(*inst);
+    // uint32_t result;
+    // if (VM.aggregator.type == Aggregator::AVG && VM.aggregator.count > 0) {
+    //   result = (uint32_t)(VM.aggregator.accumulator / VM.aggregator.count);
+    // } else {
+    //   result = (uint32_t)VM.aggregator.accumulator;
+    // }
 
-    VM.aggregator.reset();
-    VM.pc++;
+    // vm_set_value(&VM.registers[dest_reg], TYPE_UINT32, &result);
+
+    // VM.aggregator.reset();
+    // VM.pc++;
     return OK;
   }
 
-  case OP_OpenMemTree: {
+  case Op_OpenMemTree: {
     int32_t cursor_id = Opcodes::OpenMemTree::cursor_id(*inst);
     DataType key_type = Opcodes::OpenMemTree::key_type(*inst);
     int32_t record_size = Opcodes::OpenMemTree::record_size(*inst);
@@ -1046,4 +1025,8 @@ VM_RESULT vm_execute(ArenaVector<VMInstruction, QueryArena> &instructions) {
     }
   }
   return OK;
+}
+
+void vm_set_result_callback(ResultCallback callback) {
+    VM.callback = callback;
 }
