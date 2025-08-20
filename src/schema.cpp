@@ -12,7 +12,7 @@ Table* get_table(const char* table_name) {
 
 Index* get_index(const char* table_name, uint32_t column_index) {
     if (column_index == 0) {
-        return nullptr;
+        return nullptr;  // Column 0 is the primary key, not indexed separately
     }
 
     Table* table = get_table(table_name);
@@ -30,14 +30,12 @@ uint32_t get_column_index(const char* table_name, const char* col_name) {
     }
 
     for (size_t i = 0; i < table->schema.columns.size(); i++) {
-        auto name = table->schema.columns[i].name;
-        if (name.equals(col_name)) {
+        if (table->schema.columns[i].name.equals(col_name)) {
             return i;
         }
     }
-    PRINT "NOT RIGHT COLUMN Index";
-    exit(1);
-    return -1;
+
+    return -1;  // Not found
 }
 
 DataType get_column_type(const char* table_name, uint32_t col_index) {
@@ -51,16 +49,19 @@ DataType get_column_type(const char* table_name, uint32_t col_index) {
 bool add_table(Table* table) {
     if (!table) return false;
 
-    auto name = table->schema.table_name;
-    if (tables.contains(name)) {
-        return false; // Table already exists
-    }
-    auto copy = *table;
-    tables[name] = copy;
+    // Make a copy to store in the map
+    Table copy = *table;
+    tables.insert(table->schema.table_name.c_str(), copy);
     return true;
 }
 
 bool remove_table(const char* table_name) {
+    Table* table = get_table(table_name);
+    if (!table) {
+        return false;
+    }
+
+    // Note: btree cleanup should be done by caller
     tables.erase(table_name);
     return true;
 }
@@ -72,10 +73,10 @@ bool add_index(const char* table_name, Index* index) {
     }
 
     if (table->indexes.contains(index->column_index)) {
-        return false; // Index already exists
+        return false;  // Index already exists
     }
 
-    table->indexes[index->column_index] = *index;
+    table->indexes.insert(index->column_index, *index);
     return true;
 }
 
@@ -85,15 +86,20 @@ bool remove_index(const char* table_name, uint32_t column_index) {
         return false;
     }
 
+    // Note: btree cleanup should be done by caller
     table->indexes.erase(column_index);
     return true;
 }
 
 void clear_schema() {
+
+
     tables.clear();
+    // not sure about this
+    arena::reset<SchemaArena>();
 }
 
-uint32_t calculate_record_size(const std::vector<ColumnInfo>& columns) {
+uint32_t calculate_record_size(const ArenaVector<ColumnInfo, SchemaArena>& columns) {
     uint32_t size = 0;
     // Skip column 0 (key) in record size calculation
     for (size_t i = 1; i < columns.size(); i++) {
@@ -104,7 +110,7 @@ uint32_t calculate_record_size(const std::vector<ColumnInfo>& columns) {
 
 void calculate_column_offsets(TableSchema* schema) {
     schema->column_offsets.resize(schema->columns.size());
-    schema->column_offsets[0] = 0; // Key has no offset in record
+    schema->column_offsets[0] = 0;  // Key has no offset in record
 
     uint32_t offset = 0;
     for (size_t i = 1; i < schema->columns.size(); i++) {
@@ -115,10 +121,51 @@ void calculate_column_offsets(TableSchema* schema) {
 }
 
 void print_record(uint8_t* record, TableSchema* schema) {
-    for (size_t i = 0; i < schema->columns.size(); i++) {
-        if (i == 0) continue; // Skip key
-
+    for (size_t i = 1; i < schema->columns.size(); i++) {  // Skip key
+        PRINT schema->columns[i].name.c_str() << ": ";
         uint8_t* data = record + schema->column_offsets[i];
-        debug_type(data, schema->columns[i].type);
+        print_ptr(data, schema->columns[i].type);
+        PRINT " ";
     }
+    PRINT NL;
+}
+
+// Helper to get all table names (useful for debugging)
+ArenaVector<ArenaString<SchemaArena>, SchemaArena> get_all_table_names() {
+    ArenaVector<ArenaString<SchemaArena>, SchemaArena> names;
+    for (size_t i = 0; i < tables.size(); i++) {
+        auto entry = tables.at(i);
+        if (entry) {
+            names.push_back(entry->key);
+        }
+    }
+    return names;
+}
+
+// Helper to validate schema integrity
+bool validate_schema() {
+    // Check that all tables have valid btrees
+    for (size_t i = 0; i < tables.size(); i++) {
+        auto entry = tables.at(i);
+        if (entry) {
+            Table* table = &entry->value;
+
+            // Check table btree
+            if (table->tree.tree_type == INVALID) {
+                return false;
+            }
+
+            // Check all indexes
+            for (size_t j = 0; j < table->indexes.size(); j++) {
+                auto idx_entry = table->indexes.at(j);
+                if (idx_entry) {
+                    if (idx_entry->value.tree.tree_type == INVALID) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+
+    return true;
 }

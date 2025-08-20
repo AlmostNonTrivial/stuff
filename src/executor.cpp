@@ -5,12 +5,14 @@
 #include "parser.hpp"
 #include "schema.hpp"
 #include "vm.hpp"
+#include <cstring>
+#include <cstdio>
 
 static struct ExecutorState {
   bool initialized;
   bool in_transaction;
   bool master_table_exists;
-  uint32_t next_master_id; // Sequential ID counter
+  uint32_t next_master_id;
 } executor_state = {};
 
 // Master table helpers
@@ -30,61 +32,68 @@ static const char *type_to_string(DataType type) {
 }
 
 static char *generate_create_sql(const TableSchema *schema) {
-  ArenaString<QueryArena> sql("CREATE TABLE");
-  //  sql .append(schema->table_name.c_str());
-  //  sql.append(" (");
-  // for (size_t i = 0; i < schema->columns.size(); i++) {
-  //     if (i > 0) sql += ", ";
-  //     sql += type_to_string(schema->columns[i].type);
-  //     sql += " ";
-  //     sql += schema->columns[i].name;
-  // }
-  // sql += ")";
+  // Build CREATE TABLE statement
+  char* buffer = (char*)arena::alloc<QueryArena>(1024);
+  int offset = snprintf(buffer, 1024, "CREATE TABLE %s (",
+                       schema->table_name.c_str());
 
-  // char* result = (char*)arena::alloc<QueryArena>(sql.size() + 1);
-  // strcpy(result, sql.c_str());
-  // return result;
-  std::cout << "not implemented";
-  exit(1);
-  return "";
+  for (size_t i = 0; i < schema->columns.size(); i++) {
+    if (i > 0) {
+      offset += snprintf(buffer + offset, 1024 - offset, ", ");
+    }
+    offset += snprintf(buffer + offset, 1024 - offset, "%s %s",
+                      type_to_string(schema->columns[i].type),
+                      schema->columns[i].name.c_str());
+  }
+
+  snprintf(buffer + offset, 1024 - offset, ")");
+  return buffer;
 }
 
-static char *generate_index_sql(const char *table_name, uint32_t column_index) {
-  // Table* table = get_table(table_name);
-  // if (!table || column_index >= table->schema.columns.size()) {
-  //     return nullptr;
-  // }
+static char *generate_index_sql(const char *table_name, uint32_t column_index,
+                               const char *index_name) {
+  Table* table = get_table(table_name);
+  if (!table || column_index >= table->schema.columns.size()) {
+    return nullptr;
+  }
 
-  // std::string sql = "CREATE INDEX idx_" + std::string(table_name) + "_" +
-  //                  table->schema.columns[column_index].name +
-  //                  " ON " + table_name + " (" +
-  //                  table->schema.columns[column_index].name + ")";
+  char* buffer = (char*)arena::alloc<QueryArena>(512);
+  snprintf(buffer, 512, "CREATE INDEX %s ON %s (%s)",
+           index_name,
+           table_name,
+           table->schema.columns[column_index].name.c_str());
 
-  // char* result = (char*)arena::alloc<QueryArena>(sql.size() + 1);
-  // strcpy(result, sql.c_str());
-  // return result;
-  std::cout << "not implemented";
-  exit(1);
-  return "";
+  return buffer;
 }
 
-// Execute SQL through VM without triggering events
+// Execute SQL through VM without triggering recursive events
 static VM_RESULT execute_internal(const char *sql) {
+  // Save and clear event queue to prevent recursive processing
+  auto saved_events = vm_events();
+  ArenaQueue<VmEvent, QueryArena> empty_queue;
+  vm_events() = empty_queue;
+
   ArenaVector<ASTNode *, QueryArena> stmts = parse_sql(sql);
-  if (stmts.empty())
+  if (stmts.empty()) {
+    vm_events() = saved_events;
     return ERR;
+  }
 
   ArenaVector<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
   VM_RESULT result = vm_execute(program);
 
-  // Clear events from internal operations
+  // Clear any events from internal operation
+  vm_events().clear();
+
+  // Restore original event queue
+  vm_events() = saved_events;
 
   return result;
 }
 
 static void insert_master_table_entry(const char *type, const char *name,
-                                      const char *tbl_name, uint32_t rootpage,
-                                      const char *sql) {
+                                     const char *tbl_name, uint32_t rootpage,
+                                     const char *sql) {
   if (!executor_state.master_table_exists)
     return;
 
@@ -92,7 +101,19 @@ static void insert_master_table_entry(const char *type, const char *name,
   snprintf(buffer, sizeof(buffer),
            "INSERT INTO sqlite_master VALUES (%u, '%s', '%s', '%s', %u, '%s')",
            executor_state.next_master_id++, type, name, tbl_name, rootpage,
-           sql);
+           sql ? sql : "");
+
+  execute_internal(buffer);
+}
+
+static void update_master_table_rootpage(const char *name, uint32_t new_rootpage) {
+  if (!executor_state.master_table_exists)
+    return;
+
+  char buffer[512];
+  snprintf(buffer, sizeof(buffer),
+           "UPDATE sqlite_master SET rootpage = %u WHERE name = '%s'",
+           new_rootpage, name);
 
   execute_internal(buffer);
 }
@@ -110,15 +131,14 @@ static void delete_master_table_entry(const char *name) {
 
 static void create_master_table() {
   // Create the master table schema
-  TableSchema *schema =
-      (TableSchema *)arena::alloc<QueryArena>(sizeof(TableSchema));
+  TableSchema *schema = (TableSchema *)arena::alloc<QueryArena>(sizeof(TableSchema));
   schema->table_name = "sqlite_master";
 
   // Columns: id (key), type, name, tbl_name, rootpage, sql
-  schema->columns.push_back({"id", TYPE_UINT32}); // Key column must be first
+  schema->columns.push_back({"id", TYPE_UINT32});
   schema->columns.push_back({"type", TYPE_VARCHAR32});
-  schema->columns.push_back({"name", TYPE_VARCHAR32});
-  schema->columns.push_back({"tbl_name", TYPE_VARCHAR32});
+  schema->columns.push_back({"name", TYPE_VARCHAR256});
+  schema->columns.push_back({"tbl_name", TYPE_VARCHAR256});
   schema->columns.push_back({"rootpage", TYPE_UINT32});
   schema->columns.push_back({"sql", TYPE_VARCHAR256});
 
@@ -131,12 +151,10 @@ static void create_master_table() {
 
   add_table(master);
   executor_state.master_table_exists = true;
-  executor_state.next_master_id = 1; // Initialize counter
+  executor_state.next_master_id = 1;
 }
 
 static void rebuild_schema_from_master() {
-
-    // need to purge the schema cache
   if (!executor_state.master_table_exists)
     return;
 
@@ -155,55 +173,37 @@ static void rebuild_schema_from_master() {
     add_table(&master_copy);
   }
 
-  // Reset the ID counter to max(id) + 1
+  // Reset the ID counter
   executor_state.next_master_id = 1;
 
-  // First pass: find max ID
-  const char *max_query = "SELECT * FROM sqlite_master";
-  ArenaVector<ASTNode *, QueryArena> max_stmts = parse_sql(max_query);
-  if (!max_stmts.empty()) {
-    ArenaVector<VMInstruction, QueryArena> max_program =
-        build_from_ast(max_stmts[0]);
-    vm_execute(max_program);
-
-    for (auto &row : vm_output_buffer()) {
-      if (row.size() >= 6) {
-        uint32_t id = *(uint32_t *)row[0].data;
-        if (id >= executor_state.next_master_id) {
-          executor_state.next_master_id = id + 1;
-        }
-      }
-    }
-  }
-
-  // Query master table to rebuild schema - tables first
-  const char *query = "SELECT * FROM sqlite_master WHERE type = 'table' AND "
-                      "name != 'sqlite_master'";
+  // Query master table to rebuild schema
+  const char *query = "SELECT * FROM sqlite_master ORDER BY id";
   ArenaVector<ASTNode *, QueryArena> stmts = parse_sql(query);
   if (stmts.empty())
     return;
 
   ArenaVector<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
-
-  // Save current output buffer
-  auto saved_buffer = vm_output_buffer();
-
-  // Execute query
   vm_execute(program);
 
-  // Process results to rebuild tables
-  for (auto &row : vm_output_buffer()) {
+  // Process results to rebuild tables and indexes
+  auto& output = vm_output_buffer();
+  for (auto &row : output) {
     if (row.size() < 6)
       continue;
 
-    // row[0] is id
+    uint32_t id = *(uint32_t *)row[0].data;
     const char *type = (const char *)row[1].data;
     const char *name = (const char *)row[2].data;
     const char *tbl_name = (const char *)row[3].data;
     uint32_t rootpage = *(uint32_t *)row[4].data;
     const char *sql = (const char *)row[5].data;
 
-    if (strcmp(type, "table") == 0) {
+    // Update next ID counter
+    if (id >= executor_state.next_master_id) {
+      executor_state.next_master_id = id + 1;
+    }
+
+    if (strcmp(type, "table") == 0 && strcmp(name, "sqlite_master") != 0) {
       // Parse CREATE TABLE to rebuild schema
       ArenaVector<ASTNode *, QueryArena> create_stmts = parse_sql(sql);
       if (!create_stmts.empty() && create_stmts[0]->type == AST_CREATE_TABLE) {
@@ -211,52 +211,38 @@ static void rebuild_schema_from_master() {
 
         Table *table = (Table *)arena::alloc<QueryArena>(sizeof(Table));
         table->schema.table_name = name;
-        for (int i = 0; i < node->columns.size(); i++) {
-          table->schema.columns[i] = node->columns[i];
-        }
+        table->schema.columns.set(node->columns);
 
         calculate_column_offsets(&table->schema);
 
         // Restore btree with existing root page
         table->tree = btree_create(table->schema.key_type(),
-                                   table->schema.record_size, BPLUS);
+                                  table->schema.record_size, BPLUS);
         table->tree.root_page_index = rootpage;
 
         add_table(table);
       }
     }
-  }
+    else if (strcmp(type, "index") == 0) {
+      Table *table = get_table(tbl_name);
+      if (table) {
+        // Extract column index from name (format: idx_tablename_columnindex)
+        char expected_prefix[256];
+        snprintf(expected_prefix, sizeof(expected_prefix), "idx_%s_", tbl_name);
 
-  // Now rebuild indexes
-  query = "SELECT * FROM sqlite_master WHERE type = 'index'";
-  stmts = parse_sql(query);
-  if (!stmts.empty()) {
-    program = build_from_ast(stmts[0]);
-    vm_execute(program);
+        if (strncmp(name, expected_prefix, strlen(expected_prefix)) == 0) {
+          const char *col_idx_str = name + strlen(expected_prefix);
+          uint32_t col_idx = atoi(col_idx_str);
 
-    for (auto &row : vm_output_buffer()) {
-      if (row.size() < 6)
-        continue;
-
-      // row[0] is id
-      const char *type = (const char *)row[1].data;
-      const char *name = (const char *)row[2].data;
-      const char *tbl_name = (const char *)row[3].data;
-      uint32_t rootpage = *(uint32_t *)row[4].data;
-
-      if (strcmp(type, "index") == 0) {
-        Table *table = get_table(tbl_name);
-        if (table) {
-          // Parse index name to get column (simplified)
-          // Real implementation would parse the SQL
-          for (uint32_t i = 1; i < table->schema.columns.size(); i++) {
+          if (col_idx > 0 && col_idx < table->schema.columns.size()) {
             Index *index = (Index *)arena::alloc<QueryArena>(sizeof(Index));
-            index->column_index = i;
-            index->tree = btree_create(table->schema.columns[i].type,
-                                       table->schema.key_type(), BTREE);
+            index->column_index = col_idx;
+            index->index_name = name;
+            index->tree = btree_create(table->schema.columns[col_idx].type,
+                                     table->schema.key_type(), BTREE);
             index->tree.root_page_index = rootpage;
+
             add_index(tbl_name, index);
-            break; // Simplified - just add first index
           }
         }
       }
@@ -272,97 +258,113 @@ static void process_vm_events() {
     events.pop();
 
     switch (event.type) {
-        // in memory schema already modified
     case EVT_TABLE_CREATED: {
-      Table *table = (Table *)event.data;
+      const char *table_name = event.context.table_info.table_name;
+      Table *table = get_table(table_name);
 
-
-
-
-      // Insert into master table if not the master table itself
-      // if (executor_state.master_table_exists &&
-      //     table->schema.table_name != "sqlite_master") {
-      //     char* sql = generate_create_sql(&table->schema);
-      //     insert_master_table_entry("table",
-      //         table->schema.table_name.c_str(),
-      //         table->schema.table_name.c_str(),
-      //         table->tree.root_page_index,
-      //         sql);
-      // }
+      if (executor_state.master_table_exists && table &&
+          strcmp(table_name, "sqlite_master") != 0) {
+        char* sql = generate_create_sql(&table->schema);
+        insert_master_table_entry("table",
+            table_name,
+            table_name,
+            table->tree.root_page_index,
+            sql);
+      }
       break;
     }
 
-
     case EVT_INDEX_CREATED: {
-      Index *index = (Index *)event.data;
       const char *table_name = event.context.index_info.table_name;
+      uint32_t column_index = event.context.index_info.column_index;
+      Index *index = get_index(table_name, column_index);
 
-      // Apply immediately
-      add_index(table_name, index);
+      if (executor_state.master_table_exists && index) {
+        char index_name[256];
+        snprintf(index_name, sizeof(index_name), "idx_%s_%u",
+                table_name, column_index);
 
-      // // Insert into master table
-      // if (executor_state.master_table_exists) {
-      //     char* sql = generate_index_sql(table_name, index->column_index);
-      //     char index_name[128];
-      //     snprintf(index_name, sizeof(index_name), "idx_%s_%u",
-      //             table_name, index->column_index);
-
-      //     insert_master_table_entry("index",
-      //         index_name,
-      //         table_name,
-      //         index->tree.root_page_index,
-      //         sql);
-      // }
+        char* sql = generate_index_sql(table_name, column_index, index_name);
+        insert_master_table_entry("index",
+            index_name,
+            table_name,
+            index->tree.root_page_index,
+            sql);
+      }
       break;
     }
 
     case EVT_TABLE_DROPPED: {
       const char *table_name = event.context.table_info.table_name;
 
-      // Delete from master table
-      // delete_master_table_entry(table_name);
+      // Delete table and all its indexes from master
+      delete_master_table_entry(table_name);
+
+      // Also delete all indexes for this table
+      char buffer[512];
+      snprintf(buffer, sizeof(buffer),
+               "DELETE FROM sqlite_master WHERE type = 'index' AND tbl_name = '%s'",
+               table_name);
+      execute_internal(buffer);
       break;
     }
+
     case EVT_INDEX_DROPPED: {
       const char *table_name = event.context.index_info.table_name;
       uint32_t column_index = event.context.index_info.column_index;
 
-
-      // // Delete from master table
-      // char index_name[128];
-      // snprintf(index_name, sizeof(index_name), "idx_%s_%u",
-      //         table_name, column_index);
-      // delete_master_table_entry(index_name);
+      char index_name[256];
+      snprintf(index_name, sizeof(index_name), "idx_%s_%u",
+              table_name, column_index);
+      delete_master_table_entry(index_name);
       break;
     }
 
     case EVT_BTREE_ROOT_CHANGED: {
-      int i = 0;
+      const char *table_name = event.context.table_info.table_name;
+      uint32_t column = event.context.table_info.column;
 
-
-      // Update root page in master table if needed
-      // This would require an UPDATE statement
+      if (executor_state.master_table_exists) {
+        if (column == 0) {
+          // Table root changed
+          Table *table = get_table(table_name);
+          if (table) {
+            update_master_table_rootpage(table_name, table->tree.root_page_index);
+          }
+        } else {
+          // Index root changed
+          Index *index = get_index(table_name, column);
+          if (index) {
+            char index_name[256];
+            snprintf(index_name, sizeof(index_name), "idx_%s_%u",
+                    table_name, column);
+            update_master_table_rootpage(index_name, index->tree.root_page_index);
+          }
+        }
+      }
       break;
     }
 
     case EVT_TRANSACTION_BEGIN:
-      btree_begin_transaction();
-      executor_state.in_transaction = true;
+      if (!executor_state.in_transaction) {
+        btree_begin_transaction();
+        executor_state.in_transaction = true;
+      }
       break;
 
-
     case EVT_TRANSACTION_COMMIT:
-    // the commit transaction should be processed after
-    // any modifications to the master catalog
-      btree_commit();
-      executor_state.in_transaction = false;
+      if (executor_state.in_transaction) {
+        btree_commit();
+        executor_state.in_transaction = false;
+      }
       break;
 
     case EVT_TRANSACTION_ROLLBACK:
-      btree_rollback();
-      executor_state.in_transaction = false;
-      // rebuild_schema_from_master();
-      // Schema will be rebuilt after btree rollback
+      if (executor_state.in_transaction) {
+        btree_rollback();
+        executor_state.in_transaction = false;
+        rebuild_schema_from_master();
+      }
       break;
 
     default:
@@ -377,16 +379,20 @@ static void init_executor() {
   executor_state.master_table_exists = false;
   executor_state.next_master_id = 1;
 
-  // Create master table if it doesn't exist
-  // if (!get_table("sqlite_master")) {
-  // create_master_table();
-  // }
+  // Check if master table exists and load it
+  if (get_table("sqlite_master") == nullptr) {
+    create_master_table();
+  } else {
+    executor_state.master_table_exists = true;
+    rebuild_schema_from_master();
+  }
 }
 
 ExecutionMeta meta;
 
 ExecutionMeta *execute(const char *sql) {
   arena::reset<QueryArena>();
+
   if (!executor_state.initialized) {
     init_executor();
   }
@@ -395,50 +401,61 @@ ExecutionMeta *execute(const char *sql) {
 
   bool success = true;
   bool explicit_transaction = false;
+  bool auto_transaction = false;
+
+  // Check for explicit transaction commands
+  for (int i = 0; i < statements.size(); i++) {
+    if (statements[i]->type == AST_BEGIN ||
+        statements[i]->type == AST_COMMIT ||
+        statements[i]->type == AST_ROLLBACK) {
+      explicit_transaction = true;
+      break;
+    }
+  }
 
   for (int i = 0; i < statements.size(); i++) {
     auto statement = statements[i];
     bool is_read = (statement->type == AST_SELECT);
+    bool is_write = !is_read && statement->type != AST_BEGIN &&
+                   statement->type != AST_COMMIT && statement->type != AST_ROLLBACK;
 
-    // if(statement->type == AST_SELECT) {
-    //     _debug = true;
-    // }
+    // Auto-begin transaction for writes if not in explicit transaction
+    if (is_write && !executor_state.in_transaction && !explicit_transaction) {
+      btree_begin_transaction();
+      executor_state.in_transaction = true;
+      auto_transaction = true;
+    }
 
     // Build and execute program
     ArenaVector<VMInstruction, QueryArena> program = build_from_ast(statement);
-    // will have duplicates obv
     meta.sql = sql;
-
-    // std::cout << program.size() << ", ";
 
     VM_RESULT result = vm_execute(program);
     meta.result = result;
+
     if (result != OK) {
       success = false;
 
       // Rollback on error
       if (executor_state.in_transaction) {
         btree_rollback();
-        rebuild_schema_from_master();
         executor_state.in_transaction = false;
+        rebuild_schema_from_master();
       }
 
-      break; // Stop executing further statements
+      break;
     } else {
-      // Process events immediately on success
+      // Process events immediately after each statement
       process_vm_events();
 
-      if (is_read) {
-        auto buffer = vm_output_buffer();
-      }
-
-      // Auto-commit for non-explicit transactions
-      if (!explicit_transaction && executor_state.in_transaction && !is_read) {
+      // Auto-commit after write if we auto-began
+      if (auto_transaction && is_write) {
         btree_commit();
         executor_state.in_transaction = false;
+        auto_transaction = false;
       }
     }
   }
 
-return &meta;
+  return &meta;
 }
