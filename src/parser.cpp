@@ -318,7 +318,7 @@ static ASTNode* parse_literal(Parser* p) {
         if (len > 256) len = 256;
 
         node->value.type = (len <= 32) ? TYPE_VARCHAR32 : TYPE_VARCHAR256;
-        uint32_t alloc_size = VMValue::get_size(node->value.type);
+        uint32_t alloc_size = node->value.type;
         node->value.data = (uint8_t*)arena::alloc<QueryArena>(alloc_size);
         memset(node->value.data, 0, alloc_size);
         memcpy(node->value.data, p->current_start, len);

@@ -7,21 +7,21 @@
 struct SchemaArena {};
 
 struct ColumnInfo {
-  ArenaString<SchemaArena> name;
+  Str<SchemaArena> name;
   DataType type;
 };
 
 struct TableSchema {
-  ArenaString<SchemaArena> table_name;
+  Str<SchemaArena> table_name;
   uint32_t record_size;
-  ArenaVector<ColumnInfo, SchemaArena> columns;
-  ArenaVector<uint32_t, SchemaArena> column_offsets;
+  Vector<ColumnInfo, SchemaArena> columns;
+  Vector<uint32_t, SchemaArena> column_offsets;
   DataType key_type() const { return columns[0].type; }
 };
 
 struct Index {
   BTree tree;
-  ArenaString<SchemaArena> index_name;
+  Str<SchemaArena> index_name;
   uint32_t column_index;
 };
 
@@ -46,5 +46,5 @@ void clear_schema();
 
 // Utility functions
 void print_record(uint8_t* record, TableSchema* schema);
-uint32_t calculate_record_size(const ArenaVector<ColumnInfo, SchemaArena>& columns);
+uint32_t calculate_record_size(const Vector<ColumnInfo, SchemaArena>& columns);
 void calculate_column_offsets(TableSchema* schema);

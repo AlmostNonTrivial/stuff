@@ -620,7 +620,7 @@ inline void debug_print_instruction(const VMInstruction &inst, size_t index) {
 
   case OP_OpenRead:
   case OP_OpenWrite:
-    printf("cursor=%d table=\\"%s\\"", inst.p1, inst.p4 ? (const char*)inst.p4 : "?");
+    printf("cursor=%d table=\"%s\"", inst.p1, inst.p4 ? (const char*)inst.p4 : "?");
     if (inst.p3 != 0) {
       printf(" index_col=%d", inst.p3);
     }

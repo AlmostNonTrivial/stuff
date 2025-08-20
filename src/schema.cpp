@@ -99,7 +99,7 @@ void clear_schema() {
     arena::reset<SchemaArena>();
 }
 
-uint32_t calculate_record_size(const ArenaVector<ColumnInfo, SchemaArena>& columns) {
+uint32_t calculate_record_size(const Vector<ColumnInfo, SchemaArena>& columns) {
     uint32_t size = 0;
     // Skip column 0 (key) in record size calculation
     for (size_t i = 1; i < columns.size(); i++) {
@@ -131,8 +131,8 @@ void print_record(uint8_t* record, TableSchema* schema) {
 }
 
 // Helper to get all table names (useful for debugging)
-ArenaVector<Str<SchemaArena>, SchemaArena> get_all_table_names() {
-    ArenaVector<Str<SchemaArena>, SchemaArena> names;
+Vector<Str<SchemaArena>, SchemaArena> get_all_table_names() {
+    Vector<Str<SchemaArena>, SchemaArena> names;
     for (size_t i = 0; i < tables.size(); i++) {
         auto entry = tables.at(i);
         if (entry) {

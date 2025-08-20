@@ -964,7 +964,7 @@ bool btree_clear(BTree *tree) {
     return false;
   }
 
-  ArenaQueue<uint32_t, BTreeArena, 1024> bfs;
+  Queue<uint32_t, BTreeArena, 1024> bfs;
   bfs.push(tree->root_page_index);
 
   while (bfs.size()) {
