@@ -479,8 +479,9 @@ static void build_update_record(
     instructions.push_back(make_column(table_cursor_id, (int32_t)i, col_reg));
   }
 
+  // Get the rowid (column 0)
   int rowid_reg = regs.get("rowid");
-  instructions.push_back(make_key(table_cursor_id, rowid_reg));
+  instructions.push_back(make_column(table_cursor_id, 0, rowid_reg));
 
   // Position and delete from non-scan indexes that are being updated
   for (size_t i = 0; i < indexes_to_update.size(); i++) {
@@ -513,9 +514,11 @@ static void build_update_record(
   }
 
   // Write updated record to table
+  // IMPORTANT FIX: Record excludes column 0 (the key)!
+  // Start from register containing column 1, and include (columns.size() - 1) columns
   int record_reg = regs.get("record");
   instructions.push_back(make_record(
-      current_regs[0], (int32_t)table->schema.columns.size(), record_reg));
+      current_regs[1], (int32_t)(table->schema.columns.size() - 1), record_reg));
   instructions.push_back(make_update(table_cursor_id, record_reg));
 }
 
@@ -1027,6 +1030,7 @@ static ArenaVector<VMInstruction, QueryArena> build_update_index_scan(
   int rowid_reg = regs.get("rowid");
   instructions.push_back(make_column(index_cursor_id, 1, rowid_reg));
 
+
   instructions.push_back(
       make_seek_eq_label(table_cursor_id, rowid_reg, "next_iteration"));
 
@@ -1374,6 +1378,7 @@ build_create_index(const ArenaString<QueryArena> &table_name,
 }
 
 // Insert
+// In build_insert function, fix the MakeRecord call:
 ArenaVector<VMInstruction, QueryArena>
 build_insert(const ArenaString<QueryArena> &table_name,
              const ArenaVector<SetColumns, QueryArena> &values) {
@@ -1393,24 +1398,20 @@ build_insert(const ArenaString<QueryArena> &table_name,
   ArenaMap<uint32_t, int, QueryArena> indexes_to_insert;
   int cursor_id = 1;
 
-  // Iterate through table indexes
-
   instructions.push_back(make_open_write(table_cursor_id, table_name.c_str()));
 
   for (int i = 0; i < table->indexes.size(); i++) {
     auto key = table->indexes.key_at(i);
-
     indexes_to_insert[*key] = cursor_id++;
     instructions.push_back(
         make_open_write(cursor_id - 1, table_name.c_str(), *key));
   }
 
-  // Load values
+  // Load values into registers
   ArenaVector<int, QueryArena> value_regs;
   for (size_t i = 0; i < values.size(); i++) {
     int reg = regs.get(("value_" + std::to_string(i)).c_str());
     value_regs.push_back(reg);
-
     load_value(instructions, values[i].second, reg);
 
     // Find column index for this value
@@ -1426,10 +1427,16 @@ build_insert(const ArenaString<QueryArena> &table_name,
   }
 
   int record_reg = regs.get("record");
+
+  // IMPORTANT FIX: Record excludes column 0 (the key)!
+  // Start from value_regs[1] and use (values.size() - 1) columns
   instructions.push_back(
-      make_record(value_regs[0], (int32_t)values.size(), record_reg));
+      make_record(value_regs[1], (int32_t)(values.size() - 1), record_reg));
+
+  // Key is in value_regs[0], record is in record_reg
   instructions.push_back(
       make_insert(table_cursor_id, value_regs[0], record_reg));
+
   instructions.push_back(make_close(table_cursor_id));
   instructions.push_back(make_halt());
 

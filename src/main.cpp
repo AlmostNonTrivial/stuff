@@ -43,9 +43,10 @@ int main() {
       // "SELECT * FROM X;",
       // "SELECT * FROM Y;",
       // "BEGIN; DELETE FROM X WHERE name = 'ricky';COMMIT;",
-      "BEGIN; UPDATE X SET name = 'ricksmart' WHERE name = 'ricky';COMMIT;",
       "BEGIN; CREATE INDEX index_x_name ON X (name);COMMIT;",
-      "SELECT * FROM X WHERE name = 'ricksmart';",
+      "SELECT * FROM X;",
+      "BEGIN; UPDATE X SET name = 'ricksmart' WHERE name = 'ricky';COMMIT;",
+      "SELECT * FROM X WHERE name = 'ricksmart",
       // "SELECT * FROM X;"
       // "SELECT COUNT(*) FROM X;",
 

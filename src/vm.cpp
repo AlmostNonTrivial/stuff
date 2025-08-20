@@ -393,77 +393,68 @@ VM_RESULT vm_step() {
   }
 
   case OP_MakeRecord: {
-    uint32_t total_size = 0;
-    for (int i = 1; i < inst->p2; i++) {
-      VMValue *val = &VM.registers[inst->p1 + i];
-      total_size += VMValue::get_size(val->type);
-    }
-
-    uint8_t *record = (uint8_t *)arena::alloc<QueryArena>(total_size);
-
-    uint32_t offset = 0;
-
-    for (int i = 1; i < inst->p2; i++) {
-      VMValue *val = &VM.registers[inst->p1 + i];
-      uint32_t size = VMValue::get_size(val->type);
-      memcpy(record + offset, val->data, size);
-      offset += size;
-    }
-
-    VM.registers[inst->p3].type = TYPE_UINT32;
-    VM.registers[inst->p3].data = record;
-    VM.pc++;
-    return OK;
-  }
-
-  case OP_Insert: {
-
-    if (!VM.cursors.contains(inst->p1)) {
-      return ERR;
-    }
-
-    VmCursor *cursor = VM.cursors.find(inst->p1);
-    VMValue *key = &VM.registers[inst->p2];
-    VMValue *record = &VM.registers[inst->p3];
-
-    uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
-
-    bool exists = btree_cursor_seek(&cursor->btree_cursor, (void *)key->data);
-    if (exists) {
-      return ERR;
-    }
-
-    bool success =
-        btree_cursor_insert(&cursor->btree_cursor, key->data, record->data);
-    if (!success) {
-      return ERR;
-    }
-
-    // VM.program valid
-    if (cursor->btree_cursor.tree->root_page_index != current_root) {
-      if (cursor->is_index) {
-        get_table(cursor->schema->table_name.c_str())
-            ->indexes[cursor->column]
-            .tree.root_page_index = cursor->btree_cursor.tree->root_page_index;
-      } else {
-
-        /// TODO needs to work with indexes also
-        emit_root_changed_event(EVT_BTREE_ROOT_CHANGED,
-                                cursor->schema->table_name.c_str(),
-                                cursor->btree_cursor.tree->root_page_index);
+      uint32_t total_size = 0;
+      for (int i = 0; i < inst->p2; i++) {
+        VMValue *val = &VM.registers[inst->p1 + i];
+        total_size += VMValue::get_size(val->type);
       }
-    }
 
-    // for (int i = 0; i < VM.program.size(); i++) {
-    //   auto &inst = VM.program[i];
-    //   printf("[%d] op=%d, p1=%d, p2=%d, p3=%d\n", i, inst.opcode, inst.p1,
-    //          inst.p2, inst.p3);
-    // }
+      uint8_t *record = (uint8_t *)arena::alloc<QueryArena>(total_size);
 
-    emit_row_event(EVT_ROWS_INSERTED, 1);
+      uint32_t offset = 0;
+      // Start at 0 to include all columns!
+      for (int i = 0; i < inst->p2; i++) {
+        VMValue *val = &VM.registers[inst->p1 + i];
+        uint32_t size = VMValue::get_size(val->type);
+        memcpy(record + offset, val->data, size);
+        offset += size;
+      }
 
-    VM.pc++;
-    return OK;
+      VM.registers[inst->p3].type = TYPE_UINT32;
+      VM.registers[inst->p3].data = record;
+      VM.pc++;
+      return OK;
+  }
+  case OP_Insert: {
+      if (!VM.cursors.contains(inst->p1)) {
+        return ERR;
+      }
+
+      VmCursor *cursor = VM.cursors.find(inst->p1);
+      VMValue *key = &VM.registers[inst->p2];
+      VMValue *record = &VM.registers[inst->p3];
+
+      uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
+
+      bool exists = btree_cursor_seek(&cursor->btree_cursor, (void *)key->data);
+      if (exists) {
+        return ERR;
+      }
+
+      // FIX: Just use record->data directly!
+      // The record was already built correctly by MakeRecord
+      bool success =
+          btree_cursor_insert(&cursor->btree_cursor, key->data, record->data);
+      if (!success) {
+        return ERR;
+      }
+
+      // Handle root page changes
+      if (cursor->btree_cursor.tree->root_page_index != current_root) {
+        if (cursor->is_index) {
+          get_table(cursor->schema->table_name.c_str())
+              ->indexes[cursor->column]
+              .tree.root_page_index = cursor->btree_cursor.tree->root_page_index;
+        } else {
+          emit_root_changed_event(EVT_BTREE_ROOT_CHANGED,
+                                  cursor->schema->table_name.c_str(),
+                                  cursor->btree_cursor.tree->root_page_index);
+        }
+      }
+
+      emit_row_event(EVT_ROWS_INSERTED, 1);
+      VM.pc++;
+      return OK;
   }
 
   case OP_Delete: {
