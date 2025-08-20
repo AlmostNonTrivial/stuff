@@ -14,7 +14,27 @@ static struct ExecutorState {
   bool in_transaction;
   bool master_table_exists;
   uint32_t next_master_id;
+
+  // Storage for query results
+  ArenaVector<ArenaVector<TypedValue, QueryArena>, QueryArena> query_results;
 } executor_state = {};
+
+// Result callback to capture VM output
+static void capture_results_callback(void* result, size_t result_size) {
+  // Parse the result based on the schema
+  // For now, store raw results - you'll need to adapt this based on your TypedValue structure
+  ArenaVector<TypedValue, QueryArena> row;
+
+  // This is a simplified version - you'll need to properly parse based on schema
+  uint8_t* data = (uint8_t*)result;
+  size_t offset = 0;
+
+  // For master table: id, type, name, tbl_name, rootpage, sql
+  // You'll need to know the schema to properly parse this
+  // This is a placeholder that assumes we know the structure
+
+  executor_state.query_results.push_back(row);
+}
 
 // Master table helpers
 static const char *type_to_string(DataType type) {
@@ -92,6 +112,31 @@ static VM_RESULT execute_internal(const char *sql) {
   return result;
 }
 
+// Execute and capture results for internal queries
+static VM_RESULT execute_with_results(const char *sql) {
+  // Clear previous results
+  executor_state.query_results.clear();
+
+  // Set up callback to capture results
+  ResultCallback old_callback = nullptr;
+  // Save old callback if needed (you might need to add a vm_get_callback function)
+  vm_set_result_callback(capture_results_callback);
+
+  ArenaVector<ASTNode *, QueryArena> stmts = parse_sql(sql);
+  if (stmts.empty()) {
+    vm_set_result_callback(old_callback);
+    return ERR;
+  }
+
+  ArenaVector<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
+  VM_RESULT result = vm_execute(program);
+
+  // Restore old callback
+  vm_set_result_callback(old_callback);
+
+  return result;
+}
+
 static void insert_master_table_entry(const char *type, const char *name,
                                      const char *tbl_name, uint32_t rootpage,
                                      const char *sql) {
@@ -155,6 +200,65 @@ static void create_master_table() {
   executor_state.next_master_id = 1;
 }
 
+// Custom result parser for master table queries
+static void parse_master_table_row(void* result, size_t result_size) {
+  Table* master = get_table("sqlite_master");
+  if (!master) return;
+
+  uint8_t* data = (uint8_t*)result;
+  ArenaVector<TypedValue, QueryArena> row;
+
+  // Parse according to master table schema
+  // id (UINT32)
+  TypedValue id_val;
+  id_val.type = TYPE_UINT32;
+  id_val.data = (uint8_t*)arena::alloc<QueryArena>(sizeof(uint32_t));
+  memcpy(id_val.data, data, sizeof(uint32_t));
+  row.push_back(id_val);
+  data += sizeof(uint32_t);
+
+  // type (VARCHAR32)
+  TypedValue type_val;
+  type_val.type = TYPE_VARCHAR32;
+  type_val.data = (uint8_t*)arena::alloc<QueryArena>(32);
+  memcpy(type_val.data, data, 32);
+  row.push_back(type_val);
+  data += 32;
+
+  // name (VARCHAR32)
+  TypedValue name_val;
+  name_val.type = TYPE_VARCHAR32;
+  name_val.data = (uint8_t*)arena::alloc<QueryArena>(32);
+  memcpy(name_val.data, data, 32);
+  row.push_back(name_val);
+  data += 32;
+
+  // tbl_name (VARCHAR32)
+  TypedValue tbl_name_val;
+  tbl_name_val.type = TYPE_VARCHAR32;
+  tbl_name_val.data = (uint8_t*)arena::alloc<QueryArena>(32);
+  memcpy(tbl_name_val.data, data, 32);
+  row.push_back(tbl_name_val);
+  data += 32;
+
+  // rootpage (UINT32)
+  TypedValue rootpage_val;
+  rootpage_val.type = TYPE_UINT32;
+  rootpage_val.data = (uint8_t*)arena::alloc<QueryArena>(sizeof(uint32_t));
+  memcpy(rootpage_val.data, data, sizeof(uint32_t));
+  row.push_back(rootpage_val);
+  data += sizeof(uint32_t);
+
+  // sql (VARCHAR256)
+  TypedValue sql_val;
+  sql_val.type = TYPE_VARCHAR256;
+  sql_val.data = (uint8_t*)arena::alloc<QueryArena>(256);
+  memcpy(sql_val.data, data, 256);
+  row.push_back(sql_val);
+
+  executor_state.query_results.push_back(row);
+}
+
 static void rebuild_schema_from_master() {
   if (!executor_state.master_table_exists)
     return;
@@ -177,22 +281,24 @@ static void rebuild_schema_from_master() {
   // Reset the ID counter
   executor_state.next_master_id = 1;
 
+  // Clear results and set up callback for master table parsing
+  executor_state.query_results.clear();
+  ResultCallback old_callback = nullptr;
+  vm_set_result_callback(parse_master_table_row);
+
   // Query master table to rebuild schema
   const char *query = "SELECT * FROM sqlite_master ORDER BY id";
   ArenaVector<ASTNode *, QueryArena> stmts = parse_sql(query);
-  if (stmts.empty())
-    return;
+  if (!stmts.empty()) {
+    ArenaVector<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
+    vm_execute(program);
+  }
 
-  ArenaVector<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
-  vm_execute(program);
+  // Restore old callback
+  vm_set_result_callback(old_callback);
 
-
-
-  // need to set result callback
-
-
-
-  for (auto &row : output) {
+  // Process the captured results
+  for (auto &row : executor_state.query_results) {
     if (row.size() < 6)
       continue;
 
@@ -393,9 +499,6 @@ static void init_executor() {
   }
 }
 
-
-
-
 int executed = 0;
 void execute(const char *sql) {
 
@@ -445,13 +548,7 @@ void execute(const char *sql) {
         _debug = true;
     }
 
-
-    // if(statement->type == AST_CREATE_INDEX){
-    //     _debug = true;
-    // }
-
     VM_RESULT result = vm_execute(program);
-
 
     if (result != OK) {
       success = false;
@@ -469,7 +566,7 @@ void execute(const char *sql) {
       break;
     } else {
       // Process events immediately after each statement
-      // process_vm_events();
+      process_vm_events();
 
       // Auto-commit after write if we auto-began
       if (auto_transaction && is_write) {
