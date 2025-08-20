@@ -3,6 +3,7 @@
 #include "arena.hpp"
 #include "btree.hpp"
 #include "parser.hpp"
+#include "programbuilder.hpp"
 #include "schema.hpp"
 #include "vm.hpp"
 #include <cstring>
@@ -428,6 +429,7 @@ ExecutionMeta *execute(const char *sql) {
 
     // Build and execute program
     ArenaVector<VMInstruction, QueryArena> program = build_from_ast(statement);
+    debug_print_program(program);
     meta.sql = sql;
 
     VM_RESULT result = vm_execute(program);

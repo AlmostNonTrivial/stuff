@@ -153,7 +153,6 @@ void vm_shutdown() {
 }
 
 void vm_reset() {
-  // std::cout << "next\n";
   VM.pc = 0;
   VM.halted = false;
   VM.compare_result = 0;
@@ -186,12 +185,7 @@ VM_RESULT vm_step() {
   VMInstruction *inst = &VM.program[VM.pc];
 
   if (_debug) {
-    // for(int i = 0; i < VM.program.size(); i++) {
-    //     auto& inst = VM.program[i];
-    //     printf("[%d] op=%d, p1=%d, p2=%d, p3=%d\n",
-    //            i, inst.opcode, inst.p1, inst.p2, inst.p3);
-    // }
-    // exit(1);
+    debug_print_instruction(*inst, VM.pc);
   }
 
   switch (inst->opcode) {
@@ -200,51 +194,64 @@ VM_RESULT vm_step() {
     return OK;
 
   case OP_Goto:
-    VM.pc = inst->p2;
+    VM.pc = Opcodes::Goto::target(*inst);
     return OK;
 
   case OP_Integer: {
-    uint32_t val = inst->p2;
-    vm_set_value(&VM.registers[inst->p1], TYPE_UINT32, &val);
+    int32_t dest_reg = Opcodes::Integer::dest_reg(*inst);
+    int32_t value = Opcodes::Integer::value(*inst);
+    uint32_t val = (uint32_t)value;
+    vm_set_value(&VM.registers[dest_reg], TYPE_UINT32, &val);
     VM.pc++;
     return OK;
   }
 
   case OP_String: {
-    const char *str = (const char *)inst->p4;
-    uint32_t size = inst->p2;
-    vm_set_value(&VM.registers[inst->p1], (DataType)size, str);
+    int32_t dest_reg = Opcodes::String::dest_reg(*inst);
+    int32_t size = Opcodes::String::size(*inst);
+    const void* str = Opcodes::String::str(*inst);
+    vm_set_value(&VM.registers[dest_reg], (DataType)size, str);
     VM.pc++;
     return OK;
   }
 
-  case OP_Copy:
-    VM.registers[inst->p2] = VM.registers[inst->p1];
+  case OP_Copy: {
+    int32_t src = Opcodes::Copy::src_reg(*inst);
+    int32_t dest = Opcodes::Copy::dest_reg(*inst);
+    VM.registers[dest] = VM.registers[src];
     VM.pc++;
     return OK;
+  }
 
-  case OP_Move:
-    VM.registers[inst->p2] = VM.registers[inst->p1];
-    VM.registers[inst->p1].type = TYPE_NULL;
-    VM.registers[inst->p1].data = nullptr;
+  case OP_Move: {
+    int32_t src = Opcodes::Move::src_reg(*inst);
+    int32_t dest = Opcodes::Move::dest_reg(*inst);
+    VM.registers[dest] = VM.registers[src];
+    VM.registers[src].type = TYPE_NULL;
+    VM.registers[src].data = nullptr;
     VM.pc++;
     return OK;
+  }
 
   case OP_OpenRead:
   case OP_OpenWrite: {
-    char *table_name = (char *)inst->p4;
-    uint32_t index_column = inst->p3;
+    int32_t cursor_id = (inst->opcode == OP_OpenRead)
+        ? Opcodes::OpenRead::cursor_id(*inst)
+        : Opcodes::OpenWrite::cursor_id(*inst);
+    const char* table_name = (inst->opcode == OP_OpenRead)
+        ? Opcodes::OpenRead::table_name(*inst)
+        : Opcodes::OpenWrite::table_name(*inst);
+    int32_t index_column = (inst->opcode == OP_OpenRead)
+        ? Opcodes::OpenRead::index_col(*inst)
+        : Opcodes::OpenWrite::index_col(*inst);
 
     Table *table = get_table(table_name);
     if (!table) {
       return ERR;
     }
 
-    uint32_t cursor_id = inst->p2;
     VmCursor &cursor = VM.cursors[cursor_id];
 
-    // directly mutate tree, rollback will reload everything
-    // from master catalog
     if (index_column != 0) {
       Index *index = get_index(table_name, index_column);
       if (!index) {
@@ -255,7 +262,6 @@ VM_RESULT vm_step() {
       cursor.column = index_column;
       cursor.is_index = true;
     } else {
-
       cursor.btree_cursor.tree = &table->tree;
       cursor.is_index = false;
     }
@@ -265,27 +271,36 @@ VM_RESULT vm_step() {
     return OK;
   }
 
-  case OP_Close:
-    VM.cursors.erase(inst->p1);
+  case OP_Close: {
+    int32_t cursor_id = Opcodes::Close::cursor_id(*inst);
+    VM.cursors.erase(cursor_id);
     VM.pc++;
     return OK;
+  }
 
   case OP_Last:
   case OP_Rewind:
   case OP_First: {
+    int32_t cursor_id = (inst->opcode == OP_Last) ? Opcodes::Last::cursor_id(*inst) :
+                       (inst->opcode == OP_Rewind) ? Opcodes::Rewind::cursor_id(*inst) :
+                       Opcodes::First::cursor_id(*inst);
 
-    if (!VM.cursors.contains(inst->p1)) {
+    int32_t jump_if_empty = (inst->opcode == OP_Last) ? Opcodes::Last::jump_if_empty(*inst) :
+                            (inst->opcode == OP_Rewind) ? Opcodes::Rewind::jump_if_empty(*inst) :
+                            Opcodes::First::jump_if_empty(*inst);
+
+    if (!VM.cursors.contains(cursor_id)) {
       return ERR;
     }
-    VmCursor *cursor = VM.cursors.find(inst->p1);
+    VmCursor *cursor = VM.cursors.find(cursor_id);
 
     bool valid = inst->opcode == OP_Last
                      ? btree_cursor_last(&cursor->btree_cursor)
                      : btree_cursor_first(&cursor->btree_cursor);
 
     if (!valid) {
-      if (inst->p2 > 0) {
-        VM.pc = inst->p2;
+      if (jump_if_empty > 0) {
+        VM.pc = jump_if_empty;
       } else {
         VM.pc++;
       }
@@ -297,18 +312,25 @@ VM_RESULT vm_step() {
 
   case OP_Next:
   case OP_Prev: {
+    int32_t cursor_id = (inst->opcode == OP_Next)
+        ? Opcodes::Next::cursor_id(*inst)
+        : Opcodes::Prev::cursor_id(*inst);
 
-    if (!VM.cursors.contains(inst->p1)) {
+    int32_t jump_if_done = (inst->opcode == OP_Next)
+        ? Opcodes::Next::jump_if_done(*inst)
+        : Opcodes::Prev::jump_if_done(*inst);
+
+    if (!VM.cursors.contains(cursor_id)) {
       return ERR;
     }
 
-    VmCursor *cursor = VM.cursors.find(inst->p1);
+    VmCursor *cursor = VM.cursors.find(cursor_id);
     bool has_more = (inst->opcode == OP_Next)
                         ? btree_cursor_next(&cursor->btree_cursor)
                         : btree_cursor_previous(&cursor->btree_cursor);
 
-    if (has_more && inst->p2 > 0) {
-      VM.pc = inst->p2;
+    if (has_more && jump_if_done > 0) {
+      VM.pc = jump_if_done;
     } else {
       VM.pc++;
     }
@@ -320,13 +342,42 @@ VM_RESULT vm_step() {
   case OP_SeekGE:
   case OP_SeekLE:
   case OP_SeekLT: {
+    int32_t cursor_id, key_reg, jump_if_not_found;
 
-    if (!VM.cursors.contains(inst->p1)) {
+    switch(inst->opcode) {
+      case OP_SeekEQ:
+        cursor_id = Opcodes::SeekEQ::cursor_id(*inst);
+        key_reg = Opcodes::SeekEQ::key_reg(*inst);
+        jump_if_not_found = Opcodes::SeekEQ::jump_if_not_found(*inst);
+        break;
+      case OP_SeekGT:
+        cursor_id = Opcodes::SeekGT::cursor_id(*inst);
+        key_reg = Opcodes::SeekGT::key_reg(*inst);
+        jump_if_not_found = Opcodes::SeekGT::jump_if_not_found(*inst);
+        break;
+      case OP_SeekGE:
+        cursor_id = Opcodes::SeekGE::cursor_id(*inst);
+        key_reg = Opcodes::SeekGE::key_reg(*inst);
+        jump_if_not_found = Opcodes::SeekGE::jump_if_not_found(*inst);
+        break;
+      case OP_SeekLE:
+        cursor_id = Opcodes::SeekLE::cursor_id(*inst);
+        key_reg = Opcodes::SeekLE::key_reg(*inst);
+        jump_if_not_found = Opcodes::SeekLE::jump_if_not_found(*inst);
+        break;
+      case OP_SeekLT:
+        cursor_id = Opcodes::SeekLT::cursor_id(*inst);
+        key_reg = Opcodes::SeekLT::key_reg(*inst);
+        jump_if_not_found = Opcodes::SeekLT::jump_if_not_found(*inst);
+        break;
+    }
+
+    if (!VM.cursors.contains(cursor_id)) {
       return ERR;
     }
 
-    VmCursor *cursor = VM.cursors.find(inst->p1);
-    VMValue *key = &VM.registers[inst->p2];
+    VmCursor *cursor = VM.cursors.find(cursor_id);
+    VMValue *key = &VM.registers[key_reg];
 
     bool found = false;
     switch (inst->opcode) {
@@ -347,8 +398,8 @@ VM_RESULT vm_step() {
       break;
     }
 
-    if (!found && inst->p3 > 0) {
-      VM.pc = inst->p3;
+    if (!found && jump_if_not_found > 0) {
+      VM.pc = jump_if_not_found;
     } else {
       VM.pc++;
     }
@@ -356,12 +407,15 @@ VM_RESULT vm_step() {
   }
 
   case OP_Column: {
-    if (!VM.cursors.contains(inst->p1)) {
+    int32_t cursor_id = Opcodes::Column::cursor_id(*inst);
+    int32_t col_index = Opcodes::Column::column_index(*inst);
+    int32_t dest_reg = Opcodes::Column::dest_reg(*inst);
+
+    if (!VM.cursors.contains(cursor_id)) {
       return ERR;
     }
 
-    VmCursor *cursor = VM.cursors.find(inst->p1);
-    uint32_t col_index = inst->p2;
+    VmCursor *cursor = VM.cursors.find(cursor_id);
 
     if (cursor->is_index) {
       // For index cursors:
@@ -371,12 +425,12 @@ VM_RESULT vm_step() {
         // Get the indexed column value
         const uint8_t *key_data = btree_cursor_key(&cursor->btree_cursor);
         DataType key_type = cursor->schema->columns[cursor->column].type;
-        vm_set_value(&VM.registers[inst->p3], key_type, key_data);
+        vm_set_value(&VM.registers[dest_reg], key_type, key_data);
       } else {
         // Get the rowid from the record
         uint8_t *record_data = btree_cursor_record(&cursor->btree_cursor);
         // The record in an index is always a uint32 rowid
-        vm_set_value(&VM.registers[inst->p3], TYPE_UINT32, record_data);
+        vm_set_value(&VM.registers[dest_reg], TYPE_UINT32, record_data);
       }
     } else {
       // For table cursors, handle normally
@@ -384,12 +438,12 @@ VM_RESULT vm_step() {
         // Column 0 is the primary key/rowid
         const uint8_t *key_data = vb_key(cursor);
         DataType type = vb_key_type(cursor);
-        vm_set_value(&VM.registers[inst->p3], type, key_data);
+        vm_set_value(&VM.registers[dest_reg], type, key_data);
       } else {
         // Regular column access
         uint8_t *col_data = vb_column(cursor, col_index);
         DataType type = vb_column_type(cursor, col_index);
-        vm_set_value(&VM.registers[inst->p3], type, col_data);
+        vm_set_value(&VM.registers[dest_reg], type, col_data);
       }
     }
 
@@ -398,36 +452,44 @@ VM_RESULT vm_step() {
   }
 
   case OP_MakeRecord: {
+    int32_t first_reg = Opcodes::MakeRecord::first_reg(*inst);
+    int32_t reg_count = Opcodes::MakeRecord::reg_count(*inst);
+    int32_t dest_reg = Opcodes::MakeRecord::dest_reg(*inst);
+
     uint32_t total_size = 0;
-    for (int i = 0; i < inst->p2; i++) {
-      VMValue *val = &VM.registers[inst->p1 + i];
+    for (int i = 0; i < reg_count; i++) {
+      VMValue *val = &VM.registers[first_reg + i];
       total_size += VMValue::get_size(val->type);
     }
 
     uint8_t *record = (uint8_t *)arena::alloc<QueryArena>(total_size);
 
     uint32_t offset = 0;
-    // Start at 0 to include all columns!
-    for (int i = 0; i < inst->p2; i++) {
-      VMValue *val = &VM.registers[inst->p1 + i];
+    for (int i = 0; i < reg_count; i++) {
+      VMValue *val = &VM.registers[first_reg + i];
       uint32_t size = VMValue::get_size(val->type);
       memcpy(record + offset, val->data, size);
       offset += size;
     }
 
-    VM.registers[inst->p3].type = TYPE_UINT32;
-    VM.registers[inst->p3].data = record;
+    VM.registers[dest_reg].type = TYPE_UINT32;
+    VM.registers[dest_reg].data = record;
     VM.pc++;
     return OK;
   }
+
   case OP_Insert: {
-    if (!VM.cursors.contains(inst->p1)) {
+    int32_t cursor_id = Opcodes::Insert::cursor_id(*inst);
+    int32_t key_reg = Opcodes::Insert::key_reg(*inst);
+    int32_t record_reg = Opcodes::Insert::record_reg(*inst);
+
+    if (!VM.cursors.contains(cursor_id)) {
       return ERR;
     }
 
-    VmCursor *cursor = VM.cursors.find(inst->p1);
-    VMValue *key = &VM.registers[inst->p2];
-    VMValue *record = &VM.registers[inst->p3];
+    VmCursor *cursor = VM.cursors.find(cursor_id);
+    VMValue *key = &VM.registers[key_reg];
+    VMValue *record = &VM.registers[record_reg];
 
     uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
 
@@ -436,8 +498,6 @@ VM_RESULT vm_step() {
       return ERR;
     }
 
-    // FIX: Just use record->data directly!
-    // The record was already built correctly by MakeRecord
     bool success =
         btree_cursor_insert(&cursor->btree_cursor, key->data, record->data);
     if (!success) {
@@ -449,7 +509,7 @@ VM_RESULT vm_step() {
       if (cursor->is_index) {
         emit_root_changed_event(EVT_BTREE_ROOT_CHANGED, cursor->schema->table_name.c_str(), cursor->column);
       } else {
-        emit_root_changed_event(EVT_BTREE_ROOT_CHANGED,cursor->schema->table_name.c_str(), 0);
+        emit_root_changed_event(EVT_BTREE_ROOT_CHANGED, cursor->schema->table_name.c_str(), 0);
       }
     }
 
@@ -459,10 +519,12 @@ VM_RESULT vm_step() {
   }
 
   case OP_Delete: {
-    if (!VM.cursors.contains(inst->p1)) {
+    int32_t cursor_id = Opcodes::Delete::cursor_id(*inst);
+
+    if (!VM.cursors.contains(cursor_id)) {
       return ERR;
     }
-    VmCursor *cursor = VM.cursors.find(inst->p1);
+    VmCursor *cursor = VM.cursors.find(cursor_id);
 
     uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
     btree_cursor_delete(&cursor->btree_cursor);
@@ -477,13 +539,15 @@ VM_RESULT vm_step() {
   }
 
   case OP_Update: {
-    if (!VM.cursors.contains(inst->p1)) {
+    int32_t cursor_id = Opcodes::Update::cursor_id(*inst);
+    int32_t record_reg = Opcodes::Update::record_reg(*inst);
+
+    if (!VM.cursors.contains(cursor_id)) {
       return ERR;
     }
 
-    // IS it the case that the cursors current page is right?
-    VmCursor *cursor = VM.cursors.find(inst->p1);
-    VMValue *record = &VM.registers[inst->p2];
+    VmCursor *cursor = VM.cursors.find(cursor_id);
+    VMValue *record = &VM.registers[record_reg];
 
     btree_cursor_update(&cursor->btree_cursor, record->data);
     emit_row_event(EVT_ROWS_UPDATED, 1);
@@ -492,8 +556,10 @@ VM_RESULT vm_step() {
   }
 
   case OP_Compare: {
-    VMValue *a = &VM.registers[inst->p1];
-    VMValue *b = &VM.registers[inst->p3];
+    int32_t reg_a = Opcodes::Compare::reg_a(*inst);
+    int32_t reg_b = Opcodes::Compare::reg_b(*inst);
+    VMValue *a = &VM.registers[reg_a];
+    VMValue *b = &VM.registers[reg_b];
 
     VM.compare_result = cmp(a->type, a->data, b->data);
     VM.pc++;
@@ -501,12 +567,16 @@ VM_RESULT vm_step() {
   }
 
   case OP_Jump: {
-    if (VM.compare_result < 0 && inst->p1 > 0) {
-      VM.pc = inst->p1;
-    } else if (VM.compare_result == 0 && inst->p2 > 0) {
-      VM.pc = inst->p2;
-    } else if (VM.compare_result > 0 && inst->p3 > 0) {
-      VM.pc = inst->p3;
+    int32_t jump_lt = Opcodes::Jump::jump_lt(*inst);
+    int32_t jump_eq = Opcodes::Jump::jump_eq(*inst);
+    int32_t jump_gt = Opcodes::Jump::jump_gt(*inst);
+
+    if (VM.compare_result < 0 && jump_lt > 0) {
+      VM.pc = jump_lt;
+    } else if (VM.compare_result == 0 && jump_eq > 0) {
+      VM.pc = jump_eq;
+    } else if (VM.compare_result > 0 && jump_gt > 0) {
+      VM.pc = jump_gt;
     } else {
       VM.pc++;
     }
@@ -519,8 +589,43 @@ VM_RESULT vm_step() {
   case OP_Le:
   case OP_Gt:
   case OP_Ge: {
-    VMValue *a = &VM.registers[inst->p1];
-    VMValue *b = &VM.registers[inst->p3];
+    int32_t reg_a, reg_b, jump_target;
+
+    switch(inst->opcode) {
+      case OP_Eq:
+        reg_a = Opcodes::Eq::reg_a(*inst);
+        reg_b = Opcodes::Eq::reg_b(*inst);
+        jump_target = Opcodes::Eq::jump_target(*inst);
+        break;
+      case OP_Ne:
+        reg_a = Opcodes::Ne::reg_a(*inst);
+        reg_b = Opcodes::Ne::reg_b(*inst);
+        jump_target = Opcodes::Ne::jump_target(*inst);
+        break;
+      case OP_Lt:
+        reg_a = Opcodes::Lt::reg_a(*inst);
+        reg_b = Opcodes::Lt::reg_b(*inst);
+        jump_target = Opcodes::Lt::jump_target(*inst);
+        break;
+      case OP_Le:
+        reg_a = Opcodes::Le::reg_a(*inst);
+        reg_b = Opcodes::Le::reg_b(*inst);
+        jump_target = Opcodes::Le::jump_target(*inst);
+        break;
+      case OP_Gt:
+        reg_a = Opcodes::Gt::reg_a(*inst);
+        reg_b = Opcodes::Gt::reg_b(*inst);
+        jump_target = Opcodes::Gt::jump_target(*inst);
+        break;
+      case OP_Ge:
+        reg_a = Opcodes::Ge::reg_a(*inst);
+        reg_b = Opcodes::Ge::reg_b(*inst);
+        jump_target = Opcodes::Ge::jump_target(*inst);
+        break;
+    }
+
+    VMValue *a = &VM.registers[reg_a];
+    VMValue *b = &VM.registers[reg_b];
 
     int cmp_result = cmp(a->type, a->data, b->data);
     bool condition = false;
@@ -546,8 +651,8 @@ VM_RESULT vm_step() {
       break;
     }
 
-    if (condition && inst->p2 > 0) {
-      VM.pc = inst->p2;
+    if (condition && jump_target > 0) {
+      VM.pc = jump_target;
     } else {
       VM.pc++;
     }
@@ -555,13 +660,16 @@ VM_RESULT vm_step() {
   }
 
   case OP_ResultRow: {
+    int32_t first_reg = Opcodes::ResultRow::first_reg(*inst);
+    int32_t reg_count = Opcodes::ResultRow::reg_count(*inst);
+
     ArenaVector<VMValue, QueryArena> row;
-    for (int i = 0; i < inst->p2; i++) {
+    for (int i = 0; i < reg_count; i++) {
       VMValue copy;
-      copy.type = VM.registers[inst->p1 + i].type;
+      copy.type = VM.registers[first_reg + i].type;
       uint32_t size = VMValue::get_size(copy.type);
       copy.data = (uint8_t *)arena::alloc<QueryArena>(size);
-      memcpy(copy.data, VM.registers[inst->p1 + i].data, size);
+      memcpy(copy.data, VM.registers[first_reg + i].data, size);
       row.push_back(copy);
     }
 
@@ -571,8 +679,8 @@ VM_RESULT vm_step() {
   }
 
   case Op_Sort: {
-    uint32_t col = inst->p1;
-    bool desc = inst->p2;
+    int32_t col = Opcodes::Sort::column_index(*inst);
+    bool desc = Opcodes::Sort::descending(*inst);
 
     std::sort(VM.output_buffer.begin(), VM.output_buffer.end(),
               [col, desc](const auto &a, const auto &b) {
@@ -584,21 +692,15 @@ VM_RESULT vm_step() {
   }
 
   case Op_Flush: {
-    // for (auto &row : VM.output_buffer) {
-    //   for (auto &val : row) {
-    //     print_ptr(val.data, val.type);
-    //   }
-    //   std::cout << "\n";
-    // }
-    // VM.output_buffer.clear();
     VM.pc++;
     return OK;
   }
 
   case OP_AggStep: {
+    int32_t value_reg = Opcodes::AggStep::value_reg(*inst);
     VMValue *value = nullptr;
-    if (inst->p1 >= 0) {
-      value = &VM.registers[inst->p1];
+    if (value_reg >= 0) {
+      value = &VM.registers[value_reg];
     }
     Aggregator &aggr = VM.aggregator;
 
@@ -637,7 +739,7 @@ VM_RESULT vm_step() {
 
   case OP_AggReset: {
     VM.aggregator.reset();
-    const char *function_name = (char *)inst->p4;
+    const char *function_name = Opcodes::AggReset::function_name(*inst);
 
     if (strcmp(function_name, "COUNT") == 0) {
       VM.aggregator.type = Aggregator::COUNT;
@@ -656,6 +758,7 @@ VM_RESULT vm_step() {
   }
 
   case OP_AggFinal: {
+    int32_t dest_reg = Opcodes::AggFinal::dest_reg(*inst);
     uint32_t result;
     if (VM.aggregator.type == Aggregator::AVG && VM.aggregator.count > 0) {
       result = (uint32_t)(VM.aggregator.accumulator / VM.aggregator.count);
@@ -663,7 +766,7 @@ VM_RESULT vm_step() {
       result = (uint32_t)VM.aggregator.accumulator;
     }
 
-    vm_set_value(&VM.registers[inst->p1], TYPE_UINT32, &result);
+    vm_set_value(&VM.registers[dest_reg], TYPE_UINT32, &result);
 
     VM.aggregator.reset();
     VM.pc++;
@@ -671,7 +774,7 @@ VM_RESULT vm_step() {
   }
 
   case OP_CreateTable: {
-    TableSchema *schema = (TableSchema *)inst->p4;
+    TableSchema *schema = Opcodes::CreateTable::schema(*inst);
 
     // Check if table already exists
     if (get_table(schema->table_name.c_str())) {
@@ -699,8 +802,8 @@ VM_RESULT vm_step() {
   }
 
   case OP_CreateIndex: {
-    char *table_name = (char *)inst->p4;
-    uint32_t column = inst->p1;
+    const char *table_name = Opcodes::CreateIndex::table_name(*inst);
+    int32_t column = Opcodes::CreateIndex::column_index(*inst);
 
     Table *table = get_table(table_name);
     if (!table) {
@@ -718,8 +821,9 @@ VM_RESULT vm_step() {
     index->tree = btree_create(table->schema.columns[column].type,
                                table->schema.key_type(), BTREE);
 
-    // apply immediatly in memory,
+    // apply immediately in memory,
     add_index(table_name, index);
+
     // Emit event
     VmEvent event;
     event.type = EVT_INDEX_CREATED;
@@ -732,7 +836,7 @@ VM_RESULT vm_step() {
   }
 
   case OP_DropTable: {
-    char *table_name = (char *)inst->p4;
+    const char *table_name = Opcodes::DropTable::table_name(*inst);
 
     Table *table = get_table(table_name);
     if (!table) {
@@ -752,8 +856,8 @@ VM_RESULT vm_step() {
   }
 
   case OP_DropIndex: {
-    char *table_name = (char *)inst->p4;
-    uint32_t column = inst->p1;
+    const char *table_name = Opcodes::DropIndex::table_name(*inst);
+    int32_t column = Opcodes::DropIndex::column_index(*inst);
 
     Table *table = get_table(table_name);
     if (!table) {
@@ -774,7 +878,7 @@ VM_RESULT vm_step() {
 
   /*
    * the executor needs make sure that
-   * the master cataglog is synced within the transaction,
+   * the master catalog is synced within the transaction,
    * we can't let the program just commit, we let the executor
    * handle the transaction
    */
@@ -808,11 +912,9 @@ VM_RESULT vm_execute(ArenaVector<VMInstruction, QueryArena> &instructions) {
   vm_reset();
   VM.program.set(instructions);
 
-  // for(int i = 0; i < VM.program.size(); i++) {
-  //     auto& inst = instructions[i];
-  //     printf("[%d] op=%d, p1=%d, p2=%d, p3=%d\n",
-  //            i, inst.opcode, inst.p1, inst.p2, inst.p3);
-  // }
+  if (_debug) {
+    debug_print_program(VM.program);
+  }
 
   while (!VM.halted && VM.pc < VM.program.size()) {
     VM_RESULT result = vm_step();

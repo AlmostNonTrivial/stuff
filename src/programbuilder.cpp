@@ -1644,3 +1644,17 @@ ArenaVector<VMInstruction, QueryArena> build_from_ast(ASTNode *ast) {
     return vec;
   }
 }
+
+
+
+/* DEBUG */
+
+
+
+// Debug utilities for VM instructions
+
+
+
+
+
+// vm_debug.cpp
