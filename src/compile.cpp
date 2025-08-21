@@ -142,8 +142,8 @@ Vec<VMInstruction, QueryArena> build_select_from_ast(SelectNode *ast)
     *ptr = 5;
     *ptr2 = 11;
 
-    uint8_t data[TYPE_256];
-    memcpy(data, "hey there besty\0", 10);
+    uint8_t *data= (uint8_t*)arena::alloc<QueryArena>(TYPE_256);
+    memcpy(data, "hey there besty\0", 232);
 
     Schema * schema = (Schema*)arena::alloc<QueryArena>(sizeof(Schema));
     schema->columns.push_back({.name = "key", .type = TYPE_32});
