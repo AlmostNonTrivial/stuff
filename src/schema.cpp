@@ -7,8 +7,8 @@
 static Vec<Table, RegistryArena> tables;
 
 Table *get_table(const char *table_name) {
-  int index = tables.find_with([table_name](const Table *table) {
-    return table->schema.table_name.starts_with(table_name);
+  int index = tables.find_with([table_name](const Table &table) {
+    return table.schema.table_name.starts_with(table_name);
   });
   return &tables[index];
 }
@@ -23,8 +23,9 @@ Index *get_index(const char *table_name, uint32_t column_index) {
     return nullptr;
   }
 
-  int index= table->indexes.find_with([column_index](const Index* index) {
-      return index->column_index == column_index;
+  int index= table->indexes.find_with([column_index](const Index
+     & index) {
+      return index.column_index == column_index;
   });
 
   return &table->indexes[index];
@@ -82,8 +83,8 @@ bool add_index(const char *table_name, Index *index) {
     return false;
   }
 
-  if (table->indexes.contains_with([index](const Index* entry) {
-      return entry->column_index == index->column_index;
+  if (table->indexes.contains_with([index](const Index&entry) {
+      return entry.column_index == index->column_index;
   })) {
     return false; // Index already exists
   }

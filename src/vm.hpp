@@ -9,6 +9,9 @@
 #include <cstdio>
 #include <cstring>
 
+
+// #define ALLOC_VALUE()
+
 typedef void (*ResultCallback)(Vec<TypedValue, QueryArena> result);
 extern bool _debug;
 
@@ -348,21 +351,24 @@ namespace Update {
 
 // Register Operations
 namespace Load {
-    inline VMInstruction create(int32_t dest_reg, TypedValue *value) {
-        return {OP_Load, dest_reg, 0, 0, value, 0};
+    inline VMInstruction create(int32_t dest_reg, DataType  type,void*data) {
+        return {OP_Load, dest_reg, (int32_t)type, 0, data, 0};
     }
 
     inline int32_t dest_reg(const VMInstruction &inst) {
         return inst.p1;
     }
 
-    inline TypedValue* value(const VMInstruction &inst) {
-        return (TypedValue*)inst.p4;
+    inline TypedValue value(const VMInstruction &inst) {
+        return {
+            .data = (uint8_t*)inst.p4,
+            .type = (DataType)inst.p2
+        };
     }
 
     inline void print(const VMInstruction &inst) {
-        TypedValue* val = value(inst);
-        printf("Load reg=%d type=%d", inst.p1, val ? val->type : -1);
+        TypedValue val = value(inst);
+        printf("Load reg=%d type=%d", inst.p1, val.type);
     }
 }
 

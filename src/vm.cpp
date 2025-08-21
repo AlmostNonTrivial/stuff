@@ -189,8 +189,8 @@ static VM_RESULT step() {
 
   case OP_Load: {
     int32_t dest_reg = Opcodes::Load::dest_reg(*inst);
-    TypedValue *value = Opcodes::Load::value(*inst);
-    set_register(&VM.registers[dest_reg], value);
+    TypedValue value = Opcodes::Load::value(*inst);
+    set_register(&VM.registers[dest_reg], &value);
     VM.pc++;
     return OK;
   }

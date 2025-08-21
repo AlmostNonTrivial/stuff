@@ -5,6 +5,7 @@
 #include "schema.hpp"
 #include "vm.hpp"
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <utility>
 
@@ -128,15 +129,28 @@ extract_where_conditions(WhereNode *where, const char *table_name) {
 Vec<VMInstruction, QueryArena> build_select_from_ast(SelectNode *ast)
 {
 
+    ProgramBuilder program;
 
 
+    TypedValue a = {.type = TYPE_8};
+
+    auto*ptr = (uint64_t*)arena::alloc<QueryArena>(TYPE_4);
+    auto*ptr2 = (uint64_t*)arena::alloc<QueryArena>(TYPE_4);
+
+    *ptr = 5;
+    *ptr2 = 11;
 
 
+    program.emit(Opcodes::Load::create(1, TYPE_4, ptr2));
+    program.emit(Opcodes::Load::create(2, TYPE_4, ptr));
+    auto repeat = program.here();
+    program.emit(Opcodes::Arithmetic::create(2, 2, 2, ARITH_ADD));
+    program.emit(Opcodes::Test::create(4, 1, 2, GE));
+    program.emit(Opcodes::JumpIf::create(4, repeat));
+    program.emit(Opcodes::Result::create(3, 1));
 
-
-
-
-   r
+    // program.emit(Opcodes::Result::create(0, 1));
+    return program.instructions;
 }
 
 
@@ -145,6 +159,16 @@ Vec<VMInstruction, QueryArena> build_select_from_ast(SelectNode *ast)
 // Main entry point
 // ============================================================================
 Vec<VMInstruction, QueryArena> build_from_ast(ASTNode *ast) {
+   return build_select_from_ast(nullptr);
+
+
+
+
+
+
+
+
+
   if (!ast) {
     Vec<VMInstruction, QueryArena> program;
     program.push_back(Opcodes::Halt::create());

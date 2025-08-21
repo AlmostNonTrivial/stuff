@@ -19,21 +19,9 @@ static struct ExecutorState {
   Vec<Vec<TypedValue, QueryArena>, QueryArena> query_results;
 } executor_state = {};
 
-// Result callback to capture VM output
-static void capture_results_callback(void* result, size_t result_size) {
-  // Parse the result based on the schema
-  // For now, store raw results - you'll need to adapt this based on your TypedValue structure
-  Vec<TypedValue, QueryArena> row;
-
-  // This is a simplified version - you'll need to properly parse based on schema
-  uint8_t* data = (uint8_t*)result;
-  size_t offset = 0;
-
-  // For master table: id, type, name, tbl_name, rootpage, sql
-  // You'll need to know the schema to properly parse this
-  // This is a placeholder that assumes we know the structure
-
-  executor_state.query_results.push_back(row);
+// Result callback to capture VM output - updated signature
+static void capture_results_callback(Vec<TypedValue, QueryArena> result) {
+  executor_state.query_results.push_back(result);
 }
 
 // Master table helpers
@@ -119,7 +107,6 @@ static VM_RESULT execute_with_results(const char *sql) {
 
   // Set up callback to capture results
   ResultCallback old_callback = nullptr;
-  // Save old callback if needed (you might need to add a vm_get_callback function)
   vm_set_result_callback(capture_results_callback);
 
   Vec<ASTNode *, QueryArena> stmts = parse_sql(sql);
@@ -200,63 +187,13 @@ static void create_master_table() {
   executor_state.next_master_id = 1;
 }
 
-// Custom result parser for master table queries
-static void parse_master_table_row(void* result, size_t result_size) {
+// Custom result parser for master table queries - updated for new callback signature
+static void parse_master_table_row(Vec<TypedValue, QueryArena> result) {
   Table* master = get_table("sqlite_master");
   if (!master) return;
 
-  uint8_t* data = (uint8_t*)result;
-  Vec<TypedValue, QueryArena> row;
-
-  // Parse according to master table schema
-  // id (UINT32)
-  TypedValue id_val;
-  id_val.type = TYPE_4;
-  id_val.data = (uint8_t*)arena::alloc<QueryArena>(sizeof(uint32_t));
-  memcpy(id_val.data, data, sizeof(uint32_t));
-  row.push_back(id_val);
-  data += sizeof(uint32_t);
-
-  // type (VARCHAR32)
-  TypedValue type_val;
-  type_val.type = TYPE_32;
-  type_val.data = (uint8_t*)arena::alloc<QueryArena>(32);
-  memcpy(type_val.data, data, 32);
-  row.push_back(type_val);
-  data += 32;
-
-  // name (VARCHAR32)
-  TypedValue name_val;
-  name_val.type = TYPE_32;
-  name_val.data = (uint8_t*)arena::alloc<QueryArena>(32);
-  memcpy(name_val.data, data, 32);
-  row.push_back(name_val);
-  data += 32;
-
-  // tbl_name (VARCHAR32)
-  TypedValue tbl_name_val;
-  tbl_name_val.type = TYPE_32;
-  tbl_name_val.data = (uint8_t*)arena::alloc<QueryArena>(32);
-  memcpy(tbl_name_val.data, data, 32);
-  row.push_back(tbl_name_val);
-  data += 32;
-
-  // rootpage (UINT32)
-  TypedValue rootpage_val;
-  rootpage_val.type = TYPE_4;
-  rootpage_val.data = (uint8_t*)arena::alloc<QueryArena>(sizeof(uint32_t));
-  memcpy(rootpage_val.data, data, sizeof(uint32_t));
-  row.push_back(rootpage_val);
-  data += sizeof(uint32_t);
-
-  // sql (VARCHAR256)
-  TypedValue sql_val;
-  sql_val.type = TYPE_256;
-  sql_val.data = (uint8_t*)arena::alloc<QueryArena>(256);
-  memcpy(sql_val.data, data, 256);
-  row.push_back(sql_val);
-
-  executor_state.query_results.push_back(row);
+  // Result already comes as a Vec<TypedValue>, just store it
+  executor_state.query_results.push_back(result);
 }
 
 static void rebuild_schema_from_master() {
@@ -298,7 +235,8 @@ static void rebuild_schema_from_master() {
   vm_set_result_callback(old_callback);
 
   // Process the captured results
-  for (auto &row : executor_state.query_results) {
+  for (int i = 0; i < executor_state.query_results.size(); i++) {
+     auto &row = executor_state.query_results[i];
     if (row.size() < 6)
       continue;
 
@@ -322,7 +260,11 @@ static void rebuild_schema_from_master() {
 
         Table *table = (Table *)arena::alloc<QueryArena>(sizeof(Table));
         table->schema.table_name = name;
-        table->schema.columns.set(node->columns);
+
+        // Copy columns from parsed node
+        for(int i = 0; i < node->columns.size(); i++) {
+           table->schema.columns.push_back(node->columns[i]);
+        }
 
         calculate_column_offsets(&table->schema);
 
@@ -361,16 +303,16 @@ static void rebuild_schema_from_master() {
   }
 }
 
+// Updated to work with simplified VmEvent structure
 static void process_vm_events() {
-  auto events = vm_events();
+  auto& events = vm_events();
 
   while (!events.empty()) {
-    VmEvent event = events.front();
-    events.pop();
+    VmEvent event = events.pop_front();
 
     switch (event.type) {
     case EVT_TABLE_CREATED: {
-      const char *table_name = event.context.table_info.table_name;
+      const char *table_name = event.table_name;
       Table *table = get_table(table_name);
 
       if (executor_state.master_table_exists && table &&
@@ -386,8 +328,8 @@ static void process_vm_events() {
     }
 
     case EVT_INDEX_CREATED: {
-      const char *table_name = event.context.index_info.table_name;
-      uint32_t column_index = event.context.index_info.column_index;
+      const char *table_name = event.table_name;
+      uint32_t column_index = event.column;
       Index *index = get_index(table_name, column_index);
 
       if (executor_state.master_table_exists && index) {
@@ -406,7 +348,7 @@ static void process_vm_events() {
     }
 
     case EVT_TABLE_DROPPED: {
-      const char *table_name = event.context.table_info.table_name;
+      const char *table_name = event.table_name;
 
       // Delete table and all its indexes from master
       delete_master_table_entry(table_name);
@@ -421,8 +363,8 @@ static void process_vm_events() {
     }
 
     case EVT_INDEX_DROPPED: {
-      const char *table_name = event.context.index_info.table_name;
-      uint32_t column_index = event.context.index_info.column_index;
+      const char *table_name = event.table_name;
+      uint32_t column_index = event.column;
 
       char index_name[256];
       snprintf(index_name, sizeof(index_name), "idx_%s_%u",
@@ -432,8 +374,8 @@ static void process_vm_events() {
     }
 
     case EVT_BTREE_ROOT_CHANGED: {
-      const char *table_name = event.context.table_info.table_name;
-      uint32_t column = event.context.table_info.column;
+      const char *table_name = event.table_name;
+      uint32_t column = event.column;
 
       if (executor_state.master_table_exists) {
         if (column == 0) {
@@ -542,11 +484,6 @@ void execute(const char *sql) {
 
     // Build and execute program
     Vec<VMInstruction, QueryArena> program = build_from_ast(statement);
-
-    // debug_print_program(program);
-    // if(statement->type == AST_SELECT){
-    //     _debug = true;
-    // }
 
     VM_RESULT result = vm_execute(program);
 
