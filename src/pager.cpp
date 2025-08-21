@@ -1,4 +1,5 @@
 #include "pager.hpp"
+#include "vec.hpp"
 #include "arena.hpp"
 #include "defs.hpp"
 #include "os_layer.hpp"
@@ -61,10 +62,10 @@ static struct {
   bool in_transaction;
 
   Map<uint32_t, int32_t, PagerArena, MAX_CACHE_ENTRIES> page_to_cache;
-  Set<uint32_t, PagerArena> free_pages_set;
-  Set<uint32_t, PagerArena> journaled_pages;
-  Set<uint32_t, PagerArena> new_pages_in_transaction;
-  Set<uint32_t, PagerArena> pages_in_use;
+  Vec<uint32_t, PagerArena> free_pages_set;
+  Vec<uint32_t, PagerArena> journaled_pages;
+  Vec<uint32_t, PagerArena> new_pages_in_transaction;
+  Vec<uint32_t, PagerArena> pages_in_use;
 
   const char *data_file;
   char journal_file[JOURNAL_FILENAME_SIZE];
@@ -270,7 +271,7 @@ static uint32_t create_free_page(uint32_t prev_free_page) {
     }
   }
 
-  pager.new_pages_in_transaction.insert(index);
+  pager.new_pages_in_transaction.insert_unique(index);
 
   return index;
 }
@@ -280,11 +281,11 @@ static void add_to_free_list(uint32_t page_index) {
     return;
   }
 
-  pager.free_pages_set.insert(page_index);
+  pager.free_pages_set.insert_unique(page_index);
 
   if (pager.root.free_page == PAGE_INVALID) {
     pager.root.free_page = create_free_page(PAGE_INVALID);
-    pager.new_pages_in_transaction.insert(pager.root.free_page);
+    pager.new_pages_in_transaction.insert_unique(pager.root.free_page);
     pager.root_dirty = true;
   }
 
@@ -297,7 +298,7 @@ static void add_to_free_list(uint32_t page_index) {
 
   if (page->free_pointer >= FREE_PAGES_PER_FREE_PAGE) {
     uint32_t new_free_page = create_free_page(pager.root.free_page);
-    pager.new_pages_in_transaction.insert(new_free_page);
+    pager.new_pages_in_transaction.insert_unique(new_free_page);
     pager.root.free_page = new_free_page;
     pager.root_dirty = true;
 
@@ -354,7 +355,7 @@ static void build_free_pages_set() {
     FreePage *page = static_cast<FreePage *>(data);
 
     for (uint32_t i = 0; i < page->free_pointer; i++) {
-      pager.free_pages_set.insert(page->free_pages[i]);
+      pager.free_pages_set.insert_unique(page->free_pages[i]);
     }
 
     current_free_page = page->prev_free_page;
@@ -405,7 +406,7 @@ void *pager_get(uint32_t page_index) {
   }
 
   if (pager.in_transaction) {
-    pager.pages_in_use.insert(page_index);
+    pager.pages_in_use.insert_unique(page_index);
   }
 
   if (pager.page_to_cache.contains(page_index)) {
@@ -443,7 +444,7 @@ uint32_t pager_new() {
     pager.root_dirty = true;
   }
 
-  pager.new_pages_in_transaction.insert(page_index);
+  pager.new_pages_in_transaction.insert_unique(page_index);
 
   int32_t slot = cache_find_slot();
   CacheMetadata *entry = &pager.cache_meta[slot];
@@ -468,7 +469,7 @@ void pager_mark_dirty(uint32_t page_index) {
       !(pager.new_pages_in_transaction.contains(page_index))) {
     void *data = pager_get(page_index);
     journal_page(page_index, data);
-    pager.journaled_pages.insert(page_index);
+    pager.journaled_pages.insert_unique(page_index);
   }
 
   if ((pager.page_to_cache.contains(page_index))) {
@@ -505,7 +506,7 @@ void pager_begin_transaction() {
   pager.journal_fd = os_file_open(pager.journal_file, true, true);
 
   journal_page(PAGE_ROOT, &pager.root);
-  pager.journaled_pages.insert(PAGE_ROOT);
+  pager.journaled_pages.insert_unique(PAGE_ROOT);
 }
 
 void pager_commit() {

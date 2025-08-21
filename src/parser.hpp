@@ -3,7 +3,6 @@
 #include "defs.hpp"
 #include "vm.hpp"
 #include "arena.hpp"
-#include <vector>
 #include "schema.hpp"
 
 
@@ -78,7 +77,7 @@ struct SetClauseNode : ASTNode {
 // Statement nodes
 struct SelectNode : ASTNode {
     const char* table;
-    Vector<ASTNode*, QueryArena> columns;  // empty = *
+    Vec<ASTNode*, QueryArena> columns;  // empty = *
     WhereNode* where;
     AggregateNode* aggregate;
     OrderByNode* order_by;
@@ -86,12 +85,12 @@ struct SelectNode : ASTNode {
 
 struct InsertNode : ASTNode {
     const char* table;
-    Vector<ASTNode*, QueryArena> values;
+    Vec<ASTNode*, QueryArena> values;
 };
 
 struct UpdateNode : ASTNode {
     const char* table;
-    Vector<SetClauseNode*, QueryArena> set_clauses;
+    Vec<SetClauseNode*, QueryArena> set_clauses;
     WhereNode* where;
 };
 
@@ -102,7 +101,7 @@ struct DeleteNode : ASTNode {
 
 struct CreateTableNode : ASTNode {
     const char* table;
-    Vector<ColumnInfo, QueryArena> columns;
+    Vec<ColumnInfo, QueryArena> columns;
 };
 
 struct CreateIndexNode : ASTNode {
@@ -168,4 +167,4 @@ struct Parser {
 
 
 
-Vector<ASTNode*, QueryArena> parse_sql(const char* sql);
+Vec<ASTNode*, QueryArena> parse_sql(const char* sql);

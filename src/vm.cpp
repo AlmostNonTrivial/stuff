@@ -90,10 +90,10 @@ struct VmCursor {
 
 static struct {
   ResultCallback callback;
-  Vector<VMInstruction, QueryArena> program;
+  Vec<VMInstruction, QueryArena> program;
   uint32_t pc;
   bool halted;
-  Queue<VmEvent, QueryArena> events;
+  Vec<VmEvent, QueryArena> event_queue;
   QueryContext current_query_context;
   TypedValue registers[REGISTERS];
   VmCursor cursors[CURSORS];
@@ -118,7 +118,8 @@ static void reset() {
   }
 
   VM.program.clear();
-  VM.events.clear();
+  VM.event_queue.clear();
+  VM.event_queue.enable_queue_mode();
 }
 
 
@@ -479,12 +480,12 @@ static VM_RESULT step() {
       if (current_root != cursor->btree_cursor.tree->root_page_index) {
         VmEvent event;
         event.type = EVT_BTREE_ROOT_CHANGED;
-        event.context.table_info.table_name =
+        event.table_name =
             cursor->schema->table_name.c_str();
-        event.context.table_info.column =
+        event.column =
             cursor->is_index ? 0 : cursor->column_index;
 
-        VM.events.push(event);
+        VM.event_queue.push_back(event);
       }
     }
 
@@ -509,11 +510,11 @@ static VM_RESULT step() {
       if (current_root != cursor->btree_cursor.tree->root_page_index) {
         VmEvent event;
         event.type = EVT_BTREE_ROOT_CHANGED;
-        event.context.table_info.table_name =
+        event.table_name =
             cursor->schema->table_name.c_str();
-        event.context.table_info.column =
+        event.column =
             cursor->is_index ? 0 : cursor->column_index;
-        VM.events.push(event);
+        VM.event_queue.push_back(event);
       }
     }
 
@@ -565,9 +566,9 @@ static VM_RESULT step() {
       add_table(new_table);
       VmEvent event;
       event.type = EVT_TABLE_CREATED;
-      event.context.table_info.table_name =
+      event.table_name =
           new_table->schema.table_name.c_str();
-      VM.events.push(event);
+      VM.event_queue.push_back(event);
       break;
     }
 
@@ -581,14 +582,15 @@ static VM_RESULT step() {
 
       btree_clear(&table->tree);
       for (size_t i = 0; i < table->indexes.size(); i++) {
-        btree_clear(&table->indexes.value_at(i)->tree);
+        BTree *tree = &table->indexes[i].tree;
+        btree_clear(tree);
       }
 
       remove_table(table_name);
       VmEvent event;
       event.type = EVT_TABLE_DROPPED;
-      event.context.table_info.table_name = table_name;
-      VM.events.push(event);
+      event.table_name = table_name;
+      VM.event_queue.push_back(event);
       break;
     }
 
@@ -607,9 +609,9 @@ static VM_RESULT step() {
 
       VmEvent event;
       event.type = EVT_INDEX_CREATED;
-      event.context.table_info.table_name = table_name;
-      event.context.table_info.column = column;
-      VM.events.push(event);
+      event.table_name = table_name;
+      event.column = column;
+      VM.event_queue.push_back(event);
       break;
     }
 
@@ -631,9 +633,9 @@ static VM_RESULT step() {
       remove_index(table_name, column);
       VmEvent event;
       event.type = EVT_INDEX_DROPPED;
-      event.context.table_info.table_name = table_name;
-      event.context.table_info.column = column;
-      VM.events.push(event);
+      event.table_name = table_name;
+      event.column = column;
+      VM.event_queue.push_back(event);
       break;
     }
     }
@@ -671,9 +673,9 @@ static VM_RESULT step() {
   }
 }
 
-VM_RESULT vm_execute(Vector<VMInstruction, QueryArena> &instructions) {
+VM_RESULT vm_execute(Vec<VMInstruction, QueryArena> &instructions) {
   reset();
-  VM.program.set(instructions);
+  VM.program = instructions;
 
   while (!VM.halted && VM.pc < VM.program.size()) {
     VM_RESULT result = step();
@@ -685,4 +687,4 @@ VM_RESULT vm_execute(Vector<VMInstruction, QueryArena> &instructions) {
 }
 
 void vm_set_result_callback(ResultCallback callback) { VM.callback = callback; }
-Queue<VmEvent, QueryArena> &vm_events() { return VM.events; }
+Vec<VmEvent, QueryArena> &vm_events() { return VM.event_queue; }

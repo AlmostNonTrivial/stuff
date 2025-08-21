@@ -16,14 +16,14 @@ static struct ExecutorState {
   uint32_t next_master_id;
 
   // Storage for query results
-  Vector<Vector<TypedValue, QueryArena>, QueryArena> query_results;
+  Vec<Vec<TypedValue, QueryArena>, QueryArena> query_results;
 } executor_state = {};
 
 // Result callback to capture VM output
 static void capture_results_callback(void* result, size_t result_size) {
   // Parse the result based on the schema
   // For now, store raw results - you'll need to adapt this based on your TypedValue structure
-  Vector<TypedValue, QueryArena> row;
+  Vec<TypedValue, QueryArena> row;
 
   // This is a simplified version - you'll need to properly parse based on schema
   uint8_t* data = (uint8_t*)result;
@@ -94,13 +94,13 @@ static VM_RESULT execute_internal(const char *sql) {
   Queue<VmEvent, QueryArena> empty_queue;
   vm_events() = empty_queue;
 
-  Vector<ASTNode *, QueryArena> stmts = parse_sql(sql);
+  Vec<ASTNode *, QueryArena> stmts = parse_sql(sql);
   if (stmts.empty()) {
     vm_events() = saved_events;
     return ERR;
   }
 
-  Vector<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
+  Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
   VM_RESULT result = vm_execute(program);
 
   // Clear any events from internal operation
@@ -122,13 +122,13 @@ static VM_RESULT execute_with_results(const char *sql) {
   // Save old callback if needed (you might need to add a vm_get_callback function)
   vm_set_result_callback(capture_results_callback);
 
-  Vector<ASTNode *, QueryArena> stmts = parse_sql(sql);
+  Vec<ASTNode *, QueryArena> stmts = parse_sql(sql);
   if (stmts.empty()) {
     vm_set_result_callback(old_callback);
     return ERR;
   }
 
-  Vector<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
+  Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
   VM_RESULT result = vm_execute(program);
 
   // Restore old callback
@@ -206,7 +206,7 @@ static void parse_master_table_row(void* result, size_t result_size) {
   if (!master) return;
 
   uint8_t* data = (uint8_t*)result;
-  Vector<TypedValue, QueryArena> row;
+  Vec<TypedValue, QueryArena> row;
 
   // Parse according to master table schema
   // id (UINT32)
@@ -288,9 +288,9 @@ static void rebuild_schema_from_master() {
 
   // Query master table to rebuild schema
   const char *query = "SELECT * FROM sqlite_master ORDER BY id";
-  Vector<ASTNode *, QueryArena> stmts = parse_sql(query);
+  Vec<ASTNode *, QueryArena> stmts = parse_sql(query);
   if (!stmts.empty()) {
-    Vector<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
+    Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
     vm_execute(program);
   }
 
@@ -316,7 +316,7 @@ static void rebuild_schema_from_master() {
 
     if (strcmp(type, "table") == 0 && strcmp(name, "sqlite_master") != 0) {
       // Parse CREATE TABLE to rebuild schema
-      Vector<ASTNode *, QueryArena> create_stmts = parse_sql(sql);
+      Vec<ASTNode *, QueryArena> create_stmts = parse_sql(sql);
       if (!create_stmts.empty() && create_stmts[0]->type == AST_CREATE_TABLE) {
         CreateTableNode *node = (CreateTableNode *)create_stmts[0];
 
@@ -511,7 +511,7 @@ void execute(const char *sql) {
     init_executor();
   }
 
-  Vector<ASTNode *, QueryArena> statements = parse_sql(sql);
+  Vec<ASTNode *, QueryArena> statements = parse_sql(sql);
 
   bool success = true;
   bool explicit_transaction = false;
@@ -541,7 +541,7 @@ void execute(const char *sql) {
     }
 
     // Build and execute program
-    Vector<VMInstruction, QueryArena> program = build_from_ast(statement);
+    Vec<VMInstruction, QueryArena> program = build_from_ast(statement);
 
     // debug_print_program(program);
     // if(statement->type == AST_SELECT){

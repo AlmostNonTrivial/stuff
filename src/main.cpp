@@ -1,5 +1,7 @@
 // main.cpp - Simplified version
 #include "arena.hpp"
+#include "defs.hpp"
+#include "vec.hpp"
 #include "executor.hpp"
 #include "schema.hpp"
 #include "vm.hpp"
@@ -36,6 +38,38 @@ void print_result_callback(void* result, size_t result_size) {
     }
 
     printf("Row: id=%u, age=%u, name='%s'\n", id, age, name);
+}
+
+void sadasd() {
+
+    // As a stack
+    // Vect<int> stack;
+    // stack.push_back(1);
+    // stack.pop_back();
+
+    // As a queue (O(1) both ends with circular buffer)
+    Vec<int,QueryArena> queue;
+    queue.push_back(1);
+    int val = queue.pop_front();  // O(1)
+
+
+
+
+    // With structs
+    struct Record { uint32_t id; char name[32]; };
+
+    Record rec;
+
+    Vec<Record, QueryArena> records;
+    records.insert_sorted_with(rec, [](const Record& a, const Record& b) {
+        return (a.id > b.id) - (a.id < b.id);
+    });
+    records.erase(rec);
+
+    })
+
+
+
 }
 
 int main() {

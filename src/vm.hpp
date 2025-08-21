@@ -32,29 +32,13 @@ enum EventType {
 };
 
 struct VmEvent {
-  EventType type;
-  void *data;
-
-  union {
-    struct {
-      const char *table_name;
-      uint32_t root_page;
-      uint32_t column;
-    } table_info;
-
-    struct {
-      const char *table_name;
-      uint32_t column_index;
-      const char *index_name;
-    } index_info;
-
-    struct {
-      uint32_t count;
-    } row_info;
-  } context;
+    EventType type;
+    const char *table_name;
+    uint32_t root_page;
+    uint32_t column;
 };
 
-Queue<VmEvent, QueryArena> &vm_events();
+Vec<VmEvent, QueryArena> &vm_events();
 
 enum SchemaOp : uint8_t {
   SCHEMA_CREATE_TABLE = 0,
@@ -308,9 +292,7 @@ struct Logic {
                               int32_t right_reg, LogicOp op) {
     return {OP_Logic, dest_reg, left_reg, right_reg, nullptr, (uint8_t)op};
   }
-  static VMInstruction create_not(int32_t dest_reg, int32_t src_reg) {
-    return {OP_Logic, dest_reg, src_reg, 0, nullptr, (uint8_t)LOGIC_NOT};
-  }
+
   static int32_t dest_reg(const VMInstruction &inst) { return inst.p1; }
   static int32_t left_reg(const VMInstruction &inst) { return inst.p2; }
   static int32_t right_reg(const VMInstruction &inst) { return inst.p3; }
@@ -380,7 +362,7 @@ struct Transaction {
 enum VM_RESULT { OK, ABORT, ERR };
 
 // VM Functions
-VM_RESULT vm_execute(Vector<VMInstruction, QueryArena> &instructions);
+VM_RESULT vm_execute(Vec<VMInstruction, QueryArena> &instructions);
 void vm_set_result_callback(ResultCallback callback);
 
 // Debug functions would go here...

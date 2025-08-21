@@ -1,7 +1,7 @@
 // programbuilder.cpp - Simplified version with full table scans only
-#include "programbuilder.hpp"
 #include "arena.hpp"
 #include "defs.hpp"
+#include "programbuilder.hpp"
 #include "schema.hpp"
 #include "vm.hpp"
 #include <algorithm>
@@ -12,7 +12,7 @@
 // Register allocator with named registers for debugging
 struct RegisterAllocator {
   Map<Str<QueryArena>, uint32_t, QueryArena, REGISTERS> name_to_register;
-  Vector<uint32_t, QueryArena, REGISTERS> free_registers;
+  Vec<uint32_t, QueryArena, REGISTERS> free_registers;
 
   int get(const char *name) {
     auto it = name_to_register.find(name);
@@ -49,33 +49,48 @@ struct RegisterAllocator {
   }
 };
 
-// Helper to resolve labels to addresses
-static void
-resolve_labels(Vector<VMInstruction, QueryArena> &program,
-               const Map<Str<QueryArena>, int, QueryArena> &labels) {
-  for (size_t i = 0; i < program.size(); i++) {
-    auto &inst = program[i];
 
-    // Check if p2 contains a label reference (stored as string in p4 when p2 ==
-    // -1)
-    if (inst.p4 && inst.p2 == -1) {
-      auto it = labels.find((const char *)inst.p4);
-      if (it != nullptr) {
-        inst.p2 = *it;
-        inst.p4 = nullptr;
-      }
-    }
 
-    // Check if p3 contains a label reference
-    if (inst.p4 && inst.p3 == -1) {
-      auto it = labels.find((const char *)inst.p4);
-      if (it != nullptr) {
-        inst.p3 = *it;
-        inst.p4 = nullptr;
+class ProgramBuilder {
+  Vec<VMInstruction, QueryArena> instructions;
+  Map<Str<QueryArena>, int, QueryArena> labels;
+  RegisterAllocator regs;
+
+  // Fluent interface
+  ProgramBuilder &emit(VMInstruction inst) {
+    instructions.push_back(inst);
+    return *this;
+  }
+
+  ProgramBuilder &label(const char *name) {
+    labels[name] = instructions.size();
+    return *this;
+  }
+
+  int here() { return instructions.size(); }
+
+  void resolve_labels() {
+    for (size_t i = 0; i < instructions.size(); i++) {
+      auto &inst = instructions[i];
+
+      if (!inst.p4 && inst.p3 == -1) {
+        continue;
       }
+
+      auto it = labels.find((const char *)inst.p4);
+      if (it == nullptr) {
+        continue;
+        ;
+      }
+      inst.p3 = *it;
+      inst.p4 = nullptr;
     }
   }
-}
+};
+
+// ===================================================================================
+
+// Helper to resolve labels to addresses
 
 // Helper functions for creating labeled instructions
 static VMInstruction make_goto_label(const char *label) {
@@ -102,7 +117,7 @@ static VMInstruction make_compare_label(int reg_a, int reg_b, CompareOp op,
 }
 
 // Helper to load a value into a register
-static void load_value(Vector<VMInstruction, QueryArena> &program,
+static void load_value(Vec<VMInstruction, QueryArena> &program,
                        const TypedValue &value, int reg) {
   if (value.type == TYPE_UINT32 || value.type == TYPE_UINT64) {
     uint32_t val = *(uint32_t *)value.data;
@@ -113,9 +128,9 @@ static void load_value(Vector<VMInstruction, QueryArena> &program,
 }
 
 // Extract WHERE conditions from AST
-static Vector<WhereCondition, QueryArena>
+static Vec<WhereCondition, QueryArena>
 extract_where_conditions(WhereNode *where, const char *table_name) {
-  Vector<WhereCondition, QueryArena> conditions;
+  Vec<WhereCondition, QueryArena> conditions;
   if (!where || !where->condition)
     return conditions;
 
@@ -157,8 +172,8 @@ extract_where_conditions(WhereNode *where, const char *table_name) {
 
 // Build WHERE condition checks (jump to skip_label if condition fails)
 static void
-build_where_checks(Vector<VMInstruction, QueryArena> &program, int cursor_id,
-                   const Vector<WhereCondition, QueryArena> &conditions,
+build_where_checks(Vec<VMInstruction, QueryArena> &program, int cursor_id,
+                   const Vec<WhereCondition, QueryArena> &conditions,
                    const char *skip_label, RegisterAllocator &regs) {
   for (size_t i = 0; i < conditions.size(); i++) {
     int col_reg = regs.get(("where_col_" + std::to_string(i)).c_str());
@@ -206,9 +221,9 @@ build_where_checks(Vector<VMInstruction, QueryArena> &program, int cursor_id,
 // ============================================================================
 // SELECT - Always full table scan
 // ============================================================================
-static Vector<VMInstruction, QueryArena>
+static Vec<VMInstruction, QueryArena>
 build_select_from_ast(SelectNode *node) {
-  Vector<VMInstruction, QueryArena> program;
+  Vec<VMInstruction, QueryArena> program;
   RegisterAllocator regs;
   Map<Str<QueryArena>, int, QueryArena> labels;
 
@@ -235,7 +250,7 @@ build_select_from_ast(SelectNode *node) {
   build_where_checks(program, cursor_id, conditions, "next_row", regs);
 
   // Output row - read all columns
-  Vector<int, QueryArena> output_regs;
+  Vec<int, QueryArena> output_regs;
 
   int key_reg = regs.get("key");
   program.push_back(Opcodes::Column::create(cursor_id, 0, key_reg));
@@ -268,9 +283,9 @@ build_select_from_ast(SelectNode *node) {
 // ============================================================================
 // INSERT - Insert into table and all indexes
 // ============================================================================
-static Vector<VMInstruction, QueryArena>
+static Vec<VMInstruction, QueryArena>
 build_insert_from_ast(InsertNode *node) {
-  Vector<VMInstruction, QueryArena> program;
+  Vec<VMInstruction, QueryArena> program;
   RegisterAllocator regs;
 
   Table *table = get_table(node->table);
@@ -282,7 +297,7 @@ build_insert_from_ast(InsertNode *node) {
   program.push_back(Opcodes::OpenWrite::create(table_cursor, node->table));
 
   // // Open cursors for each index
-  // Vector<std::pair<int, uint32_t>, QueryArena> index_cursors; // cursor_id,
+  // Vec<std::pair<int, uint32_t>, QueryArena> index_cursors; // cursor_id,
   // column_index for (size_t i = 0; i < table->indexes.size(); i++) {
   //     uint32_t col_idx = *table->indexes.key_at(i);
   //     program.push_back(Opcodes::OpenWrite::create(next_cursor, node->table,
@@ -291,7 +306,7 @@ build_insert_from_ast(InsertNode *node) {
   // }
 
   // Load values into registers
-  Vector<int, QueryArena> value_regs;
+  Vec<int, QueryArena> value_regs;
   for (size_t i = 0; i < table->schema.columns.size(); i++) {
     if (node->values[i]->type == AST_LITERAL) {
       LiteralNode *lit = (LiteralNode *)node->values[i];
@@ -335,9 +350,9 @@ build_insert_from_ast(InsertNode *node) {
 // ============================================================================
 // DELETE - Only delete from table, leave indexes alone
 // ============================================================================
-static Vector<VMInstruction, QueryArena>
+static Vec<VMInstruction, QueryArena>
 build_delete_from_ast(DeleteNode *node) {
-  Vector<VMInstruction, QueryArena> program;
+  Vec<VMInstruction, QueryArena> program;
   RegisterAllocator regs;
   Map<Str<QueryArena>, int, QueryArena> labels;
 
@@ -377,9 +392,9 @@ build_delete_from_ast(DeleteNode *node) {
 // ============================================================================
 // UPDATE - Update table, insert new entries to affected indexes
 // ============================================================================
-static Vector<VMInstruction, QueryArena>
+static Vec<VMInstruction, QueryArena>
 build_update_from_ast(UpdateNode *node) {
-  Vector<VMInstruction, QueryArena> program;
+  Vec<VMInstruction, QueryArena> program;
   RegisterAllocator regs;
   Map<Str<QueryArena>, int, QueryArena> labels;
 
@@ -403,7 +418,7 @@ build_update_from_ast(UpdateNode *node) {
   }
 
   // Open index cursors for columns being updated
-  Vector<std::pair<int, uint32_t>, QueryArena> index_cursors;
+  Vec<std::pair<int, uint32_t>, QueryArena> index_cursors;
   for (size_t i = 0; i < table->indexes.size(); i++) {
     uint32_t col_idx = *table->indexes.key_at(i);
     if (updated_columns.contains(col_idx)) {
@@ -427,7 +442,7 @@ build_update_from_ast(UpdateNode *node) {
   build_where_checks(program, table_cursor, conditions, "next_row", regs);
 
   // Read all current column values
-  Vector<int, QueryArena> current_regs;
+  Vec<int, QueryArena> current_regs;
   for (size_t i = 0; i < table->schema.columns.size(); i++) {
     int reg = regs.get(("current_col_" + std::to_string(i)).c_str());
     current_regs.push_back(reg);
@@ -481,22 +496,22 @@ build_update_from_ast(UpdateNode *node) {
 // ============================================================================
 // Schema operations
 // ============================================================================
-static Vector<VMInstruction, QueryArena>
+static Vec<VMInstruction, QueryArena>
 build_create_table_from_ast(CreateTableNode *node) {
   TableSchema *schema =
       (TableSchema *)arena::alloc<QueryArena>(sizeof(TableSchema));
   schema->table_name = node->table;
   schema->columns.set(node->columns);
 
-  Vector<VMInstruction, QueryArena> program;
+  Vec<VMInstruction, QueryArena> program;
   program.push_back(Opcodes::CreateTable::create(schema));
   program.push_back(Opcodes::Halt::create());
   return program;
 }
 
-static Vector<VMInstruction, QueryArena>
+static Vec<VMInstruction, QueryArena>
 build_create_index_from_ast(CreateIndexNode *node) {
-  Vector<VMInstruction, QueryArena> program;
+  Vec<VMInstruction, QueryArena> program;
   RegisterAllocator regs;
   Map<Str<QueryArena>, int, QueryArena> labels;
 
@@ -551,24 +566,24 @@ build_create_index_from_ast(CreateIndexNode *node) {
 }
 
 // Transaction operations
-static Vector<VMInstruction, QueryArena> build_begin_from_ast(BeginNode *node) {
-  Vector<VMInstruction, QueryArena> program;
+static Vec<VMInstruction, QueryArena> build_begin_from_ast(BeginNode *node) {
+  Vec<VMInstruction, QueryArena> program;
   program.push_back(Opcodes::Begin::create());
   program.push_back(Opcodes::Halt::create());
   return program;
 }
 
-static Vector<VMInstruction, QueryArena>
+static Vec<VMInstruction, QueryArena>
 build_commit_from_ast(CommitNode *node) {
-  Vector<VMInstruction, QueryArena> program;
+  Vec<VMInstruction, QueryArena> program;
   program.push_back(Opcodes::Commit::create());
   program.push_back(Opcodes::Halt::create());
   return program;
 }
 
-static Vector<VMInstruction, QueryArena>
+static Vec<VMInstruction, QueryArena>
 build_rollback_from_ast(RollbackNode *node) {
-  Vector<VMInstruction, QueryArena> program;
+  Vec<VMInstruction, QueryArena> program;
   program.push_back(Opcodes::Rollback::create());
   program.push_back(Opcodes::Halt::create());
   return program;
@@ -577,9 +592,9 @@ build_rollback_from_ast(RollbackNode *node) {
 // ============================================================================
 // Main entry point
 // ============================================================================
-Vector<VMInstruction, QueryArena> build_from_ast(ASTNode *ast) {
+Vec<VMInstruction, QueryArena> build_from_ast(ASTNode *ast) {
   if (!ast) {
-    Vector<VMInstruction, QueryArena> program;
+    Vec<VMInstruction, QueryArena> program;
     program.push_back(Opcodes::Halt::create());
     return program;
   }
@@ -604,7 +619,7 @@ Vector<VMInstruction, QueryArena> build_from_ast(ASTNode *ast) {
   case AST_ROLLBACK:
     return build_rollback_from_ast((RollbackNode *)ast);
   default: {
-    Vector<VMInstruction, QueryArena> program;
+    Vec<VMInstruction, QueryArena> program;
     program.push_back(Opcodes::Halt::create());
     return program;
   }

@@ -964,12 +964,12 @@ bool btree_clear(BTree *tree) {
     return false;
   }
 
-  Queue<uint32_t, BTreeArena, 1024> bfs;
-  bfs.push(tree->root_page_index);
+  Vec<uint32_t, BTreeArena, 1024> bfs;
+  bfs.push_back(tree->root_page_index);
 
   while (bfs.size()) {
     uint32_t index = bfs.front();
-    bfs.pop();
+    bfs.pop_front();
 
     auto node = static_cast<BTreeNode *>(pager_get(index));
     if (!node) {
@@ -980,7 +980,7 @@ bool btree_clear(BTree *tree) {
     if (!node->is_leaf) {
       uint32_t *children = get_children(*tree, node);
       for (uint32_t i = 0; i < node->num_keys + 1; i++) {
-        bfs.push(children[i]);
+        bfs.push_back(children[i]);
       }
     }
 
@@ -1270,19 +1270,19 @@ bool btree_cursor_update(BtCursor *cursor, const uint8_t *record) {
 }
 
 bool btree_cursor_seek_ge(BtCursor *cursor, const void *key) {
-  return cursor_seek_cmp(cursor, key, SEEK_GE);
+  return btree_cursor_seek_cmp(cursor, key, GE);
 }
 
 bool btree_cursor_seek_gt(BtCursor *cursor, const void *key) {
-  return cursor_seek_cmp(cursor, key, SEEK_GT);
+  return btree_cursor_seek_cmp(cursor, key, GT);
 }
 
 bool btree_cursor_seek_le(BtCursor *cursor, const void *key) {
-  return cursor_seek_cmp(cursor, key, SEEK_LE);
+  return btree_cursor_seek_cmp(cursor, key, LE);
 }
 
 bool btree_cursor_seek_lt(BtCursor *cursor, const void *key) {
-  return cursor_seek_cmp(cursor, key, SEEK_LT);
+  return btree_cursor_seek_cmp(cursor, key, LT);
 }
 
 bool btree_cursor_first(BtCursor *cursor) { return cursor_move_end(cursor, true); }

@@ -27,10 +27,10 @@ struct OrderBy {
 
 struct ParsedParameters {
   Str<QueryArena> table_name;
-  Vector<SetColumns, QueryArena> set_columns;
-  Vector<WhereCondition, QueryArena> where_conditions;
+  Vec<SetColumns, QueryArena> set_columns;
+  Vec<WhereCondition, QueryArena> where_conditions;
   enum Operation { UPDATE, DELETE, SELECT, AGGREGATE } operation;
-  Vector<Str<QueryArena>, QueryArena> select_columns;
+  Vec<Str<QueryArena>, QueryArena> select_columns;
   OrderBy order_by;
   Str<QueryArena> aggregate;
 };
@@ -43,4 +43,4 @@ AccessMethodEnum type;
 };
 
 // Main entry points for AST-based building
-Vector<VMInstruction, QueryArena> build_from_ast(ASTNode* ast);
+Vec<VMInstruction, QueryArena> build_from_ast(ASTNode* ast);
