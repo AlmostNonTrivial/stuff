@@ -3,7 +3,7 @@
 #include "arena.hpp"
 #include "btree.hpp"
 #include "parser.hpp"
-#include "programbuilder.hpp"
+#include "compile.hpp"
 #include "schema.hpp"
 #include "vm.hpp"
 #include <cstring>
@@ -91,7 +91,7 @@ static char *generate_index_sql(const char *table_name, uint32_t column_index,
 static VM_RESULT execute_internal(const char *sql) {
   // Save and clear event queue to prevent recursive processing
   auto saved_events = vm_events();
-  Queue<VmEvent, QueryArena> empty_queue;
+  Vec<VmEvent, QueryArena> empty_queue;
   vm_events() = empty_queue;
 
   Vec<ASTNode *, QueryArena> stmts = parse_sql(sql);

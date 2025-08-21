@@ -352,18 +352,12 @@ static VM_RESULT step() {
 
       // Open regular table or index
       Table *table = get_table(table_name);
-      if (!table) {
-        return ERR;
-      }
+
 
       cursor.is_memory = false;
 
       if (index_column != 0) {
         Index *index = get_index(table_name, index_column);
-        if (!index) {
-          return ERR;
-        }
-
         cursor.btree_cursor.tree = &index->tree;
         cursor.column_index = index_column;
         cursor.is_index = true;
@@ -550,11 +544,8 @@ static VM_RESULT step() {
     case SCHEMA_CREATE_TABLE: {
       Schema *schema = Opcodes::Schema::table_schema(*inst);
 
-      if (get_table(schema->table_name.c_str())) {
-        return ERR;
-      }
-
       Table *new_table = (Table *)arena::alloc<RegistryArena>(sizeof(Table));
+
       new_table->schema = *schema;
 
       calculate_column_offsets(&new_table->schema);
@@ -574,9 +565,6 @@ static VM_RESULT step() {
       const char *table_name = Opcodes::Schema::table_name(*inst);
 
       Table *table = get_table(table_name);
-      if (!table) {
-        return ERR;
-      }
 
       btree_clear(&table->tree);
       for (size_t i = 0; i < table->indexes.size(); i++) {
@@ -612,15 +600,7 @@ static VM_RESULT step() {
       const char *table_name = Opcodes::Schema::table_name(*inst);
       int32_t column = Opcodes::Schema::column_index(*inst);
 
-      Table *table = get_table(table_name);
-      if (!table) {
-        return ERR;
-      }
-
       Index *index = get_index(table_name, column);
-      if (!index) {
-        return ERR;
-      }
 
       emit_vm_event(EVT_INDEX_DROPPED, nullptr, table_name,
                     index->column_index);
