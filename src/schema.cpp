@@ -82,7 +82,9 @@ bool add_index(const char *table_name, Index *index) {
     return false;
   }
 
-  if (table->indexes.contains_with(index->column_index, []())) {
+  if (table->indexes.contains_with([index](const Index* entry) {
+      return entry->column_index == index->column_index;
+  })) {
     return false; // Index already exists
   }
 

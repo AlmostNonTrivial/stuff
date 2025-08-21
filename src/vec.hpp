@@ -219,8 +219,8 @@ struct Vec{
 
     // Contains with comparator
     template<typename EqualFn>
-    bool contains_with(const T &value, EqualFn eq) const {
-        return find_with(value, eq) != -1;
+    bool contains_with(EqualFn eq) const {
+        return find_with(eq) != -1;
     }
 
     // Insert unique with operator==

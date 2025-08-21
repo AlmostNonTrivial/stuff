@@ -106,7 +106,7 @@ static void set_register(TypedValue *dest, TypedValue *src) {
 }
 
 static void build_record(uint8_t *data, int32_t first_reg, int32_t count) {
-  int32_t offset;
+  int32_t offset = 0;
   for (int i = 0; i < count; i++) {
     TypedValue *val = &VM.registers[first_reg + i];
     uint32_t size = val->type;
@@ -136,10 +136,12 @@ static void emit_vm_event(EventType evt, VmCursor *cursor = nullptr,
     event.column = col_index;
     break;
   }
+  default:
+    event.type = evt;
+    break;
   }
 
   VM.event_queue.push_back(event);
-  // build this out
 }
 
 static void reset() {
@@ -156,9 +158,25 @@ static void reset() {
   VM.event_queue.enable_queue_mode();
 }
 
+// Debug helper
+void vm_debug_print_all_registers() {
+  printf("===== REGISTERS =====\n");
+  for (int i = 0; i < REGISTERS; i++) {
+    if (VM.registers[i].type != TYPE_NULL) {
+      Debug::print_register(i, VM.registers[i]);
+    }
+  }
+  printf("====================\n");
+}
+
 // Main execution step
 static VM_RESULT step() {
   VMInstruction *inst = &VM.program[VM.pc];
+
+  if (_debug) {
+    printf("Executing PC=%d: ", VM.pc);
+    Debug::print_instruction(*inst);
+  }
 
   switch (inst->opcode) {
   case OP_Halt:
@@ -197,25 +215,26 @@ static VM_RESULT step() {
     int cmp_result = cmp(a->type, a->data, b->data);
 
     TypedValue result = {.type = TYPE_4};
+    result.data = (uint8_t *)arena::alloc<QueryArena>(sizeof(uint32_t));
 
     switch (op) {
     case EQ:
-      *result.data = (cmp_result == 0) ? 1 : 0;
+      *(uint32_t*)result.data = (cmp_result == 0) ? 1 : 0;
       break;
     case NE:
-      *result.data = (cmp_result != 0) ? 1 : 0;
+      *(uint32_t*)result.data = (cmp_result != 0) ? 1 : 0;
       break;
     case LT:
-      *result.data = (cmp_result < 0) ? 1 : 0;
+      *(uint32_t*)result.data = (cmp_result < 0) ? 1 : 0;
       break;
     case LE:
-      *result.data = (cmp_result <= 0) ? 1 : 0;
+      *(uint32_t*)result.data = (cmp_result <= 0) ? 1 : 0;
       break;
     case GT:
-      *result.data = (cmp_result > 0) ? 1 : 0;
+      *(uint32_t*)result.data = (cmp_result > 0) ? 1 : 0;
       break;
     case GE:
-      *result.data = (cmp_result >= 0) ? 1 : 0;
+      *(uint32_t*)result.data = (cmp_result >= 0) ? 1 : 0;
       break;
     }
 
@@ -246,19 +265,18 @@ static VM_RESULT step() {
     int32_t right = Opcodes::Logic::right_reg(*inst);
     LogicOp op = Opcodes::Logic::op(*inst);
 
-    TypedValue result{
-        .type = TYPE_4,
-    };
+    TypedValue result{.type = TYPE_4};
+    result.data = (uint8_t *)arena::alloc<QueryArena>(sizeof(uint32_t));
 
     uint32_t a = *(uint32_t *)VM.registers[left].data;
     uint32_t b = *(uint32_t *)VM.registers[right].data;
 
     switch (op) {
     case LOGIC_AND:
-      *result.data = (a && b) ? 1 : 0;
+      *(uint32_t*)result.data = (a && b) ? 1 : 0;
       break;
     case LOGIC_OR:
-      *result.data = (a || b) ? 1 : 0;
+      *(uint32_t*)result.data = (a || b) ? 1 : 0;
       break;
     default:
       return ERR;
@@ -274,7 +292,8 @@ static VM_RESULT step() {
     int32_t reg_count = Opcodes::Result::reg_count(*inst);
 
     if (!VM.callback) {
-      return ERR;
+      VM.pc++;
+      return OK;
     }
 
     Vec<TypedValue, QueryArena> output;
@@ -302,6 +321,7 @@ static VM_RESULT step() {
     // Determine output type (use larger of the two)
     DataType output_type = (a->type > b->type) ? a->type : b->type;
     result->type = output_type;
+    result->data = (uint8_t *)arena::alloc<QueryArena>(output_type);
 
     if (!do_arithmetic(op, output_type, result->data, a->data, b->data)) {
       return ERR; // Division by zero
@@ -327,9 +347,9 @@ static VM_RESULT step() {
       cursor.is_index = false;
       cursor.schema = schema;
     } else {
-
       const char *table_name = Opcodes::Open::table_name(*inst);
       int32_t index_column = Opcodes::Open::index_col(*inst);
+
       // Open regular table or index
       Table *table = get_table(table_name);
       if (!table) {
@@ -456,12 +476,11 @@ static VM_RESULT step() {
     TypedValue *key = &VM.registers[key_reg];
 
     uint8_t data[cursor->record_size()];
-    build_record(data, record_reg, count);
+    build_record(data, record_reg, count - 1);
     bool success;
     if (cursor->is_memory) {
       success = memcursor_insert(&cursor->mem_cursor, key->data, data);
     } else {
-
       uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
       success = btree_cursor_insert(&cursor->btree_cursor, key->data, data);
       if (current_root != cursor->btree_cursor.tree->root_page_index) {
@@ -484,9 +503,8 @@ static VM_RESULT step() {
     if (cursor->is_memory) {
       memcursor_delete(&cursor->mem_cursor);
     } else {
-
-      btree_cursor_delete(&cursor->btree_cursor);
       uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
+      btree_cursor_delete(&cursor->btree_cursor);
       if (current_root != cursor->btree_cursor.tree->root_page_index) {
         emit_vm_event(EVT_BTREE_ROOT_CHANGED, cursor);
       }
@@ -497,14 +515,23 @@ static VM_RESULT step() {
   }
 
   case OP_Update: {
-    int32_t cursor_id = Opcodes::Insert::cursor_id(*inst);
-    int32_t record_reg = Opcodes::Insert::key_reg(*inst);
-    int32_t count = Opcodes::Insert::reg_count(*inst);
+    int32_t cursor_id = Opcodes::Update::cursor_id(*inst);
+    int32_t record_reg = Opcodes::Update::record_reg(*inst);
 
     VmCursor *cursor = &VM.cursors[cursor_id];
 
-    uint8_t data[cursor->record_size()];
-    build_record(data, record_reg, count);
+    // Calculate record size from schema
+    uint32_t record_size = cursor->record_size();
+    uint8_t data[record_size];
+
+    // Build record from registers
+    int32_t offset = 0;
+    for (uint32_t i = 1; i < cursor->schema->columns.size(); i++) {
+      TypedValue *val = &VM.registers[record_reg + i - 1];
+      uint32_t size = val->type;
+      memcpy(data + offset, val->data, size);
+      offset += size;
+    }
 
     if (cursor->is_memory) {
       memcursor_update(&cursor->mem_cursor, data);
@@ -527,7 +554,7 @@ static VM_RESULT step() {
         return ERR;
       }
 
-      Table *new_table = (Table *)arena::alloc<QueryArena>(sizeof(Table));
+      Table *new_table = (Table *)arena::alloc<RegistryArena>(sizeof(Table));
       new_table->schema = *schema;
 
       calculate_column_offsets(&new_table->schema);
@@ -568,7 +595,7 @@ static VM_RESULT step() {
 
       Table *table = get_table(table_name);
 
-      Index *index = (Index *)arena::alloc<QueryArena>(sizeof(Index));
+      Index *index = (Index *)arena::alloc<RegistryArena>(sizeof(Index));
       index->column_index = column;
       index->tree = btree_create(table->schema.columns[column].type,
                                  table->schema.key_type(), BTREE);
@@ -641,14 +668,32 @@ VM_RESULT vm_execute(Vec<VMInstruction, QueryArena> &instructions) {
   reset();
   VM.program = instructions;
 
+  if (_debug) {
+    Debug::print_program(instructions);
+  }
+
   while (!VM.halted && VM.pc < VM.program.size()) {
     VM_RESULT result = step();
     if (result != OK) {
+      if (_debug) {
+        printf("VM execution failed at PC=%d\n", VM.pc);
+        vm_debug_print_all_registers();
+      }
       return result;
     }
   }
+
+  if (_debug) {
+    printf("VM execution completed successfully\n");
+  }
+
   return OK;
 }
 
-void vm_set_result_callback(ResultCallback callback) { VM.callback = callback; }
-Vec<VmEvent, QueryArena> &vm_events() { return VM.event_queue; }
+void vm_set_result_callback(ResultCallback callback) {
+  VM.callback = callback;
+}
+
+Vec<VmEvent, QueryArena> &vm_events() {
+  return VM.event_queue;
+}
