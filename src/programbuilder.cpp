@@ -258,7 +258,7 @@ build_select_from_ast(SelectNode *node) {
   // Done
   labels["end"] = program.size();
   program.push_back(Opcodes::Close::create(cursor_id));
-  program.push_back(Opcodes::Flush::create(memtree_id));
+  program.push_back(Opcodes::Result::create(memtree_id));
   program.push_back(Opcodes::Halt::create());
 
   resolve_labels(program, labels);

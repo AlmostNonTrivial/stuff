@@ -1,16 +1,16 @@
 #pragma once
 #include "arena.hpp"
 #include "btree.hpp"
-#include "schema.hpp"
 #include "defs.hpp"
+#include "schema.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 
 struct QueryContext {
-    TableSchema* schema;
-    bool has_key_prefix;  // true for SELECT results that include key
+  TableSchema *schema;
+  bool has_key_prefix; // true for SELECT results that include key
 };
 typedef void (*ResultCallback)(void *result, size_t result_size);
 inline const char *datatype_to_string(DataType type);
@@ -31,12 +31,19 @@ enum EventType {
 };
 
 enum ArithOp : uint8_t {
-    ARITH_ADD = 0,
-    ARITH_SUB = 1,
-    ARITH_MUL = 2,
-    ARITH_DIV = 3,
-    ARITH_MOD = 4,
+  ARITH_ADD = 0,
+  ARITH_SUB = 1,
+  ARITH_MUL = 2,
+  ARITH_DIV = 3,
+  ARITH_MOD = 4,
 };
+
+enum LogicOp : uint8_t {
+  LOGIC_AND = 0,
+  LOGIC_OR = 1,
+  LOGIC_NOT = 2,
+};
+
 struct VmEvent {
   EventType type;
   void *data;
@@ -63,15 +70,21 @@ Queue<VmEvent, QueryArena> vm_events();
 // Forward declaration for schema
 struct TableSchema;
 
-inline const char* arith_op_to_string(ArithOp op) {
-    switch (op) {
-        case ARITH_ADD: return "ADD";
-        case ARITH_SUB: return "SUB";
-        case ARITH_MUL: return "MUL";
-        case ARITH_DIV: return "DIV";
-        case ARITH_MOD: return "MOD";
-        default: return "???";
-    }
+inline const char *arith_op_to_string(ArithOp op) {
+  switch (op) {
+  case ARITH_ADD:
+    return "ADD";
+  case ARITH_SUB:
+    return "SUB";
+  case ARITH_MUL:
+    return "MUL";
+  case ARITH_DIV:
+    return "DIV";
+  case ARITH_MOD:
+    return "MOD";
+  default:
+    return "???";
+  }
 }
 enum OpCode : uint32_t {
   // Control flow
@@ -87,7 +100,6 @@ enum OpCode : uint32_t {
   OP_Last = 14,
   OP_Next = 15,
   OP_Prev = 16,
-
 
   // Unified Seek operation
   OP_Seek = 20,
@@ -106,9 +118,12 @@ enum OpCode : uint32_t {
   OP_Move = 44,
 
   // Unified Comparison operation
-  OP_Compare = 50,
- OP_Arithmetic = 51,
-  OP_Flush = 71,
+  OP_Test = 60,
+  OP_Arithmetic = 51,
+  OP_Result = 71,
+  OP_JumpIf = 52,
+  OP_Logic = 53,
+  OP_ResultRow = 54,
 
   // Schema operations
   OP_CreateTable = 80,
@@ -195,24 +210,21 @@ struct Halt {
   }
 };
 
-
 struct Arithmetic {
-    static VMInstruction create(int32_t dest_reg, int32_t left_reg, int32_t right_reg, ArithOp op) {
-        return {OP_Arithmetic, dest_reg, left_reg, right_reg, nullptr, (uint8_t)op};
-    }
-    static int32_t dest_reg(const VMInstruction& inst) { return inst.p1; }
-    static int32_t left_reg(const VMInstruction& inst) { return inst.p2; }
-    static int32_t right_reg(const VMInstruction& inst) { return inst.p3; }
-    static ArithOp op(const VMInstruction& inst) { return (ArithOp)inst.p5; }
+  static VMInstruction create(int32_t dest_reg, int32_t left_reg,
+                              int32_t right_reg, ArithOp op) {
+    return {OP_Arithmetic, dest_reg, left_reg, right_reg, nullptr, (uint8_t)op};
+  }
+  static int32_t dest_reg(const VMInstruction &inst) { return inst.p1; }
+  static int32_t left_reg(const VMInstruction &inst) { return inst.p2; }
+  static int32_t right_reg(const VMInstruction &inst) { return inst.p3; }
+  static ArithOp op(const VMInstruction &inst) { return (ArithOp)inst.p5; }
 
-    static void print(const VMInstruction& inst) {
-        const char* op_str[] = {"+", "-", "*", "/", "%"};
-        printf("r%d = r%d %s r%d",
-               dest_reg(inst),
-               left_reg(inst),
-               op_str[op(inst)],
-               right_reg(inst));
-    }
+  static void print(const VMInstruction &inst) {
+    const char *op_str[] = {"+", "-", "*", "/", "%"};
+    printf("r%d = r%d %s r%d", dest_reg(inst), left_reg(inst), op_str[op(inst)],
+           right_reg(inst));
+  }
 };
 
 // Cursor Operations
@@ -447,35 +459,78 @@ struct Move {
     printf("r%d => r%d", src_reg(inst), dest_reg(inst));
   }
 };
-
-// Unified Comparison operation
-struct Compare {
-  static VMInstruction create(int32_t reg_a, int32_t reg_b,
-                              int32_t jump_target, CompareOp op) {
-    return {OP_Compare, reg_a, reg_b, jump_target, nullptr, (uint8_t)op};
+struct Test {
+  static VMInstruction create(int32_t dest_reg, int32_t left_reg,
+                              int32_t right_reg, CompareOp op) {
+    return {OP_Test, dest_reg, left_reg, right_reg, nullptr, (uint8_t)op};
   }
-  static int32_t reg_a(const VMInstruction &inst) { return inst.p1; }
-  static int32_t reg_b(const VMInstruction &inst) { return inst.p2; }
-  static int32_t jump_target(const VMInstruction &inst) { return inst.p3; }
+  static int32_t dest_reg(const VMInstruction &inst) { return inst.p1; }
+  static int32_t left_reg(const VMInstruction &inst) { return inst.p2; }
+  static int32_t right_reg(const VMInstruction &inst) { return inst.p3; }
   static CompareOp op(const VMInstruction &inst) { return (CompareOp)inst.p5; }
+
   static void print(const VMInstruction &inst) {
     const char *op_str[] = {"==", "!=", "<", "<=", ">", ">="};
-    printf("r%d %s r%d", reg_a(inst), op_str[op(inst)], reg_b(inst));
-    if (jump_target(inst) >= 0)
-      printf(" true->%d", jump_target(inst));
+    printf("r%d = (r%d %s r%d)", dest_reg(inst), left_reg(inst),
+           op_str[op(inst)], right_reg(inst));
   }
 };
 
-
-struct Flush {
-  static VMInstruction create(int32_t cursor_id) {
-    return {OP_Flush, cursor_id, 0, 0, nullptr, 0};
+truct JumpIf {
+  static VMInstruction create(int32_t test_reg, int32_t jump_target, bool jump_on_true = true) {
+    return {OP_JumpIf, test_reg, jump_target, 0, nullptr, (uint8_t)jump_on_true};
   }
-  static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
-  static void print(const VMInstruction &inst) {
-    printf("cursor=%d", cursor_id(inst));
+  static int32_t test_reg(const VMInstruction& inst) { return inst.p1; }
+  static int32_t jump_target(const VMInstruction& inst) { return inst.p2; }
+  static bool jump_on_true(const VMInstruction& inst) { return inst.p5 != 0; }
+
+  static void print(const VMInstruction& inst) {
+    printf("if (r%d %s 0) goto %d",
+           test_reg(inst),
+           jump_on_true(inst) ? "!=" : "==",
+           jump_target(inst));
   }
 };
+
+struct Logic {
+  static VMInstruction create(int32_t dest_reg, int32_t left_reg,
+                              int32_t right_reg, LogicOp op) {
+    return {OP_Logic, dest_reg, left_reg, right_reg, nullptr, (uint8_t)op};
+  }
+  static VMInstruction create_not(int32_t dest_reg, int32_t src_reg) {
+    return {OP_Logic, dest_reg, src_reg, 0, nullptr, (uint8_t)LOGIC_NOT};
+  }
+  static int32_t dest_reg(const VMInstruction& inst) { return inst.p1; }
+  static int32_t left_reg(const VMInstruction& inst) { return inst.p2; }
+  static int32_t right_reg(const VMInstruction& inst) { return inst.p3; }
+  static LogicOp op(const VMInstruction& inst) { return (LogicOp)inst.p5; }
+
+  static void print(const VMInstruction& inst) {
+    const char* op_str[] = {"AND", "OR", "NOT"};
+    if (op(inst) == LOGIC_NOT) {
+      printf("r%d = NOT r%d", dest_reg(inst), left_reg(inst));
+    } else {
+      printf("r%d = r%d %s r%d",
+             dest_reg(inst), left_reg(inst), op_str[op(inst)], right_reg(inst));
+    }
+  }
+};
+
+struct Result {
+  static VMInstruction create(int32_t first_reg, int32_t reg_count) {
+    return {OP_ResultRow, first_reg, reg_count, 0, nullptr, 0};
+  }
+  static int32_t first_reg(const VMInstruction& inst) { return inst.p1; }
+  static int32_t reg_count(const VMInstruction& inst) { return inst.p2; }
+
+  static void print(const VMInstruction& inst) {
+    printf("output r%d..r%d (%d regs)",
+           first_reg(inst),
+           first_reg(inst) + reg_count(inst) - 1,
+           reg_count(inst));
+  }
+};
+
 
 // Schema Operations
 struct CreateTable {
@@ -547,8 +602,8 @@ struct Rollback {
 struct OpenMemTree {
   static VMInstruction create(int32_t cursor_id, DataType key_type,
                               int32_t record_size) {
-    return {OP_OpenMemTree, cursor_id, (int32_t)key_type, record_size,
-            nullptr, 0};
+    return {OP_OpenMemTree, cursor_id, (int32_t)key_type,
+            record_size,    nullptr,   0};
   }
   static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
   static DataType key_type(const VMInstruction &inst) {
@@ -556,10 +611,8 @@ struct OpenMemTree {
   }
   static int32_t record_size(const VMInstruction &inst) { return inst.p3; }
   static void print(const VMInstruction &inst) {
-    printf("cursor=%d key_type=%s record_size=%d",
-           cursor_id(inst),
-           datatype_to_string(key_type(inst)),
-           record_size(inst));
+    printf("cursor=%d key_type=%s record_size=%d", cursor_id(inst),
+           datatype_to_string(key_type(inst)), record_size(inst));
   }
 };
 
@@ -578,69 +631,112 @@ void vm_reset();
 void vm_shutdown();
 void vm_set_result_callback(ResultCallback callback);
 
-
-
 // ============================================================================
 // Debug Functions
 // ============================================================================
 
 inline const char *opcode_to_string(OpCode op) {
   switch (op) {
-  case OP_Trace: return "Trace";
-  case OP_Goto: return "Goto";
-  case OP_Halt: return "Halt";
-  case OP_OpenRead: return "OpenRead";
-  case OP_OpenWrite: return "OpenWrite";
-  case OP_Close: return "Close";
-  case OP_First: return "First";
-  case OP_Last: return "Last";
-  case OP_Next: return "Next";
-  case OP_Prev: return "Prev";
-  case OP_Seek: return "Seek";
-  case OP_Column: return "Column";
-  case OP_MakeRecord: return "MakeRecord";
-  case OP_Insert: return "Insert";
-  case OP_Delete: return "Delete";
-  case OP_Update: return "Update";
-  case OP_Integer: return "Integer";
-  case OP_String: return "String";
-  case OP_Copy: return "Copy";
-  case OP_Move: return "Move";
-  case OP_Compare: return "Compare";
-  case OP_Flush: return "Flush";
-  case OP_CreateTable: return "CreateTable";
-  case OP_DropTable: return "DropTable";
-  case OP_CreateIndex: return "CreateIndex";
-  case OP_DropIndex: return "DropIndex";
-  case OP_Begin: return "Begin";
-   case OP_Arithmetic: return "Arithmetic";
-  case OP_Commit: return "Commit";
-  case OP_Rollback: return "Rollback";
-  case OP_OpenMemTree: return "OpenMemTree";
-  default: return "Unknown";
+  case OP_Trace:
+    return "Trace";
+  case OP_Goto:
+    return "Goto";
+  case OP_Halt:
+    return "Halt";
+  case OP_OpenRead:
+    return "OpenRead";
+  case OP_OpenWrite:
+    return "OpenWrite";
+  case OP_Close:
+    return "Close";
+  case OP_First:
+    return "First";
+  case OP_Last:
+    return "Last";
+  case OP_Next:
+    return "Next";
+  case OP_Prev:
+    return "Prev";
+  case OP_Seek:
+    return "Seek";
+  case OP_Column:
+    return "Column";
+  case OP_MakeRecord:
+    return "MakeRecord";
+  case OP_Insert:
+    return "Insert";
+  case OP_Delete:
+    return "Delete";
+  case OP_Update:
+    return "Update";
+  case OP_Integer:
+    return "Integer";
+  case OP_String:
+    return "String";
+  case OP_Copy:
+    return "Copy";
+  case OP_Move:
+    return "Move";
+  case OP_Test:
+    return "Test";
+  case OP_Result:
+    return "Result";
+  case OP_CreateTable:
+    return "CreateTable";
+  case OP_DropTable:
+    return "DropTable";
+  case OP_CreateIndex:
+    return "CreateIndex";
+  case OP_DropIndex:
+    return "DropIndex";
+  case OP_Begin:
+    return "Begin";
+  case OP_Arithmetic:
+    return "Arithmetic";
+  case OP_Commit:
+    return "Commit";
+  case OP_Rollback:
+    return "Rollback";
+  case OP_OpenMemTree:
+    return "OpenMemTree";
+  default:
+    return "Unknown";
   }
 }
 
 inline const char *datatype_to_string(DataType type) {
   switch (type) {
-  case TYPE_NULL: return "NULL";
-  case TYPE_UINT32: return "UINT32";
-  case TYPE_UINT64: return "UINT64";
-  case TYPE_VARCHAR32: return "VARCHAR32";
-  case TYPE_VARCHAR256: return "VARCHAR256";
-  default: return "UNKNOWN";
+  case TYPE_NULL:
+    return "NULL";
+  case TYPE_UINT32:
+    return "UINT32";
+  case TYPE_UINT64:
+    return "UINT64";
+  case TYPE_VARCHAR32:
+    return "VARCHAR32";
+  case TYPE_VARCHAR256:
+    return "VARCHAR256";
+  default:
+    return "UNKNOWN";
   }
 }
 
 inline const char *compare_op_to_string(CompareOp op) {
   switch (op) {
-  case EQ: return "EQ";
-  case NE: return "NE";
-  case LT: return "LT";
-  case LE: return "LE";
-  case GT: return "GT";
-  case GE: return "GE";
-  default: return "??";
+  case EQ:
+    return "EQ";
+  case NE:
+    return "NE";
+  case LT:
+    return "LT";
+  case LE:
+    return "LE";
+  case GT:
+    return "GT";
+  case GE:
+    return "GE";
+  default:
+    return "??";
   }
 }
 
@@ -649,7 +745,7 @@ inline void debug_print_instruction(const VMInstruction &inst, size_t index) {
 
   switch (inst.opcode) {
   case OP_Trace:
-    printf("msg=\"%s\"", inst.p4 ? (const char*)inst.p4 : "");
+    printf("msg=\"%s\"", inst.p4 ? (const char *)inst.p4 : "");
     break;
 
   case OP_Goto:
@@ -662,7 +758,8 @@ inline void debug_print_instruction(const VMInstruction &inst, size_t index) {
 
   case OP_OpenRead:
   case OP_OpenWrite:
-    printf("cursor=%d table=\"%s\"", inst.p1, inst.p4 ? (const char*)inst.p4 : "?");
+    printf("cursor=%d table=\"%s\"", inst.p1,
+           inst.p4 ? (const char *)inst.p4 : "?");
     if (inst.p3 != 0) {
       printf(" index_col=%d", inst.p3);
     }
@@ -687,16 +784,10 @@ inline void debug_print_instruction(const VMInstruction &inst, size_t index) {
       printf(" done->%d", inst.p2);
     }
     break;
-case OP_Arithmetic:
-const char* op_symbols[] = {"+", "-", "*", "/", "%"};
-         printf("r%d = r%d %s r%d",
-                inst.p1,
-                inst.p2,
-                op_symbols[inst.p5],
-                inst.p3);
-         break;
+
   case OP_Seek:
-    printf("cursor=%d key=r%d op=%s", inst.p1, inst.p2, compare_op_to_string((CompareOp)inst.p5));
+    printf("cursor=%d key=r%d op=%s", inst.p1, inst.p2,
+           compare_op_to_string((CompareOp)inst.p5));
     if (inst.p3 >= 0) {
       printf(" notfound->%d", inst.p3);
     }
@@ -707,7 +798,8 @@ const char* op_symbols[] = {"+", "-", "*", "/", "%"};
     break;
 
   case OP_MakeRecord:
-    printf("r%d..r%d (%d regs) -> r%d", inst.p1, inst.p1 + inst.p2 - 1, inst.p2, inst.p3);
+    printf("r%d..r%d (%d regs) -> r%d", inst.p1, inst.p1 + inst.p2 - 1, inst.p2,
+           inst.p3);
     break;
 
   case OP_Insert:
@@ -753,28 +845,18 @@ const char* op_symbols[] = {"+", "-", "*", "/", "%"};
     printf("r%d => r%d", inst.p1, inst.p2);
     break;
 
-  case OP_Compare:
-    printf("r%d %s r%d", inst.p1, compare_op_to_string((CompareOp)inst.p5), inst.p2);
-    if (inst.p3 >= 0) {
-      printf(" true->%d", inst.p3);
-    }
-    break;
-
-  case OP_Flush:
-    printf("cursor=%d", inst.p1);
-    break;
-
   case OP_CreateTable:
     printf("schema=%p", inst.p4);
     break;
 
   case OP_DropTable:
-    printf("table=\"%s\"", inst.p4 ? (const char*)inst.p4 : "?");
+    printf("table=\"%s\"", inst.p4 ? (const char *)inst.p4 : "?");
     break;
 
   case OP_CreateIndex:
   case OP_DropIndex:
-    printf("col=%d table=\"%s\"", inst.p1, inst.p4 ? (const char*)inst.p4 : "?");
+    printf("col=%d table=\"%s\"", inst.p1,
+           inst.p4 ? (const char *)inst.p4 : "?");
     break;
 
   case OP_Begin:
@@ -784,18 +866,50 @@ const char* op_symbols[] = {"+", "-", "*", "/", "%"};
     break;
 
   case OP_OpenMemTree:
-    printf("cursor=%d key_type=%s record_size=%d",
-           inst.p1, datatype_to_string((DataType)inst.p2), inst.p3);
+    printf("cursor=%d key_type=%s record_size=%d", inst.p1,
+           datatype_to_string((DataType)inst.p2), inst.p3);
+    break;
+  case OP_Arithmetic: {
+
+    const char *op_symbols[] = {"+", "-", "*", "/", "%"};
+    printf("r%d = r%d %s r%d", inst.p1, inst.p2, op_symbols[inst.p5], inst.p3);
+    break;
+  }
+
+  case OP_Test:
+    printf("r%d = (r%d %s r%d)", inst.p1, inst.p2,
+           compare_op_to_string((CompareOp)inst.p5), inst.p3);
+    break;
+
+  case OP_JumpIf:
+    printf("if (r%d %s 0) goto %d", inst.p1, inst.p5 ? "!=" : "==", inst.p2);
+    break;
+
+  case OP_Logic: {
+    const char *logic_ops[] = {"AND", "OR", "NOT"};
+    if (inst.p5 == LOGIC_NOT) {
+      printf("r%d = NOT r%d", inst.p1, inst.p2);
+    } else {
+      printf("r%d = r%d %s r%d", inst.p1, inst.p2, logic_ops[inst.p5], inst.p3);
+    }
+    break;
+  }
+
+  case OP_Result:
+    printf("output r%d..r%d (%d regs)", inst.p1, inst.p1 + inst.p2 - 1,
+           inst.p2);
     break;
 
   default:
-    printf("p1=%d p2=%d p3=%d p4=%p p5=%d", inst.p1, inst.p2, inst.p3, inst.p4, inst.p5);
+    printf("p1=%d p2=%d p3=%d p4=%p p5=%d", inst.p1, inst.p2, inst.p3, inst.p4,
+           inst.p5);
   }
 
   printf("\n");
 }
 
-inline void debug_print_program(const Vector<VMInstruction, QueryArena> &program) {
+inline void
+debug_print_program(const Vector<VMInstruction, QueryArena> &program) {
   printf("\n=== VM Program (%zu instructions) ===\n", program.size());
   printf("Idx  Opcode       Parameters\n");
   printf("---  ------------ --------------------------------\n");
@@ -814,9 +928,11 @@ inline void debug_print_program(const Vector<VMInstruction, QueryArena> &program
     for (size_t j = 0; j < program.size(); j++) {
       const auto &check = program[j];
       if ((check.opcode == OP_Goto && check.p2 == (int)i) ||
-          (check.opcode == OP_Compare && check.p3 == (int)i) ||
-          ((check.opcode == OP_Next || check.opcode == OP_Prev) && check.p2 == (int)i) ||
-          ((check.opcode == OP_First || check.opcode == OP_Last) && check.p2 == (int)i) ||
+          (check.opcode == OP_Test && check.p3 == (int)i) ||
+          ((check.opcode == OP_Next || check.opcode == OP_Prev) &&
+           check.p2 == (int)i) ||
+          ((check.opcode == OP_First || check.opcode == OP_Last) &&
+           check.p2 == (int)i) ||
           (check.opcode == OP_Seek && check.p3 == (int)i)) {
         is_target = true;
         break;
@@ -824,7 +940,8 @@ inline void debug_print_program(const Vector<VMInstruction, QueryArena> &program
     }
 
     if (is_target) {
-      printf("  Label_%zu: instruction [%zu] %s\n", i, i, opcode_to_string(inst.opcode));
+      printf("  Label_%zu: instruction [%zu] %s\n", i, i,
+             opcode_to_string(inst.opcode));
     }
   }
 

@@ -164,6 +164,117 @@ VM_RESULT vm_step() {
     return OK;
   }
 
+
+  case OP_Test: {
+    int32_t dest = Opcodes::Test::dest_reg(*inst);
+    int32_t left = Opcodes::Test::left_reg(*inst);
+    int32_t right = Opcodes::Test::right_reg(*inst);
+    CompareOp op = Opcodes::Test::op(*inst);
+
+    TypedValue* a = &VM.registers[left];
+    TypedValue* b = &VM.registers[right];
+
+    int cmp_result = cmp(a->type, a->data, b->data);
+    uint32_t result = 0;
+
+    switch (op) {
+      case EQ: result = (cmp_result == 0) ? 1 : 0; break;
+      case NE: result = (cmp_result != 0) ? 1 : 0; break;
+      case LT: result = (cmp_result < 0) ? 1 : 0; break;
+      case LE: result = (cmp_result <= 0) ? 1 : 0; break;
+      case GT: result = (cmp_result > 0) ? 1 : 0; break;
+      case GE: result = (cmp_result >= 0) ? 1 : 0; break;
+    }
+
+    vm_set_value(&VM.registers[dest], TYPE_UINT32, &result);
+    VM.pc++;
+    return OK;
+  }
+
+  case OP_JumpIf: {
+    int32_t test_reg = Opcodes::JumpIf::test_reg(*inst);
+    int32_t target = Opcodes::JumpIf::jump_target(*inst);
+    bool jump_on_true = Opcodes::JumpIf::jump_on_true(*inst);
+
+    TypedValue* val = &VM.registers[test_reg];
+    bool is_true = false;
+
+    if (val->type == TYPE_UINT32) {
+      is_true = (*(uint32_t*)val->data != 0);
+    } else if (val->type == TYPE_UINT64) {
+      is_true = (*(uint64_t*)val->data != 0);
+    }
+
+    if ((is_true && jump_on_true) || (!is_true && !jump_on_true)) {
+      VM.pc = target;
+    } else {
+      VM.pc++;
+    }
+    return OK;
+  }
+
+  case OP_Logic: {
+    int32_t dest = Opcodes::Logic::dest_reg(*inst);
+    int32_t left = Opcodes::Logic::left_reg(*inst);
+    int32_t right = Opcodes::Logic::right_reg(*inst);
+    LogicOp op = Opcodes::Logic::op(*inst);
+
+    uint32_t result = 0;
+
+    if (op == LOGIC_NOT) {
+      TypedValue* val = &VM.registers[left];
+      uint32_t is_true = 0;
+      if (val->type == TYPE_UINT32) {
+        is_true = *(uint32_t*)val->data;
+      }
+      result = is_true ? 0 : 1;
+    } else {
+      TypedValue* a = &VM.registers[left];
+      TypedValue* b = &VM.registers[right];
+
+      uint32_t a_val = (a->type == TYPE_UINT32) ? *(uint32_t*)a->data : 0;
+      uint32_t b_val = (b->type == TYPE_UINT32) ? *(uint32_t*)b->data : 0;
+
+      if (op == LOGIC_AND) {
+        result = (a_val && b_val) ? 1 : 0;
+      } else if (op == LOGIC_OR) {
+        result = (a_val || b_val) ? 1 : 0;
+      }
+    }
+
+    vm_set_value(&VM.registers[dest], TYPE_UINT32, &result);
+    VM.pc++;
+    return OK;
+  }
+
+  case OP_ResultRow: {
+    int32_t first = Opcodes::Result::first_reg(*inst);
+    int32_t count = Opcodes::Result::reg_count(*inst);
+
+    if (VM.callback) {
+      // Build result from registers
+      uint32_t total_size = 0;
+      for (int i = 0; i < count; i++) {
+        TypedValue* val = &VM.registers[first + i];
+        total_size += val->type;
+      }
+
+      uint8_t* result = (uint8_t*)arena::alloc<QueryArena>(total_size);
+      uint32_t offset = 0;
+
+      for (int i = 0; i < count; i++) {
+        TypedValue* val = &VM.registers[first + i];
+        memcpy(result + offset, val->data, val->type);
+        offset += val->type;
+      }
+
+      VM.callback(result, total_size);
+    }
+
+    VM.pc++;
+    return OK;
+  }
+
   case OP_Arithmetic: {
     int32_t dest = Opcodes::Arithmetic::dest_reg(*inst);
     int32_t left = Opcodes::Arithmetic::left_reg(*inst);
@@ -556,82 +667,6 @@ VM_RESULT vm_step() {
     return OK;
   }
 
-  case OP_Compare: {
-    int32_t reg_a = Opcodes::Compare::reg_a(*inst);
-    int32_t reg_b = Opcodes::Compare::reg_b(*inst);
-    int32_t jump_target = Opcodes::Compare::jump_target(*inst);
-    CompareOp op = Opcodes::Compare::op(*inst);
-
-    TypedValue *a = &VM.registers[reg_a];
-    TypedValue *b = &VM.registers[reg_b];
-
-    int cmp_result = cmp(a->type, a->data, b->data);
-    bool condition = false;
-
-    switch (op) {
-    case EQ:
-      condition = (cmp_result == 0);
-      break;
-    case NE:
-      condition = (cmp_result != 0);
-      break;
-    case LT:
-      condition = (cmp_result < 0);
-      break;
-    case LE:
-      condition = (cmp_result <= 0);
-      break;
-    case GT:
-      condition = (cmp_result > 0);
-      break;
-    case GE:
-      condition = (cmp_result >= 0);
-      break;
-    }
-
-    if (condition && jump_target >= 0) {
-      VM.pc = jump_target;
-    } else {
-      VM.pc++;
-    }
-    return OK;
-  }
-
-  case OP_Flush: {
-    int32_t cursor_id = Opcodes::Flush::cursor_id(*inst);
-
-    VmCursor *cursor = &VM.cursors[cursor_id];
-
-    // Rewind to beginning
-    bool valid;
-    if (cursor->is_memory) {
-      valid = memcursor_first(&cursor->mem_cursor);
-    } else {
-      valid = btree_cursor_first(&cursor->btree_cursor);
-    }
-
-    if (valid && VM.callback) {
-      do {
-        uint8_t *record;
-        if (cursor->is_memory) {
-          record = memcursor_record(&cursor->mem_cursor);
-        } else {
-          record = btree_cursor_record(&cursor->btree_cursor);
-        }
-
-        VM.callback(record, cursor->record_size());
-
-        if (cursor->is_memory) {
-          valid = memcursor_next(&cursor->mem_cursor);
-        } else {
-          valid = btree_cursor_next(&cursor->btree_cursor);
-        }
-      } while (valid);
-    }
-
-    VM.pc++;
-    return OK;
-  }
 
   case OP_OpenMemTree: {
     int32_t cursor_id = Opcodes::OpenMemTree::cursor_id(*inst);
