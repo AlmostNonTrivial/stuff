@@ -119,7 +119,7 @@ static VMInstruction make_compare_label(int reg_a, int reg_b, CompareOp op,
 // Helper to load a value into a register
 static void load_value(Vec<VMInstruction, QueryArena> &program,
                        const TypedValue &value, int reg) {
-  if (value.type == TYPE_UINT32 || value.type == TYPE_UINT64) {
+  if (value.type == TYPE_4 || value.type == TYPE_8) {
     uint32_t val = *(uint32_t *)value.data;
     program.push_back(Opcodes::Integer::create(reg, val));
   } else {

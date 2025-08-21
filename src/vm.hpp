@@ -9,12 +9,7 @@
 #include <cstdio>
 #include <cstring>
 
-struct QueryContext {
-  TableSchema *schema;
-  bool has_key_prefix;
-};
-
-typedef void (*ResultCallback)(void *result, size_t result_size);
+typedef void (*ResultCallback)(Vec<TypedValue, QueryArena> result);
 extern bool _debug;
 
 enum EventType {
@@ -67,7 +62,6 @@ enum OpCode : uint32_t {
 
   // Data operations
   OP_Column = 30,
-  OP_MakeRecord = 32,
   OP_Insert = 34,
   OP_Delete = 35,
   OP_Update = 36,
@@ -81,7 +75,7 @@ enum OpCode : uint32_t {
   OP_Arithmetic = 51,
   OP_JumpIf = 52,
   OP_Logic = 53,
-  OP_ResultRow = 54,
+  OP_Result = 54,
 
   // Schema operations
   OP_Schema = 80,
@@ -130,18 +124,16 @@ struct Open {
     return {OP_Open, cursor_id, index_col, 0, (void *)table_name, flags};
   }
 
-  static VMInstruction create_ephemeral(int32_t cursor_id, int32_t key_type,
-                                        int32_t record_size) {
+  static VMInstruction create_ephemeral(int32_t cursor_id,
+      TableSchema * schema) {
     uint8_t flags = (0x01) | (0x02);
-    return {OP_Open, cursor_id, key_type, record_size, nullptr, flags};
+    return {OP_Open, cursor_id, 0, 0, schema, flags};
   }
 
   static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
-  static DataType ephemeral_key_type(const VMInstruction &inst) {
-    return (DataType)inst.p2;
-  }
-  static DataType ephemeral_record_size(const VMInstruction &inst) {
-    return (DataType)inst.p3;
+
+  static TableSchema* ephemeral_schema(const VMInstruction &inst) {
+    return (TableSchema*)inst.p4;
   }
   static int32_t index_col(const VMInstruction &inst) { return inst.p3; }
   static const char *table_name(const VMInstruction &inst) {
@@ -200,24 +192,14 @@ struct Column {
   static int32_t dest_reg(const VMInstruction &inst) { return inst.p3; }
 };
 
-struct MakeRecord {
-  static VMInstruction create(int32_t first_reg, int32_t reg_count,
-                              int32_t dest_reg) {
-    return {OP_MakeRecord, first_reg, reg_count, dest_reg, nullptr, 0};
-  }
-  static int32_t first_reg(const VMInstruction &inst) { return inst.p1; }
-  static int32_t reg_count(const VMInstruction &inst) { return inst.p2; }
-  static int32_t dest_reg(const VMInstruction &inst) { return inst.p3; }
-};
 
 struct Insert {
-  static VMInstruction create(int32_t cursor_id, int32_t key_reg,
-                              int32_t record_reg) {
-    return {OP_Insert, cursor_id, key_reg, record_reg, nullptr, 0};
+  static VMInstruction create(int32_t cursor_id, int32_t start_reg, int32_t reg_count) {
+    return {OP_Insert, cursor_id, start_reg, reg_count, nullptr, 0};
   }
   static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
   static int32_t key_reg(const VMInstruction &inst) { return inst.p2; }
-  static int32_t record_reg(const VMInstruction &inst) { return inst.p3; }
+  static int32_t reg_count(const VMInstruction &inst) { return inst.p3; }
 };
 
 struct Delete {
@@ -299,12 +281,12 @@ struct Logic {
   static LogicOp op(const VMInstruction &inst) { return (LogicOp)inst.p5; }
 };
 
-struct ResultRow {
-  static VMInstruction create(int32_t first_reg, int32_t reg_count) {
-    return {OP_ResultRow, first_reg, reg_count, 0, nullptr, 0};
+struct Result {
+  static VMInstruction create(int32_t reg, int32_t size) {
+    return {OP_Result, reg, size, 0, nullptr, 0};
   }
-  static int32_t first_reg(const VMInstruction &inst) { return inst.p1; }
-  static int32_t reg_count(const VMInstruction &inst) { return inst.p2; }
+  static int32_t reg(const VMInstruction &inst) { return inst.p1; }
+  static int32_t size(const VMInstruction &inst) { return inst.p2; }
 };
 
 // Schema Operations

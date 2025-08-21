@@ -39,13 +39,13 @@ static void capture_results_callback(void* result, size_t result_size) {
 // Master table helpers
 static const char *type_to_string(DataType type) {
   switch (type) {
-  case TYPE_UINT32:
+  case TYPE_4:
     return "INT32";
-  case TYPE_UINT64:
+  case TYPE_8:
     return "INT64";
-  case TYPE_VARCHAR32:
+  case TYPE_32:
     return "VARCHAR32";
-  case TYPE_VARCHAR256:
+  case TYPE_256:
     return "VARCHAR256";
   default:
     return "VARCHAR32";
@@ -181,12 +181,12 @@ static void create_master_table() {
   schema->table_name = "sqlite_master";
 
   // Columns: id (key), type, name, tbl_name, rootpage, sql
-  schema->columns.push_back({"id", TYPE_UINT32});
-  schema->columns.push_back({"type", TYPE_VARCHAR32});
-  schema->columns.push_back({"name", TYPE_VARCHAR32});
-  schema->columns.push_back({"tbl_name", TYPE_VARCHAR32});
-  schema->columns.push_back({"rootpage", TYPE_UINT32});
-  schema->columns.push_back({"sql", TYPE_VARCHAR256});
+  schema->columns.push_back({"id", TYPE_4});
+  schema->columns.push_back({"type", TYPE_32});
+  schema->columns.push_back({"name", TYPE_32});
+  schema->columns.push_back({"tbl_name", TYPE_32});
+  schema->columns.push_back({"rootpage", TYPE_4});
+  schema->columns.push_back({"sql", TYPE_256});
 
   calculate_column_offsets(schema);
 
@@ -211,7 +211,7 @@ static void parse_master_table_row(void* result, size_t result_size) {
   // Parse according to master table schema
   // id (UINT32)
   TypedValue id_val;
-  id_val.type = TYPE_UINT32;
+  id_val.type = TYPE_4;
   id_val.data = (uint8_t*)arena::alloc<QueryArena>(sizeof(uint32_t));
   memcpy(id_val.data, data, sizeof(uint32_t));
   row.push_back(id_val);
@@ -219,7 +219,7 @@ static void parse_master_table_row(void* result, size_t result_size) {
 
   // type (VARCHAR32)
   TypedValue type_val;
-  type_val.type = TYPE_VARCHAR32;
+  type_val.type = TYPE_32;
   type_val.data = (uint8_t*)arena::alloc<QueryArena>(32);
   memcpy(type_val.data, data, 32);
   row.push_back(type_val);
@@ -227,7 +227,7 @@ static void parse_master_table_row(void* result, size_t result_size) {
 
   // name (VARCHAR32)
   TypedValue name_val;
-  name_val.type = TYPE_VARCHAR32;
+  name_val.type = TYPE_32;
   name_val.data = (uint8_t*)arena::alloc<QueryArena>(32);
   memcpy(name_val.data, data, 32);
   row.push_back(name_val);
@@ -235,7 +235,7 @@ static void parse_master_table_row(void* result, size_t result_size) {
 
   // tbl_name (VARCHAR32)
   TypedValue tbl_name_val;
-  tbl_name_val.type = TYPE_VARCHAR32;
+  tbl_name_val.type = TYPE_32;
   tbl_name_val.data = (uint8_t*)arena::alloc<QueryArena>(32);
   memcpy(tbl_name_val.data, data, 32);
   row.push_back(tbl_name_val);
@@ -243,7 +243,7 @@ static void parse_master_table_row(void* result, size_t result_size) {
 
   // rootpage (UINT32)
   TypedValue rootpage_val;
-  rootpage_val.type = TYPE_UINT32;
+  rootpage_val.type = TYPE_4;
   rootpage_val.data = (uint8_t*)arena::alloc<QueryArena>(sizeof(uint32_t));
   memcpy(rootpage_val.data, data, sizeof(uint32_t));
   row.push_back(rootpage_val);
@@ -251,7 +251,7 @@ static void parse_master_table_row(void* result, size_t result_size) {
 
   // sql (VARCHAR256)
   TypedValue sql_val;
-  sql_val.type = TYPE_VARCHAR256;
+  sql_val.type = TYPE_256;
   sql_val.data = (uint8_t*)arena::alloc<QueryArena>(256);
   memcpy(sql_val.data, data, 256);
   row.push_back(sql_val);

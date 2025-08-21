@@ -10,20 +10,19 @@ struct QueryArena {};
 // #define FAIL(msg) ((std::cout << msg << std::endl; exit(1)))
 
 enum DataType : uint32_t {
-
     TYPE_NULL= 0,       //
-    TYPE_UINT32 = 4,      // 4-byte integer
-    TYPE_UINT64 = 8,      // 8-byte integer
-    // TYPE_INT32 = 4,      // 4-byte integer // would this work
-    // TYPE_INT64 = 8,      // 8-byte integer
-    TYPE_VARCHAR32 = 32, // Variable char up to 32 bytes
-    TYPE_VARCHAR256 = 256 // Variable char up to 256 bytes
+    TYPE_2 = 2,
+    TYPE_4 = 4,      // 4-byte integer
+    TYPE_8 = 8,      // 8-byte integer
+    TYPE_32 = 32, // Variable char up to 32 bytes
+    TYPE_256 = 256, // Variable char up to 256 bytes
+
 };
 
 // VM value - uses arena allocation for data
 struct TypedValue {
-  DataType type;
-  uint8_t *data; // Points to arena-allocated memory
+   DataType type;
+   uint8_t *data; // Points to arena-allocated memory
 };
 
 

@@ -283,17 +283,17 @@ static DataType token_to_data_type(TokenType type) {
     switch (type) {
         case TOK_INT:
         case TOK_INT32:
-            return TYPE_UINT32;
+            return TYPE_4;
         case TOK_INT64:
-            return TYPE_UINT64;
+            return TYPE_8;
         case TOK_VARCHAR:
         case TOK_VARCHAR256:
-            return TYPE_VARCHAR256;
+            return TYPE_256;
         case TOK_VARCHAR32:
         case TOK_VAR32:
-            return TYPE_VARCHAR32;
+            return TYPE_32;
         default:
-            return TYPE_VARCHAR32;  // Default type
+            return TYPE_32;  // Default type
     }
 }
 
@@ -308,7 +308,7 @@ static ASTNode* parse_literal(Parser* p) {
     node->type = AST_LITERAL;
 
     if (p->current_type == TOK_INTEGER) {
-        node->value.type = TYPE_UINT32;
+        node->value.type = TYPE_4;
         uint32_t val = (uint32_t)p->current_value.int_val;
         node->value.data = (uint8_t*)arena::alloc<QueryArena>(sizeof(uint32_t));
         memcpy(node->value.data, &val, sizeof(uint32_t));
@@ -317,7 +317,7 @@ static ASTNode* parse_literal(Parser* p) {
         size_t len = p->current_len;
         if (len > 256) len = 256;
 
-        node->value.type = (len <= 32) ? TYPE_VARCHAR32 : TYPE_VARCHAR256;
+        node->value.type = (len <= 32) ? TYPE_32 : TYPE_256;
         uint32_t alloc_size = node->value.type;
         node->value.data = (uint8_t*)arena::alloc<QueryArena>(alloc_size);
         memset(node->value.data, 0, alloc_size);
@@ -567,7 +567,7 @@ static ASTNode* parse_create(Parser* p) {
             } else if (p->current_type == TOK_IDENTIFIER) {
                 // Fallback for unrecognized types
                 advance(p);
-                col.type = TYPE_VARCHAR32;
+                col.type = TYPE_32;
             }
 
             // Parse column name

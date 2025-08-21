@@ -3,14 +3,14 @@
 
 void print_ptr(uint8_t *data, DataType type) {
   switch (type) {
-  case TYPE_UINT32:
+  case TYPE_4:
     std::cout << *reinterpret_cast<uint32_t *>(data) << ",";
     break;
-  case TYPE_UINT64:
+  case TYPE_8:
     std::cout << *reinterpret_cast<uint64_t *>(data) << ",";
     break;
-  case TYPE_VARCHAR32:
-  case TYPE_VARCHAR256:
+  case TYPE_32:
+  case TYPE_256:
     for (uint32_t i = 0; i < type; ++i) {
       printf("%c", data[i]);
     }
@@ -28,20 +28,20 @@ void debug_type(uint8_t *data, DataType type) {
   printf("\n");
 
   switch (type) {
-  case TYPE_UINT32: {
+  case TYPE_4: {
     uint32_t val;
     memcpy(&val, data, 4);
     printf("INT32: %u (0x%08x)\n", val, val);
     break;
   }
-  case TYPE_UINT64: {
+  case TYPE_8: {
     uint64_t val;
     memcpy(&val, data, 8);
     printf("INT64: %lu (0x%016lx)\n", val, val);
     break;
   }
-  case TYPE_VARCHAR32:
-  case TYPE_VARCHAR256:
+  case TYPE_32:
+  case TYPE_256:
     printf("VARCHAR: \"");
     for (size_t i = 0; i < type; ++i) {
       if (data[i] == 0) break;
@@ -261,26 +261,26 @@ void init_type_ops() {
     };
 
     // UINT32
-    type_ops[TYPE_UINT32] = {
+    type_ops[TYPE_4] = {
         cmp_u32, copy_u32, to_u64_u32, from_u64_u32, print_u32, size_u32,
         add_u32, sub_u32, mul_u32, div_u32, mod_u32
     };
 
     // UINT64
-    type_ops[TYPE_UINT64] = {
+    type_ops[TYPE_8] = {
         cmp_u64, copy_u64, to_u64_u64, from_u64_u64, print_u64, size_u64,
         add_u64, sub_u64, mul_u64, div_u64, mod_u64
     };
 
     // VARCHAR32
-    type_ops[TYPE_VARCHAR32] = {
+    type_ops[TYPE_32] = {
         cmp_varchar32, copy_varchar32, to_u64_varchar, from_u64_varchar32,
         print_varchar32, size_varchar32,
         arith_fail, arith_fail, arith_fail, arith_fail, arith_fail
     };
 
     // VARCHAR256
-    type_ops[TYPE_VARCHAR256] = {
+    type_ops[TYPE_256] = {
         cmp_varchar256, copy_varchar256, to_u64_varchar, from_u64_varchar256,
         print_varchar256, size_varchar256,
         arith_fail, arith_fail, arith_fail, arith_fail, arith_fail
