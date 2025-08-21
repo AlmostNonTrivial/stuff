@@ -131,6 +131,8 @@ Vec<VMInstruction, QueryArena> build_select_from_ast(SelectNode *ast)
 
     ProgramBuilder program;
 
+    int mem_cursor = 0;
+
 
     TypedValue a = {.type = TYPE_8};
 
@@ -140,14 +142,29 @@ Vec<VMInstruction, QueryArena> build_select_from_ast(SelectNode *ast)
     *ptr = 5;
     *ptr2 = 11;
 
+    uint8_t data[TYPE_256];
+    memcpy(data, "hey there besty\0", 10);
 
-    program.emit(Opcodes::Load::create(1, TYPE_4, ptr2));
-    program.emit(Opcodes::Load::create(2, TYPE_4, ptr));
-    auto repeat = program.here();
-    program.emit(Opcodes::Arithmetic::create(2, 2, 2, ARITH_ADD));
-    program.emit(Opcodes::Test::create(4, 1, 2, GE));
-    program.emit(Opcodes::JumpIf::create(4, repeat));
-    program.emit(Opcodes::Result::create(3, 1));
+    Schema * schema = (Schema*)arena::alloc<QueryArena>(sizeof(Schema));
+    schema->columns.push_back({.name = "key", .type = TYPE_32});
+    schema->record_size = 0;
+    program.emit(Opcodes::Open::create_ephemeral(mem_cursor, schema));
+    program.emit(Opcodes::Load::create(1, TYPE_256, data));
+    program.emit(Opcodes::Insert::create(mem_cursor, 1, 1));
+    program.emit(Opcodes::Seek::create(mem_cursor, 1, 10, EQ));
+    program.emit(Opcodes::Column::create(mem_cursor, 0, 2));
+    program.emit(Opcodes::Result::create(2, 1));
+
+
+
+    // program.emit(Opcodes::Load::create(2, TYPE_4, ptr));
+    // auto repeat = program.here();
+    // program.emit(Opcodes::Arithmetic::create(2, 2, 2, ARITH_ADD));
+    // program.emit(Opcodes::Test::create(4, 1, 2, GE));
+    // program.emit(Opcodes::Test::create(5, 1, 2, LT));
+    // program.emit(Opcodes::Logic::create(6, 4, 5, LOGIC_AND));
+    // program.emit(Opcodes::JumpIf::create(6, repeat));
+    // program.emit(Opcodes::Result::create(3, 1));
 
     // program.emit(Opcodes::Result::create(0, 1));
     return program.instructions;

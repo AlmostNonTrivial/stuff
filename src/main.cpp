@@ -9,13 +9,13 @@
 
 // In main.cpp, replace print_result_callback with:
 void print_result_callback(Vec<TypedValue, QueryArena> result) {
-  for (int i = 0; i < result.size(); i++) {
-    print_value(result[i].type, result[i].data);
-    if (i != result.size() - 1) {
-      std::cout << ", ";
-    }
-  }
-  std::cout << "\n";
+  // for (int i = 0; i < result.size(); i++) {
+  //   print_value(result[i].type, result[i].data);
+  //   if (i != result.size() - 1) {
+  //     std::cout << ", ";
+  //   }
+  // }
+  // std::cout << "\n";
 }
 
 void test() {
