@@ -99,19 +99,18 @@ static struct {
   QueryContext current_query_context;
   TypedValue registers[REGISTERS];
   VmCursor cursors[CURSORS];
-  bool initialized;
 } VM = {};
 
-static void vm_set_value(TypedValue *dest, TypedValue *src) {
+static void set_register(TypedValue *dest, TypedValue *src) {
   dest->type = src->type;
   dest->data = (uint8_t *)arena::alloc<QueryArena>((uint32_t)dest->type);
   memcpy(dest->data, src->data, (uint32_t)dest->type);
 }
 
 // Public VM functions
-void vm_shutdown() { VM.initialized = false; }
 
-void vm_reset() {
+
+void reset() {
   VM.pc = 0;
   VM.halted = false;
 
@@ -124,15 +123,10 @@ void vm_reset() {
   VM.events.clear();
 }
 
-void vm_init() {
-  VM.initialized = true;
-  vm_reset();
-}
-
 Queue<VmEvent, QueryArena> &vm_events() { return VM.events; }
 
 // Main execution step
-VM_RESULT vm_step() {
+VM_RESULT step() {
   VMInstruction *inst = &VM.program[VM.pc];
 
   switch (inst->opcode) {
@@ -147,7 +141,7 @@ VM_RESULT vm_step() {
   case OP_Load: {
     int32_t dest_reg = Opcodes::Load::dest_reg(*inst);
     TypedValue *value = Opcodes::Load::value(*inst);
-    vm_set_value(&VM.registers[dest_reg], value);
+    set_register(&VM.registers[dest_reg], value);
     VM.pc++;
     return OK;
   }
@@ -155,7 +149,7 @@ VM_RESULT vm_step() {
   case OP_Copy: {
     int32_t src = Opcodes::Copy::src_reg(*inst);
     int32_t dest = Opcodes::Copy::dest_reg(*inst);
-    vm_set_value(&VM.registers[src], &VM.registers[src]);
+    set_register(&VM.registers[dest], &VM.registers[src]);
     VM.pc++;
     return OK;
   }
@@ -194,7 +188,7 @@ VM_RESULT vm_step() {
       break;
     }
 
-    vm_set_value(&VM.registers[dest], &result);
+    set_register(&VM.registers[dest], &result);
     VM.pc++;
     return OK;
   }
@@ -205,13 +199,7 @@ VM_RESULT vm_step() {
     bool jump_on_true = Opcodes::JumpIf::jump_on_true(*inst);
 
     TypedValue *val = &VM.registers[test_reg];
-    bool is_true = false;
-
-    if (val->type == TYPE_UINT32) {
-      is_true = (*(uint32_t *)val->data != 0);
-    } else if (val->type == TYPE_UINT64) {
-      is_true = (*(uint64_t *)val->data != 0);
-    }
+    bool is_true = (*(uint32_t *)val->data != 0);
 
     if ((is_true && jump_on_true) || (!is_true && !jump_on_true)) {
       VM.pc = target;
@@ -227,30 +215,25 @@ VM_RESULT vm_step() {
     int32_t right = Opcodes::Logic::right_reg(*inst);
     LogicOp op = Opcodes::Logic::op(*inst);
 
-    uint32_t result = 0;
+    TypedValue result{
+        .type = TYPE_UINT32,
+    };
 
-    if (op == LOGIC_NOT) {
-      TypedValue *val = &VM.registers[left];
-      uint32_t is_true = 0;
-      if (val->type == TYPE_UINT32) {
-        is_true = *(uint32_t *)val->data;
-      }
-      result = is_true ? 0 : 1;
-    } else {
-      TypedValue *a = &VM.registers[left];
-      TypedValue *b = &VM.registers[right];
+    uint32_t a = *(uint32_t *)VM.registers[left].data;
+    uint32_t b = *(uint32_t *)VM.registers[right].data;
 
-      uint32_t a_val = (a->type == TYPE_UINT32) ? *(uint32_t *)a->data : 0;
-      uint32_t b_val = (b->type == TYPE_UINT32) ? *(uint32_t *)b->data : 0;
-
-      if (op == LOGIC_AND) {
-        result = (a_val && b_val) ? 1 : 0;
-      } else if (op == LOGIC_OR) {
-        result = (a_val || b_val) ? 1 : 0;
-      }
+    switch (op) {
+    case LOGIC_AND:
+      *result.data = (a && b) ? 1 : 0;
+      break;
+    case LOGIC_OR:
+      *result.data = (a || b) ? 1 : 0;
+      break;
+    default:
+      return ERR;
     }
 
-    // vm_set_value(&VM.registers[dest], TYPE_UINT32, &result);
+    set_register(&VM.registers[dest], &result);
     VM.pc++;
     return OK;
   }
@@ -440,7 +423,7 @@ VM_RESULT vm_step() {
     TypedValue value = {.type = cursor->column_type(col_index),
                         .data = cursor->column(col_index)};
 
-    vm_set_value(&VM.registers[dest_reg], &value);
+    set_register(&VM.registers[dest_reg], &value);
     VM.pc++;
     return OK;
   }
@@ -691,15 +674,11 @@ VM_RESULT vm_step() {
 }
 
 VM_RESULT vm_execute(Vector<VMInstruction, QueryArena> &instructions) {
-  if (!VM.initialized) {
-    vm_init();
-  }
-
-  vm_reset();
+  reset();
   VM.program.set(instructions);
 
   while (!VM.halted && VM.pc < VM.program.size()) {
-    VM_RESULT result = vm_step();
+    VM_RESULT result = step();
     if (result != OK) {
       return result;
     }

@@ -37,7 +37,6 @@ enum ArithOp : uint8_t {
 enum LogicOp : uint8_t {
   LOGIC_AND = 0,
   LOGIC_OR = 1,
-  LOGIC_NOT = 2,
 };
 
 

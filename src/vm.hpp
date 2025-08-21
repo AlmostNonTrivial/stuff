@@ -381,9 +381,6 @@ enum VM_RESULT { OK, ABORT, ERR };
 
 // VM Functions
 VM_RESULT vm_execute(Vector<VMInstruction, QueryArena> &instructions);
-void vm_init();
-void vm_reset();
-void vm_shutdown();
 void vm_set_result_callback(ResultCallback callback);
 
 // Debug functions would go here...
