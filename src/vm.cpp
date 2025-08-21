@@ -115,21 +115,25 @@ static void build_record(uint8_t *data, int32_t first_reg, int32_t count) {
   }
 }
 
-static void emit_vm_event(EventType evt,
-    VmCursor * cursor = nullptr,
-    const char * table_name = nullptr,
-    uint32_t col_index = 0) {
+static void emit_vm_event(EventType evt, VmCursor *cursor = nullptr,
+                          const char *table_name = nullptr,
+                          uint32_t col_index = 0) {
   VmEvent event;
 
   switch (evt) {
-  case EVT_BTREE_ROOT_CHANGED:
+  case EVT_BTREE_ROOT_CHANGED: {
+    event.type = evt;
+    event.table_name = cursor->schema->table_name.c_str();
+    event.column = cursor->is_index ? 0 : cursor->column_index;
+    break;
+  }
   case EVT_INDEX_CREATED:
   case EVT_TABLE_CREATED:
   case EVT_INDEX_DROPPED:
   case EVT_TABLE_DROPPED: {
-    event.type = EVT_BTREE_ROOT_CHANGED;
-    event.table_name = cursor->schema->table_name.c_str();
-    event.column = cursor->is_index ? 0 : cursor->column_index;
+    event.type = evt;
+    event.table_name = table_name;
+    event.column = col_index;
     break;
   }
   }
@@ -451,7 +455,6 @@ static VM_RESULT step() {
     VmCursor *cursor = &VM.cursors[cursor_id];
     TypedValue *key = &VM.registers[key_reg];
 
-
     uint8_t data[cursor->record_size()];
     build_record(data, record_reg, count);
     bool success;
@@ -494,24 +497,23 @@ static VM_RESULT step() {
   }
 
   case OP_Update: {
-      int32_t cursor_id = Opcodes::Insert::cursor_id(*inst);
-      int32_t record_reg = Opcodes::Insert::key_reg(*inst);
-      int32_t count = Opcodes::Insert::reg_count(*inst);
+    int32_t cursor_id = Opcodes::Insert::cursor_id(*inst);
+    int32_t record_reg = Opcodes::Insert::key_reg(*inst);
+    int32_t count = Opcodes::Insert::reg_count(*inst);
 
-      VmCursor *cursor = &VM.cursors[cursor_id];
+    VmCursor *cursor = &VM.cursors[cursor_id];
 
+    uint8_t data[cursor->record_size()];
+    build_record(data, record_reg, count);
 
-      uint8_t data[cursor->record_size()];
-      build_record(data, record_reg, count);
+    if (cursor->is_memory) {
+      memcursor_update(&cursor->mem_cursor, data);
+    } else {
+      btree_cursor_update(&cursor->btree_cursor, data);
+    }
 
-      if (cursor->is_memory) {
-        memcursor_update(&cursor->mem_cursor, data);
-      } else {
-        btree_cursor_update(&cursor->btree_cursor,  data);
-      }
-
-      VM.pc++;
-      return OK;
+    VM.pc++;
+    return OK;
   }
 
   case OP_Schema: {
@@ -535,7 +537,8 @@ static VM_RESULT step() {
 
       add_table(new_table);
 
-      emit_vm_event(EVT_TABLE_CREATED, nullptr, new_table->schema.table_name.c_str());
+      emit_vm_event(EVT_TABLE_CREATED, nullptr,
+                    new_table->schema.table_name.c_str());
 
       break;
     }
@@ -572,8 +575,8 @@ static VM_RESULT step() {
 
       add_index(table_name, index);
 
-
-      emit_vm_event(EVT_INDEX_CREATED, nullptr, table_name, index->column_index);
+      emit_vm_event(EVT_INDEX_CREATED, nullptr, table_name,
+                    index->column_index);
 
       break;
     }
@@ -592,7 +595,8 @@ static VM_RESULT step() {
         return ERR;
       }
 
-      emit_vm_event(EVT_INDEX_DROPPED, nullptr, table_name, index->column_index);
+      emit_vm_event(EVT_INDEX_DROPPED, nullptr, table_name,
+                    index->column_index);
 
       btree_clear(&index->tree);
       remove_index(table_name, column);
