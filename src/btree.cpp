@@ -37,7 +37,7 @@ struct FindResult {
   bool found;
 };
 
-enum SeekOp { SEEK_GE, SEEK_GT, SEEK_LE, SEEK_LT };
+
 
 // Internal function declarations
 static void repair_after_delete(BTree &tree, BTreeNode *node);
@@ -1133,9 +1133,9 @@ static bool cursor_move_end(BtCursor *cursor, bool first) {
   return cursor_move_in_subtree(cursor, root, first);
 }
 
-static bool cursor_seek_cmp(BtCursor *cursor, const void *key, SeekOp op) {
-  bool exact_match_ok = (op == SEEK_GE || op == SEEK_LE);
-  bool forward = (op == SEEK_GE || op == SEEK_GT);
+bool btree_cursor_seek_cmp(BtCursor *cursor, const void *key, CompareOp op) {
+  bool exact_match_ok = (op == GE || op == LE);
+  bool forward = (op == GE|| op == GT);
 
   if (exact_match_ok && btree_cursor_seek(cursor, key)) {
     return true;
@@ -1151,10 +1151,10 @@ static bool cursor_seek_cmp(BtCursor *cursor, const void *key, SeekOp op) {
     int cmp_result = cmp(cursor->tree->node_key_size, current_key,
                          static_cast<const uint8_t *>(key));
 
-    bool satisfied = (op == SEEK_GE && cmp_result >= 0) ||
-                     (op == SEEK_GT && cmp_result > 0) ||
-                     (op == SEEK_LE && cmp_result <= 0) ||
-                     (op == SEEK_LT && cmp_result < 0);
+    bool satisfied = (op == GE&& cmp_result >= 0) ||
+                     (op == GT&& cmp_result > 0) ||
+                     (op == LE&& cmp_result <= 0) ||
+                     (op == LT && cmp_result < 0);
     if (satisfied)
       return true;
   } while (forward ? btree_cursor_next(cursor) : btree_cursor_previous(cursor));

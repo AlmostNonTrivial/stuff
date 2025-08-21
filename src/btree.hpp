@@ -79,3 +79,5 @@ bool btree_cursor_is_valid(BtCursor *cursor);
 
 bool btree_cursor_has_next(BtCursor *cursor);
 bool btree_cursor_has_previous(BtCursor *cursor);
+
+bool btree_cursor_seek_cmp(BtCursor *cursor, const void *key, CompareOp op);

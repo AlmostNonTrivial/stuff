@@ -253,6 +253,10 @@ inline bool memtree_delete(MemTree* tree, const uint8_t* key) {
 // Cursor Operations - Matching BTree cursor interface
 // ============================================================================
 
+
+
+
+
 inline bool memcursor_seek(MemCursor* cursor, const void* key) {
   MemTreeNode* node = memtree_find_node(cursor->tree, (const uint8_t*)key);
   if (node) {
@@ -487,4 +491,14 @@ inline uint32_t memtree_count(const MemTree* tree) {
 
 inline bool memtree_is_empty(const MemTree* tree) {
   return tree->root == nullptr;
+}
+inline bool memcursor_seek_cmp(MemCursor*cursor, const uint8_t*key, CompareOp op) {
+    switch (op) {
+        case GE:return memcursor_seek_ge(cursor, key);
+        case GT:return memcursor_seek_gt(cursor, key);
+        case LE:return memcursor_seek_le(cursor, key);
+        case LT:return memcursor_seek_lt(cursor, key);
+        case EQ:return memcursor_seek(cursor, key);
+    }
+    return false;
 }
