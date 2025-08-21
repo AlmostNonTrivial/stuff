@@ -1,5 +1,4 @@
 #include "pager.hpp"
-#include "vec.hpp"
 #include "arena.hpp"
 #include "defs.hpp"
 #include "os_layer.hpp"
@@ -61,7 +60,7 @@ static struct {
 
   bool in_transaction;
 
-  Map<uint32_t, int32_t, PagerArena, MAX_CACHE_ENTRIES> page_to_cache;
+  Vec<int32_t, PagerArena, MAX_CACHE_ENTRIES> page_to_cache;
   Vec<uint32_t, PagerArena> free_pages_set;
   Vec<uint32_t, PagerArena> journaled_pages;
   Vec<uint32_t, PagerArena> new_pages_in_transaction;
@@ -473,7 +472,7 @@ void pager_mark_dirty(uint32_t page_index) {
   }
 
   if ((pager.page_to_cache.contains(page_index))) {
-    pager.cache_meta[*pager.page_to_cache.find(page_index)].is_dirty =
+    pager.cache_meta[pager.page_to_cache.find(page_index)].is_dirty =
         true;
   }
 }
