@@ -17,7 +17,7 @@ bool _debug;
 struct VmCursor {
   BtCursor btree_cursor;
   MemCursor mem_cursor;
-  TableSchema *schema;
+  Schema *schema;
   bool is_index;
   uint32_t column_index;
   bool is_memory;
@@ -54,7 +54,8 @@ struct VmCursor {
         return memcursor_key(&vb->mem_cursor);
       }
       // For memory trees, the record is the whole value
-      return memcursor_record(&vb->mem_cursor) + vb->schema->column_offsets[col_index];
+      return memcursor_record(&vb->mem_cursor) +
+             vb->schema->column_offsets[col_index];
     }
 
     // Original btree logic
@@ -104,11 +105,38 @@ static void set_register(TypedValue *dest, TypedValue *src) {
   memcpy(dest->data, src->data, (uint32_t)dest->type);
 }
 
-static void emit_vm_event(EventType evt, VmCursor *cursor) {
-  // build this out
+static void build_record(uint8_t *data, int32_t first_reg, int32_t count) {
+  int32_t offset;
+  for (int i = 0; i < count; i++) {
+    TypedValue *val = &VM.registers[first_reg + i];
+    uint32_t size = val->type;
+    memcpy(data + offset, val->data, size);
+    offset += size;
+  }
 }
 
+static void emit_vm_event(EventType evt,
+    VmCursor * cursor = nullptr,
+    const char * table_name = nullptr,
+    uint32_t col_index = 0) {
+  VmEvent event;
 
+  switch (evt) {
+  case EVT_BTREE_ROOT_CHANGED:
+  case EVT_INDEX_CREATED:
+  case EVT_TABLE_CREATED:
+  case EVT_INDEX_DROPPED:
+  case EVT_TABLE_DROPPED: {
+    event.type = EVT_BTREE_ROOT_CHANGED;
+    event.table_name = cursor->schema->table_name.c_str();
+    event.column = cursor->is_index ? 0 : cursor->column_index;
+    break;
+  }
+  }
+
+  VM.event_queue.push_back(event);
+  // build this out
+}
 
 static void reset() {
   VM.pc = 0;
@@ -238,8 +266,8 @@ static VM_RESULT step() {
   }
 
   case OP_Result: {
-    int32_t first_reg = Opcodes::MakeRecord::first_reg(*inst);
-    int32_t reg_count = Opcodes::MakeRecord::reg_count(*inst);
+    int32_t first_reg = Opcodes::Result::first_reg(*inst);
+    int32_t reg_count = Opcodes::Result::reg_count(*inst);
 
     if (!VM.callback) {
       return ERR;
@@ -285,7 +313,7 @@ static VM_RESULT step() {
     VmCursor &cursor = VM.cursors[cursor_id];
 
     if (is_ephemeral) {
-      TableSchema * schema = Opcodes::Open::ephemeral_schema(*inst);
+      Schema *schema = Opcodes::Open::ephemeral_schema(*inst);
       cursor.mem_tree = memtree_create(schema->key_type(), schema->record_size);
       cursor.mem_cursor.tree = &cursor.mem_tree;
       cursor.mem_cursor.state = MemCursor::INVALID;
@@ -414,8 +442,6 @@ static VM_RESULT step() {
     return OK;
   }
 
-
-
   case OP_Insert: {
     int32_t cursor_id = Opcodes::Insert::cursor_id(*inst);
     int32_t key_reg = Opcodes::Insert::key_reg(*inst);
@@ -425,40 +451,20 @@ static VM_RESULT step() {
     VmCursor *cursor = &VM.cursors[cursor_id];
     TypedValue *key = &VM.registers[key_reg];
 
-    uint32_t offset = 0;
+
     uint8_t data[cursor->record_size()];
-    for (int i = 0; i < count; i++) {
-      TypedValue *val = &VM.registers[record_reg + i];
-      uint32_t size = val->type;
-      memcpy(data + offset, val->data, size);
-      offset += size;
-    }
-
-
+    build_record(data, record_reg, count);
     bool success;
     if (cursor->is_memory) {
-
       success = memcursor_insert(&cursor->mem_cursor, key->data, data);
     } else {
-      if (!cursor->is_index) {
-        // Check for duplicate key in table
-        bool exists = btree_cursor_seek(&cursor->btree_cursor, key->data);
-        if (exists) {
-          return ERR;
-        }
-      }
+
       uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
       success = btree_cursor_insert(&cursor->btree_cursor, key->data, data);
       if (current_root != cursor->btree_cursor.tree->root_page_index) {
-        VmEvent event;
-        event.type = EVT_BTREE_ROOT_CHANGED;
-        event.table_name = cursor->schema->table_name.c_str();
-        event.column = cursor->is_index ? 0 : cursor->column_index;
-
-        VM.event_queue.push_back(event);
+        emit_vm_event(EVT_BTREE_ROOT_CHANGED, cursor);
       }
     }
-
     if (!success) {
       return ERR;
     }
@@ -476,20 +482,10 @@ static VM_RESULT step() {
       memcursor_delete(&cursor->mem_cursor);
     } else {
 
-      if (cursor->is_index) {
-        // delete not supported on index,
-        // needs to be rebuilt
-        return ERR;
-      }
-
       btree_cursor_delete(&cursor->btree_cursor);
       uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
       if (current_root != cursor->btree_cursor.tree->root_page_index) {
-        VmEvent event;
-        event.type = EVT_BTREE_ROOT_CHANGED;
-        event.table_name = cursor->schema->table_name.c_str();
-        event.column = cursor->is_index ? 0 : cursor->column_index;
-        VM.event_queue.push_back(event);
+        emit_vm_event(EVT_BTREE_ROOT_CHANGED, cursor);
       }
     }
 
@@ -498,25 +494,24 @@ static VM_RESULT step() {
   }
 
   case OP_Update: {
-    int32_t cursor_id = Opcodes::Update::cursor_id(*inst);
-    int32_t record_reg = Opcodes::Update::record_reg(*inst);
+      int32_t cursor_id = Opcodes::Insert::cursor_id(*inst);
+      int32_t record_reg = Opcodes::Insert::key_reg(*inst);
+      int32_t count = Opcodes::Insert::reg_count(*inst);
 
-    VmCursor *cursor = &VM.cursors[cursor_id];
-    TypedValue *record = &VM.registers[record_reg];
+      VmCursor *cursor = &VM.cursors[cursor_id];
 
-    if (cursor->is_index) {
-      // updates only on b+tree
-      return ERR;
-    }
 
-    if (cursor->is_memory) {
-      memcursor_update(&cursor->mem_cursor, record->data);
-    } else {
-      btree_cursor_update(&cursor->btree_cursor, record->data);
-    }
+      uint8_t data[cursor->record_size()];
+      build_record(data, record_reg, count);
 
-    VM.pc++;
-    return OK;
+      if (cursor->is_memory) {
+        memcursor_update(&cursor->mem_cursor, data);
+      } else {
+        btree_cursor_update(&cursor->btree_cursor,  data);
+      }
+
+      VM.pc++;
+      return OK;
   }
 
   case OP_Schema: {
@@ -524,7 +519,7 @@ static VM_RESULT step() {
 
     switch (op_type) {
     case SCHEMA_CREATE_TABLE: {
-      TableSchema *schema = Opcodes::Schema::table_schema(*inst);
+      Schema *schema = Opcodes::Schema::table_schema(*inst);
 
       if (get_table(schema->table_name.c_str())) {
         return ERR;
@@ -539,10 +534,9 @@ static VM_RESULT step() {
                                      new_table->schema.record_size, BPLUS);
 
       add_table(new_table);
-      VmEvent event;
-      event.type = EVT_TABLE_CREATED;
-      event.table_name = new_table->schema.table_name.c_str();
-      VM.event_queue.push_back(event);
+
+      emit_vm_event(EVT_TABLE_CREATED, nullptr, new_table->schema.table_name.c_str());
+
       break;
     }
 
@@ -560,11 +554,8 @@ static VM_RESULT step() {
         btree_clear(tree);
       }
 
+      emit_vm_event(EVT_TABLE_DROPPED, nullptr, table_name);
       remove_table(table_name);
-      VmEvent event;
-      event.type = EVT_TABLE_DROPPED;
-      event.table_name = table_name;
-      VM.event_queue.push_back(event);
       break;
     }
 
@@ -581,11 +572,9 @@ static VM_RESULT step() {
 
       add_index(table_name, index);
 
-      VmEvent event;
-      event.type = EVT_INDEX_CREATED;
-      event.table_name = table_name;
-      event.column = column;
-      VM.event_queue.push_back(event);
+
+      emit_vm_event(EVT_INDEX_CREATED, nullptr, table_name, index->column_index);
+
       break;
     }
 
@@ -603,13 +592,10 @@ static VM_RESULT step() {
         return ERR;
       }
 
+      emit_vm_event(EVT_INDEX_DROPPED, nullptr, table_name, index->column_index);
+
       btree_clear(&index->tree);
       remove_index(table_name, column);
-      VmEvent event;
-      event.type = EVT_INDEX_DROPPED;
-      event.table_name = table_name;
-      event.column = column;
-      VM.event_queue.push_back(event);
       break;
     }
     }

@@ -4,31 +4,31 @@
 #include "btree.hpp"
 #include <cstdint>
 
-struct SchemaArena {};
+struct RegistryArena {};
 
 struct ColumnInfo {
-  Str<SchemaArena> name;
+  Str<RegistryArena> name;
   DataType type;
 };
 
-struct TableSchema {
-  Str<SchemaArena> table_name;
+struct Schema {
+  Str<RegistryArena> table_name;
   uint32_t record_size;
-  Vec<ColumnInfo, SchemaArena> columns;
-  Vec<uint32_t, SchemaArena> column_offsets;
+  Vec<ColumnInfo, RegistryArena> columns;
+  Vec<uint32_t, RegistryArena> column_offsets;
   DataType key_type() const { return columns[0].type; }
 };
 
 struct Index {
   BTree tree;
-  Str<SchemaArena> index_name;
+  Str<RegistryArena> index_name;
   uint32_t column_index;
 };
 
 struct Table {
-  TableSchema schema;
+  Schema schema;
   BTree tree;
-  Vec<Index, SchemaArena> indexes;
+  Vec<Index, RegistryArena> indexes;
 };
 
 // Schema registry functions
@@ -45,6 +45,6 @@ bool remove_index(const char* table_name, uint32_t column_index);
 void clear_schema();
 
 // Utility functions
-void print_record(uint8_t* record, TableSchema* schema);
-uint32_t calculate_record_size(const Vec<ColumnInfo, SchemaArena>& columns);
-void calculate_column_offsets(TableSchema* schema);
+void print_record(uint8_t* record, Schema* schema);
+uint32_t calculate_record_size(const Vec<ColumnInfo, RegistryArena>& columns);
+void calculate_column_offsets(Schema* schema);

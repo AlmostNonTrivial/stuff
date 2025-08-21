@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <cstring>
 
-static Vec<Table, SchemaArena> tables;
+static Vec<Table, RegistryArena> tables;
 
 Table *get_table(const char *table_name) {
   int index = tables.find_with([table_name](const Table *table) {
@@ -105,10 +105,10 @@ void clear_schema() {
 
   tables.clear();
   // not sure about this
-  arena::reset<SchemaArena>();
+  arena::reset<RegistryArena>();
 }
 
-uint32_t calculate_record_size(const Vec<ColumnInfo, SchemaArena> &columns) {
+uint32_t calculate_record_size(const Vec<ColumnInfo, RegistryArena> &columns) {
   uint32_t size = 0;
   // Skip column 0 (key) in record size calculation
   for (size_t i = 1; i < columns.size(); i++) {
@@ -117,7 +117,7 @@ uint32_t calculate_record_size(const Vec<ColumnInfo, SchemaArena> &columns) {
   return size;
 }
 
-void calculate_column_offsets(TableSchema *schema) {
+void calculate_column_offsets(Schema *schema) {
   schema->column_offsets.clear();
   schema->column_offsets.push_back(0); // Key has no offset in record
 
@@ -129,7 +129,7 @@ void calculate_column_offsets(TableSchema *schema) {
   schema->record_size = offset;
 }
 
-void print_record(uint8_t *record, TableSchema *schema) {
+void print_record(uint8_t *record, Schema *schema) {
   for (size_t i = 1; i < schema->columns.size(); i++) { // Skip key
     PRINT schema->columns[i].name.c_str() << ": ";
     uint8_t *data = record + schema->column_offsets[i];
@@ -140,8 +140,8 @@ void print_record(uint8_t *record, TableSchema *schema) {
 }
 
 // Helper to get all table names (useful for debugging)
-Vec<Str<SchemaArena>, SchemaArena> get_all_table_names() {
-  Vec<Str<SchemaArena>, SchemaArena> names;
+Vec<Str<RegistryArena>, RegistryArena> get_all_table_names() {
+  Vec<Str<RegistryArena>, RegistryArena> names;
   for (size_t i = 0; i < tables.size(); i++) {
     auto entry = tables[i];
     names.push_back(entry.schema.table_name);

@@ -74,7 +74,7 @@ void sadasd() {
 
 int main() {
     arena::init<QueryArena>(PAGE_SIZE * 30);
-    arena::init<SchemaArena>(PAGE_SIZE * 14);
+    arena::init<RegistryArena>(PAGE_SIZE * 14);
     btree_init("db");
 
     std::vector<const char *> queries = {

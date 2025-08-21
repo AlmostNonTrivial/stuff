@@ -125,15 +125,15 @@ struct Open {
   }
 
   static VMInstruction create_ephemeral(int32_t cursor_id,
-      TableSchema * schema) {
+      Schema * schema) {
     uint8_t flags = (0x01) | (0x02);
     return {OP_Open, cursor_id, 0, 0, schema, flags};
   }
 
   static int32_t cursor_id(const VMInstruction &inst) { return inst.p1; }
 
-  static TableSchema* ephemeral_schema(const VMInstruction &inst) {
-    return (TableSchema*)inst.p4;
+  static Schema* ephemeral_schema(const VMInstruction &inst) {
+    return (Schema*)inst.p4;
   }
   static int32_t index_col(const VMInstruction &inst) { return inst.p3; }
   static const char *table_name(const VMInstruction &inst) {
@@ -282,16 +282,16 @@ struct Logic {
 };
 
 struct Result {
-  static VMInstruction create(int32_t reg, int32_t size) {
-    return {OP_Result, reg, size, 0, nullptr, 0};
+  static VMInstruction create(int32_t first_reg, int32_t reg_count) {
+    return {OP_Result, first_reg, reg_count, 0, nullptr, 0};
   }
-  static int32_t reg(const VMInstruction &inst) { return inst.p1; }
-  static int32_t size(const VMInstruction &inst) { return inst.p2; }
+  static int32_t first_reg(const VMInstruction &inst) { return inst.p1; }
+  static int32_t reg_count(const VMInstruction &inst) { return inst.p2; }
 };
 
 // Schema Operations
 struct Schema {
-  static VMInstruction create_table(TableSchema *schema) {
+  static VMInstruction create_table(Schema *schema) {
     return {OP_Schema, 0, 0, 0, schema, SCHEMA_CREATE_TABLE};
   }
   static VMInstruction drop_table(const char *table_name) {
@@ -310,8 +310,8 @@ struct Schema {
   static SchemaOp op_type(const VMInstruction &inst) {
     return (SchemaOp)inst.p5;
   }
-  static TableSchema *table_schema(const VMInstruction &inst) {
-    return (TableSchema *)inst.p4;
+  static Schema *table_schema(const VMInstruction &inst) {
+    return (Schema *)inst.p4;
   }
   static const char *table_name(const VMInstruction &inst) {
     return (const char *)inst.p4;
@@ -338,7 +338,7 @@ struct Transaction {
 } // namespace Opcodes
 
 // VM Runtime Definitions
-#define REGISTERS 20
+#define REGISTERS 40
 #define CURSORS 10
 
 enum VM_RESULT { OK, ABORT, ERR };

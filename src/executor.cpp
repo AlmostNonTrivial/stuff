@@ -52,7 +52,7 @@ static const char *type_to_string(DataType type) {
   }
 }
 
-static char *generate_create_sql(const TableSchema *schema) {
+static char *generate_create_sql(const Schema *schema) {
   // Build CREATE TABLE statement
   char* buffer = (char*)arena::alloc<QueryArena>(1024);
   int offset = snprintf(buffer, 1024, "CREATE TABLE %s (",
@@ -177,7 +177,7 @@ static void delete_master_table_entry(const char *name) {
 
 static void create_master_table() {
   // Create the master table schema
-  TableSchema *schema = (TableSchema *)arena::alloc<QueryArena>(sizeof(TableSchema));
+  Schema *schema = (Schema *)arena::alloc<QueryArena>(sizeof(Schema));
   schema->table_name = "sqlite_master";
 
   // Columns: id (key), type, name, tbl_name, rootpage, sql
