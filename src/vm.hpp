@@ -30,8 +30,13 @@ enum EventType {
   EVT_TRANSACTION_ROLLBACK
 };
 
-
-
+enum ArithOp : uint8_t {
+    ARITH_ADD = 0,
+    ARITH_SUB = 1,
+    ARITH_MUL = 2,
+    ARITH_DIV = 3,
+    ARITH_MOD = 4,
+};
 struct VmEvent {
   EventType type;
   void *data;
@@ -58,6 +63,16 @@ Queue<VmEvent, QueryArena> vm_events();
 // Forward declaration for schema
 struct TableSchema;
 
+inline const char* arith_op_to_string(ArithOp op) {
+    switch (op) {
+        case ARITH_ADD: return "ADD";
+        case ARITH_SUB: return "SUB";
+        case ARITH_MUL: return "MUL";
+        case ARITH_DIV: return "DIV";
+        case ARITH_MOD: return "MOD";
+        default: return "???";
+    }
+}
 enum OpCode : uint32_t {
   // Control flow
   OP_Trace = 0,
@@ -72,6 +87,7 @@ enum OpCode : uint32_t {
   OP_Last = 14,
   OP_Next = 15,
   OP_Prev = 16,
+
 
   // Unified Seek operation
   OP_Seek = 20,
@@ -91,7 +107,7 @@ enum OpCode : uint32_t {
 
   // Unified Comparison operation
   OP_Compare = 50,
-
+ OP_Arithmetic = 51,
   OP_Flush = 71,
 
   // Schema operations
@@ -177,6 +193,26 @@ struct Halt {
   static void print(const VMInstruction &inst) {
     printf("exit_code=%d", exit_code(inst));
   }
+};
+
+
+struct Arithmetic {
+    static VMInstruction create(int32_t dest_reg, int32_t left_reg, int32_t right_reg, ArithOp op) {
+        return {OP_Arithmetic, dest_reg, left_reg, right_reg, nullptr, (uint8_t)op};
+    }
+    static int32_t dest_reg(const VMInstruction& inst) { return inst.p1; }
+    static int32_t left_reg(const VMInstruction& inst) { return inst.p2; }
+    static int32_t right_reg(const VMInstruction& inst) { return inst.p3; }
+    static ArithOp op(const VMInstruction& inst) { return (ArithOp)inst.p5; }
+
+    static void print(const VMInstruction& inst) {
+        const char* op_str[] = {"+", "-", "*", "/", "%"};
+        printf("r%d = r%d %s r%d",
+               dest_reg(inst),
+               left_reg(inst),
+               op_str[op(inst)],
+               right_reg(inst));
+    }
 };
 
 // Cursor Operations
@@ -577,6 +613,7 @@ inline const char *opcode_to_string(OpCode op) {
   case OP_CreateIndex: return "CreateIndex";
   case OP_DropIndex: return "DropIndex";
   case OP_Begin: return "Begin";
+   case OP_Arithmetic: return "Arithmetic";
   case OP_Commit: return "Commit";
   case OP_Rollback: return "Rollback";
   case OP_OpenMemTree: return "OpenMemTree";
@@ -650,7 +687,14 @@ inline void debug_print_instruction(const VMInstruction &inst, size_t index) {
       printf(" done->%d", inst.p2);
     }
     break;
-
+case OP_Arithmetic:
+const char* op_symbols[] = {"+", "-", "*", "/", "%"};
+         printf("r%d = r%d %s r%d",
+                inst.p1,
+                inst.p2,
+                op_symbols[inst.p5],
+                inst.p3);
+         break;
   case OP_Seek:
     printf("cursor=%d key=r%d op=%s", inst.p1, inst.p2, compare_op_to_string((CompareOp)inst.p5));
     if (inst.p3 >= 0) {

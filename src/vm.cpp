@@ -87,14 +87,12 @@ static struct {
 
 static void vm_set_value(TypedValue *val, DataType type, const void *data) {
   val->type = type;
-  val->data = (uint8_t*)arena::alloc<QueryArena>((uint32_t)type);
+  val->data = (uint8_t *)arena::alloc<QueryArena>((uint32_t)type);
   memcpy(val->data, data, (uint32_t)type);
 }
 
 // Public VM functions
-void vm_shutdown() {
-  VM.initialized = false;
-}
+void vm_shutdown() { VM.initialized = false; }
 
 void vm_reset() {
   VM.pc = 0;
@@ -119,7 +117,6 @@ bool vm_is_halted() { return VM.halted; }
 // Main execution step
 VM_RESULT vm_step() {
   VMInstruction *inst = &VM.program[VM.pc];
-
 
   switch (inst->opcode) {
   case OP_Halt:
@@ -167,17 +164,92 @@ VM_RESULT vm_step() {
     return OK;
   }
 
+  case OP_Arithmetic: {
+    int32_t dest = Opcodes::Arithmetic::dest_reg(*inst);
+    int32_t left = Opcodes::Arithmetic::left_reg(*inst);
+    int32_t right = Opcodes::Arithmetic::right_reg(*inst);
+    ArithOp op = Opcodes::Arithmetic::op(*inst);
+
+    TypedValue *a = &VM.registers[left];
+    TypedValue *b = &VM.registers[right];
+    TypedValue *result = &VM.registers[dest];
+
+    // Determine output type (use larger of the two)
+    DataType output_type = (a->type > b->type) ? a->type : b->type;
+
+    // Convert both operands to uint64_t for calculation
+    uint64_t val_a = 0, val_b = 0;
+
+    // Extract value based on type
+    switch (a->type) {
+    case TYPE_UINT32:
+      val_a = *(uint32_t *)a->data;
+      break;
+    case TYPE_UINT64:
+      val_a = *(uint64_t *)a->data;
+      break;
+    default:
+      return ERR; // Non-numeric type
+    }
+
+    switch (b->type) {
+    case TYPE_UINT32:
+      val_b = *(uint32_t *)b->data;
+      break;
+    case TYPE_UINT64:
+      val_b = *(uint64_t *)b->data;
+      break;
+    default:
+      return ERR; // Non-numeric type
+    }
+
+    // Perform arithmetic
+    uint64_t val_result = 0;
+    switch (op) {
+    case ARITH_ADD:
+      val_result = val_a + val_b;
+      break;
+    case ARITH_SUB:
+      val_result = val_a - val_b;
+      break;
+    case ARITH_MUL:
+      val_result = val_a * val_b;
+      break;
+    case ARITH_DIV:
+      if (val_b == 0)
+        return ERR;
+      val_result = val_a / val_b;
+      break;
+    case ARITH_MOD:
+      if (val_b == 0)
+        return ERR;
+      val_result = val_a % val_b;
+      break;
+    }
+
+    // Store result in appropriate type
+    if (output_type == TYPE_UINT32) {
+      uint32_t val32 = (uint32_t)val_result;
+      vm_set_value(result, TYPE_UINT32, &val32);
+    } else {
+      vm_set_value(result, TYPE_UINT64, &val_result);
+    }
+
+    VM.pc++;
+    return OK;
+  }
+
   case OP_OpenRead:
   case OP_OpenWrite: {
     int32_t cursor_id = (inst->opcode == OP_OpenRead)
-        ? Opcodes::OpenRead::cursor_id(*inst)
-        : Opcodes::OpenWrite::cursor_id(*inst);
+                            ? Opcodes::OpenRead::cursor_id(*inst)
+                            : Opcodes::OpenWrite::cursor_id(*inst);
     const char *table_name = (inst->opcode == OP_OpenRead)
-        ? Opcodes::OpenRead::table_name(*inst)
-        : Opcodes::OpenWrite::table_name(*inst);
+                                 ? Opcodes::OpenRead::table_name(*inst)
+                                 : Opcodes::OpenWrite::table_name(*inst);
     int32_t index_column = (inst->opcode == OP_OpenRead)
-        ? Opcodes::OpenRead::index_col(*inst)
-        : Opcodes::OpenWrite::index_col(*inst);
+                               ? Opcodes::OpenRead::index_col(*inst)
+                               : Opcodes::OpenWrite::index_col(*inst);
 
     Table *table = get_table(table_name);
     if (!table) {
@@ -417,14 +489,16 @@ VM_RESULT vm_step() {
         }
       }
       uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
-      success = btree_cursor_insert(&cursor->btree_cursor, key->data, record->data);
-      if(current_root != cursor->btree_cursor.tree->root_page_index) {
-         VmEvent event;
-         event.type = EVT_BTREE_ROOT_CHANGED;
-         event.context.table_info.table_name = cursor->schema->table_name.c_str();
-         event.context.table_info.column = cursor->is_index ? 0 : cursor->column;
+      success =
+          btree_cursor_insert(&cursor->btree_cursor, key->data, record->data);
+      if (current_root != cursor->btree_cursor.tree->root_page_index) {
+        VmEvent event;
+        event.type = EVT_BTREE_ROOT_CHANGED;
+        event.context.table_info.table_name =
+            cursor->schema->table_name.c_str();
+        event.context.table_info.column = cursor->is_index ? 0 : cursor->column;
 
-         VM.events.push(event);
+        VM.events.push(event);
       }
     }
 
@@ -446,12 +520,13 @@ VM_RESULT vm_step() {
     } else {
       btree_cursor_delete(&cursor->btree_cursor);
       uint32_t current_root = cursor->btree_cursor.tree->root_page_index;
-      if(current_root != cursor->btree_cursor.tree->root_page_index) {
-         VmEvent event;
-         event.type = EVT_BTREE_ROOT_CHANGED;
-         event.context.table_info.table_name = cursor->schema->table_name.c_str();
-         event.context.table_info.column = cursor->is_index ? 0 : cursor->column;
-         VM.events.push(event);
+      if (current_root != cursor->btree_cursor.tree->root_page_index) {
+        VmEvent event;
+        event.type = EVT_BTREE_ROOT_CHANGED;
+        event.context.table_info.table_name =
+            cursor->schema->table_name.c_str();
+        event.context.table_info.column = cursor->is_index ? 0 : cursor->column;
+        VM.events.push(event);
       }
     }
 
@@ -466,9 +541,9 @@ VM_RESULT vm_step() {
     VmCursor *cursor = &VM.cursors[cursor_id];
     TypedValue *record = &VM.registers[record_reg];
 
-    if(cursor->is_index) {
-        // updates only on b+tree
-        return ERR;
+    if (cursor->is_index) {
+      // updates only on b+tree
+      return ERR;
     }
 
     if (cursor->is_memory) {
@@ -521,7 +596,6 @@ VM_RESULT vm_step() {
     }
     return OK;
   }
-
 
   case OP_Flush: {
     int32_t cursor_id = Opcodes::Flush::cursor_id(*inst);
@@ -705,7 +779,6 @@ VM_RESULT vm_execute(Vector<VMInstruction, QueryArena> &instructions) {
   vm_reset();
   VM.program.set(instructions);
 
-
   while (!VM.halted && VM.pc < VM.program.size()) {
     VM_RESULT result = vm_step();
     if (result != OK) {
@@ -715,10 +788,6 @@ VM_RESULT vm_execute(Vector<VMInstruction, QueryArena> &instructions) {
   return OK;
 }
 
-void vm_set_result_callback(ResultCallback callback) {
-  VM.callback = callback;
-}
+void vm_set_result_callback(ResultCallback callback) { VM.callback = callback; }
 
-Queue<VmEvent, QueryArena> vm_events() {
-    return VM.events;
-}
+Queue<VmEvent, QueryArena> vm_events() { return VM.events; }
