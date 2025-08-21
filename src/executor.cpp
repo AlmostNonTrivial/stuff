@@ -543,10 +543,10 @@ void execute(const char *sql) {
     // Build and execute program
     Vector<VMInstruction, QueryArena> program = build_from_ast(statement);
 
-    debug_print_program(program);
-    if(statement->type == AST_SELECT){
-        _debug = true;
-    }
+    // debug_print_program(program);
+    // if(statement->type == AST_SELECT){
+    //     _debug = true;
+    // }
 
     VM_RESULT result = vm_execute(program);
 

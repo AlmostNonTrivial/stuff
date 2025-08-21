@@ -4,9 +4,7 @@
 #include "btree.hpp"
 #include "defs.hpp"
 #include "memtree.hpp"
-#include "pager.hpp"
 #include "schema.hpp"
-#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -110,7 +108,7 @@ static void set_register(TypedValue *dest, TypedValue *src) {
 // Public VM functions
 
 
-void reset() {
+static void reset() {
   VM.pc = 0;
   VM.halted = false;
 
@@ -123,10 +121,10 @@ void reset() {
   VM.events.clear();
 }
 
-Queue<VmEvent, QueryArena> &vm_events() { return VM.events; }
+
 
 // Main execution step
-VM_RESULT step() {
+static VM_RESULT step() {
   VMInstruction *inst = &VM.program[VM.pc];
 
   switch (inst->opcode) {
@@ -687,3 +685,4 @@ VM_RESULT vm_execute(Vector<VMInstruction, QueryArena> &instructions) {
 }
 
 void vm_set_result_callback(ResultCallback callback) { VM.callback = callback; }
+Queue<VmEvent, QueryArena> &vm_events() { return VM.events; }
