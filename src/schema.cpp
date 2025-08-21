@@ -7,9 +7,10 @@
 static Vec<Table, SchemaArena> tables;
 
 Table *get_table(const char *table_name) {
-  int index = tables.find_with(table_name, [](const Table *table, char *name) {
-    return table->schema.table_name.starts_with(name);
+  int index = tables.find_with([table_name](const Table *table) {
+    return table->schema.table_name.starts_with(table_name);
   });
+  return &tables[index];
 }
 
 Index *get_index(const char *table_name, uint32_t column_index) {
@@ -22,7 +23,11 @@ Index *get_index(const char *table_name, uint32_t column_index) {
     return nullptr;
   }
 
-  return table->indexes.find(column_index);
+  int index= table->indexes.find_with([column_index](const Index* index) {
+      return index->column_index == column_index;
+  });
+
+  return &table->indexes[index];
 }
 
 uint32_t get_column_index(const char *table_name, const char *col_name) {
@@ -32,7 +37,7 @@ uint32_t get_column_index(const char *table_name, const char *col_name) {
   }
 
   for (size_t i = 0; i < table->schema.columns.size(); i++) {
-    if (table->schema.columns[i].name.equals(col_name)) {
+    if (table->schema.columns[i].name.starts_with(col_name)) {
       return i;
     }
   }
@@ -65,8 +70,8 @@ bool remove_table(const char *table_name) {
   }
 
   // Note: btree cleanup should be done by caller
-  tables.erase_with(table_name, [](const Table& entry, const char * name) {
-      return entry.schema.table_name.starts_with(name);
+  tables.erase_with([table_name](const Table& entry) {
+      return entry.schema.table_name.starts_with(table_name);
   });
   return true;
 }
@@ -113,12 +118,12 @@ uint32_t calculate_record_size(const Vec<ColumnInfo, SchemaArena> &columns) {
 }
 
 void calculate_column_offsets(TableSchema *schema) {
-  schema->column_offsets.resize(schema->columns.size());
-  schema->column_offsets[0] = 0; // Key has no offset in record
+  schema->column_offsets.clear();
+  schema->column_offsets.push_back(0); // Key has no offset in record
 
   uint32_t offset = 0;
   for (size_t i = 1; i < schema->columns.size(); i++) {
-    schema->column_offsets[i] = offset;
+    schema->column_offsets.push_back( offset);
     offset += schema->columns[i].type;
   }
   schema->record_size = offset;

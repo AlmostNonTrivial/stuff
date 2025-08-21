@@ -203,9 +203,9 @@ struct Vec{
 
     // Find with custom comparator (for structs)
     template<typename EqualFn>
-    int find_with(const T &value, EqualFn eq) const {
+    int find_with(EqualFn eq) const {
         for (size_t i = 0; i < count; i++) {
-            if (eq((*this)[i], value)) return (int)i;
+            if (eq((*this)[i])) return (int)i;
         }
         return -1;
     }
@@ -255,8 +255,8 @@ struct Vec{
 
     // Erase with comparator
     template<typename EqualFn>
-    void erase_with(const T &item, EqualFn eq) {
-        int pos = find_with(item, eq);
+    void erase_with( EqualFn eq) {
+        int pos = find_with(eq);
         if (pos != -1) {
             swap_remove(pos);
         }
