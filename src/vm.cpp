@@ -231,7 +231,8 @@ struct VmCursor {
         }
     }
 
-    char *type_name() {
+    const char *type_name() {
+
         switch (type) {
         case EPHEMERAL:
             return "MEMTREE";
@@ -619,6 +620,8 @@ static VM_RESULT step() {
             printf("=> Closed cursor %d", cursor_id);
         }
 
+        // if(VM.cursors[cursor_id] == 0)
+
         // Note: cursor destructor handles cleanup
         VM.pc++;
         return OK;
@@ -791,6 +794,8 @@ static VM_RESULT step() {
         return ERR;
     }
 }
+
+
 
 // ============================================================================
 // Main VM Execute Function

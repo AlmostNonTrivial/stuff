@@ -2,6 +2,7 @@
 #include "compile.hpp"
 #include "arena.hpp"
 #include "defs.hpp"
+#include "parser.hpp"
 #include "schema.hpp"
 #include "vm.hpp"
 #include <algorithm>
@@ -123,7 +124,7 @@ struct ProgramBuilder {
 //   return conditions;
 // }
 
-Vec<VMInstruction, QueryArena> build_select_from_ast(SelectNode *ast) {
+Vec<VMInstruction, QueryArena> build_select_from_ast(ASTNode*ast) {
 
   ProgramBuilder program;
 
