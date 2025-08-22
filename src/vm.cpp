@@ -44,10 +44,18 @@ struct VmCursor {
         MemTree mem_tree; // For EPHEMERAL (owned by cursor)
     } storage;
 
+
+    // ========================================================================
+    // Helper functions
+    // ========================================================================
+
+    uint32_t record_size() const {
+        return layout.record_size;
+    }
+
     // ========================================================================
     // Initialization
     // ========================================================================
-
 
     void open_table(const RecordLayout &table_layout, BTree *tree) {
         type = TABLE;
@@ -56,7 +64,6 @@ struct VmCursor {
         cursor.btree.tree = storage.btree_ptr;
         cursor.btree.state = CURSOR_INVALID;
     }
-
 
     void open_index(const RecordLayout &index_layout, BTree *tree) {
         type = INDEX;
@@ -75,51 +82,71 @@ struct VmCursor {
     }
 
     // ========================================================================
-    // Unified Navigation
+    // Unified Navigation - Using switch statements as requested
     // ========================================================================
 
     bool rewind(bool to_end = false) {
-        if (type == EPHEMERAL) {
+        switch (type) {
+        case EPHEMERAL:
             return to_end ? memcursor_last(&cursor.mem) : memcursor_first(&cursor.mem);
-        } else {
+        case TABLE:
+        case INDEX:
             return to_end ? btree_cursor_last(&cursor.btree) : btree_cursor_first(&cursor.btree);
+        default:
+            return false;
         }
     }
 
     bool step(bool forward = true) {
-        if (type == EPHEMERAL) {
+        // Keep as ternary as requested
+        switch (type) {
+        case EPHEMERAL:
             return forward ? memcursor_next(&cursor.mem) : memcursor_previous(&cursor.mem);
-        } else {
-            return forward ? btree_cursor_next(&cursor.btree)
-                           : btree_cursor_previous(&cursor.btree);
+        case TABLE:
+        case INDEX:
+            return forward ? btree_cursor_next(&cursor.btree) : btree_cursor_previous(&cursor.btree);
+        default:
+            return false;
         }
     }
 
     bool seek(CompareOp op, uint8_t *key) {
-        if (type == EPHEMERAL) {
+        switch (type) {
+        case EPHEMERAL:
             return memcursor_seek_cmp(&cursor.mem, key, op);
-        } else {
+        case TABLE:
+        case INDEX:
             return btree_cursor_seek_cmp(&cursor.btree, key, op);
+        default:
+            return false;
         }
     }
 
     // ========================================================================
-    // Data Access - The Critical Part
+    // Data Access - Using switch statements
     // ========================================================================
 
     uint8_t *get_key() {
-        if (type == EPHEMERAL) {
+        switch (type) {
+        case EPHEMERAL:
             return memcursor_key(&cursor.mem);
-        } else {
+        case TABLE:
+        case INDEX:
             return btree_cursor_key(&cursor.btree);
+        default:
+            return nullptr;
         }
     }
 
     uint8_t *get_record() {
-        if (type == EPHEMERAL) {
+        switch (type) {
+        case EPHEMERAL:
             return memcursor_record(&cursor.mem);
-        } else {
+        case TABLE:
+        case INDEX:
             return btree_cursor_record(&cursor.btree);
+        default:
+            return nullptr;
         }
     }
 
@@ -157,65 +184,48 @@ struct VmCursor {
     }
 
     // ========================================================================
-    // Modification Operations
+    // Modification Operations - Using switch statements
     // ========================================================================
 
     bool insert(uint8_t *key, uint8_t *record) {
-        if (type == EPHEMERAL) {
+        switch (type) {
+        case EPHEMERAL:
             return memcursor_insert(&cursor.mem, key, record);
-        } else {
-            uint32_t old_root = storage.btree_ptr->root_page_index;
-            bool success = btree_cursor_insert(&cursor.btree, key, record);
-
-            // Check if root changed (for event emission)
-            if (success && old_root != storage.btree_ptr->root_page_index) {
-                // VM can check this flag and emit event
-                root_changed = true;
-            }
-            return success;
+        case TABLE:
+        case INDEX: {
+            return btree_cursor_insert(&cursor.btree, key, record);
+        }
+        default:
+            return false;
         }
     }
 
     bool update(uint8_t *record) {
-        if (type == EPHEMERAL) {
+        switch (type) {
+        case EPHEMERAL:
             return memcursor_update(&cursor.mem, record);
-        } else {
+        case TABLE:
+        case INDEX:
             return btree_cursor_update(&cursor.btree, record);
+        default:
+            return false;
         }
     }
 
     bool remove() {
-        if (type == EPHEMERAL) {
+        switch (type) {
+        case EPHEMERAL:
             return memcursor_delete(&cursor.mem);
-        } else {
-            uint32_t old_root = storage.btree_ptr->root_page_index;
-            bool success = btree_cursor_delete(&cursor.btree);
-
-            if (success && old_root != storage.btree_ptr->root_page_index) {
-                root_changed = true;
-            }
-            return success;
+        case TABLE:
+        case INDEX: {
+            return btree_cursor_delete(&cursor.btree);
+        }
+        default:
+            return false;
         }
     }
-
-    // ========================================================================
-    // State & Metadata
-    // ========================================================================
-
-    bool is_valid() {
-        if (type == EPHEMERAL) {
-            return cursor.mem.state == MemCursor::VALID;
-        } else {
-            return cursor.btree.state == CURSOR_VALID;
-        }
-    }
-
-    uint32_t record_size() const { return layout.record_size; }
-
-    DataType key_type() const { return layout.key_type(); }
-
-    bool root_changed = false; // Flag for VM to check
 };
+
 
 // Helper function for column access
 
@@ -248,37 +258,6 @@ static void build_record(uint8_t *data, int32_t first_reg, int32_t count) {
         memcpy(data + offset, val->data, size);
         offset += size;
     }
-}
-
-static void emit_vm_event(uint32_t evt, VmCursor *cursor = nullptr
-                          //                         const char *table_name = nullptr
-                          //                         uint32_t col_index = 0)
-
-) {
-    // VmEvent event;
-
-    // switch (evt) {
-    // case EVT_BTREE_ROOT_CHANGED: {
-    //   event.type = evt;
-    //   event.table_name = cursor->table_name;
-    //   event.column = cursor->index_column;
-    //   break;
-    // }
-    // case EVT_INDEX_CREATED:
-    // case EVT_TABLE_CREATED:
-    // case EVT_INDEX_DROPPED:
-    // case EVT_TABLE_DROPPED: {
-    //   event.type = evt;
-    //   event.table_name = table_name;
-    //   event.column = col_index;
-    //   break;
-    // }
-    // default:
-    //   event.type = evt;
-    //   break;
-    // }
-
-    // VM.event_queue.push_back(event);
 }
 
 static void reset() {
@@ -320,29 +299,32 @@ static VM_RESULT step() {
         VM.pc = Opcodes::Goto::target(*inst);
         return OK;
 
+    case OP_Load: {
+        int32_t dest_reg = Opcodes::Move::dest_reg(*inst);
+        uint8_t *data = Opcodes::Move::data(*inst);
+        DataType type = Opcodes::Move::type(*inst);
+
+        if (_debug) {
+            printf("=> R[%d] = ", dest_reg);
+            print_value(type, data);
+            printf(" (type=%d)", type);
+        }
+        set_register(&VM.registers[dest_reg], data, type);
+
+        VM.pc++;
+        return OK;
+    }
     case OP_Move: {
         int32_t dest_reg = Opcodes::Move::dest_reg(*inst);
-
-        if (Opcodes::Move::is_load(*inst)) {
-            uint8_t *data = Opcodes::Move::data(*inst);
-            DataType type = Opcodes::Move::type(*inst);
-
-            if (_debug) {
-                printf("=> R[%d] = ", dest_reg);
-                print_value(type, data);
-                printf(" (type=%d)", type);
-            }
-            set_register(&VM.registers[dest_reg], data, type);
-        } else {
-            int32_t src_reg = Opcodes::Move::src_reg(*inst);
-            auto *src = &VM.registers[src_reg];
-            if (_debug) {
-                printf("=> R[%d] = ", dest_reg);
-                print_value(src->type, src->data);
-                printf(" (type=%d)", src->type);
-            }
-            set_register(&VM.registers[dest_reg], src);
+        int32_t src_reg = Opcodes::Move::src_reg(*inst);
+        auto *src = &VM.registers[src_reg];
+        if (_debug) {
+            printf("=> R[%d] = ", dest_reg);
+            print_value(src->type, src->data);
+            printf(" (type=%d)", src->type);
         }
+        set_register(&VM.registers[dest_reg], src);
+
 
         VM.pc++;
         return OK;
@@ -670,10 +652,6 @@ static VM_RESULT step() {
 
         bool success = cursor->insert(key->data, data);
 
-        if (cursor->root_changed) {
-            emit_vm_event(EVT_BTREE_ROOT_CHANGED, cursor);
-            cursor->root_changed = false;
-        }
 
         if (!success) {
             return ERR;
@@ -698,128 +676,117 @@ static VM_RESULT step() {
         return OK;
     }
 
-    case OP_Schema: {
-        SchemaOp op_type = Opcodes::Schema::op_type(*inst);
+    case OP_CreateTable: {
+        int start_reg = Opcodes::Schema::create_table_start_reg(*inst);
+        int reg_count = Opcodes::Schema::create_table_reg_count(*inst);
+        char *table_name = Opcodes::Schema::create_table_table_name(*inst);
 
-        switch (op_type) {
-        case SCHEMA_CREATE_TABLE:
-        case SCHEMA_CREATE_INDEX:
-        {
+        EmbVec<ColumnInfo, 10> columns;
+        int row_size = 0;
+        for (int i = 1; i < reg_count; i++) {
+            VMValue *col_name = &VM.registers[start_reg + i - 1];
+            VMValue *col_type = &VM.registers[start_reg + i];
+            ColumnInfo info;
+            info.name.assign((char *)col_name->data);
+            info.type = col_type->type;
+            row_size += col_type->type;
+            columns.push_back(info);
+        }
+        DataType key_size = columns[0].type;
+        uint32_t record_size = row_size - key_size;
 
-            int start_reg = Opcodes::Schema::create_table_start_reg(*inst);
-            int reg_count = Opcodes::Schema::create_table_reg_count(*inst);
-            char * table_name = Opcodes::Schema::create_table_table_name(*inst);
+        BTree tree = btree_create(key_size, record_size, BPLUS);
 
-            EmbVec<ColumnInfo, 10> columns;
-            int row_size = 0;
-            for (int i = 1; i < reg_count; i++) {
-                VMValue *col_name = &VM.registers[start_reg + i - 1];
-                VMValue *col_type = &VM.registers[start_reg + i];
-                ColumnInfo info;
-                info.name.assign((char *)col_name->data);
-                info.type = col_type->type;
-                row_size += col_type->type;
-                columns.push_back(info);
-            }
-            DataType key_size = columns[0].type;
-            uint32_t record_size = row_size - key_size;
-
-            BTree tree = btree_create(key_size, record_size, BPLUS);
-
-            if(!add_table(&tree,  &columns, table_name)){
-                return ERR;
-            }
-
-            break;
+        if (!add_table(&tree, &columns, table_name)) {
+            return ERR;
         }
 
-        case SCHEMA_CREATE_INDEX: {
+        break;
+    }
+    case OP_CreateIndex: {
 
-                // lets load the column name
-                  const char *table_name = Opcodes::Schema::table_name(*inst);
-                  int column = Opcodes::Schema::column_name_register(*inst);
+        // lets load the column name
+        const char *table_name = Opcodes::Schema::table_name(*inst);
+        int column = Opcodes::Schema::column_name_register(*inst);
 
-                  VMValue * column_name = &VM.registers[column];
-
-
-                  Table *table = get_table(table_name);
-                  uint32_t index = get_column_index(table_name, (char*)column_name->data);
-                  DataType type = get_column_type(table_name, index);
-
-                  EmbVec<ColumnInfo, 2> columns;
-
-                  columns.push_back(table->columns[column]);
-                  columns.push_back(table->columns[0]);
+        VMValue *column_name = &VM.registers[column];
 
 
-                  BTree tree = btree_create(columns[0].type, columns[1].type ,BTREE);
+        Table *table = get_table(table_name);
+        uint32_t index = get_column_index(table_name, (char *)column_name->data);
+        DataType type = get_column_type(table_name, index);
 
-                  add_index(&tree, columns, table_name);
+        EmbVec<ColumnInfo, 2> columns;
+
+        columns.push_back(table->columns[column]);
+        columns.push_back(table->columns[0]);
 
 
-                  break;
-              }
+        BTree tree = btree_create(columns[0].type, columns[1].type, BTREE);
 
-        case SCHEMA_DROP_TABLE: {
-            const char *table_name = Opcodes::Schema::table_name(*inst);
+        add_index(&tree, columns, table_name);
 
-            Table *table = get_table(table_name);
 
-            btree_clear(&table->tree);
-            for (size_t i = 0; i < table->indexes.size(); i++) {
-                BTree *tree = &table->indexes[i].tree;
-                btree_clear(tree);
-            }
+        break;
+    }
 
-            remove_table(table_name);
-            break;
+    case OP_DropTable: {
+        const char *table_name = Opcodes::Schema::table_name(*inst);
+
+        Table *table = get_table(table_name);
+
+        btree_clear(&table->tree);
+        for (size_t i = 0; i < table->indexes.size(); i++) {
+            BTree *tree = &table->indexes[i].tree;
+            btree_clear(tree);
         }
 
+        remove_table(table_name);
+        break;
+    }
+    case OP_DropIndex: {
+        const char *table_name = Opcodes::Schema::table_name(*inst);
+        int32_t column = Opcodes::Schema::column_index(*inst);
 
+        Index *index = get_index(table_name, column);
 
-        case SCHEMA_DROP_INDEX: {
-            const char *table_name = Opcodes::Schema::table_name(*inst);
-            int32_t column = Opcodes::Schema::column_index(*inst);
+        btree_clear(&index->tree);
+        remove_index(table_name, column);
+        break;
+    }
+    }
 
-            Index *index = get_index(table_name, column);
+    VM.pc++;
+    return OK;
+}
 
-            btree_clear(&index->tree);
-            remove_index(table_name, column);
-            break;
-        }
-        }
+case OP_Transaction: {
+    TransactionOp op_type = Opcodes::Transaction::op_type(*inst);
 
+    switch (op_type) {
+    case TXN_BEGIN:
+        btree_begin_transaction();
         VM.pc++;
         return OK;
+
+    case TXN_COMMIT:
+        btree_commit();
+        VM.pc++;
+        return OK;
+
+    case TXN_ROLLBACK:
+        btree_rollback();
+        VM.pc++;
+        return ABORT;
     }
 
-    case OP_Transaction: {
-        TransactionOp op_type = Opcodes::Transaction::op_type(*inst);
+    return ERR;
+}
 
-        switch (op_type) {
-        case TXN_BEGIN:
-            btree_begin_transaction();
-            VM.pc++;
-            return OK;
-
-        case TXN_COMMIT:
-            btree_commit();
-            VM.pc++;
-            return OK;
-
-        case TXN_ROLLBACK:
-            btree_rollback();
-            VM.pc++;
-            return ABORT;
-        }
-
-        return ERR;
-    }
-
-    default:
-        printf("Unknown opcode: %d\n", inst->opcode);
-        return ERR;
-    }
+default:
+printf("Unknown opcode: %d\n", inst->opcode);
+return ERR;
+}
 }
 
 VM_RESULT vm_execute(Vec<VMInstruction, QueryArena> &instructions) {

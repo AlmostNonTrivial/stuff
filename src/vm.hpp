@@ -77,6 +77,7 @@ enum OpCode : uint32_t {
 
   // Register operations
   OP_Move = 40,
+  OP_Load= 41,
 
   // Computation
   OP_Test = 60,
@@ -85,11 +86,12 @@ enum OpCode : uint32_t {
   OP_Logic = 53,
   OP_Result = 54,
 
-  // Schema operations
-  OP_Schema = 80,
 
-  // Transactions
-  OP_Transaction = 90,
+  // Schema operations
+  OP_CreateTable = 81,
+  OP_CreateIndex= 82,
+  OP_DropIndex= 83,
+  OP_DropTable= 84,
 };
 
 struct VMInstruction {
