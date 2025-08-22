@@ -1,11 +1,10 @@
-// schema.hpp (updated with statistics)
+// schema.hpp
 #pragma once
 #include "arena.hpp"
 #include "btree.hpp"
 #include "defs.hpp"
 #include "str.hpp"
 #include "vec.hpp"
-
 #include <cstdint>
 
 #define TABLE_NAME_SIZE TYPE_32
@@ -25,10 +24,13 @@ struct RecordLayout {
     DataType key_type() const { return layout[0]; }
     uint32_t column_count() const { return layout.size(); }
 
-    // Factory methods (unchanged)
+    // Factory methods
     static RecordLayout create(EmbVec<DataType, MAX_RECORD_LAYOUT> &column_types);
     static RecordLayout create(DataType key, DataType rec = TYPE_NULL);
-    uint32_t get_offset(uint32_t col_index) const { return offsets[col_index]; }
+
+    uint32_t get_offset(uint32_t col_index) const {
+        return col_index < offsets.size() ? offsets[col_index] : 0;
+    }
 };
 
 // ============================================================================
@@ -88,8 +90,6 @@ struct Table {
     Vec<ColumnInfo, RegistryArena> columns;
     TableStats stats; // Cached statistics
 
-
-
     RecordLayout to_layout() const {
         EmbVec<DataType, MAX_RECORD_LAYOUT> types;
         for (uint32_t i = 0; i < columns.size(); i++) {
@@ -101,33 +101,11 @@ struct Table {
     // Mark all statistics as stale (called by VM on modifications)
     void invalidate_stats() {
         stats.mark_stale();
-        // for (auto& idx : indexes) {
         for (uint32_t i = 0; i < indexes.size(); i++) {
             indexes[i].stats.mark_stale();
         }
     }
 };
-
-
-struct TableSnapshot {
-    EmbStr<TABLE_NAME_SIZE> name;
-    uint32_t btree_root;
-};
-
-struct IndexSnapshot {
-    TableSnapshot*table;
-    EmbStr<TABLE_NAME_SIZE> name;
-    uint32_t btree_root;
-};
-
-struct SchemaSnapshot {
-    Vec<TableSnapshot, QueryArena> tables;
-    Vec<IndexSnapshot, QueryArena> indexes;
-};
-
-
-SchemaSnapshot create_snapshot();
-
 
 // ============================================================================
 // Schema Registry Functions
@@ -137,9 +115,9 @@ Index *get_index(const char *table_name, uint32_t column_index);
 uint32_t get_column_index(const char *table_name, const char *col_name);
 DataType get_column_type(const char *table_name, uint32_t col_index);
 
-bool add_table(BTree* tree, EmbVec<ColumnInfo, 10> *columns, char * table_name);
+bool add_table(Table *table);
 bool remove_table(const char *table_name);
-bool add_index(BTree*tree, EmbVec<ColumnInfo, 2> columns, char * table_name);
+bool add_index(const char *table_name, Index *index);
 bool remove_index(const char *table_name, uint32_t column_index);
 void clear_schema();
 
@@ -156,6 +134,14 @@ IndexStats *get_index_stats(const char *table_name, uint32_t column_index);
 // Utility Functions
 // ============================================================================
 void print_record(uint8_t *record, const RecordLayout *layout);
+void print_record_with_names(uint8_t *key, uint8_t *record, const Table *table);
 void print_table_info(const char *table_name);
 void print_all_tables();
 bool validate_schema();
+size_t get_table_size(const char *table_name);
+RecordLayout build_layout_from_columns(const char *table_name,
+                                       const Vec<const char *, QueryArena> &column_names);
+Vec<const char *, QueryArena> get_all_table_names();
+bool column_exists_anywhere(const char *col_name);
+uint32_t total_index_count();
+bool stats_are_fresh(const char *table_name);

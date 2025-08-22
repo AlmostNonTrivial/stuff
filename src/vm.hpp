@@ -10,9 +10,6 @@
 #include <cstdio>
 #include <cstring>
 
-
-// #define ALLOC_VALUE()
-
 struct VMValue {
     DataType type;
     uint8_t data[TYPE_256];
@@ -21,86 +18,43 @@ struct VMValue {
 typedef void (*ResultCallback)(Vec<TypedValue, QueryArena> result);
 extern bool _debug;
 
-enum EventType {
-  EVT_TABLE_CREATED,
-  EVT_TABLE_DROPPED,
-  EVT_INDEX_CREATED,
-  EVT_INDEX_DROPPED,
-  EVT_BTREE_ROOT_CHANGED,
-  EVT_ROWS_INSERTED,
-  EVT_ROWS_DELETED,
-  EVT_ROWS_UPDATED,
-  EVT_TRANSACTION_BEGIN,
-  EVT_TRANSACTION_COMMIT,
-  EVT_TRANSACTION_ROLLBACK
-};
-
-struct VmEvent {
-    EventType type;
-    const char *table_name;
-    uint32_t root_page;
-    uint32_t column;
-};
-
-Vec<VmEvent, QueryArena> &vm_events();
-
-enum SchemaOp : uint8_t {
-  SCHEMA_CREATE_TABLE = 0,
-  SCHEMA_DROP_TABLE = 1,
-  SCHEMA_CREATE_INDEX = 2,
-  SCHEMA_DROP_INDEX = 3
-};
-
-enum TransactionOp : uint8_t {
-  TXN_BEGIN = 0,
-  TXN_COMMIT = 1,
-  TXN_ROLLBACK = 2
-};
-
 enum OpCode : uint32_t {
-  // Control flow
-  OP_Goto = 1,
-  OP_Halt = 2,
+    // Control flow
+    OP_Goto = 1,
+    OP_Halt = 2,
 
-  // Cursor operations
-  OP_Open = 10,
-  OP_Close = 12,
-  OP_Rewind = 13,
-  OP_Step = 14,
-  OP_Seek = 20,
+    // Cursor operations
+    OP_Open = 10,
+    OP_Close = 12,
+    OP_Rewind = 13,
+    OP_Step = 14,
+    OP_Seek = 20,
 
-  // Data operations
-  OP_Column = 30,
-  OP_Insert = 34,
-  OP_Delete = 35,
-  OP_Update = 36,
+    // Data operations
+    OP_Column = 30,
+    OP_Insert = 34,
+    OP_Delete = 35,
+    OP_Update = 36,
 
-  // Register operations
-  OP_Move = 40,
-  OP_Load= 41,
+    // Register operations
+    OP_Move = 40,
+    OP_Load = 41,
 
-  // Computation
-  OP_Test = 60,
-  OP_Arithmetic = 51,
-  OP_JumpIf = 52,
-  OP_Logic = 53,
-  OP_Result = 54,
-
-
-  // Schema operations
-  OP_CreateTable = 81,
-  OP_CreateIndex= 82,
-  OP_DropIndex= 83,
-  OP_DropTable= 84,
+    // Computation
+    OP_Test = 60,
+    OP_Arithmetic = 51,
+    OP_JumpIf = 52,
+    OP_Logic = 53,
+    OP_Result = 54,
 };
 
 struct VMInstruction {
-  OpCode opcode;
-  int32_t p1;
-  int32_t p2;
-  int32_t p3;
-  void *p4;
-  uint8_t p5;
+    OpCode opcode;
+    int32_t p1;
+    int32_t p2;
+    int32_t p3;
+    void *p4;
+    uint8_t p5;
 };
 
 // ============================================================================
@@ -146,11 +100,10 @@ namespace Open {
         return {OP_Open, cursor_id, index_col, 0, (void *)table_name, flags};
     }
 
-    inline VMInstruction create_ephemeral(int32_t cursor_id,  EmbVec<DataType, MAX_RECORD_LAYOUT>*layout) {
+    inline VMInstruction create_ephemeral(int32_t cursor_id, RecordLayout *layout) {
         uint8_t flags = (0x01) | (0x02);
         return {OP_Open, cursor_id, 0, 0, layout, flags};
     }
-
 
     inline int32_t cursor_id(const VMInstruction &inst) {
         return inst.p1;
@@ -359,38 +312,46 @@ namespace Update {
 
 // Register Operations
 namespace Move {
-    inline VMInstruction create_load(int32_t dest_reg,  DataType type, void*data) {
-        return {OP_Move, dest_reg, (int32_t)type, -1, data, 0};
+    inline VMInstruction create_load(int32_t dest_reg, DataType type, void *data) {
+        return {OP_Load, dest_reg, (int32_t)type, -1, data, 0};
     }
 
-    inline VMInstruction create_create(int32_t dest_reg,  int32_t src_reg) {
+    inline VMInstruction create_move(int32_t dest_reg, int32_t src_reg) {
         return {OP_Move, dest_reg, 0, src_reg, nullptr, 0};
     }
 
-    inline int32_t is_load(const VMInstruction &inst) {
-            return inst.p3 == -1;
-        }
+    inline bool is_load(const VMInstruction &inst) {
+        return inst.opcode == OP_Load;
+    }
 
     inline int32_t dest_reg(const VMInstruction &inst) {
         return inst.p1;
     }
+
     inline int32_t src_reg(const VMInstruction &inst) {
         return inst.p3;
     }
 
-    inline uint8_t*data(const VMInstruction &inst) {
-       return (uint8_t*)inst.p4;
+    inline uint8_t* data(const VMInstruction &inst) {
+        return (uint8_t*)inst.p4;
     }
+
     inline DataType type(const VMInstruction &inst) {
         return (DataType)inst.p2;
     }
 
     inline void print(const VMInstruction &inst) {
-        printf("Load reg=%d type=%d", inst.p1, inst.p2);
+        if (inst.opcode == OP_Load) {
+            printf("Load reg=%d type=%d", inst.p1, inst.p2);
+            if (inst.p4) {
+                printf(" value=");
+                print_value((DataType)inst.p2, (uint8_t*)inst.p4);
+            }
+        } else {
+            printf("Move dest=%d src=%d", inst.p1, inst.p3);
+        }
     }
 }
-
-
 
 // Computation
 namespace Test {
@@ -522,87 +483,6 @@ namespace Result {
     }
 }
 
-// Schema Operations
-namespace Schema {
-    inline VMInstruction create_table(int start_reg, int count, char * name) {
-        return {OP_Schema, start_reg, count, 0, name, SCHEMA_CREATE_TABLE};
-    }
-
-    inline int create_table_start_reg(const VMInstruction &inst) {
-       return inst.p1;
-    }
-    inline int create_table_reg_count(const VMInstruction &inst) {
-       return inst.p2;
-    }
-    inline char * create_table_table_name(const VMInstruction &inst) {
-       return (char*)inst.p4;
-    }
-
-    inline VMInstruction create_index(const char *table_name, int32_t column_index) {
-        return {OP_Schema, column_index, 0, 0, (void *)table_name, SCHEMA_CREATE_INDEX};
-    }
-
-
-    inline SchemaOp op_type(const VMInstruction &inst) {
-        return (SchemaOp)inst.p5;
-    }
-
-    inline const char* table_name(const VMInstruction &inst) {
-        return (const char *)inst.p4;
-    }
-
-    inline int column_name_register(const VMInstruction &inst) {
-        return inst.p1;
-    }
-
-
-    inline VMInstruction drop_table(const char *table_name) {
-        return {OP_Schema, 0, 0, 0, (void *)table_name, SCHEMA_DROP_TABLE};
-    }
-
-    inline VMInstruction drop_index(const char *table_name, int32_t column_index) {
-        return {OP_Schema, column_index, 0, 0, (void *)table_name, SCHEMA_DROP_INDEX};
-    }
-
-
-    inline void print(const VMInstruction &inst) {
-        const char* op_names[] = {"CREATE_TABLE", "DROP_TABLE", "CREATE_INDEX", "DROP_INDEX"};
-        printf("Schema op=%s", op_names[inst.p5]);
-        if (inst.p5 == SCHEMA_CREATE_TABLE) {
-            // ::Schema* s = table_schema(inst);
-            // printf(" table=%s", s ? s->table_name.c_str() : "null");
-        } else if (inst.p5 == SCHEMA_DROP_TABLE) {
-            printf(" table=%s", table_name(inst));
-        } else {
-            printf(" table=%s col=%d", table_name(inst), inst.p1);
-        }
-    }
-}
-
-// Transactions
-namespace Transaction {
-    inline VMInstruction begin() {
-        return {OP_Transaction, 0, 0, 0, nullptr, TXN_BEGIN};
-    }
-
-    inline VMInstruction commit() {
-        return {OP_Transaction, 0, 0, 0, nullptr, TXN_COMMIT};
-    }
-
-    inline VMInstruction rollback() {
-        return {OP_Transaction, 0, 0, 0, nullptr, TXN_ROLLBACK};
-    }
-
-    inline TransactionOp op_type(const VMInstruction &inst) {
-        return (TransactionOp)inst.p5;
-    }
-
-    inline void print(const VMInstruction &inst) {
-        const char* op_names[] = {"BEGIN", "COMMIT", "ROLLBACK"};
-        printf("Transaction %s", op_names[inst.p5]);
-    }
-}
-
 } // namespace Opcodes
 
 // ============================================================================
@@ -625,14 +505,12 @@ inline const char* opcode_name(OpCode op) {
         case OP_Delete: return "Delete";
         case OP_Update: return "Update";
         case OP_Move: return "Move";
-
+        case OP_Load: return "Load";
         case OP_Test: return "Test";
         case OP_Arithmetic: return "Arithmetic";
         case OP_JumpIf: return "JumpIf";
         case OP_Logic: return "Logic";
         case OP_Result: return "Result";
-        case OP_Schema: return "Schema";
-        case OP_Transaction: return "Transaction";
         default: return "Unknown";
     }
 }
@@ -656,14 +534,13 @@ inline void print_instruction(const VMInstruction &inst, int pc = -1) {
         case OP_Insert: Opcodes::Insert::print(inst); break;
         case OP_Delete: Opcodes::Delete::print(inst); break;
         case OP_Update: Opcodes::Update::print(inst); break;
-        case OP_Move: Opcodes::Move::print(inst); break;
+        case OP_Move:
+        case OP_Load: Opcodes::Move::print(inst); break;
         case OP_Test: Opcodes::Test::print(inst); break;
         case OP_Arithmetic: Opcodes::Arithmetic::print(inst); break;
         case OP_JumpIf: Opcodes::JumpIf::print(inst); break;
         case OP_Logic: Opcodes::Logic::print(inst); break;
         case OP_Result: Opcodes::Result::print(inst); break;
-        case OP_Schema: Opcodes::Schema::print(inst); break;
-        case OP_Transaction: Opcodes::Transaction::print(inst); break;
         default: printf("p1=%d p2=%d p3=%d", inst.p1, inst.p2, inst.p3);
     }
     printf("\n");
@@ -679,13 +556,13 @@ inline void print_program(const Vec<VMInstruction, QueryArena> &program) {
 
 inline void print_register(int reg_num, const VMValue &value) {
     printf("R[%2d]: type=%3d ", reg_num, value.type);
-    if (value.data) {
-        printf("value=");
-        print_value(value.type, value.data);
-    } else {
-        printf("(null)");
-    }
+    printf("value=");
+    print_value(value.type, value.data);
     printf("\n");
+}
+
+inline void print_cursor_state(int cursor_id, const char* state) {
+    printf("Cursor[%d]: %s\n", cursor_id, state);
 }
 
 inline void enable_trace(bool enable) {
@@ -703,6 +580,5 @@ enum VM_RESULT { OK, ABORT, ERR };
 // VM Functions
 VM_RESULT vm_execute(Vec<VMInstruction, QueryArena> &instructions);
 void vm_set_result_callback(ResultCallback callback);
-
-// Debug function that can be called from VM to print registers
 void vm_debug_print_all_registers();
+void vm_debug_print_cursor(int cursor_id);
