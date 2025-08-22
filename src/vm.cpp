@@ -703,14 +703,30 @@ static VM_RESULT step() {
 
         switch (op_type) {
         case SCHEMA_CREATE_TABLE: {
-            Vec<ColumnInfo, QueryArena> *schema = Opcodes::Schema::table_schema(*inst);
 
-            Table new_table;
+            int start_reg = Opcodes::Schema::create_table_start_reg(*inst);
+            int reg_count = Opcodes::Schema::create_table_reg_count(*inst);
+            char * table_name = Opcodes::Schema::create_table_table_name(*inst);
 
-            new_table->tree =
-                btree_create(new_table->schema.key_type(), new_table->schema.record_size, BPLUS);
+            EmbVec<ColumnInfo, 10> columns;
+            int row_size = 0;
+            for (int i = 1; i < reg_count; i++) {
+                VMValue *col_name = &VM.registers[start_reg + i - 1];
+                VMValue *col_type = &VM.registers[start_reg + i];
+                ColumnInfo info;
+                info.name.assign((char *)col_name->data);
+                info.type = col_type->type;
+                row_size += col_type->type;
+                columns.push_back(info);
+            }
+            DataType key_size = columns[0].type;
+            uint32_t record_size = row_size - key_size;
 
-            add_table(new_table);
+            BTree tree = btree_create(key_size, record_size, BPLUS);
+
+            if(!add_table(&tree,  &columns, table_name)){
+                return ERR;
+            }
 
             break;
         }
@@ -738,7 +754,8 @@ static VM_RESULT step() {
 
             Index *index = (Index *)arena::alloc<RegistryArena>(sizeof(Index));
             index->column_index = column;
-            index->tree = btree_create(table->schema.columns[column].type, table->schema.key_type(), BTREE);
+            index->tree =
+                btree_create(table->schema.columns[column].type, table->schema.key_type(), BTREE);
 
             add_index(table_name, index);
 

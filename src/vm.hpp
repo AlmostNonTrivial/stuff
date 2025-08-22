@@ -522,28 +522,27 @@ namespace Result {
 
 // Schema Operations
 namespace Schema {
-    inline VMInstruction create_table(::Schema *schema) {
-        return {OP_Schema, 0, 0, 0, schema, SCHEMA_CREATE_TABLE};
+    inline VMInstruction create_table(int start_reg, int count, char * name) {
+        return {OP_Schema, start_reg, count, 0, name, SCHEMA_CREATE_TABLE};
     }
 
-    inline VMInstruction drop_table(const char *table_name) {
-        return {OP_Schema, 0, 0, 0, (void *)table_name, SCHEMA_DROP_TABLE};
+    inline int create_table_start_reg(const VMInstruction &inst) {
+       return inst.p1;
+    }
+    inline int create_table_reg_count(const VMInstruction &inst) {
+       return inst.p2;
+    }
+    inline char * create_table_table_name(const VMInstruction &inst) {
+       return (char*)inst.p4;
     }
 
     inline VMInstruction create_index(const char *table_name, int32_t column_index) {
         return {OP_Schema, column_index, 0, 0, (void *)table_name, SCHEMA_CREATE_INDEX};
     }
 
-    inline VMInstruction drop_index(const char *table_name, int32_t column_index) {
-        return {OP_Schema, column_index, 0, 0, (void *)table_name, SCHEMA_DROP_INDEX};
-    }
 
     inline SchemaOp op_type(const VMInstruction &inst) {
         return (SchemaOp)inst.p5;
-    }
-
-    inline Vec<ColumnInfo, QueryArena>* table_schema(const VMInstruction &inst) {
-        return (Vec<ColumnInfo, QueryArena>*)inst.p4;
     }
 
     inline const char* table_name(const VMInstruction &inst) {
@@ -554,12 +553,22 @@ namespace Schema {
         return inst.p1;
     }
 
+
+    inline VMInstruction drop_table(const char *table_name) {
+        return {OP_Schema, 0, 0, 0, (void *)table_name, SCHEMA_DROP_TABLE};
+    }
+
+    inline VMInstruction drop_index(const char *table_name, int32_t column_index) {
+        return {OP_Schema, column_index, 0, 0, (void *)table_name, SCHEMA_DROP_INDEX};
+    }
+
+
     inline void print(const VMInstruction &inst) {
         const char* op_names[] = {"CREATE_TABLE", "DROP_TABLE", "CREATE_INDEX", "DROP_INDEX"};
         printf("Schema op=%s", op_names[inst.p5]);
         if (inst.p5 == SCHEMA_CREATE_TABLE) {
-            ::Schema* s = table_schema(inst);
-            printf(" table=%s", s ? s->table_name.c_str() : "null");
+            // ::Schema* s = table_schema(inst);
+            // printf(" table=%s", s ? s->table_name.c_str() : "null");
         } else if (inst.p5 == SCHEMA_DROP_TABLE) {
             printf(" table=%s", table_name(inst));
         } else {

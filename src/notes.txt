@@ -8,3 +8,9 @@ do an exact match
 // Could we run the vm with a template output arena?
 
 // how do we actually initialise the btree on load, if we're not creating it
+
+
+
+
+// add load and move
+// add seperate transaction and schema commands

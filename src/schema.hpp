@@ -87,10 +87,8 @@ struct Table {
     Vec<Index, RegistryArena> indexes;
     Vec<ColumnInfo, RegistryArena> columns;
     TableStats stats; // Cached statistics
-    
-    void from_schema(Vec<ColumnInfo, QueryArena> schema) {
-        
-    }
+
+
 
     RecordLayout to_layout() const {
         EmbVec<DataType, MAX_RECORD_LAYOUT> types;
@@ -142,7 +140,7 @@ Index *get_index(const char *table_name, uint32_t column_index);
 uint32_t get_column_index(const char *table_name, const char *col_name);
 DataType get_column_type(const char *table_name, uint32_t col_index);
 
-bool add_table(Table *table);
+bool add_table(BTree* tree, EmbVec<ColumnInfo, 10> *columns, char * table_name);
 bool remove_table(const char *table_name);
 bool add_index(const char *table_name, Index *index);
 bool remove_index(const char *table_name, uint32_t column_index);
