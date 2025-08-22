@@ -233,11 +233,11 @@ struct VmCursor {
 
     char *type_name() {
         switch (type) {
-        EPHEMERAL:
+        case EPHEMERAL:
             return "MEMTREE";
-        INDEX:
+        case INDEX:
             return "INDEX";
-        TABLE:
+        case TABLE:
             return "TABLE";
         }
     }
