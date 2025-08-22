@@ -1,4 +1,5 @@
 #include "btree.hpp"
+#include "vec.hpp"
 #include "arena.hpp"
 #include "defs.hpp"
 #include "pager.hpp"
@@ -964,7 +965,7 @@ bool btree_clear(BTree *tree) {
     return false;
   }
 
-  Vec<uint32_t, BTreeArena, 1024> bfs;
+  Vec<uint32_t, BTreeArena> bfs;
   bfs.push_back(tree->root_page_index);
 
   while (bfs.size()) {

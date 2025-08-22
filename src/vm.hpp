@@ -4,6 +4,7 @@
 #include "btree.hpp"
 #include "defs.hpp"
 #include "schema.hpp"
+#include "vec.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -143,17 +144,18 @@ namespace Open {
         return {OP_Open, cursor_id, index_col, 0, (void *)table_name, flags};
     }
 
-    inline VMInstruction create_ephemeral(int32_t cursor_id, Schema *schema) {
+    inline VMInstruction create_ephemeral(int32_t cursor_id,  EmbVec<DataType, MAX_RECORD_LAYOUT>*layout) {
         uint8_t flags = (0x01) | (0x02);
-        return {OP_Open, cursor_id, 0, 0, schema, flags};
+        return {OP_Open, cursor_id, 0, 0, layout, flags};
     }
+
 
     inline int32_t cursor_id(const VMInstruction &inst) {
         return inst.p1;
     }
 
-    inline Schema* ephemeral_schema(const VMInstruction &inst) {
-        return (Schema*)inst.p4;
+    inline RecordLayout* ephemeral_schema(const VMInstruction &inst) {
+        return (RecordLayout*)inst.p4;
     }
 
     inline int32_t index_col(const VMInstruction &inst) {
@@ -540,8 +542,8 @@ namespace Schema {
         return (SchemaOp)inst.p5;
     }
 
-    inline ::Schema* table_schema(const VMInstruction &inst) {
-        return (::Schema *)inst.p4;
+    inline Vec<ColumnInfo, QueryArena>* table_schema(const VMInstruction &inst) {
+        return (Vec<ColumnInfo, QueryArena>*)inst.p4;
     }
 
     inline const char* table_name(const VMInstruction &inst) {

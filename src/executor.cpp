@@ -89,6 +89,7 @@ static VM_RESULT execute_internal(const char *sql) {
   }
 
   Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
+
   VM_RESULT result = vm_execute(program);
 
   // Clear any events from internal operation
@@ -484,7 +485,7 @@ void execute(const char *sql) {
 
     // Build and execute program
     Vec<VMInstruction, QueryArena> program = build_from_ast(statement);
-
+SchemaSnapshot before =  create_snapshot();
     VM_RESULT result = vm_execute(program);
 
     if (result != OK) {
@@ -502,8 +503,10 @@ void execute(const char *sql) {
 
       break;
     } else {
-      // Process events immediately after each statement
-      process_vm_events();
+
+        SchemaSnapshot after = create_snapshot();
+       // process
+
 
       // Auto-commit after write if we auto-began
       if (auto_transaction && is_write) {

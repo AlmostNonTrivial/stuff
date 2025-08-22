@@ -4,6 +4,7 @@
 #include "btree.hpp"
 #include "defs.hpp"
 #include "str.hpp"
+#include "vec.hpp"
 
 #include <cstdint>
 
@@ -67,10 +68,14 @@ struct ColumnInfo {
 // Index - Secondary index metadata
 // ============================================================================
 struct Index {
-    EmbStr<TABLE_NAME_SIZE + 1 + COLUMN_NAME_SIZE> index_name;
+    EmbStr<TABLE_NAME_SIZE> index_name;
     BTree tree;
     uint32_t column_index;
     IndexStats stats; // Cached statistics
+
+    RecordLayout to_layout() const {
+        return RecordLayout::create(tree.node_key_size, (DataType)tree.record_size);
+    }
 };
 
 // ============================================================================
@@ -82,11 +87,13 @@ struct Table {
     Vec<Index, RegistryArena> indexes;
     Vec<ColumnInfo, RegistryArena> columns;
     TableStats stats; // Cached statistics
+    
+    void from_schema(Vec<ColumnInfo, QueryArena> schema) {
+        
+    }
 
     RecordLayout to_layout() const {
         EmbVec<DataType, MAX_RECORD_LAYOUT> types;
-
-
         for (uint32_t i = 0; i < columns.size(); i++) {
             types.push_back(columns[i].type);
         }
@@ -102,6 +109,27 @@ struct Table {
         }
     }
 };
+
+
+struct TableSnapshot {
+    EmbStr<TABLE_NAME_SIZE> name;
+    uint32_t btree_root;
+};
+
+struct IndexSnapshot {
+    TableSnapshot*table;
+    EmbStr<TABLE_NAME_SIZE> name;
+    uint32_t btree_root;
+};
+
+struct SchemaSnapshot {
+    Vec<TableSnapshot, QueryArena> tables;
+    Vec<IndexSnapshot, QueryArena> indexes;
+};
+
+
+SchemaSnapshot create_snapshot();
+
 
 
 
