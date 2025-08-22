@@ -1,7 +1,7 @@
 // programbuilder.cpp - Simplified version with full table scans only
+#include "compile.hpp"
 #include "arena.hpp"
 #include "defs.hpp"
-#include "compile.hpp"
 #include "schema.hpp"
 #include "vm.hpp"
 #include <algorithm>
@@ -9,18 +9,18 @@
 #include <cstring>
 #include <utility>
 
-
-
 // Register allocator with named registers for debugging
 struct RegisterAllocator {
-  Vec<std::pair<Str<QueryArena>, uint32_t>, QueryArena, REGISTERS> name_to_register;
+  Vec<std::pair<Str<QueryArena>, uint32_t>, QueryArena, REGISTERS>
+      name_to_register;
 
-
-  // we need array allocation to be contiguous, so for simplicity just increment them
+  // we need array allocation to be contiguous, so for simplicity just increment
+  // them
   int get(const char *name) {
-      auto it = name_to_register.find_with([name](const std::pair<Str<QueryArena>, uint32_t> entry){
+    auto it = name_to_register.find_with(
+        [name](const std::pair<Str<QueryArena>, uint32_t> entry) {
           return entry.first.starts_with(name);
-      });
+        });
 
     if (it != -1) {
       return name_to_register[it].second;
@@ -30,14 +30,10 @@ struct RegisterAllocator {
     exit(1);
   }
 
-  void free(const char *name) {
-  }
+  void free(const char *name) {}
 
-  void clear() {
-    name_to_register.clear();
-  }
+  void clear() { name_to_register.clear(); }
 };
-
 
 struct ProgramBuilder {
   Vec<VMInstruction, QueryArena> instructions;
@@ -64,11 +60,12 @@ struct ProgramBuilder {
       if (!inst.p4 && inst.p3 == -1) {
         continue;
       }
-      char * label = (char*)inst.p4;
+      char *label = (char *)inst.p4;
 
-      auto it = labels.find_with([label](const std::pair<Str<QueryArena>, uint32_t> entry){
-          return entry.first.starts_with(label);
-      });
+      auto it = labels.find_with(
+          [label](const std::pair<Str<QueryArena>, uint32_t> entry) {
+            return entry.first.starts_with(label);
+          });
 
       if (it == -1) {
         continue;
@@ -126,65 +123,51 @@ extract_where_conditions(WhereNode *where, const char *table_name) {
   return conditions;
 }
 
-Vec<VMInstruction, QueryArena> build_select_from_ast(SelectNode *ast)
-{
+Vec<VMInstruction, QueryArena> build_select_from_ast(SelectNode *ast) {
 
-    ProgramBuilder program;
+  ProgramBuilder program;
 
-    int mem_cursor = 0;
+  int mem_cursor = 0;
 
+  TypedValue a = {.type = TYPE_8};
 
-    TypedValue a = {.type = TYPE_8};
+  auto *ptr = (uint64_t *)arena::alloc<QueryArena>(TYPE_4);
+  auto *ptr2 = (uint64_t *)arena::alloc<QueryArena>(TYPE_4);
 
-    auto*ptr = (uint64_t*)arena::alloc<QueryArena>(TYPE_4);
-    auto*ptr2 = (uint64_t*)arena::alloc<QueryArena>(TYPE_4);
+  *ptr = 5;
+  *ptr2 = 11;
 
-    *ptr = 5;
-    *ptr2 = 11;
+  uint8_t *data = (uint8_t *)arena::alloc<QueryArena>(TYPE_256);
+  memcpy(data, "hey there besty\0", 232);
 
-    uint8_t *data= (uint8_t*)arena::alloc<QueryArena>(TYPE_256);
-    memcpy(data, "hey there besty\0", 232);
+  Schema *schema = (Schema *)arena::alloc<QueryArena>(sizeof(Schema));
+  schema->columns.push_back({.name = "key", .type = TYPE_32});
+  schema->record_size = 0;
+  program.emit(Opcodes::Open::create_ephemeral(mem_cursor, schema));
+  program.emit(Opcodes::Move::create_load(1, TYPE_256, data));
+  program.emit(Opcodes::Insert::create(mem_cursor, 1, 1));
+  program.emit(Opcodes::Seek::create(mem_cursor, 1, 10, EQ));
+  program.emit(Opcodes::Column::create(mem_cursor, 0, 2));
+  program.emit(Opcodes::Result::create(2, 1));
 
-    Schema * schema = (Schema*)arena::alloc<QueryArena>(sizeof(Schema));
-    schema->columns.push_back({.name = "key", .type = TYPE_32});
-    schema->record_size = 0;
-    program.emit(Opcodes::Open::create_ephemeral(mem_cursor, schema));
-    program.emit(Opcodes::Load::create(1, TYPE_256, data));
-    program.emit(Opcodes::Insert::create(mem_cursor, 1, 1));
-    program.emit(Opcodes::Seek::create(mem_cursor, 1, 10, EQ));
-    program.emit(Opcodes::Column::create(mem_cursor, 0, 2));
-    program.emit(Opcodes::Result::create(2, 1));
+  // program.emit(Opcodes::Move::create(2, TYPE_4, ptr));
+  // auto repeat = program.here();
+  // program.emit(Opcodes::Arithmetic::create(2, 2, 2, ARITH_ADD));
+  // program.emit(Opcodes::Test::create(4, 1, 2, GE));
+  // program.emit(Opcodes::Test::create(5, 1, 2, LT));
+  // program.emit(Opcodes::Logic::create(6, 4, 5, LOGIC_AND));
+  // program.emit(Opcodes::JumpIf::create(6, repeat));
+  // program.emit(Opcodes::Result::create(3, 1));
 
-
-
-    // program.emit(Opcodes::Load::create(2, TYPE_4, ptr));
-    // auto repeat = program.here();
-    // program.emit(Opcodes::Arithmetic::create(2, 2, 2, ARITH_ADD));
-    // program.emit(Opcodes::Test::create(4, 1, 2, GE));
-    // program.emit(Opcodes::Test::create(5, 1, 2, LT));
-    // program.emit(Opcodes::Logic::create(6, 4, 5, LOGIC_AND));
-    // program.emit(Opcodes::JumpIf::create(6, repeat));
-    // program.emit(Opcodes::Result::create(3, 1));
-
-    // program.emit(Opcodes::Result::create(0, 1));
-    return program.instructions;
+  // program.emit(Opcodes::Result::create(0, 1));
+  return program.instructions;
 }
-
-
 
 // ============================================================================
 // Main entry point
 // ============================================================================
 Vec<VMInstruction, QueryArena> build_from_ast(ASTNode *ast) {
-   return build_select_from_ast(nullptr);
-
-
-
-
-
-
-
-
+  return build_select_from_ast(nullptr);
 
   if (!ast) {
     Vec<VMInstruction, QueryArena> program;

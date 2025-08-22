@@ -12,6 +12,11 @@
 
 // #define ALLOC_VALUE()
 
+struct VMValue {
+    DataType type;
+    uint8_t data[TYPE_256];
+};
+
 typedef void (*ResultCallback)(Vec<TypedValue, QueryArena> result);
 extern bool _debug;
 
@@ -70,8 +75,7 @@ enum OpCode : uint32_t {
   OP_Update = 36,
 
   // Register operations
-  OP_Load = 40,
-  OP_Copy = 43,
+  OP_Move = 40,
 
   // Computation
   OP_Test = 60,
@@ -350,45 +354,39 @@ namespace Update {
 }
 
 // Register Operations
-namespace Load {
-    inline VMInstruction create(int32_t dest_reg, DataType  type,void*data) {
-        return {OP_Load, dest_reg, (int32_t)type, 0, data, 0};
+namespace Move {
+    inline VMInstruction create_load(int32_t dest_reg,  DataType type, void*data) {
+        return {OP_Move, dest_reg, (int32_t)type, -1, data, 0};
     }
+
+    inline VMInstruction create_create(int32_t dest_reg,  int32_t src_reg) {
+        return {OP_Move, dest_reg, 0, src_reg, nullptr, 0};
+    }
+
+    inline int32_t is_load(const VMInstruction &inst) {
+            return inst.p3 == -1;
+        }
 
     inline int32_t dest_reg(const VMInstruction &inst) {
         return inst.p1;
     }
-
-    inline TypedValue value(const VMInstruction &inst) {
-        return {
-            .data = (uint8_t*)inst.p4,
-            .type = (DataType)inst.p2
-        };
-    }
-
-    inline void print(const VMInstruction &inst) {
-        TypedValue val = value(inst);
-        printf("Load reg=%d type=%d", inst.p1, val.type);
-    }
-}
-
-namespace Copy {
-    inline VMInstruction create(int32_t src_reg, int32_t dest_reg) {
-        return {OP_Copy, src_reg, dest_reg, 0, nullptr, 0};
-    }
-
     inline int32_t src_reg(const VMInstruction &inst) {
-        return inst.p1;
+        return inst.p3;
     }
 
-    inline int32_t dest_reg(const VMInstruction &inst) {
-        return inst.p2;
+    inline uint8_t*data(const VMInstruction &inst) {
+       return (uint8_t*)inst.p4;
+    }
+    inline DataType type(const VMInstruction &inst) {
+        return (DataType)inst.p2;
     }
 
     inline void print(const VMInstruction &inst) {
-        printf("Copy src_reg=%d dest_reg=%d", inst.p1, inst.p2);
+        printf("Load reg=%d type=%d", inst.p1, inst.p2);
     }
 }
+
+
 
 // Computation
 namespace Test {
@@ -613,8 +611,8 @@ inline const char* opcode_name(OpCode op) {
         case OP_Insert: return "Insert";
         case OP_Delete: return "Delete";
         case OP_Update: return "Update";
-        case OP_Load: return "Load";
-        case OP_Copy: return "Copy";
+        case OP_Move: return "Move";
+
         case OP_Test: return "Test";
         case OP_Arithmetic: return "Arithmetic";
         case OP_JumpIf: return "JumpIf";
@@ -645,8 +643,7 @@ inline void print_instruction(const VMInstruction &inst, int pc = -1) {
         case OP_Insert: Opcodes::Insert::print(inst); break;
         case OP_Delete: Opcodes::Delete::print(inst); break;
         case OP_Update: Opcodes::Update::print(inst); break;
-        case OP_Load: Opcodes::Load::print(inst); break;
-        case OP_Copy: Opcodes::Copy::print(inst); break;
+        case OP_Move: Opcodes::Move::print(inst); break;
         case OP_Test: Opcodes::Test::print(inst); break;
         case OP_Arithmetic: Opcodes::Arithmetic::print(inst); break;
         case OP_JumpIf: Opcodes::JumpIf::print(inst); break;
@@ -667,7 +664,7 @@ inline void print_program(const Vec<VMInstruction, QueryArena> &program) {
     printf("==========================================\n");
 }
 
-inline void print_register(int reg_num, const TypedValue &value) {
+inline void print_register(int reg_num, const VMValue &value) {
     printf("R[%2d]: type=%3d ", reg_num, value.type);
     if (value.data) {
         printf("value=");

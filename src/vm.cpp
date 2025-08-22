@@ -12,6 +12,9 @@
 
 bool _debug;
 
+
+struct VmArena {};
+
 /*------------VMCURSOR---------------- */
 
 struct VmCursor {
@@ -23,7 +26,7 @@ struct VmCursor {
   bool is_memory;
   MemTree mem_tree;
 
-  bool seek(CompareOp op, TypedValue *value) {
+  bool seek(CompareOp op, VMValue *value) {
     auto key = value;
     auto cursor = this;
     if (cursor->is_memory) {
@@ -95,20 +98,24 @@ static struct {
   uint32_t pc;
   bool halted;
   Vec<VmEvent, QueryArena> event_queue;
-  TypedValue registers[REGISTERS];
+  VMValue registers[REGISTERS];
   VmCursor cursors[CURSORS];
 } VM = {};
 
-static void set_register(TypedValue *dest, TypedValue *src) {
+
+static void set_register(VMValue *dest, VMValue *src) {
   dest->type = src->type;
-  dest->data = (uint8_t *)arena::alloc<QueryArena>((uint32_t)dest->type);
-  memcpy(dest->data, src->data, (uint32_t)dest->type);
+  memcpy(dest->data, src->data, (uint32_t)src->type);
+}
+static void set_register(VMValue *dest, uint8_t*data, DataType type) {
+  dest->type = type;
+  memcpy(dest->data, data, type);
 }
 
 static void build_record(uint8_t *data, int32_t first_reg, int32_t count) {
   int32_t offset = 0;
   for (int i = 0; i < count; i++) {
-    TypedValue *val = &VM.registers[first_reg + i];
+    VMValue *val = &VM.registers[first_reg + i];
     uint32_t size = val->type;
     memcpy(data + offset, val->data, size);
     offset += size;
@@ -150,7 +157,6 @@ static void reset() {
 
   for (uint32_t i = 0; i < REGISTERS; i++) {
     VM.registers[i].type = TYPE_NULL;
-    VM.registers[i].data = nullptr;
   }
 
   VM.program.clear();
@@ -186,63 +192,71 @@ static VM_RESULT step() {
     VM.pc = Opcodes::Goto::target(*inst);
     return OK;
 
-  case OP_Load: {
-    int32_t dest_reg = Opcodes::Load::dest_reg(*inst);
-    TypedValue value = Opcodes::Load::value(*inst);
+  case OP_Move: {
+    int32_t dest_reg = Opcodes::Move::dest_reg(*inst);
 
-    if (_debug) {
-      printf("=> R[%d] = ", dest_reg);
-      print_value(value.type, value.data);
-      printf(" (type=%d)", value.type);
+    if (Opcodes::Move::is_load(*inst)) {
+      uint8_t *data = Opcodes::Move::data(*inst);
+      DataType type = Opcodes::Move::type(*inst);
+
+      if (_debug) {
+        printf("=> R[%d] = ", dest_reg);
+        print_value(type, data);
+        printf(" (type=%d)", type);
+      }
+      set_register(&VM.registers[dest_reg], data, type);
+    } else {
+      int32_t src_reg = Opcodes::Move::src_reg(*inst);
+      auto *src = &VM.registers[src_reg];
+      if (_debug) {
+        printf("=> R[%d] = ", dest_reg);
+        print_value(src->type, src->data);
+        printf(" (type=%d)", src->type);
+      }
+      set_register(&VM.registers[dest_reg], src);
     }
 
-    set_register(&VM.registers[dest_reg], &value);
     VM.pc++;
     return OK;
   }
-
-  case OP_Copy: {
-    int32_t src = Opcodes::Copy::src_reg(*inst);
-    int32_t dest = Opcodes::Copy::dest_reg(*inst);
-
-    if (_debug) {
-      printf("R[%d] => R[%d]  (", src, dest);
-      print_value(VM.registers[src].type, VM.registers[src].data);
-      printf(")");
-    }
-
-    set_register(&VM.registers[dest], &VM.registers[src]);
-    VM.pc++;
-    return OK;
-  }
-
   case OP_Test: {
     int32_t dest = Opcodes::Test::dest_reg(*inst);
     int32_t left = Opcodes::Test::left_reg(*inst);
     int32_t right = Opcodes::Test::right_reg(*inst);
     CompareOp op = Opcodes::Test::op(*inst);
 
-    TypedValue *a = &VM.registers[left];
-    TypedValue *b = &VM.registers[right];
+    VMValue *a = &VM.registers[left];
+    VMValue *b = &VM.registers[right];
 
     int cmp_result = cmp(a->type, a->data, b->data);
 
-    TypedValue result = {.type = TYPE_4};
-    result.data = (uint8_t *)arena::alloc<QueryArena>(sizeof(uint32_t));
+    VMValue result = {.type = TYPE_4};
 
     bool test_result = false;
     switch (op) {
-    case EQ: test_result = (cmp_result == 0); break;
-    case NE: test_result = (cmp_result != 0); break;
-    case LT: test_result = (cmp_result < 0); break;
-    case LE: test_result = (cmp_result <= 0); break;
-    case GT: test_result = (cmp_result > 0); break;
-    case GE: test_result = (cmp_result >= 0); break;
+    case EQ:
+      test_result = (cmp_result == 0);
+      break;
+    case NE:
+      test_result = (cmp_result != 0);
+      break;
+    case LT:
+      test_result = (cmp_result < 0);
+      break;
+    case LE:
+      test_result = (cmp_result <= 0);
+      break;
+    case GT:
+      test_result = (cmp_result > 0);
+      break;
+    case GE:
+      test_result = (cmp_result >= 0);
+      break;
     }
-    *(uint32_t*)result.data = test_result ? 1 : 0;
+    *(uint32_t *)result.data = test_result ? 1 : 0;
 
     if (_debug) {
-      const char* op_names[] = {"==", "!=", "<", "<=", ">", ">="};
+      const char *op_names[] = {"==", "!=", "<", "<=", ">", ">="};
       printf("R[%d] = (", dest);
       print_value(a->type, a->data);
       printf(" %s ", op_names[op]);
@@ -260,15 +274,14 @@ static VM_RESULT step() {
     int32_t target = Opcodes::JumpIf::jump_target(*inst);
     bool jump_on_true = Opcodes::JumpIf::jump_on_true(*inst);
 
-    TypedValue *val = &VM.registers[test_reg];
+    VMValue *val = &VM.registers[test_reg];
     bool is_true = (*(uint32_t *)val->data != 0);
     bool will_jump = (is_true && jump_on_true) || (!is_true && !jump_on_true);
 
     if (_debug) {
       printf("R[%d]=", test_reg);
       print_value(val->type, val->data);
-      printf(" (%s), jump_on_%s => %s to PC=%d",
-             is_true ? "TRUE" : "FALSE",
+      printf(" (%s), jump_on_%s => %s to PC=%d", is_true ? "TRUE" : "FALSE",
              jump_on_true ? "true" : "false",
              will_jump ? "JUMPING" : "CONTINUE",
              will_jump ? target : VM.pc + 1);
@@ -288,8 +301,7 @@ static VM_RESULT step() {
     int32_t right = Opcodes::Logic::right_reg(*inst);
     LogicOp op = Opcodes::Logic::op(*inst);
 
-    TypedValue result{.type = TYPE_4};
-    result.data = (uint8_t *)arena::alloc<QueryArena>(sizeof(uint32_t));
+    VMValue result{.type = TYPE_4};
 
     uint32_t a = *(uint32_t *)VM.registers[left].data;
     uint32_t b = *(uint32_t *)VM.registers[right].data;
@@ -305,12 +317,11 @@ static VM_RESULT step() {
     default:
       return ERR;
     }
-    *(uint32_t*)result.data = res_val;
+    *(uint32_t *)result.data = res_val;
 
     if (_debug) {
-      const char* op_names[] = {"AND", "OR"};
-      printf("R[%d] = %d %s %d => %d",
-             dest, a, op_names[op], b, res_val);
+      const char *op_names[] = {"AND", "OR"};
+      printf("R[%d] = %d %s %d => %d", dest, a, op_names[op], b, res_val);
     }
 
     set_register(&VM.registers[dest], &result);
@@ -325,9 +336,10 @@ static VM_RESULT step() {
     if (_debug) {
       printf("OUTPUT: ");
       for (int i = 0; i < reg_count; i++) {
-        if (i > 0) printf(", ");
-        TypedValue *val = &VM.registers[first_reg + i];
-        if (val->data) {
+        if (i > 0)
+          printf(", ");
+        VMValue *val = &VM.registers[first_reg + i];
+        if (val->type != TYPE_NULL) {
           print_value(val->type, val->data);
         } else {
           printf("NULL");
@@ -343,8 +355,11 @@ static VM_RESULT step() {
     Vec<TypedValue, QueryArena> output;
 
     for (int i = 0; i < reg_count; i++) {
-      TypedValue *val = &VM.registers[first_reg + i];
-      output.push_back(*val);
+      VMValue *val = &VM.registers[first_reg + i];
+      TypedValue value = {.type = val->type};
+      value.data = (uint8_t*)arena::alloc<QueryArena>(val->type);
+      memcpy(value.data, val->data, val->type);
+      output.push_back(value);
     }
 
     VM.callback(output);
@@ -358,29 +373,26 @@ static VM_RESULT step() {
     int32_t right = Opcodes::Arithmetic::right_reg(*inst);
     ArithOp op = Opcodes::Arithmetic::op(*inst);
 
-    TypedValue *a = &VM.registers[left];
-    TypedValue *b = &VM.registers[right];
-    TypedValue *dst = &VM.registers[dest];
+    VMValue *a = &VM.registers[left];
+    VMValue*b = &VM.registers[right];
+    VMValue*dst = &VM.registers[dest];
 
     // Determine output type (use larger of the two)
     DataType output_type = (a->type > b->type) ? a->type : b->type;
     uint8_t data[output_type];
-    TypedValue result = {
-        .type = output_type,
-        .data = data
-    };
+    VMValue result = {.type = output_type,};
 
-    bool success = do_arithmetic(op, output_type, result.data, a->data, b->data);
+    bool success =
+        do_arithmetic(op, output_type, result.data, a->data, b->data);
 
     if (_debug) {
-      const char* op_names[] = {"+", "-", "*", "/", "%"};
+      const char *op_names[] = {"+", "-", "*", "/", "%"};
       printf("R[%d] = ", dest);
       print_value(a->type, a->data);
       printf(" %s ", op_names[op]);
       print_value(b->type, b->data);
       printf(" = ");
       if (success) {
-        set_register(dst, &result);
         print_value(result.type, result.data);
       } else {
         printf("ERROR");
@@ -416,7 +428,6 @@ static VM_RESULT step() {
 
       // Open regular table or index
       Table *table = get_table(table_name);
-
 
       cursor.is_memory = false;
 
@@ -497,7 +508,7 @@ static VM_RESULT step() {
     CompareOp op = Opcodes::Seek::op(*inst);
 
     VmCursor *cursor = &VM.cursors[cursor_id];
-    TypedValue *key = &VM.registers[key_reg];
+    VMValue *key = &VM.registers[key_reg];
 
     bool found = cursor->seek(op, key);
 
@@ -516,25 +527,25 @@ static VM_RESULT step() {
 
     VmCursor *cursor = &VM.cursors[cursor_id];
 
-    TypedValue value = {.type = cursor->column_type(col_index),
-                        .data = cursor->column(col_index)};
+
+    uint8_t *data = cursor->column(col_index);
+    DataType type = cursor->column_type(col_index);
+
 
     if (_debug) {
       printf("R[%d] = cursor[%d].col[%d] = ", dest_reg, cursor_id, col_index);
-      if (value.data) {
-        print_value(value.type, value.data);
+      if (data) {
+        print_value(type, data);
       } else {
         printf("NULL");
       }
-      printf(" (type=%d)", value.type);
+      printf(" (type=%d)", type);
     }
 
-    set_register(&VM.registers[dest_reg], &value);
+    set_register(&VM.registers[dest_reg], data, type);
     VM.pc++;
     return OK;
   }
-
-
 
   case OP_Delete: {
     int32_t cursor_id = Opcodes::Delete::cursor_id(*inst);
@@ -561,7 +572,7 @@ static VM_RESULT step() {
     int32_t count = Opcodes::Insert::reg_count(*inst);
 
     VmCursor *cursor = &VM.cursors[cursor_id];
-    TypedValue *key = &VM.registers[key_reg];
+    VMValue *key = &VM.registers[key_reg];
 
     uint8_t data[cursor->record_size()];
     build_record(data, record_reg, count - 1);
@@ -737,10 +748,6 @@ VM_RESULT vm_execute(Vec<VMInstruction, QueryArena> &instructions) {
   return OK;
 }
 
-void vm_set_result_callback(ResultCallback callback) {
-  VM.callback = callback;
-}
+void vm_set_result_callback(ResultCallback callback) { VM.callback = callback; }
 
-Vec<VmEvent, QueryArena> &vm_events() {
-  return VM.event_queue;
-}
+Vec<VmEvent, QueryArena> &vm_events() { return VM.event_queue; }
