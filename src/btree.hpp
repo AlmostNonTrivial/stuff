@@ -3,6 +3,8 @@
 #include "defs.hpp"
 #include <cstdint>
 
+#define MIN_ENTRY_COUNT 3
+// #define MAX_COLS PAGE_SIZE - NODE_HEADER_SIZE
 enum TreeType : uint32_t { BPLUS = 0, BTREE = 1, MEM = 2, INVALID = 3 };
 
 // B+Tree control structure

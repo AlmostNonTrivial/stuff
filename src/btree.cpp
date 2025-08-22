@@ -9,7 +9,7 @@
 
 // Constants
 #define NODE_HEADER_SIZE 24
-#define MIN_ENTRY_COUNT 3
+#define NODE_DATA_SIZE PAGE_SIZE - NODE_HEADER_SIZE
 
 // B+Tree node structure - fits in a single page
 struct BTreeNode {
@@ -24,7 +24,7 @@ struct BTreeNode {
   // Data area - stores keys, children pointers, and data
   // Layout for internal nodes: [keys][children]
   // Layout for leaf nodes: [keys][records]
-  uint8_t data[PAGE_SIZE - NODE_HEADER_SIZE]; // Rest of the page (4064 bytes)
+  uint8_t data[NODE_DATA_SIZE]; // Rest of the page (4064 bytes)
 };
 
 static_assert(sizeof(BTreeNode) == PAGE_SIZE,

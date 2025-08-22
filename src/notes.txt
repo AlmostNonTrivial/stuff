@@ -1,43 +1,10 @@
-GENERAL:
-
-- create master table might
-need to put key in first column
-
-- make sure the offsets are being
-correctly set with the key or not
-
-- do we still need to run the insert master
-or can we just load the hardcoded version
-as it won't change?
-
-- how do we manage the master root changing
-if we do it through execute internal?
-
-- can our vm value be a 64 bit, 32 bit,
-or string?
-
-
-make sure to test the cached find in the containers
 
 // arena
 - for btree clear, we can do some a priori calculation based on t, as to
-the max amount of memory surely
-// what should I do about the keywords map?
-
 // does        if (table->schema.columns[i].name.starts_with(col_name) == 0) need to
 do an exact match
+// currently, if the master root changes we're fucked. right now we can handle 5 tables
 
+// Could we run the vm with a template output arena?
 
-BUGS:
-HOW ARE WE GOING TO RESULT CREATE Index needing the reference to itself
-before the event can be read
-
-DEBUGGING:
-- ignore vm commands and master table for now
-- for make record, and insert, the registers need to
-be contiguous, should this involve the key
-
-
-
-// currently, if the master root changes we're fucked.
-// right now we can handle 5 tables
+// how do we actually initialise the btree on load, if we're not creating it

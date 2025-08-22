@@ -17,75 +17,220 @@ struct VmArena {};
 
 /*------------VMCURSOR---------------- */
 
+// vm.hpp (VmCursor section)
+
 struct VmCursor {
-  BtCursor btree_cursor;
-  MemCursor mem_cursor;
-  Schema *schema;
-  bool is_index;
-  uint32_t column_index;
-  bool is_memory;
-  MemTree mem_tree;
+    // Cursor type explicitly enumerated
+    enum Type {
+        TABLE,      // Primary table cursor
+        INDEX,      // Secondary index cursor
+        EPHEMERAL   // Memory-only temporary cursor
+    };
 
-  bool seek(CompareOp op, VMValue *value) {
-    auto key = value;
-    auto cursor = this;
-    if (cursor->is_memory) {
-      return memcursor_seek_cmp(&cursor->mem_cursor, key->data, op);
-    }
-    return btree_cursor_seek_cmp(&cursor->btree_cursor, key, op);
-  }
+    Type type;
+    RecordLayout layout;  // Value type - no pointer needed!
 
-  // Unified interface helpers
-  uint32_t record_size() const {
-    if (is_memory) {
-      return mem_tree.record_size;
-    }
-    return schema ? schema->record_size : 0;
-  }
+    // Storage backends (union since only one is active)
+    union {
+        BtCursor btree;
+        MemCursor mem;
+    } cursor;
 
-  DataType key_type() const {
-    if (is_memory) {
-      return mem_tree.key_type;
-    }
-    return schema ? schema->columns[0].type : TYPE_NULL;
-  }
+    // Storage trees
+    union {
+        BTree* btree_ptr;      // For TABLE/INDEX
+        MemTree mem_tree;      // For EPHEMERAL (owned by cursor)
+    } storage;
 
-  uint8_t *column(uint32_t col_index) {
-    auto vb = this;
-    if (vb->is_memory) {
-      if (col_index == 0) {
-        return memcursor_key(&vb->mem_cursor);
-      }
-      // For memory trees, the record is the whole value
-      return memcursor_record(&vb->mem_cursor) +
-             vb->schema->column_offsets[col_index];
+    // Metadata (only for persistent tables/indexes)
+    const char* table_name;   // nullptr for ephemeral
+    uint32_t index_column;     // 0 for primary table, >0 for index
+
+    // ========================================================================
+    // Initialization
+    // ========================================================================
+
+    void open_table(Table* table) {
+        type = TABLE;
+        layout = table->to_layout();
+        storage.btree_ptr = &table->tree;
+        cursor.btree.tree = storage.btree_ptr;
+        cursor.btree.state = CURSOR_INVALID;
+        table_name = table->table_name.c_str();
+        index_column = 0;
     }
 
-    // Original btree logic
-    if (col_index == 0) {
-      return btree_cursor_key(&vb->btree_cursor);
+    void open_index(Table* table, Index* index) {
+        type = INDEX;
+        // Index layout: [indexed_column, rowid]
+        layout = RecordLayout::create(
+            table->columns[index->column_index].type,  // Key
+            TYPE_8  // Rowid (assuming 8 bytes)
+        );
+        storage.btree_ptr = &index->tree;
+        cursor.btree.tree = storage.btree_ptr;
+        cursor.btree.state = CURSOR_INVALID;
+        table_name = table->table_name.c_str();
+        index_column = index->column_index;
     }
 
-    if (vb->is_index) {
-      return btree_cursor_record(&vb->btree_cursor);
+    void open_ephemeral(const RecordLayout& ephemeral_layout) {
+        type = EPHEMERAL;
+        layout = ephemeral_layout;  // Copy by value
+        storage.mem_tree = memtree_create(layout.key_type(), layout.record_size);
+        cursor.mem.tree = &storage.mem_tree;
+        cursor.mem.state = MemCursor::INVALID;
+        table_name = nullptr;
+        index_column = 0;
     }
 
-    uint8_t *record = btree_cursor_record(&vb->btree_cursor);
-    return record + vb->schema->column_offsets[col_index];
-  }
+    // ========================================================================
+    // Unified Navigation
+    // ========================================================================
 
-  DataType column_type(uint32_t col_index) {
-    auto vb = this;
-    if (vb->is_memory) {
-      // For memory trees, we need to handle this differently
-      if (col_index == 0) {
-        return vb->mem_tree.key_type;
-      }
-      // The record in memtree doesn't have schema
-      return TYPE_NULL;
+    bool rewind(bool to_end = false) {
+        if (type == EPHEMERAL) {
+            return to_end ? memcursor_last(&cursor.mem)
+                         : memcursor_first(&cursor.mem);
+        } else {
+            return to_end ? btree_cursor_last(&cursor.btree)
+                         : btree_cursor_first(&cursor.btree);
+        }
     }
-    return vb->schema->columns[col_index].type;
-  }
+
+    bool step(bool forward = true) {
+        if (type == EPHEMERAL) {
+            return forward ? memcursor_next(&cursor.mem)
+                          : memcursor_previous(&cursor.mem);
+        } else {
+            return forward ? btree_cursor_next(&cursor.btree)
+                          : btree_cursor_previous(&cursor.btree);
+        }
+    }
+
+    bool seek(CompareOp op, uint8_t* key) {
+        if (type == EPHEMERAL) {
+            return memcursor_seek_cmp(&cursor.mem, key, op);
+        } else {
+            return btree_cursor_seek_cmp(&cursor.btree, key, op);
+        }
+    }
+
+    // ========================================================================
+    // Data Access - The Critical Part
+    // ========================================================================
+
+    uint8_t* get_key() {
+        if (type == EPHEMERAL) {
+            return memcursor_key(&cursor.mem);
+        } else {
+            return btree_cursor_key(&cursor.btree);
+        }
+    }
+
+    uint8_t* get_record() {
+        if (type == EPHEMERAL) {
+            return memcursor_record(&cursor.mem);
+        } else {
+            return btree_cursor_record(&cursor.btree);
+        }
+    }
+
+    uint8_t* column(uint32_t col_index) {
+        // Bounds check
+        if (col_index >= layout.column_count()) {
+            return nullptr;
+        }
+
+        // Column 0 is always the key
+        if (col_index == 0) {
+            return get_key();
+        }
+
+        // For other columns, get the record
+        uint8_t* record = get_record();
+        if (!record) return nullptr;
+
+        // Special case: index cursors
+        if (type == INDEX) {
+            // Index record is just the rowid (column 1)
+            return (col_index == 1) ? record : nullptr;
+        }
+
+        // Regular table/ephemeral: use pre-calculated offsets
+        return record + layout.get_offset(col_index);
+    }
+
+    DataType column_type(uint32_t col_index) {
+        if (col_index >= layout.column_count()) {
+            return TYPE_NULL;
+        }
+        return layout.layout[col_index];
+    }
+
+    // ========================================================================
+    // Modification Operations
+    // ========================================================================
+
+    bool insert(uint8_t* key, uint8_t* record) {
+        if (type == EPHEMERAL) {
+            return memcursor_insert(&cursor.mem, key, record);
+        } else {
+            uint32_t old_root = storage.btree_ptr->root_page_index;
+            bool success = btree_cursor_insert(&cursor.btree, key, record);
+
+            // Check if root changed (for event emission)
+            if (success && old_root != storage.btree_ptr->root_page_index) {
+                // VM can check this flag and emit event
+                root_changed = true;
+            }
+            return success;
+        }
+    }
+
+    bool update(uint8_t* record) {
+        if (type == EPHEMERAL) {
+            return memcursor_update(&cursor.mem, record);
+        } else {
+            return btree_cursor_update(&cursor.btree, record);
+        }
+    }
+
+    bool remove() {
+        if (type == EPHEMERAL) {
+            return memcursor_delete(&cursor.mem);
+        } else {
+            uint32_t old_root = storage.btree_ptr->root_page_index;
+            bool success = btree_cursor_delete(&cursor.btree);
+
+            if (success && old_root != storage.btree_ptr->root_page_index) {
+                root_changed = true;
+            }
+            return success;
+        }
+    }
+
+    // ========================================================================
+    // State & Metadata
+    // ========================================================================
+
+    bool is_valid() {
+        if (type == EPHEMERAL) {
+            return cursor.mem.state == MemCursor::VALID;
+        } else {
+            return cursor.btree.state == CURSOR_VALID;
+        }
+    }
+
+    uint32_t record_size() const {
+        return layout.record_size;
+    }
+
+    DataType key_type() const {
+        return layout.key_type();
+    }
+
+    bool root_changed = false;  // Flag for VM to check
 };
 
 // Helper function for column access

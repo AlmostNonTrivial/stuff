@@ -1,0 +1,14 @@
+CompileFlags:
+  Add: [-std=c++20, -Wall, -Wextra]
+  CompilationDatabase: build/
+
+Diagnostics:
+  ClangTidy:
+    Add: [
+      modernize-*,
+      performance-*,
+      readability-*
+    ]
+    Remove: [
+      modernize-use-trailing-return-type
+    ]
