@@ -80,48 +80,48 @@ struct ProgramBuilder {
 
 // Helper to resolve labels to addresses
 
-// Extract WHERE conditions from AST
-static Vec<WhereCondition, QueryArena>
-extract_where_conditions(WhereNode *where, const char *table_name) {
-  Vec<WhereCondition, QueryArena> conditions;
-  if (!where || !where->condition)
-    return conditions;
+// // Extract WHERE conditions from AST
+// static Vec<WhereCondition, QueryArena>
+// extract_where_conditions(WhereNode *where, const char *table_name) {
+//   Vec<WhereCondition, QueryArena> conditions;
+//   if (!where || !where->condition)
+//     return conditions;
 
-  // Simple traversal for AND-only conditions
-  std::function<void(ASTNode *)> extract = [&](ASTNode *node) {
-    if (!node)
-      return;
+//   // Simple traversal for AND-only conditions
+//   std::function<void(ASTNode *)> extract = [&](ASTNode *node) {
+//     if (!node)
+//       return;
 
-    if (node->type == AST_BINARY_OP) {
-      BinaryOpNode *binop = (BinaryOpNode *)node;
+//     if (node->type == AST_BINARY_OP) {
+//       BinaryOpNode *binop = (BinaryOpNode *)node;
 
-      if (binop->is_and) {
-        extract(binop->left);
-        extract(binop->right);
-      } else {
-        // This is a comparison
-        WhereCondition cond;
+//       if (binop->is_and) {
+//         extract(binop->left);
+//         extract(binop->right);
+//       } else {
+//         // This is a comparison
+//         WhereCondition cond;
 
-        if (binop->left->type == AST_COLUMN_REF) {
-          ColumnRefNode *col = (ColumnRefNode *)binop->left;
-          cond.column_name = col->name;
-          cond.column_index = get_column_index(table_name, col->name);
-        }
+//         if (binop->left->type == AST_COLUMN_REF) {
+//           ColumnRefNode *col = (ColumnRefNode *)binop->left;
+//           cond.column_name = col->name;
+//           cond.column_index = get_column_index(table_name, col->name);
+//         }
 
-        if (binop->right->type == AST_LITERAL) {
-          LiteralNode *lit = (LiteralNode *)binop->right;
-          cond.value = lit->value;
-        }
+//         if (binop->right->type == AST_LITERAL) {
+//           LiteralNode *lit = (LiteralNode *)binop->right;
+//           cond.value = lit->value;
+//         }
 
-        cond.operator_type = binop->op;
-        conditions.push_back(cond);
-      }
-    }
-  };
+//         cond.operator_type = binop->op;
+//         conditions.push_back(cond);
+//       }
+//     }
+//   };
 
-  extract(where->condition);
-  return conditions;
-}
+//   extract(where->condition);
+//   return conditions;
+// }
 
 Vec<VMInstruction, QueryArena> build_select_from_ast(SelectNode *ast) {
 
@@ -140,10 +140,10 @@ Vec<VMInstruction, QueryArena> build_select_from_ast(SelectNode *ast) {
   uint8_t *data = (uint8_t *)arena::alloc<QueryArena>(TYPE_256);
   memcpy(data, "hey there besty\0", 232);
 
-  Schema *schema = (Schema *)arena::alloc<QueryArena>(sizeof(Schema));
-  schema->columns.push_back({.name = "key", .type = TYPE_32});
-  schema->record_size = 0;
-  program.emit(Opcodes::Open::create_ephemeral(mem_cursor, schema));
+  // Schema *schema = (Schema *)arena::alloc<QueryArena>(sizeof(Schema));
+  // schema->columns.push_back({.name = "key", .type = TYPE_32});
+  // schema->record_size = 0;
+  // program.emit(Opcodes::Open::create_ephemeral(mem_cursor, schema));
   program.emit(Opcodes::Move::create_load(1, TYPE_256, data));
   program.emit(Opcodes::Insert::create(mem_cursor, 1, 1));
   program.emit(Opcodes::Seek::create(mem_cursor, 1, 10, EQ));

@@ -1,4 +1,5 @@
 #include "pager.hpp"
+#include "vec.hpp"
 #include "arena.hpp"
 #include "defs.hpp"
 #include "os_layer.hpp"

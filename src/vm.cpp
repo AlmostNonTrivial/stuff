@@ -1,10 +1,12 @@
 // vm.cpp
 #include "vm.hpp"
+
 #include "arena.hpp"
 #include "btree.hpp"
 #include "defs.hpp"
 #include "memtree.hpp"
 #include "schema.hpp"
+
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -45,9 +47,7 @@ struct VmCursor {
     // Helper functions
     // ========================================================================
 
-    uint32_t record_size() const {
-        return layout.record_size;
-    }
+    uint32_t record_size() const { return layout.record_size; }
 
     // ========================================================================
     // Initialization
@@ -99,7 +99,8 @@ struct VmCursor {
             return forward ? memcursor_next(&cursor.mem) : memcursor_previous(&cursor.mem);
         case TABLE:
         case INDEX:
-            return forward ? btree_cursor_next(&cursor.btree) : btree_cursor_previous(&cursor.btree);
+            return forward ? btree_cursor_next(&cursor.btree)
+                           : btree_cursor_previous(&cursor.btree);
         default:
             return false;
         }
@@ -230,9 +231,21 @@ struct VmCursor {
         }
     }
 
+    char *type_name() {
+        switch (type) {
+        EPHEMERAL:
+            return "MEMTREE";
+        INDEX:
+            return "INDEX";
+        TABLE:
+            return "TABLE";
+        }
+    }
+
     // Debug helper
     void print_current() {
         printf("Cursor type=%s, valid=%d", type_name(), is_valid());
+
         if (is_valid()) {
             uint8_t *key = get_key();
             if (key) {
@@ -250,7 +263,7 @@ struct VmCursor {
 
 static struct {
     ResultCallback callback;
-    Vec<VMInstruction, VmArena> program;
+    Vec<VMInstruction, QueryArena> program;
     uint32_t pc;
     bool halted;
     VMValue registers[REGISTERS];
@@ -394,12 +407,24 @@ static VM_RESULT step() {
         bool test_result = false;
 
         switch (op) {
-        case EQ: test_result = (cmp_result == 0); break;
-        case NE: test_result = (cmp_result != 0); break;
-        case LT: test_result = (cmp_result < 0); break;
-        case LE: test_result = (cmp_result <= 0); break;
-        case GT: test_result = (cmp_result > 0); break;
-        case GE: test_result = (cmp_result >= 0); break;
+        case EQ:
+            test_result = (cmp_result == 0);
+            break;
+        case NE:
+            test_result = (cmp_result != 0);
+            break;
+        case LT:
+            test_result = (cmp_result < 0);
+            break;
+        case LE:
+            test_result = (cmp_result <= 0);
+            break;
+        case GT:
+            test_result = (cmp_result > 0);
+            break;
+        case GE:
+            test_result = (cmp_result >= 0);
+            break;
         }
 
         *(uint32_t *)result.data = test_result ? 1 : 0;
@@ -430,10 +455,8 @@ static VM_RESULT step() {
         if (_debug) {
             printf("=> R[%d]=", test_reg);
             print_value(val->type, val->data);
-            printf(" (%s), jump_on_%s => %s to PC=%d",
-                   is_true ? "TRUE" : "FALSE",
-                   jump_on_true ? "true" : "false",
-                   will_jump ? "JUMPING" : "CONTINUE",
+            printf(" (%s), jump_on_%s => %s to PC=%d", is_true ? "TRUE" : "FALSE",
+                   jump_on_true ? "true" : "false", will_jump ? "JUMPING" : "CONTINUE",
                    will_jump ? target : VM.pc + 1);
         }
 
@@ -487,7 +510,8 @@ static VM_RESULT step() {
         if (_debug) {
             printf("=> OUTPUT: ");
             for (int i = 0; i < reg_count; i++) {
-                if (i > 0) printf(", ");
+                if (i > 0)
+                    printf(", ");
                 VMValue *val = &VM.registers[first_reg + i];
                 if (val->type != TYPE_NULL) {
                     print_value(val->type, val->data);
@@ -571,8 +595,8 @@ static VM_RESULT step() {
                 cursor.open_index(index->to_layout(), &index->tree);
 
                 if (_debug) {
-                    printf("=> Opened index cursor %d on %s.%d",
-                           cursor_id, table_name, index_column);
+                    printf("=> Opened index cursor %d on %s.%d", cursor_id, table_name,
+                           index_column);
                 }
             } else {
                 Table *table = get_table(table_name);
@@ -609,8 +633,8 @@ static VM_RESULT step() {
         bool valid = cursor->rewind(to_end);
 
         if (_debug) {
-            printf("=> Cursor %d rewound to %s, valid=%d",
-                   cursor_id, to_end ? "end" : "start", valid);
+            printf("=> Cursor %d rewound to %s, valid=%d", cursor_id, to_end ? "end" : "start",
+                   valid);
             if (!valid && jump_if_empty >= 0) {
                 printf(", jumping to PC=%d", jump_if_empty);
             }
@@ -633,8 +657,8 @@ static VM_RESULT step() {
         bool has_more = cursor->step(forward);
 
         if (_debug) {
-            printf("=> Cursor %d stepped %s, has_more=%d",
-                   cursor_id, forward ? "forward" : "backward", has_more);
+            printf("=> Cursor %d stepped %s, has_more=%d", cursor_id,
+                   forward ? "forward" : "backward", has_more);
             if (!has_more && jump_if_done >= 0) {
                 printf(", jumping to PC=%d", jump_if_done);
             }
@@ -660,7 +684,7 @@ static VM_RESULT step() {
         bool found = cursor->seek(op, key->data);
 
         if (_debug) {
-            const char* op_names[] = {"EQ", "NE", "LT", "LE", "GT", "GE"};
+            const char *op_names[] = {"EQ", "NE", "LT", "LE", "GT", "GE"};
             printf("=> Cursor %d seek %s with key=", cursor_id, op_names[op]);
             print_value(key->type, key->data);
             printf(", found=%d", found);
@@ -754,8 +778,8 @@ static VM_RESULT step() {
         bool success = cursor->update(data);
 
         if (_debug) {
-            printf("=> Cursor %d update with data from R[%d], success=%d",
-                   cursor_id, record_reg, success);
+            printf("=> Cursor %d update with data from R[%d], success=%d", cursor_id, record_reg,
+                   success);
         }
 
         VM.pc++;

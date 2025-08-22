@@ -190,7 +190,7 @@ bool remove_table(const char *table_name) {
             }
 
             // Remove from registry
-            tables.erase(i);
+            // tables.erase(i);
 
             if (_debug)
                 printf("Removed table '%s'\n", table_name);
@@ -261,7 +261,7 @@ bool remove_index(const char *table_name, uint32_t column_index) {
                        table->indexes[i].index_name.c_str(), table_name);
             }
 
-            table->indexes.erase(i);
+            // table->indexes.erase(i);
             return true;
         }
     }
