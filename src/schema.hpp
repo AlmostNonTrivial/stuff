@@ -129,9 +129,6 @@ struct SchemaSnapshot {
 SchemaSnapshot create_snapshot();
 
 
-
-
-
 // ============================================================================
 // Schema Registry Functions
 // ============================================================================
@@ -142,7 +139,7 @@ DataType get_column_type(const char *table_name, uint32_t col_index);
 
 bool add_table(BTree* tree, EmbVec<ColumnInfo, 10> *columns, char * table_name);
 bool remove_table(const char *table_name);
-bool add_index(const char *table_name, Index *index);
+bool add_index(BTree*tree, EmbVec<ColumnInfo, 2> columns, char * table_name);
 bool remove_index(const char *table_name, uint32_t column_index);
 void clear_schema();
 

@@ -116,7 +116,9 @@ IndexStats *get_index_stats(const char *table_name, uint32_t column_index) {
 // Registry Modification Functions
 // ============================================================================
 
-bool add_table(Table *table) {
+
+bool add_table(BTree* tree, EmbVec<ColumnInfo, 10>* columns, char * table_name)
+{
     // Validate table
     if (table->columns.empty()) {
         if (_debug)
@@ -181,7 +183,9 @@ bool remove_table(const char *table_name) {
     return false;
 }
 
-bool add_index(const char *table_name, Index *index) {
+
+
+bool add_index(BTree*tree, EmbVec<ColumnInfo, 2> columns, char * table_name){
     Table *table = get_table(table_name);
     if (!table) {
         if (_debug)

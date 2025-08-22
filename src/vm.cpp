@@ -702,7 +702,9 @@ static VM_RESULT step() {
         SchemaOp op_type = Opcodes::Schema::op_type(*inst);
 
         switch (op_type) {
-        case SCHEMA_CREATE_TABLE: {
+        case SCHEMA_CREATE_TABLE:
+        case SCHEMA_CREATE_INDEX:
+        {
 
             int start_reg = Opcodes::Schema::create_table_start_reg(*inst);
             int reg_count = Opcodes::Schema::create_table_reg_count(*inst);
@@ -731,6 +733,33 @@ static VM_RESULT step() {
             break;
         }
 
+        case SCHEMA_CREATE_INDEX: {
+
+                // lets load the column name
+                  const char *table_name = Opcodes::Schema::table_name(*inst);
+                  int column = Opcodes::Schema::column_name_register(*inst);
+
+                  VMValue * column_name = &VM.registers[column];
+
+
+                  Table *table = get_table(table_name);
+                  uint32_t index = get_column_index(table_name, (char*)column_name->data);
+                  DataType type = get_column_type(table_name, index);
+
+                  EmbVec<ColumnInfo, 2> columns;
+
+                  columns.push_back(table->columns[column]);
+                  columns.push_back(table->columns[0]);
+
+
+                  BTree tree = btree_create(columns[0].type, columns[1].type ,BTREE);
+
+                  add_index(&tree, columns, table_name);
+
+
+                  break;
+              }
+
         case SCHEMA_DROP_TABLE: {
             const char *table_name = Opcodes::Schema::table_name(*inst);
 
@@ -746,22 +775,7 @@ static VM_RESULT step() {
             break;
         }
 
-        case SCHEMA_CREATE_INDEX: {
-            const char *table_name = Opcodes::Schema::table_name(*inst);
-            int32_t column = Opcodes::Schema::column_index(*inst);
 
-            Table *table = get_table(table_name);
-
-            Index *index = (Index *)arena::alloc<RegistryArena>(sizeof(Index));
-            index->column_index = column;
-            index->tree =
-                btree_create(table->schema.columns[column].type, table->schema.key_type(), BTREE);
-
-            add_index(table_name, index);
-
-
-            break;
-        }
 
         case SCHEMA_DROP_INDEX: {
             const char *table_name = Opcodes::Schema::table_name(*inst);

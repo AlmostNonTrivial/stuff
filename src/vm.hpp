@@ -549,7 +549,7 @@ namespace Schema {
         return (const char *)inst.p4;
     }
 
-    inline int32_t column_index(const VMInstruction &inst) {
+    inline int column_name_register(const VMInstruction &inst) {
         return inst.p1;
     }
 
