@@ -13,8 +13,7 @@
 #include <cstring>
 #include <ios>
 bool _debug = false;
-struct VmArena {
-};
+
 // ============================================================================
 // VmCursor - Unified cursor abstraction
 // ============================================================================
