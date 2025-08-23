@@ -16,10 +16,7 @@ struct VMValue {
 };
 
 
-struct ExecContext {
-    void* (*alloc)(size_t size);  // Function pointer for allocation
-    void (*emit_row)(TypedValue* values, size_t count);  // Result callback
-};
+
 typedef void (*ResultCallback)(Vec<TypedValue, QueryArena> result);
 extern bool _debug;
 enum OpCode : uint32_t {
@@ -757,7 +754,7 @@ enable_trace(bool enable)
 enum VM_RESULT { OK, ABORT, ERR };
 // VM Functions
 VM_RESULT
-vm_execute(VMInstruction* instructions, int instruction_count, ExecContext * ctx);
+vm_execute(VMInstruction* instructions, int instruction_count, MemoryContext * ctx);
 
 
 void

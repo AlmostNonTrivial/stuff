@@ -69,6 +69,7 @@ struct VmCursor {
 		memcpy(&layout, &ephemeral_layout, sizeof(RecordLayout));
 		storage.mem_tree =
 		    memtree_create(layout.key_type(), layout.record_size);
+		// cursor.mem.ctx = e
 		cursor.mem.tree = &storage.mem_tree;
 		cursor.mem.state = MemCursor::INVALID;
 	}
@@ -280,7 +281,7 @@ struct VmCursor {
 // VM State
 // ============================================================================
 static struct {
-	ExecContext *ctx;
+	MemoryContext *ctx;
 	VMInstruction *program;
 	int program_size;
 	uint32_t pc;
@@ -799,7 +800,7 @@ step()
 // ============================================================================
 
 VM_RESULT
-vm_execute(VMInstruction *instructions, int instruction_count, ExecContext *ctx)
+vm_execute(VMInstruction *instructions, int instruction_count, MemoryContext *ctx)
 {
 	reset();
 	VM.program = instructions;

@@ -1,5 +1,6 @@
 // memtree.hpp
 #pragma once
+
 #include "defs.hpp"
 #include "arena.hpp"
 #include <cstdint>
@@ -42,7 +43,8 @@ struct NodeStack {
 struct MemCursor {
     MemTree* tree;
     MemTreeNode* current;
-    NodeStack stack;  // Stack for traversal without parent pointers
+    NodeStack stack;
+    MemoryContext* ctx;  // Add context for allocations
 
     enum State {
         INVALID,
@@ -51,12 +53,14 @@ struct MemCursor {
     } state;
 };
 
+
 // ============================================================================
 // Tree Creation and Management
 // ============================================================================
 
 inline MemTree memtree_create(DataType key_type, uint32_t record_size,
-                              bool allow_duplicates = false) {
+                              bool allow_duplicates = false
+                              ) {
     MemTree tree;
     tree.root = nullptr;
     tree.key_type = key_type;
@@ -107,11 +111,11 @@ static int memtree_compare_full(const MemTree* tree, const uint8_t* a_key, const
 }
 
 static MemTreeNode* memtree_create_node(MemTree* tree, const uint8_t* key,
-                                        const uint8_t* record) {
-    auto* node = (MemTreeNode*)arena::alloc<QueryArena>(sizeof(MemTreeNode));
+                                        const uint8_t* record, MemoryContext* ctx) {
+    auto* node = (MemTreeNode*)ctx->alloc(sizeof(MemTreeNode));
 
     // Allocate single contiguous block for key + record
-    node->data = (uint8_t*)arena::alloc<QueryArena>(tree->data_size);
+    node->data = (uint8_t*)ctx->alloc(tree->data_size);
 
     // Copy key at offset 0
     memcpy(node->data, key, tree->key_type);
@@ -208,9 +212,9 @@ static void stack_push_right_path(NodeStack* stack, MemTreeNode* node) {
 // Tree Operations
 // ============================================================================
 
-inline bool memtree_insert(MemTree* tree, const uint8_t* key, const uint8_t* record) {
+inline bool memtree_insert(MemTree* tree, const uint8_t* key, const uint8_t* record, MemoryContext*ctx) {
     if (!tree->root) {
-        tree->root = memtree_create_node(tree, key, record);
+        tree->root = memtree_create_node(tree, key, record, ctx);
         return true;
     }
 
@@ -263,7 +267,7 @@ inline bool memtree_insert(MemTree* tree, const uint8_t* key, const uint8_t* rec
     }
 
     // Insert new node
-    MemTreeNode* new_node = memtree_create_node(tree, key, record);
+    MemTreeNode* new_node = memtree_create_node(tree, key, record, ctx);
 
     if (went_left) {
         parent->left = new_node;
@@ -726,8 +730,9 @@ inline bool memcursor_is_valid(MemCursor* cursor) {
 }
 
 inline bool memcursor_insert(MemCursor* cursor, const void* key, const uint8_t* record) {
-    return memtree_insert(cursor->tree, (const uint8_t*)key, record);
+    return memtree_insert(cursor->tree, (const uint8_t*)key, record, cursor->ctx);
 }
+
 
 inline bool memcursor_delete(MemCursor* cursor) {
     if (cursor->state != MemCursor::VALID) {

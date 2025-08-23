@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <sys/types.h>
 
 // Constants
@@ -1103,52 +1104,29 @@ repair_after_delete(BTree &tree, BTreeNode *node)
 	}
 }
 
-/*
- * The btree module doesn't
- * really need dynamic memory
- * as it operates on the
- * pagers cached memory, but
- * in this instance we don't
- * know how big the btree is
- * going to be;
- *
- * TODO, calculate exact max
- * memory from t
- */
-struct BTreeArena;
+void
+clear_recurse(BTree &tree, BTreeNode *node)
+{
+	if (node->is_leaf) {
+		pager_delete(node->index);
+		return;
+	}
+
+	uint32_t i = 0;
+	BTreeNode* child = get_child(tree, node, i++);
+	while(child != nullptr) {
+			clear_recurse(tree, child);
+			child = get_child(tree, node, i);
+	}
+
+	pager_delete(node->index);
+}
 
 bool
 btree_clear(BTree *tree)
 {
-	arena::init<BTreeArena>(tree->internal_max_keys);
-	if (tree->root_page_index == 0) {
-		return false;
-	}
-
-	Vec<uint32_t, BTreeArena> bfs;
-	bfs.push_back(tree->root_page_index);
-
-	while (bfs.size()) {
-		uint32_t index = bfs.front();
-		bfs.pop_front();
-
-		auto node = static_cast<BTreeNode *>(pager_get(index));
-		if (!node) {
-			arena::shutdown<BTreeArena>();
-			return false;
-		}
-
-		if (!node->is_leaf) {
-			uint32_t *children = get_children(*tree, node);
-			for (uint32_t i = 0; i < node->num_keys + 1; i++) {
-				bfs.push_back(children[i]);
-			}
-		}
-
-		pager_delete(node->index);
-	}
-
-	arena::shutdown<BTreeArena>();
+	clear_recurse(
+	    *tree, static_cast<BTreeNode *>(pager_get(tree->root_page_index)));
 	return true;
 }
 
@@ -1788,11 +1766,8 @@ btree_close()
 }
 
 bool
-btree_cursor_seek_exact(
-            BtCursor *cursor,
-            const void *key,
-			const uint8_t *record
-            )
+btree_cursor_seek_exact(BtCursor *cursor, const void *key,
+			const uint8_t *record)
 {
 	// First seek to key
 	if (!btree_cursor_seek(cursor, key)) {

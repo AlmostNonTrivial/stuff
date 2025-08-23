@@ -49,6 +49,11 @@ enum CompareOp {
     EXACT = 6
 };
 
+struct MemoryContext {
+    void* (*alloc)(size_t size);  // Function pointer for allocation
+    void (*emit_row)(TypedValue* values, size_t count);  // Result callback
+};
+
 int cmp(DataType key_size, const uint8_t *key1, const uint8_t *key2) ;
 
 void print_ptr(uint8_t *data, DataType type);
