@@ -15,6 +15,10 @@
 #include <cstdint>
 
 
+BlobNode* get_blob(uint32_t index) {
+       return static_cast<BlobNode*>(pager_get(index));
+}
+
 BlobNode* allocate_blob_page() {
 	uint32_t page_index = pager_new();
 	BlobNode*node = static_cast<BlobNode*>(pager_get(page_index));
@@ -128,8 +132,13 @@ void blob_cursor_delete(BlobCursor* cursor) {
 }
 
 // No-ops for operations that don't make sense for blobs
-void blob_cursor_next(BlobCursor* cursor) {
-    // No-op: blobs aren't ordered
+bool blob_cursor_next(BlobCursor* cursor) {
+    auto current = get_blob(cursor->blob_id);
+    if(current && current->next) {
+        current->next = current->next;
+        return true;
+    }
+    return false;
 }
 
 void blob_cursor_prev(BlobCursor* cursor) {
