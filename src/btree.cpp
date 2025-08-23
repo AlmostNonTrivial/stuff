@@ -72,20 +72,20 @@ repair_after_delete(BTree &tree, BTreeNode *node);
 static uint32_t
 get_max_keys(BTree &tree, BTreeNode *node)
 {
-	return node->is_leaf ? tree.leaf_max_keys : tree.internal_max_keys;
+	return  tree.internal_max_keys;
 }
 
 static uint32_t
 get_min_keys(BTree &tree, BTreeNode *node)
 {
-	return node->is_leaf ? tree.leaf_min_keys : tree.internal_min_keys;
+	return tree.internal_min_keys;
 }
 
 static uint32_t
 get_split_index(BTree &tree, BTreeNode *node)
 {
-	return node->is_leaf ? tree.leaf_split_index
-			     : tree.internal_split_index;
+	return
+			      tree.internal_split_index;
 }
 
 static BTreeNode *
@@ -140,7 +140,7 @@ get_internal_record_at(BTree &tree, BTreeNode *node, uint32_t index)
 static uint8_t *
 get_leaf_record_data(BTree &tree, BTreeNode *node)
 {
-	return node->data + tree.leaf_max_keys * tree.node_key_size;
+	return node->data + tree.internal_max_keys* tree.node_key_size;
 }
 
 static uint8_t *
@@ -222,9 +222,7 @@ btree_create(DataType key, uint32_t record_size)
 
 		uint32_t split_index = max_keys / 2;
 
-		tree.leaf_max_keys = max_keys;
-		tree.leaf_min_keys = min_keys;
-		tree.leaf_split_index = split_index;
+
 
 		tree.internal_max_keys = max_keys;
 		tree.internal_min_keys = min_keys;
@@ -439,7 +437,7 @@ insert(BTree &tree, BTreeNode *node, uint8_t *key, const uint8_t *data)
 			return true;
 		}
 
-		if (node->num_keys >= tree.leaf_max_keys) {
+		if (node->num_keys >= tree.internal_max_keys) {
 			insert_repair(tree, node);
 			return false;
 		}
@@ -559,61 +557,6 @@ do_delete_btree(BTree &tree, BTreeNode *node, const uint8_t *key, uint32_t i)
 	}
 }
 
-static void
-update_parent_keys(BTree &tree, BTreeNode *node, const uint8_t *deleted_key)
-{
-	uint8_t *next_smallest = nullptr;
-	BTreeNode *parent_node = get_parent(node);
-
-	uint32_t *parent_children = get_children(tree, parent_node);
-	uint32_t parent_index;
-
-	for (parent_index = 0; parent_children[parent_index] != node->index;
-	     parent_index++)
-		;
-
-	if (node->num_keys == 0) {
-		if (parent_index == parent_node->num_keys) {
-			next_smallest = nullptr;
-		} else {
-			BTreeNode *next_sibling =
-			    get_child(tree, parent_node, parent_index + 1);
-			if (next_sibling) {
-				next_smallest =
-				    get_key_at(tree, next_sibling, 0);
-			}
-		}
-	} else {
-		next_smallest = get_key_at(tree, node, 0);
-	}
-
-	BTreeNode *current_parent = parent_node;
-	while (current_parent) {
-		if (parent_index > 0 &&
-		    cmp(tree.node_key_size,
-			get_key_at(tree, current_parent, parent_index - 1),
-			deleted_key) == 0) {
-			mark_dirty(current_parent);
-			if (next_smallest) {
-				memcpy(get_key_at(tree, current_parent,
-						  parent_index - 1),
-				       next_smallest, tree.node_key_size);
-			}
-		}
-
-		BTreeNode *grandparent = get_parent(current_parent);
-		if (grandparent) {
-			uint32_t *grandparent_children =
-			    get_children(tree, grandparent);
-			for (parent_index = 0;
-			     grandparent_children[parent_index] !=
-			     current_parent->index;
-			     parent_index++)
-				;
-		}
-		current_parent = grandparent;
-	}
-}
 
 
 static void
@@ -1364,32 +1307,7 @@ btree_cursor_next(BtCursor *cursor)
 
 	cursor_save_state(cursor);
 
-	// If leaf node in B+tree,
-	// use next pointer for
-	// efficiency
-	if (cursor->tree->tree_type == BPLUS) {
-		if (!node->is_leaf) {
-			cursor_restore_state(cursor);
-			return false;
-		}
 
-		cursor->path.current_index++;
-		if (cursor->path.current_index >= node->num_keys) {
-			if (node->next != 0) {
-				BTreeNode *next_node = get_next(node);
-				if (next_node && next_node->num_keys > 0) {
-					cursor->path.current_page =
-					    next_node->index;
-					cursor->path.current_index = 0;
-					return true;
-				}
-			}
-
-			cursor_restore_state(cursor);
-			return false;
-		}
-		return true;
-	}
 
 	// BTREE traversal
 	if (node->is_leaf) {
@@ -1472,30 +1390,7 @@ btree_cursor_previous(BtCursor *cursor)
 	// If leaf node in B+tree,
 	// use previous pointer for
 	// efficiency
-	if (cursor->tree->tree_type == BPLUS) {
-		if (!node->is_leaf) {
-			cursor_restore_state(cursor);
-			return false;
-		}
-		if (cursor->path.current_index > 0) {
-			cursor->path.current_index--;
-			return true;
-		}
 
-		// Move to previous leaf
-		if (node->previous != 0) {
-			BTreeNode *prev_node = get_prev(node);
-			if (prev_node && prev_node->num_keys > 0) {
-				cursor->path.current_page = prev_node->index;
-				cursor->path.current_index =
-				    prev_node->num_keys - 1;
-				return true;
-			}
-		}
-
-		cursor_restore_state(cursor);
-		return false;
-	}
 
 	// For B-tree traversal
 	if (node->is_leaf) {

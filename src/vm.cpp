@@ -17,118 +17,163 @@ bool _debug = false;
 // ============================================================================
 // VmCursor - Unified cursor abstraction
 // ============================================================================
+// vm_cursor.hpp - Updated VmCursor implementation
+#pragma once
+#include "btree.hpp"
+#include "bplustree.hpp"
+#include "memtree.hpp"
+#include "blob.hpp"
+#include "schema.hpp"
+#include <cstdint>
+#include <cstring>
+
+// ============================================================================
+// VmCursor - Unified cursor abstraction
+// ============================================================================
 struct VmCursor {
 	// Cursor type explicitly enumerated
 	enum Type {
-		TABLE,	   // Primary table cursor
-		INDEX,	   // Secondary index cursor
-		EPHEMERAL, // Memory-only temporary cursor
-		BLOB
+		BTREE_TABLE,     // BTree for primary table
+		BPLUS_TABLE,     // B+Tree for primary table
+		BTREE_INDEX,     // BTree for secondary index
+		BPLUS_INDEX,     // B+Tree for secondary index
+		EPHEMERAL,       // Memory-only temporary cursor
+		BLOB             // Blob storage cursor
 	};
+
 	Type type;
 	RecordLayout layout; // Value type - no pointer needed!
+
 	// Storage backends (union since only one is active)
 	union {
-		BtCursor btree;
-		MemCursor mem;
-		BlobCursor blob;
+		BtCursor btree;      // Regular B-tree cursor
+		BPtCursor bptree;    // B+tree cursor
+		MemCursor mem;       // Memory cursor
+		BlobCursor blob;     // Blob cursor
 	} cursor;
+
 	// Storage trees
 	union {
-		BTree *btree_ptr; // For TABLE/INDEX
-		MemTree mem_tree; // For EPHEMERAL (owned by cursor)
+		BTree *btree_ptr;       // For BTREE_TABLE/BTREE_INDEX
+		BPlusTree *bptree_ptr;  // For BPLUS_TABLE/BPLUS_INDEX
+		MemTree mem_tree;       // For EPHEMERAL (owned by cursor)
 	} storage;
+
 	// ========================================================================
 	// Helper functions
 	// ========================================================================
-	uint32_t
-	record_size() const
-	{
+	uint32_t record_size() const {
 		return layout.record_size;
 	}
+
 	// ========================================================================
 	// Initialization
 	// ========================================================================
-	void
-	open_table(const RecordLayout &table_layout, BTree *tree)
-	{
-		type = TABLE;
+	void open_btree_table(const RecordLayout &table_layout, BTree *tree) {
+		type = BTREE_TABLE;
 		memcpy(&layout, &table_layout, sizeof(RecordLayout));
 		storage.btree_ptr = tree;
 		cursor.btree.tree = storage.btree_ptr;
 		cursor.btree.state = CURSOR_INVALID;
 	}
-	void
-	open_index(const RecordLayout &index_layout, BTree *tree)
-	{
-		type = INDEX;
+
+	void open_bplus_table(const RecordLayout &table_layout, BPlusTree *tree) {
+		type = BPLUS_TABLE;
+		memcpy(&layout, &table_layout, sizeof(RecordLayout));
+		storage.bptree_ptr = tree;
+		cursor.bptree.tree = storage.bptree_ptr;
+		cursor.bptree.state = BPT_CURSOR_INVALID;
+	}
+
+	void open_btree_index(const RecordLayout &index_layout, BTree *tree) {
+		type = BTREE_INDEX;
 		memcpy(&layout, &index_layout, sizeof(RecordLayout));
 		storage.btree_ptr = tree;
 		cursor.btree.tree = storage.btree_ptr;
 		cursor.btree.state = CURSOR_INVALID;
 	}
-	void
-	open_ephemeral(const RecordLayout &ephemeral_layout)
-	{
+
+	void open_bplus_index(const RecordLayout &index_layout, BPlusTree *tree) {
+		type = BPLUS_INDEX;
+		memcpy(&layout, &index_layout, sizeof(RecordLayout));
+		storage.bptree_ptr = tree;
+		cursor.bptree.tree = storage.bptree_ptr;
+		cursor.bptree.state = BPT_CURSOR_INVALID;
+	}
+
+	// Legacy compatibility functions
+	void open_table(const RecordLayout &table_layout, BTree *tree) {
+		open_btree_table(table_layout, tree);
+	}
+
+	void open_index(const RecordLayout &index_layout, BTree *tree) {
+		open_btree_index(index_layout, tree);
+	}
+
+	void open_ephemeral(const RecordLayout &ephemeral_layout) {
 		type = EPHEMERAL;
 		memcpy(&layout, &ephemeral_layout, sizeof(RecordLayout));
-		storage.mem_tree =
-		    memtree_create(layout.key_type(), layout.record_size);
-		// cursor.mem.ctx = e
+		storage.mem_tree = memtree_create(layout.key_type(), layout.record_size);
 		cursor.mem.tree = &storage.mem_tree;
 		cursor.mem.state = MemCursor::INVALID;
 	}
-	void
-	open_blob(MemoryContext *ctx)
-	{
+
+	void open_blob(MemoryContext *ctx) {
 		type = BLOB;
 		cursor.blob.ctx = ctx;
 	}
+
 	// ========================================================================
 	// Unified Navigation
 	// ========================================================================
-	bool
-	rewind(bool to_end = false)
-	{
+	bool rewind(bool to_end = false) {
 		switch (type) {
 		case EPHEMERAL:
 			return to_end ? memcursor_last(&cursor.mem)
-				      : memcursor_first(&cursor.mem);
-		case TABLE:
-		case INDEX:
+			              : memcursor_first(&cursor.mem);
+		case BTREE_TABLE:
+		case BTREE_INDEX:
 			return to_end ? btree_cursor_last(&cursor.btree)
-				      : btree_cursor_first(&cursor.btree);
-						case BLOB:
-										default:
-			return false;
-		}
-	}
-	bool
-	step(bool forward = true)
-	{
-		switch (type) {
-		case EPHEMERAL:
-			return forward ? memcursor_next(&cursor.mem)
-				       : memcursor_previous(&cursor.mem);
-		case TABLE:
-		case INDEX:
-			return forward ? btree_cursor_next(&cursor.btree)
-				       : btree_cursor_previous(&cursor.btree);
-
+			              : btree_cursor_first(&cursor.btree);
+		case BPLUS_TABLE:
+		case BPLUS_INDEX:
+			return to_end ? bplustree_cursor_last(&cursor.bptree)
+			              : bplustree_cursor_first(&cursor.bptree);
 		case BLOB:
 		default:
 			return false;
 		}
 	}
-	bool
-	seek(CompareOp op, uint8_t *key)
-	{
+
+	bool step(bool forward = true) {
+		switch (type) {
+		case EPHEMERAL:
+			return forward ? memcursor_next(&cursor.mem)
+			               : memcursor_previous(&cursor.mem);
+		case BTREE_TABLE:
+		case BTREE_INDEX:
+			return forward ? btree_cursor_next(&cursor.btree)
+			               : btree_cursor_previous(&cursor.btree);
+		case BPLUS_TABLE:
+		case BPLUS_INDEX:
+			return forward ? bplustree_cursor_next(&cursor.bptree)
+			               : bplustree_cursor_previous(&cursor.bptree);
+		case BLOB:
+		default:
+			return false;
+		}
+	}
+
+	bool seek(CompareOp op, uint8_t *key) {
 		switch (type) {
 		case EPHEMERAL:
 			return memcursor_seek_cmp(&cursor.mem, key, op);
-		case TABLE:
-		case INDEX:
+		case BTREE_TABLE:
+		case BTREE_INDEX:
 			return btree_cursor_seek_cmp(&cursor.btree, key, op);
+		case BPLUS_TABLE:
+		case BPLUS_INDEX:
+			return bplustree_cursor_seek_cmp(&cursor.bptree, key, op);
 		case BLOB:
 			return blob_cursor_seek(&cursor.blob, key);
 		default:
@@ -136,166 +181,180 @@ struct VmCursor {
 		}
 	}
 
-	bool
-	seek_exact(uint8_t *key, const uint8_t *record)
-	{
+	bool seek_exact(uint8_t *key, const uint8_t *record) {
 		switch (type) {
 		case EPHEMERAL:
 			return memcursor_seek_exact(&cursor.mem, key, record);
-		case TABLE:
-		case INDEX:
-			return btree_cursor_seek_exact(&cursor.btree, key,
-						       record);
+		case BTREE_TABLE:
+		case BTREE_INDEX:
+			return btree_cursor_seek_exact(&cursor.btree, key, record);
+		case BPLUS_TABLE:
+		case BPLUS_INDEX:
+			return bplustree_cursor_seek_exact(&cursor.bptree, key, record);
 		case BLOB:
 		default:
 			return false;
 		}
 	}
 
-	bool
-	is_valid()
-	{
+	bool is_valid() {
 		switch (type) {
 		case EPHEMERAL:
 			return memcursor_is_valid(&cursor.mem);
-		case TABLE:
-		case INDEX:
+		case BTREE_TABLE:
+		case BTREE_INDEX:
 			return btree_cursor_is_valid(&cursor.btree);
+		case BPLUS_TABLE:
+		case BPLUS_INDEX:
+			return bplustree_cursor_is_valid(&cursor.bptree);
 		case BLOB:
-		    return blob_cursor_is_valid(&cursor.blob);
+			return blob_cursor_is_valid(&cursor.blob);
 		default:
 			return false;
 		}
 	}
+
 	// ========================================================================
 	// Data Access
 	// ========================================================================
-	uint8_t *
-	get_key()
-	{
+	uint8_t* get_key() {
 		switch (type) {
 		case EPHEMERAL:
 			return memcursor_key(&cursor.mem);
-		case TABLE:
-		case INDEX:
+		case BTREE_TABLE:
+		case BTREE_INDEX:
 			return btree_cursor_key(&cursor.btree);
+		case BPLUS_TABLE:
+		case BPLUS_INDEX:
+			return bplustree_cursor_key(&cursor.bptree);
 		case BLOB:
 		default:
-
 			return nullptr;
 		}
 	}
-	uint8_t *
-	get_record()
-	{
+
+	uint8_t* get_record() {
 		switch (type) {
 		case EPHEMERAL:
 			return memcursor_record(&cursor.mem);
-		case TABLE:
-		case INDEX:
+		case BTREE_TABLE:
+		case BTREE_INDEX:
 			return btree_cursor_record(&cursor.btree);
+		case BPLUS_TABLE:
+		case BPLUS_INDEX:
+			return bplustree_cursor_record(&cursor.bptree);
 		case BLOB:
-		    return blob_cursor_record(&cursor.blob);
+			return blob_cursor_record(&cursor.blob);
 		default:
 			return nullptr;
 		}
 	}
-	uint8_t *
-	column(uint32_t col_index)
-	{
+
+	uint8_t* column(uint32_t col_index) {
 		// Bounds check
 		if (col_index >= layout.column_count()) {
 			return nullptr;
 		}
+
 		// Column 0 is always the key
 		if (col_index == 0) {
 			return get_key();
 		}
+
 		// For other columns, get the record
 		uint8_t *record = get_record();
-		if (!record)
-			return nullptr;
+		if (!record) return nullptr;
+
 		// Special case: index cursors
-		if (type == INDEX) {
+		if (type == BTREE_INDEX || type == BPLUS_INDEX) {
 			// Index record is just the rowid (column 1)
 			return (col_index == 1) ? record : nullptr;
 		}
+
 		// Regular table/ephemeral: use pre-calculated offsets
 		return record + layout.get_offset(col_index);
 	}
-	DataType
-	column_type(uint32_t col_index)
-	{
+
+	DataType column_type(uint32_t col_index) {
 		if (col_index >= layout.column_count()) {
 			return TYPE_NULL;
 		}
 		return layout.layout[col_index];
 	}
+
 	// ========================================================================
 	// Modification Operations
 	// ========================================================================
-	bool
-	insert(uint8_t *key, uint8_t *record, uint32_t size = 0)
-	{
+	bool insert(uint8_t *key, uint8_t *record, uint32_t size = 0) {
 		switch (type) {
 		case EPHEMERAL:
 			return memcursor_insert(&cursor.mem, key, record);
-		case TABLE:
-		case INDEX:
+		case BTREE_TABLE:
+		case BTREE_INDEX:
 			return btree_cursor_insert(&cursor.btree, key, record);
+		case BPLUS_TABLE:
+		case BPLUS_INDEX:
+			return bplustree_cursor_insert(&cursor.bptree, key, record);
 		case BLOB:
 			return blob_cursor_insert(&cursor.blob, key, record, size);
 		default:
 			return false;
 		}
 	}
-	bool
-	update(uint8_t *record)
-	{
+
+	bool update(uint8_t *record) {
 		switch (type) {
 		case EPHEMERAL:
 			return memcursor_update(&cursor.mem, record);
-		case TABLE:
-		case INDEX:
+		case BTREE_TABLE:
+		case BTREE_INDEX:
 			return btree_cursor_update(&cursor.btree, record);
+		case BPLUS_TABLE:
+		case BPLUS_INDEX:
+			return bplustree_cursor_update(&cursor.bptree, record);
 		case BLOB:
 		default:
 			return false;
 		}
 	}
-	bool
-	remove()
-	{
+
+	bool remove() {
 		switch (type) {
 		case EPHEMERAL:
 			return memcursor_delete(&cursor.mem);
-		case TABLE:
-		case INDEX:
+		case BTREE_TABLE:
+		case BTREE_INDEX:
 			return btree_cursor_delete(&cursor.btree);
+		case BPLUS_TABLE:
+		case BPLUS_INDEX:
+			return bplustree_cursor_delete(&cursor.bptree);
 		case BLOB:
-		    return blob_cursor_delete(&cursor.blob);
+			return blob_cursor_delete(&cursor.blob);
 		default:
 			return false;
 		}
 	}
-	const char *
-	type_name()
-	{
+
+	const char* type_name() {
 		switch (type) {
 		case EPHEMERAL:
 			return "MEMTREE";
-		case INDEX:
-			return "INDEX";
-		case TABLE:
-			return "TABLE";
+		case BTREE_INDEX:
+			return "BTREE_INDEX";
+		case BTREE_TABLE:
+			return "BTREE_TABLE";
+		case BPLUS_INDEX:
+			return "BPLUS_INDEX";
+		case BPLUS_TABLE:
+			return "BPLUS_TABLE";
 		case BLOB:
-		    return "BLOB";
+			return "BLOB";
 		}
+		return "UNKNOWN";
 	}
+
 	// Debug helper
-	void
-	print_current()
-	{
+	void print_current() {
 		printf("Cursor type=%s, valid=%d", type_name(), is_valid());
 		if (is_valid()) {
 			uint8_t *key = get_key();
@@ -644,7 +703,7 @@ step()
 				Index *index =
 				    get_index(table_name, index_column);
 				cursor.open_index(index->to_layout(),
-						  &index->tree);
+						  &index->tree.btree);
 				if (_debug) {
 					printf("=> Opened index cursor %d on "
 					       "%s.%d",
@@ -654,7 +713,7 @@ step()
 			} else {
 				Table *table = get_table(table_name);
 				cursor.open_table(table->to_layout(),
-						  &table->tree);
+						  &table->tree.btree);
 				if (_debug) {
 					printf(
 					    "=> Opened table cursor %d on %s",

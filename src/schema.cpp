@@ -117,7 +117,7 @@ void update_index_stats(const char *table_name, uint32_t column_index, const Ind
 void invalidate_table_stats(const char *table_name) {
     Table *table = get_table(table_name);
     if (table) {
-        table->invalidate_stats();
+        table->stats.mark_stale();
     }
 }
 
@@ -181,22 +181,22 @@ bool add_table(Table *table) {
 }
 
 bool remove_table(const char *table_name) {
-    for (size_t i = 0; i < tables.size(); i++) {
-        if (tables[i].table_name == table_name) {
-            // Clear btrees
-            btree_clear(&tables[i].tree);
-            for (size_t j = 0; j < tables[i].indexes.size(); j++) {
-                btree_clear(&tables[i].indexes[j].tree);
-            }
+    // for (size_t i = 0; i < tables.size(); i++) {
+    //     if (tables[i].table_name == table_name) {
+    //         // Clear btrees
+    //         btree_clear(&tables[i].tree);
+    //         for (size_t j = 0; j < tables[i].indexes.size(); j++) {
+    //             btree_clear(&tables[i].indexes[j].tree);
+    //         }
 
-            // Remove from registry
-            // tables.erase(i);
+    //         // Remove from registry
+    //         // tables.erase(i);
 
-            if (_debug)
-                printf("Removed table '%s'\n", table_name);
-            return true;
-        }
-    }
+    //         if (_debug)
+    //             printf("Removed table '%s'\n", table_name);
+    //         return true;
+    //     }
+    // }
     return false;
 }
 
@@ -248,37 +248,37 @@ bool add_index(const char *table_name, Index *index) {
 }
 
 bool remove_index(const char *table_name, uint32_t column_index) {
-    Table *table = get_table(table_name);
-    if (!table)
-        return false;
+    // Table *table = get_table(table_name);
+    // if (!table)
+    //     return false;
 
-    for (size_t i = 0; i < table->indexes.size(); i++) {
-        if (table->indexes[i].column_index == column_index) {
-            btree_clear(&table->indexes[i].tree);
+    // for (size_t i = 0; i < table->indexes.size(); i++) {
+    //     if (table->indexes[i].column_index == column_index) {
+    //         btree_clear(&table->indexes[i].tree);
 
-            if (_debug) {
-                printf("Removed index '%s' from table '%s'\n",
-                       table->indexes[i].index_name.c_str(), table_name);
-            }
+    //         if (_debug) {
+    //             printf("Removed index '%s' from table '%s'\n",
+    //                    table->indexes[i].index_name.c_str(), table_name);
+    //         }
 
-            // table->indexes.erase(i);
-            return true;
-        }
-    }
-    return false;
+    //         // table->indexes.erase(i);
+    //         return true;
+    //     }
+    // }
+    // return false;
 }
 
 void clear_schema() {
-    for (size_t i = 0; i < tables.size(); i++) {
-        btree_clear(&tables[i].tree);
-        for (size_t j = 0; j < tables[i].indexes.size(); j++) {
-            btree_clear(&tables[i].indexes[j].tree);
-        }
-    }
-    tables.clear();
+    // for (size_t i = 0; i < tables.size(); i++) {
+    //     btree_clear(&tables[i].tree);
+    //     for (size_t j = 0; j < tables[i].indexes.size(); j++) {
+    //         btree_clear(&tables[i].indexes[j].tree);
+    //     }
+    // }
+    // tables.clear();
 
-    if (_debug)
-        printf("Cleared all schema\n");
+    // if (_debug)
+    //     printf("Cleared all schema\n");
 }
 
 
@@ -384,8 +384,8 @@ void print_table_info(const char *table_name) {
     }
 
     printf("BTree info:\n");
-    printf("  Root page: %u\n", table->tree.root_page_index);
-    printf("  Record size in tree: %u\n", table->tree.record_size);
+    // printf("  Root page: %u\n", table->tree.root_page_index);
+    // printf("  Record size in tree: %u\n", table->tree.record_size);
     printf("\n");
 }
 
@@ -415,33 +415,33 @@ void print_all_tables() {
 bool validate_schema() {
     for (size_t i = 0; i < tables.size(); i++) {
         // Check btree consistency
-        if (tables[i].tree.tree_type == INVALID) {
-            printf("Error: Table '%s' has invalid btree\n", tables[i].table_name.c_str());
-            return false;
-        }
+        // if (tables[i].tree.tree_type == INVALID) {
+        //     printf("Error: Table '%s' has invalid btree\n", tables[i].table_name.c_str());
+        //     return false;
+        // }
 
-        // Check each index
-        for (size_t j = 0; j < tables[i].indexes.size(); j++) {
-            if (tables[i].indexes[j].column_index >= tables[i].columns.size()) {
-                printf("Error: Index '%s' points to invalid column %u\n",
-                       tables[i].indexes[j].index_name.c_str(),
-                       tables[i].indexes[j].column_index);
-                return false;
-            }
+        // // Check each index
+        // for (size_t j = 0; j < tables[i].indexes.size(); j++) {
+        //     if (tables[i].indexes[j].column_index >= tables[i].columns.size()) {
+        //         printf("Error: Index '%s' points to invalid column %u\n",
+        //                tables[i].indexes[j].index_name.c_str(),
+        //                tables[i].indexes[j].column_index);
+        //         return false;
+        //     }
 
-            if (tables[i].indexes[j].tree.tree_type == INVALID) {
-                printf("Error: Index '%s' has invalid btree\n",
-                       tables[i].indexes[j].index_name.c_str());
-                return false;
-            }
-        }
+        //     if (tables[i].indexes[j].tree.tree_type == INVALID) {
+        //         printf("Error: Index '%s' has invalid btree\n",
+        //                tables[i].indexes[j].index_name.c_str());
+        //         return false;
+        //     }
+        // }
 
-        // Validate record layout
-        RecordLayout layout = tables[i].to_layout();
-        if (layout.column_count() != tables[i].columns.size()) {
-            printf("Error: Layout mismatch for table '%s'\n", tables[i].table_name.c_str());
-            return false;
-        }
+        // // Validate record layout
+        // RecordLayout layout = tables[i].to_layout();
+        // if (layout.column_count() != tables[i].columns.size()) {
+        //     printf("Error: Layout mismatch for table '%s'\n", tables[i].table_name.c_str());
+        //     return false;
+        // }
     }
 
     return true;

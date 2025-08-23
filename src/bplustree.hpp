@@ -1,12 +1,14 @@
-// btree.hpp
+// bplustree.hpp - Complete B+Tree header with cursor definitions
 #pragma once
 #include "defs.hpp"
 #include <cstdint>
 
 #define MIN_ENTRY_COUNT 3
-// #define MAX_COLS PAGE_SIZE - NODE_HEADER_SIZE
 
-// B+Tree control structure
+// Forward declaration
+struct MemoryContext;
+
+// B+Tree control structure (stores data only in leaves)
 struct BPlusTree {
 	uint32_t root_page_index;
 	uint32_t internal_max_keys;
@@ -17,86 +19,90 @@ struct BPlusTree {
 	uint32_t leaf_split_index;
 	uint32_t record_size; // Total size of each record
 	DataType node_key_size;
-	// TreeType tree_type;
-	// bool in_memory;
 };
 
+// B+Tree management functions
 BPlusTree
-btree_create(DataType key, uint32_t record_size);
+bplustree_create(DataType key, uint32_t record_size);
 bool
-btree_clear(BPlusTree *tree);
+bplustree_clear(BPlusTree *tree);
 
-enum CursorState : uint32_t {
-	CURSOR_INVALID = 0,
-	CURSOR_VALID = 1,
-	CURSOR_REQUIRESEEK = 2,
-	CURSOR_FAULT = 3
+// B+Tree cursor state enumeration
+enum BPtCursorState : uint32_t {
+	BPT_CURSOR_INVALID = 0,
+	BPT_CURSOR_VALID = 1,
+	BPT_CURSOR_REQUIRESEEK = 2,
+	BPT_CURSOR_FAULT = 3
 };
 
 #define MAX_BTREE_DEPTH 16
 
+// Path tracking for B+Tree cursor (simplified for leaf-level operations)
+
+// B+Tree cursor structure
 struct BPtCursor {
 	BPlusTree *tree;
 	MemoryContext *ctx;
-	// actually, a bptree doesn't need a stack
 	struct {
-		uint32_t page_stack[MAX_BTREE_DEPTH];  // Page indexes
-		uint32_t index_stack[MAX_BTREE_DEPTH]; // Key indexes within
-						       // each page
-		uint32_t
-		    child_stack[MAX_BTREE_DEPTH]; // Child position we came from
-		uint32_t stack_depth;
-		uint32_t current_page;
-		uint32_t current_index;
-	} path, saved;
-	CursorState state;
+		uint32_t current_page;	// Current leaf page
+		uint32_t current_index; // Current position in leaf
+	} path,
+	    saved; // For save/restore operations
+	BPtCursorState state;
 };
 
+// B+Tree cursor navigation functions
 bool
-btree_cursor_seek(BtCursor *cursor, const void *key);
+bplustree_cursor_seek(BPtCursor *cursor, const void *key);
 bool
-btree_cursor_previous(BtCursor *cursor);
+bplustree_cursor_previous(BPtCursor *cursor);
 bool
-btree_cursor_next(BtCursor *cursor);
+bplustree_cursor_next(BPtCursor *cursor);
 bool
-btree_cursor_last(BtCursor *cursor);
+bplustree_cursor_last(BPtCursor *cursor);
 bool
-btree_cursor_first(BtCursor *cursor);
+bplustree_cursor_first(BPtCursor *cursor);
 bool
-btree_cursor_is_end(BtCursor *cursor);
+bplustree_cursor_is_end(BPtCursor *cursor);
 bool
-btree_cursor_is_start(BtCursor *cursor);
-bool
-btree_cursor_update(BtCursor *cursor, const uint8_t *record);
-bool
-btree_cursor_insert(BtCursor *cursor, const void *key, const uint8_t *record);
-bool
-btree_cursor_delete(BtCursor *cursor);
+bplustree_cursor_is_start(BPtCursor *cursor);
 
-uint8_t *
-btree_cursor_key(BtCursor *cursor);
-uint8_t *
-btree_cursor_record(BtCursor *cursor);
-
+// B+Tree cursor data modification functions
 bool
-btree_cursor_seek_ge(BtCursor *cursor, const void *key);
+bplustree_cursor_update(BPtCursor *cursor, const uint8_t *record);
 bool
-btree_cursor_seek_gt(BtCursor *cursor, const void *key);
-bool
-btree_cursor_seek_le(BtCursor *cursor, const void *key);
-bool
-btree_cursor_seek_lt(BtCursor *cursor, const void *key);
-
-bool
-btree_cursor_is_valid(BtCursor *cursor);
-
-bool
-btree_cursor_has_next(BtCursor *cursor);
-bool
-btree_cursor_has_previous(BtCursor *cursor);
-
-bool
-btree_cursor_seek_cmp(BtCursor *cursor, const void *key, CompareOp op);
-bool
-btree_cursor_seek_exact(BtCursor *cursor, const void *key,
+bplustree_cursor_insert(BPtCursor *cursor, const void *key,
 			const uint8_t *record);
+bool
+bplustree_cursor_delete(BPtCursor *cursor);
+
+// B+Tree cursor data access functions
+uint8_t *
+bplustree_cursor_key(BPtCursor *cursor);
+uint8_t *
+bplustree_cursor_record(BPtCursor *cursor);
+
+// B+Tree cursor comparison seek functions
+bool
+bplustree_cursor_seek_ge(BPtCursor *cursor, const void *key);
+bool
+bplustree_cursor_seek_gt(BPtCursor *cursor, const void *key);
+bool
+bplustree_cursor_seek_le(BPtCursor *cursor, const void *key);
+bool
+bplustree_cursor_seek_lt(BPtCursor *cursor, const void *key);
+
+// B+Tree cursor state query functions
+bool
+bplustree_cursor_is_valid(BPtCursor *cursor);
+bool
+bplustree_cursor_has_next(BPtCursor *cursor);
+bool
+bplustree_cursor_has_previous(BPtCursor *cursor);
+
+// B+Tree cursor advanced operations
+bool
+bplustree_cursor_seek_cmp(BPtCursor *cursor, const void *key, CompareOp op);
+bool
+bplustree_cursor_seek_exact(BPtCursor *cursor, const void *key,
+			    const uint8_t *record);
