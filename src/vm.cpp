@@ -11,16 +11,18 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ios>
 bool _debug = false;
-struct VmArena {};
+struct VmArena {
+};
 // ============================================================================
 // VmCursor - Unified cursor abstraction
 // ============================================================================
 struct VmCursor {
 	// Cursor type explicitly enumerated
 	enum Type {
-		TABLE,	  // Primary table cursor
-		INDEX,	  // Secondary index cursor
+		TABLE,	   // Primary table cursor
+		INDEX,	   // Secondary index cursor
 		EPHEMERAL, // Memory-only temporary cursor
 		BLOB
 	};
@@ -77,9 +79,11 @@ struct VmCursor {
 		cursor.mem.tree = &storage.mem_tree;
 		cursor.mem.state = MemCursor::INVALID;
 	}
-	void open_blob(MemoryContext*ctx){
-	    type=BLOB;
-		cursor.blob.ctx =ctx;
+	void
+	open_blob(MemoryContext *ctx)
+	{
+		type = BLOB;
+		cursor.blob.ctx = ctx;
 	}
 	// ========================================================================
 	// Unified Navigation
@@ -124,7 +128,7 @@ struct VmCursor {
 		case INDEX:
 			return btree_cursor_seek_cmp(&cursor.btree, key, op);
 		case BLOB:
-		    // return blob_c
+			// return blob_c
 		default:
 			return false;
 		}
@@ -223,7 +227,7 @@ struct VmCursor {
 	// Modification Operations
 	// ========================================================================
 	bool
-	insert(uint8_t *key, uint8_t *record)
+	insert(uint8_t *key, uint8_t *record, uint32_t size = 0)
 	{
 		switch (type) {
 		case EPHEMERAL:
@@ -231,6 +235,8 @@ struct VmCursor {
 		case TABLE:
 		case INDEX:
 			return btree_cursor_insert(&cursor.btree, key, record);
+		case BLOB:
+			// return blob_cursor_insert(&cursor)
 		default:
 			return false;
 		}
@@ -767,12 +773,22 @@ step()
 	case OP_Insert: {
 		int32_t cursor_id = Opcodes::Insert::cursor_id(*inst);
 		int32_t key_reg = Opcodes::Insert::key_reg(*inst);
-		int32_t count = Opcodes::Insert::reg_count(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
 		VMValue *key = &VM.registers[key_reg];
-		uint8_t data[cursor->record_size()];
-		build_record(data, key_reg + 1, count - 1);
-		bool success = cursor->insert(key->data, data);
+
+		bool success;
+		int32_t count;
+		if (Opcodes::Insert::is_variable_length(*inst)) {
+			uint32_t size = Opcodes::Insert::size(*inst);
+			success = cursor->insert(key->data, key->data, size);
+			count = 2;
+		} else {
+			count = Opcodes::Insert::reg_count(*inst);
+			uint8_t data[cursor->record_size()];
+			build_record(data, key_reg + 1, count - 1);
+			success = cursor->insert(key->data, data);
+		}
+
 		if (_debug) {
 			printf("=> Cursor %d insert key=", cursor_id);
 			print_value(key->type, key->data);
@@ -811,7 +827,8 @@ step()
 // ============================================================================
 
 VM_RESULT
-vm_execute(VMInstruction *instructions, int instruction_count, MemoryContext *ctx)
+vm_execute(VMInstruction *instructions, int instruction_count,
+	   MemoryContext *ctx)
 {
 	reset();
 	VM.program = instructions;

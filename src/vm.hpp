@@ -308,7 +308,12 @@ namespace Insert
 inline VMInstruction
 create(int32_t cursor_id, int32_t start_reg, int32_t reg_count)
 {
-	return {OP_Insert, cursor_id, start_reg, reg_count, nullptr, 0};
+	return {OP_Insert, cursor_id, start_reg, reg_count, nullptr, (uint8_t)false};
+}
+inline VMInstruction
+create_variable(int32_t cursor_id, int32_t src_reg, int32_t size)
+{
+	return {OP_Insert, cursor_id, src_reg, size, nullptr, (uint8_t)true};
 }
 inline int32_t
 cursor_id(const VMInstruction &inst)
@@ -324,6 +329,15 @@ inline int32_t
 reg_count(const VMInstruction &inst)
 {
 	return inst.p3;
+}
+uint32_t
+size(const VMInstruction &inst)
+{
+	return inst.p3;
+}
+
+bool is_variable_length(const VMInstruction&inst) {
+    return (bool)inst.p5;
 }
 inline void
 print(const VMInstruction &inst)
