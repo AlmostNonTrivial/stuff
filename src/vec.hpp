@@ -67,6 +67,26 @@ template <typename T, typename ArenaTag, size_t InitialCapacity = 16> class Vec
 	{
 	}
 
+	static Vec* create(size_t initial_capacity = 16) {
+        // Calculate sizes
+        size_t vec_size = sizeof(Vec);
+        size_t buffer_size = sizeof(T) * initial_capacity;
+        size_t total_size = vec_size + buffer_size;
+
+        // ONE allocation for both Vec object and initial buffer
+        void* memory = Arena<ArenaTag>::alloc(total_size);
+
+        // Placement new the Vec at the start
+        Vec* vec = new (memory) Vec();
+
+        // Buffer immediately follows the Vec object
+        vec->data = (T*)((uint8_t*)memory + vec_size);
+        vec->capacity = initial_capacity;
+        vec->count = 0;
+
+        return vec;
+    }
+
 	// ========================================================================
 	// Basic Operations
 	// ========================================================================

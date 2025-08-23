@@ -26,6 +26,40 @@ public:
 
     Str() : data(nullptr), len(0), capacity(0) {}
 
+    static Str* create(size_t initial_capacity = 32) {
+            size_t str_size = sizeof(Str);
+            size_t buffer_size = initial_capacity;
+            size_t total_size = str_size + buffer_size;
+
+            void* memory = Arena<ArenaTag>::alloc(total_size);
+
+            Str* str = new (memory) Str();
+            str->data = (char*)((uint8_t*)memory + str_size);
+            str->capacity = initial_capacity;
+            str->len = 0;
+            str->data[0] = '\0';
+
+            return str;
+        }
+
+        // Create from C string - size perfectly
+        static Str* create(const char* cstr) {
+            size_t len = strlen(cstr);
+            size_t str_size = sizeof(Str);
+            size_t buffer_size = len + 1;
+            size_t total_size = str_size + buffer_size;
+
+            void* memory = Arena<ArenaTag>::alloc(total_size);
+
+            Str* str = new (memory) Str();
+            str->data = (char*)((uint8_t*)memory + str_size);
+            str->capacity = buffer_size;
+            str->len = len;
+            memcpy(str->data, cstr, len + 1);
+
+            return str;
+        }
+
     Str(const char *str) : data(nullptr), len(0), capacity(0) {
         if (str) assign(str);
     }
