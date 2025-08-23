@@ -1739,31 +1739,6 @@ btree_cursor_has_previous(BtCursor *cursor)
 
 // wrap pager
 
-bool
-btree_init(const char *filename)
-{
-	return pager_init(filename);
-}
-void
-btree_begin_transaction()
-{
-	pager_begin_transaction();
-}
-void
-btree_commit()
-{
-	pager_commit();
-}
-void
-btree_rollback()
-{
-	pager_rollback();
-}
-void
-btree_close()
-{
-	pager_close();
-}
 
 bool
 btree_cursor_seek_exact(BtCursor *cursor, const void *key,

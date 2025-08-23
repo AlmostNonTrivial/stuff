@@ -5,6 +5,14 @@
 #define PAGE_SIZE 2048
 #include <cstdint>
 
+
+
+struct Buffer {
+    void*ptr;
+    uint32_t size;
+};
+
+
 struct QueryArena {};
 // #define FAIL(msg) ((std::cout << msg << std::endl; exit(1)))
 

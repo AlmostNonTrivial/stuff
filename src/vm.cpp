@@ -1,6 +1,8 @@
 // vm.cpp
 #include "vm.hpp"
+#include "blob.hpp"
 #include "arena.hpp"
+#include "blob.hpp"
 #include "btree.hpp"
 #include "defs.hpp"
 #include "memtree.hpp"
@@ -19,7 +21,8 @@ struct VmCursor {
 	enum Type {
 		TABLE,	  // Primary table cursor
 		INDEX,	  // Secondary index cursor
-		EPHEMERAL // Memory-only temporary cursor
+		EPHEMERAL, // Memory-only temporary cursor
+		BLOB
 	};
 	Type type;
 	RecordLayout layout; // Value type - no pointer needed!
@@ -27,6 +30,7 @@ struct VmCursor {
 	union {
 		BtCursor btree;
 		MemCursor mem;
+		BlobCursor blob;
 	} cursor;
 	// Storage trees
 	union {
@@ -73,6 +77,10 @@ struct VmCursor {
 		cursor.mem.tree = &storage.mem_tree;
 		cursor.mem.state = MemCursor::INVALID;
 	}
+	void open_blob(MemoryContext*ctx){
+	    type=BLOB;
+		cursor.blob.ctx =ctx;
+	}
 	// ========================================================================
 	// Unified Navigation
 	// ========================================================================
@@ -115,6 +123,8 @@ struct VmCursor {
 		case TABLE:
 		case INDEX:
 			return btree_cursor_seek_cmp(&cursor.btree, key, op);
+		case BLOB:
+		    // return blob_c
 		default:
 			return false;
 		}
@@ -130,6 +140,7 @@ struct VmCursor {
 		case INDEX:
 			return btree_cursor_seek_exact(&cursor.btree, key,
 						       record);
+
 		default:
 			return false;
 		}
