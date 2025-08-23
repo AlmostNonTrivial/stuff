@@ -3,27 +3,28 @@
 #include "defs.hpp"
 #include <cstdint>
 
-
-
 #define MIN_ENTRY_COUNT 3
 // #define MAX_COLS PAGE_SIZE - NODE_HEADER_SIZE
 
-
 // B+Tree control structure
-struct BTree {
+struct BPlusTree {
 	uint32_t root_page_index;
 	uint32_t internal_max_keys;
+	uint32_t leaf_max_keys;
 	uint32_t internal_min_keys;
+	uint32_t leaf_min_keys;
 	uint32_t internal_split_index;
+	uint32_t leaf_split_index;
 	uint32_t record_size; // Total size of each record
 	DataType node_key_size;
+	// TreeType tree_type;
+	// bool in_memory;
 };
 
-BTree
+BPlusTree
 btree_create(DataType key, uint32_t record_size);
 bool
-btree_clear(BTree *tree);
-
+btree_clear(BPlusTree *tree);
 
 enum CursorState : uint32_t {
 	CURSOR_INVALID = 0,
@@ -34,20 +35,20 @@ enum CursorState : uint32_t {
 
 #define MAX_BTREE_DEPTH 16
 
-struct CursorPath {
-	uint32_t page_stack[MAX_BTREE_DEPTH];  // Page indexes
-	uint32_t index_stack[MAX_BTREE_DEPTH]; // Key indexes within each page
-	uint32_t child_stack[MAX_BTREE_DEPTH]; // Child position we came from
-	uint32_t stack_depth;
-	uint32_t current_page;
-	uint32_t current_index;
-};
-
-struct BtCursor {
-	BTree *tree;
-	MemoryContext* ctx;
-	CursorPath path;
-	CursorPath saved;
+struct BPtCursor {
+	BPlusTree *tree;
+	MemoryContext *ctx;
+	// actually, a bptree doesn't need a stack
+	struct {
+		uint32_t page_stack[MAX_BTREE_DEPTH];  // Page indexes
+		uint32_t index_stack[MAX_BTREE_DEPTH]; // Key indexes within
+						       // each page
+		uint32_t
+		    child_stack[MAX_BTREE_DEPTH]; // Child position we came from
+		uint32_t stack_depth;
+		uint32_t current_page;
+		uint32_t current_index;
+	} path, saved;
 	CursorState state;
 };
 
