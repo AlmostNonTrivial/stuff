@@ -45,7 +45,8 @@ enum CompareOp {
     LT = 2,
     LE = 3,
     GT = 4,
-    GE = 5
+    GE = 5,
+    EXACT = 6
 };
 
 int cmp(DataType key_size, const uint8_t *key1, const uint8_t *key2) ;
