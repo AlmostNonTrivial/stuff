@@ -2,6 +2,7 @@
 // #include "executor.hpp"
 // #include "arena.hpp"
 // #include "btree.hpp"
+// #include "defs.hpp"
 // #include "parser.hpp"
 // #include "compile.hpp"
 // #include "schema.hpp"
@@ -646,6 +647,22 @@
 // }
 
 
+// struct ExecContext {
+//     // Memory management
+//     void* (*alloc)(size_t size, void* ctx);
+//     void* alloc_ctx;  // Opaque pointer to arena/allocator
+
+//     // Result handling
+//     void (*emit_row)(TypedValue* values, size_t count, void* ctx);
+//     void* emit_ctx;
+
+//     // Statistics/monitoring (very real-world)
+//     size_t rows_processed;
+//     size_t memory_used;
+
+//     // Transaction context (if you add transactions)
+//     uint64_t txn_id;
+// };
 // // ============================================================================
 // // Main Execute Function
 // // ============================================================================
@@ -658,6 +675,10 @@
 //     }
 
 //     arena::reset<QueryArena>();
+//     ExecContext ctx;
+//     ctx.alloc = arena::alloc<QueryArena>;
+//     ctx.emit_row =
+//     // ctx.alloc_ctx = arena;
 
 //     if (!executor_state.initialized) {
 //         init_executor();

@@ -10,8 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 bool _debug = false;
-struct VmArena {
-};
+struct VmArena {};
 // ============================================================================
 // VmCursor - Unified cursor abstraction
 // ============================================================================
@@ -281,8 +280,9 @@ struct VmCursor {
 // VM State
 // ============================================================================
 static struct {
-	ResultCallback callback;
-	Vec<VMInstruction, QueryArena> program;
+	ExecContext *ctx;
+	VMInstruction *program;
+	int program_size;
 	uint32_t pc;
 	bool halted;
 	VMValue registers[REGISTERS];
@@ -326,7 +326,9 @@ reset()
 	for (uint32_t i = 0; i < REGISTERS; i++) {
 		VM.registers[i].type = TYPE_NULL;
 	}
-	VM.program.clear();
+	VM.program = nullptr;
+	VM.program_size = 0;
+	VM.ctx = nullptr;
 }
 // ============================================================================
 // Debug Functions
@@ -541,31 +543,21 @@ step()
 	case OP_Result: {
 		int32_t first_reg = Opcodes::Result::first_reg(*inst);
 		int32_t reg_count = Opcodes::Result::reg_count(*inst);
-		if (_debug) {
-			printf("=> OUTPUT: ");
-			for (int i = 0; i < reg_count; i++) {
-				if (i > 0)
-					printf(", ");
-				VMValue *val = &VM.registers[first_reg + i];
-				if (val->type != TYPE_NULL) {
-					print_value(val->type, val->data);
-				} else {
-					printf("NULL");
-				}
-			}
-		}
-		if (VM.callback) {
-			Vec<TypedValue, QueryArena> output;
+
+		if (VM.ctx && VM.ctx->emit_row) {
+			// Allocate output array using the context's allocator
+			TypedValue *values = (TypedValue *)VM.ctx->alloc(
+			    sizeof(TypedValue) * reg_count);
+
 			for (int i = 0; i < reg_count; i++) {
 				VMValue *val = &VM.registers[first_reg + i];
-				TypedValue value = {.type = val->type};
-				value.data =
-				    (uint8_t *)arena::alloc<QueryArena>(
-					val->type);
-				memcpy(value.data, val->data, val->type);
-				output.push_back(value);
+				values[i].type = val->type;
+				values[i].data =
+				    (uint8_t *)VM.ctx->alloc(val->type);
+				memcpy(values[i].data, val->data, val->type);
 			}
-			VM.callback(output);
+
+			VM.ctx->emit_row(values, reg_count);
 		}
 		VM.pc++;
 		return OK;
@@ -702,7 +694,6 @@ step()
 		VMValue *key = &VM.registers[key_reg];
 		bool found;
 
-
 		/* Is there a better way to do this?? */
 		if (op == EXACT) {
 			VMValue *record = &VM.registers[key_reg + 1];
@@ -806,16 +797,19 @@ step()
 // ============================================================================
 // Main VM Execute Function
 // ============================================================================
+
 VM_RESULT
-vm_execute(Vec<VMInstruction, QueryArena> &instructions)
+vm_execute(VMInstruction *instructions, int instruction_count, ExecContext *ctx)
 {
 	reset();
 	VM.program = instructions;
+	VM.program_size = instruction_count;
+	VM.ctx = ctx;
 	if (_debug) {
-		Debug::print_program(instructions);
+		Debug::print_program(instructions, instruction_count);
 		printf("\n===== EXECUTION TRACE =====\n");
 	}
-	while (!VM.halted && VM.pc < VM.program.size()) {
+	while (!VM.halted && VM.pc < VM.program_size) {
 		VM_RESULT result = step();
 		if (result != OK) {
 			if (_debug) {
@@ -831,9 +825,4 @@ vm_execute(Vec<VMInstruction, QueryArena> &instructions)
 		vm_debug_print_all_registers();
 	}
 	return OK;
-}
-void
-vm_set_result_callback(ResultCallback callback)
-{
-	VM.callback = callback;
 }

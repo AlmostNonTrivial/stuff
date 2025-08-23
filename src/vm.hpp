@@ -1,3 +1,4 @@
+
 // vm.hpp
 #pragma once
 #include "arena.hpp"
@@ -12,6 +13,12 @@
 struct VMValue {
 	DataType type;
 	uint8_t data[TYPE_256];
+};
+
+
+struct ExecContext {
+    void* (*alloc)(size_t size);  // Function pointer for allocation
+    void (*emit_row)(TypedValue* values, size_t count);  // Result callback
 };
 typedef void (*ResultCallback)(Vec<TypedValue, QueryArena> result);
 extern bool _debug;
@@ -717,10 +724,10 @@ print_instruction(const VMInstruction &inst, int pc = -1)
 	printf("\n");
 }
 inline void
-print_program(const Vec<VMInstruction, QueryArena> &program)
+print_program(VMInstruction * program, int program_size)
 {
-	printf("===== VM PROGRAM (%zu instructions) =====\n", program.size());
-	for (size_t i = 0; i < program.size(); i++) {
+    printf("===== VM PROGRAM (%zu instructions) =====\n", program_size);
+	for (size_t i = 0; i < program_size; i++) {
 		print_instruction(program[i], i);
 	}
 	printf("==========================================\n");
@@ -750,9 +757,9 @@ enable_trace(bool enable)
 enum VM_RESULT { OK, ABORT, ERR };
 // VM Functions
 VM_RESULT
-vm_execute(Vec<VMInstruction, QueryArena> &instructions);
-void
-vm_set_result_callback(ResultCallback callback);
+vm_execute(VMInstruction* instructions, int instruction_count, ExecContext * ctx);
+
+
 void
 vm_debug_print_all_registers();
 void
