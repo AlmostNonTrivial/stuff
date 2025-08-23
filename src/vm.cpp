@@ -99,7 +99,8 @@ struct VmCursor {
 		case INDEX:
 			return to_end ? btree_cursor_last(&cursor.btree)
 				      : btree_cursor_first(&cursor.btree);
-		default:
+						case BLOB:
+										default:
 			return false;
 		}
 	}
@@ -114,6 +115,8 @@ struct VmCursor {
 		case INDEX:
 			return forward ? btree_cursor_next(&cursor.btree)
 				       : btree_cursor_previous(&cursor.btree);
+
+		case BLOB:
 		default:
 			return false;
 		}
@@ -128,7 +131,7 @@ struct VmCursor {
 		case INDEX:
 			return btree_cursor_seek_cmp(&cursor.btree, key, op);
 		case BLOB:
-			// return blob_c
+			return blob_cursor_seek(&cursor.blob, key);
 		default:
 			return false;
 		}
@@ -144,7 +147,7 @@ struct VmCursor {
 		case INDEX:
 			return btree_cursor_seek_exact(&cursor.btree, key,
 						       record);
-
+		case BLOB:
 		default:
 			return false;
 		}
@@ -159,6 +162,8 @@ struct VmCursor {
 		case TABLE:
 		case INDEX:
 			return btree_cursor_is_valid(&cursor.btree);
+		case BLOB:
+		    return blob_cursor_is_valid(&cursor.blob);
 		default:
 			return false;
 		}
@@ -175,7 +180,9 @@ struct VmCursor {
 		case TABLE:
 		case INDEX:
 			return btree_cursor_key(&cursor.btree);
+		case BLOB:
 		default:
+
 			return nullptr;
 		}
 	}
@@ -188,6 +195,8 @@ struct VmCursor {
 		case TABLE:
 		case INDEX:
 			return btree_cursor_record(&cursor.btree);
+		case BLOB:
+		    return blob_cursor_record(&cursor.blob);
 		default:
 			return nullptr;
 		}
@@ -236,7 +245,7 @@ struct VmCursor {
 		case INDEX:
 			return btree_cursor_insert(&cursor.btree, key, record);
 		case BLOB:
-			// return blob_cursor_insert(&cursor)
+			return blob_cursor_insert(&cursor.blob, key, record, size);
 		default:
 			return false;
 		}
@@ -250,6 +259,7 @@ struct VmCursor {
 		case TABLE:
 		case INDEX:
 			return btree_cursor_update(&cursor.btree, record);
+		case BLOB:
 		default:
 			return false;
 		}
@@ -263,6 +273,8 @@ struct VmCursor {
 		case TABLE:
 		case INDEX:
 			return btree_cursor_delete(&cursor.btree);
+		case BLOB:
+		    return blob_cursor_delete(&cursor.blob);
 		default:
 			return false;
 		}
@@ -277,6 +289,8 @@ struct VmCursor {
 			return "INDEX";
 		case TABLE:
 			return "TABLE";
+		case BLOB:
+		    return "BLOB";
 		}
 	}
 	// Debug helper

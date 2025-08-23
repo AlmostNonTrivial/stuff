@@ -1,37 +1,37 @@
+// blob.cpp
 #include "blob.hpp"
 #include "defs.hpp"
 #include "pager.hpp"
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 
-
-
-
-
-#include "blob.hpp"
-#include "defs.hpp"
-#include "pager.hpp"
-#include <algorithm>
-#include <cstdint>
-
+// ============================================================================
+// Internal Blob Storage Functions
+// ============================================================================
 
 BlobNode* get_blob(uint32_t index) {
-       return static_cast<BlobNode*>(pager_get(index));
+    if (index == 0) return nullptr;
+    return static_cast<BlobNode*>(pager_get(index));
 }
 
 BlobNode* allocate_blob_page() {
-	uint32_t page_index = pager_new();
-	BlobNode*node = static_cast<BlobNode*>(pager_get(page_index));
+    uint32_t page_index = pager_new();
+    BlobNode* node = static_cast<BlobNode*>(pager_get(page_index));
 
-	node->index = page_index;
-	node->next = 0;
+    node->index = page_index;
+    node->next = 0;
+    node->size = 0;
+    node->flags = 0;
 
-	pager_mark_dirty(node->index);
-	return node;
+    pager_mark_dirty(node->index);
+    return node;
 }
 
-uint32_t insert(uint8_t* data, uint32_t size) {
-    int nodes_required = (size + BLOB_DATA_SIZE - 1) / BLOB_DATA_SIZE; // Ceiling division
+uint32_t blob_store(uint8_t* data, uint32_t size) {
+    if (!data || size == 0) return 0;
+
+    int nodes_required = (size + BLOB_DATA_SIZE - 1) / BLOB_DATA_SIZE;
 
     uint32_t first_page = 0;
     uint32_t prev_page = 0;
@@ -39,25 +39,20 @@ uint32_t insert(uint8_t* data, uint32_t size) {
     uint8_t* current_data = data;
 
     for (int i = 0; i < nodes_required; i++) {
-        // Allocate new page (you'll need a free list or allocator)
-
         BlobNode* node = allocate_blob_page();
         node->size = std::min(remaining, (uint32_t)BLOB_DATA_SIZE);
-        node->next = 0;  // Will be updated if not last
-        node->flags = 0;
+        node->next = 0;
 
         memcpy(node->data, current_data, node->size);
 
-        // Link nodes
         if (i == 0) {
             first_page = node->index;
         } else {
-            BlobNode* prev = static_cast<BlobNode*>(pager_get(prev_page));
+            BlobNode* prev = get_blob(prev_page);
             prev->next = node->index;
-            pager_mark_dirty(prev_page);  // Important!
+            pager_mark_dirty(prev_page);
         }
 
-        // Update for next iteration
         current_data += node->size;
         remaining -= node->size;
         prev_page = node->index;
@@ -65,110 +60,185 @@ uint32_t insert(uint8_t* data, uint32_t size) {
         pager_mark_dirty(node->index);
     }
 
-    return first_page;  // This is your blob_id
+    return first_page;
 }
 
+void blob_delete_chain(uint32_t index) {
+    if (index == 0) return;
 
-void delete_blob(uint32_t index) {
+    BlobNode* blob = get_blob(index);
+    if (!blob) return;
 
-    auto blob = static_cast<BlobNode*>(pager_get(index));
-    if(blob->next) {
-        delete_blob(blob->next);
+    if (blob->next) {
+        blob_delete_chain(blob->next);
     }
 
     pager_delete(index);
 }
 
-Buffer get(uint32_t blob_id) {
+// ============================================================================
+// Cursor Navigation (mostly no-ops for unordered blobs)
+// ============================================================================
+
+bool blob_cursor_first(BlobCursor* cursor) {
+    return cursor->valid;
+}
+
+bool blob_cursor_last(BlobCursor* cursor) {
+    return cursor->valid;
+}
+
+bool blob_cursor_next(BlobCursor* cursor) {
+    return false;
+}
+
+bool blob_cursor_previous(BlobCursor* cursor) {
+    return false;
+}
+
+// ============================================================================
+// Cursor Seeking
+// ============================================================================
+
+bool blob_cursor_seek(BlobCursor* cursor, const void* key) {
+    if (!key) {
+        cursor->valid = false;
+        cursor->blob_id = 0;
+        return false;
+    }
+
+    // Key is the blob_id (uint32_t)
+    uint32_t blob_id = *(const uint32_t*)key;
+
+    if (blob_id == 0) {
+        cursor->valid = false;
+        cursor->blob_id = 0;
+        return false;
+    }
+
+    // Lazy: just verify the blob exists
+    BlobNode* node = get_blob(blob_id);
+    if (!node) {
+        cursor->valid = false;
+        cursor->blob_id = 0;
+        return false;
+    }
+
+    cursor->blob_id = blob_id;
+    cursor->valid = true;
+
+    return true;
+}
+
+bool blob_cursor_seek_cmp(BlobCursor* cursor, const void* key, CompareOp op) {
+    if (op == EQ) {
+        return blob_cursor_seek(cursor, key);
+    }
+    return false;
+}
+
+bool blob_cursor_seek_exact(BlobCursor* cursor, const void* key, const uint8_t* record) {
+    return blob_cursor_seek(cursor, key);
+}
+
+// ============================================================================
+// Data Access
+// ============================================================================
+
+uint8_t* blob_cursor_key(BlobCursor* cursor) {
+    if (!cursor->valid) {
+        return nullptr;
+    }
+
+    // Allocate space for the key and return it
+    uint32_t* key_storage = (uint32_t*)cursor->ctx->alloc(sizeof(uint32_t));
+    *key_storage = cursor->blob_id;
+    return (uint8_t*)key_storage;
+}
+
+uint8_t* blob_cursor_record(BlobCursor* cursor) {
+    if (!cursor->valid || cursor->blob_id == 0) {
+        return nullptr;
+    }
+
     // First pass: calculate total size
     uint32_t total_size = 0;
-    uint32_t current = blob_id;
+    uint32_t current = cursor->blob_id;
 
     while (current) {
-        BlobNode* node = static_cast<BlobNode*>(pager_get(current));
-        if (!node) return Buffer{nullptr, 0}; // Error case
+        BlobNode* node = get_blob(current);
+        if (!node) return nullptr;
 
         total_size += node->size;
         current = node->next;
     }
 
-    // Allocate contiguous buffer
-    uint8_t* data = new uint8_t[total_size];
+    if (total_size == 0) {
+        return nullptr;
+    }
+
+    // Allocate from context
+    uint8_t* data = (uint8_t*)cursor->ctx->alloc(total_size);
 
     // Second pass: copy data
     uint32_t offset = 0;
-    current = blob_id;
+    current = cursor->blob_id;
 
     while (current) {
-        BlobNode* node = static_cast<BlobNode*>(pager_get(current));
+        BlobNode* node = get_blob(current);
         memcpy(data + offset, node->data, node->size);
         offset += node->size;
         current = node->next;
     }
 
-    return Buffer{data, total_size};
+    return data;
 }
 
-
-
-// Insert new blob and point cursor to it
-void blob_cursor_insert(BlobCursor* cursor, uint8_t* data, uint32_t size) {
-    cursor->blob_id = insert(data, size);  // Your existing insert
-    cursor->valid = true;
+bool blob_cursor_is_valid(BlobCursor* cursor) {
+    return cursor->valid && cursor->blob_id != 0;
 }
 
-// Get data from current blob
-Buffer blob_cursor_get(BlobCursor* cursor) {
-    if (!cursor->valid) return Buffer{nullptr, 0};
-    return get(cursor->blob_id);  // Your existing get
-}
+// ============================================================================
+// Modification Operations
+// ============================================================================
 
-// Delete current blob
-void blob_cursor_delete(BlobCursor* cursor) {
-    if (!cursor->valid) return;
-    delete_blob(cursor->blob_id);  // Your existing delete_blob
-    cursor->valid = false;
-    cursor->blob_id = 0;
-}
+bool blob_cursor_insert(BlobCursor* cursor, const void* key, const uint8_t* record, const uint32_t size) {
+    // For blob insertion through the standard cursor interface:
+    // - key: contains the size as uint32_t
+    // - record: points to the actual data
 
-// No-ops for operations that don't make sense for blobs
-bool blob_cursor_next(BlobCursor* cursor) {
-    auto current = get_blob(cursor->blob_id);
-    if(current && current->next) {
-        current->next = current->next;
-        return true;
-    }
-    return false;
-}
-
-void blob_cursor_prev(BlobCursor* cursor) {
-    // No-op: blobs aren't ordered
-}
-
-void blob_cursor_first(BlobCursor* cursor) {
-    // No-op: no ordering concept
-}
-
-void blob_cursor_last(BlobCursor* cursor) {
-    // No-op: no ordering concept
-}
-
-bool blob_cursor_valid(BlobCursor* cursor) {
-    return cursor->valid;
-}
-
-// Point cursor to specific blob
-bool blob_cursor_seek(BlobCursor* cursor, uint32_t blob_id) {
-    cursor->blob_id = blob_id;
-    if(pager_get(blob_id) == nullptr) {
-        cursor->valid = false;
+    if (!key || !record) {
         return false;
     }
+
+    if (size == 0) {
+        return false;
+    }
+
+    // Store the blob and update cursor
+    uint32_t blob_id = blob_store((uint8_t*)record, size);
+    if (blob_id == 0) {
+        return false;
+    }
+
+    cursor->blob_id = blob_id;
     cursor->valid = true;
+
     return true;
 }
 
-// Get current blob_id (for storing in btree)
-uint32_t blob_cursor_key(BlobCursor* cursor) {
-    return cursor->blob_id;
+bool blob_cursor_update(BlobCursor* cursor, const uint8_t* record) {
+    // Blobs are immutable - cannot update in place
+    return false;
+}
+
+bool blob_cursor_delete(BlobCursor* cursor) {
+    if (!cursor->valid || cursor->blob_id == 0) {
+        return false;
+    }
+
+    blob_delete_chain(cursor->blob_id);
+    cursor->valid = false;
+    cursor->blob_id = 0;
+    return true;
 }
