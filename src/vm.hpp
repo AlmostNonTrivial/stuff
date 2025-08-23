@@ -331,12 +331,12 @@ reg_count(const VMInstruction &inst)
 	return inst.p3;
 }
 uint32_t
-size(const VMInstruction &inst)
+inline size(const VMInstruction &inst)
 {
 	return inst.p3;
 }
 
-bool is_variable_length(const VMInstruction&inst) {
+inline bool is_variable_length(const VMInstruction&inst) {
     return (bool)inst.p5;
 }
 inline void

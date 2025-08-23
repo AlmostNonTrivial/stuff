@@ -43,4 +43,6 @@ AccessMethodEnum type;
 };
 
 // Main entry points for AST-based building
-Vec<VMInstruction, QueryArena> build_from_ast(ASTNode* ast);
+// Vec<VMInstruction, QueryArena> build_from_ast(ASTNode* ast);
+
+void compile();
