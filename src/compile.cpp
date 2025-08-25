@@ -5,6 +5,7 @@
 #include "pager.hpp"
 #include "parser.hpp"
 #include "schema.hpp"
+#include "vec.hpp"
 #include "vm.hpp"
 #include <algorithm>
 #include <cstdint>
@@ -99,19 +100,9 @@ struct ProgramBuilder {
 };
 
 
-void
-init_stuff()
-{
 
+Vec<VMInstruction, QueryArena> build_from_ast(ASTNode *ast) {
+    Vec<VMInstruction, QueryArena> program;
 
-	pager_init("stuff");
-}
-
-
-
-void
-compile()
-{
-	init_stuff();
-	// vm_execute(VMInstruction * instructions, ctx)
+    return program;
 }

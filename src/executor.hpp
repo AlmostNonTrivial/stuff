@@ -5,4 +5,4 @@
 #include "arena.hpp"
 
 
-// void execute(const char * sql);
+void execute(const char * sql);

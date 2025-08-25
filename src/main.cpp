@@ -1,17 +1,17 @@
+#include "executor.hpp"
 
 
-#include "compile.hpp"
-#include "defs.hpp"
-#include "pager.hpp"
-
-
-// In main.cpp, replace print_result_callback with:
+const char * create_customers = "CREATE TABLE Customers (id TYPE_4, name TYPE_32, email TYPEE 32)";
 
 
 
 int main() {
 
-    
+
+    execute(create_customers);
+
+
+
 
 
 
