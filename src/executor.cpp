@@ -259,7 +259,7 @@ static VM_RESULT
 execute_drop_index(DropIndexNode *node)
 {
 
-	Index *index = find_index(node->index_name);
+	Index *index = get_index(node->index_name);
 
 	assert(index != nullptr);
 
@@ -342,7 +342,6 @@ init_executor()
 
 	executor_state.initialized = true;
 	executor_state.in_transaction = false;
-
 	executor_state.next_master_id = 1;
 
 	// Reset statistics

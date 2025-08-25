@@ -34,6 +34,7 @@ main()
 		// execute(create_products);
 	}
 	execute(select_tables);
+
 	// print_table_info("sqlite_master");
 	// print_table_info("Customers");
 	// execute(insert_customer);

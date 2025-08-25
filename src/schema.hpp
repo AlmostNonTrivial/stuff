@@ -1,6 +1,7 @@
-// schema.hpp - Updated with support for both tree types
+// schema.hpp - Compressed version with only used functions
 #pragma once
 #include "arena.hpp"
+#include "map.hpp"
 #include "btree.hpp"
 #include "bplustree.hpp"
 #include "defs.hpp"
@@ -10,77 +11,61 @@
 #include <cassert>
 #include <cstdint>
 
-#define TABLE_NAME_SIZE TYPE_32
-#define COLUMN_NAME_SIZE TYPE_32
 #define MAX_RECORD_LAYOUT 32
 
-DataType get_column_type(const char *table_name, uint32_t col_index);
-
-struct RegistryArena {};
-
-// Tree type enumeration
-enum class TreeType {
-	BTREE,      // Regular B-tree
-	BPLUSTREE   // B+ tree
+struct RegistryArena
+{
 };
 
 // ============================================================================
-// RecordLayout - Pure record interpretation (VM's concern)
+// Core Types
 // ============================================================================
-struct RecordLayout {
+
+enum class TreeType
+{
+	BTREE,
+	BPLUSTREE
+};
+
+// RecordLayout - Pure record interpretation
+struct RecordLayout
+{
 	Vec<DataType, QueryArena> layout;
 	Vec<uint32_t, QueryArena> offsets;
 	uint32_t record_size;
 
-	DataType key_type() const { return layout[0]; }
-	uint32_t column_count() const { return layout.size(); }
-
-	// Factory methods
-	static RecordLayout create(Vec<DataType, QueryArena> &column_types);
-	static RecordLayout create(DataType key, DataType rec = TYPE_NULL);
-
-	uint32_t get_offset(uint32_t col_index) const {
+	DataType
+	key_type() const
+	{
+		return layout[0];
+	}
+	uint32_t
+	column_count() const
+	{
+		return layout.size();
+	}
+	uint32_t
+	get_offset(uint32_t col_index) const
+	{
 		return offsets[col_index];
 	}
+
+	static RecordLayout
+	create(Vec<DataType, QueryArena> &column_types);
+	static RecordLayout
+	create(DataType key, DataType rec = TYPE_NULL);
 };
 
-// ============================================================================
-// Table Statistics - Cached from last ANALYZE
-// ============================================================================
-struct TableStats {
-	uint32_t row_count = 0;
-	uint32_t page_count = 0;
-	uint32_t total_size = 0;    // In bytes
-	uint64_t last_analyzed = 0; // Timestamp
-	bool is_stale = true;       // True if data changed since last analyze
-
-	void mark_stale() { is_stale = true; }
-	void clear() { *this = TableStats{}; }
-};
-
-struct IndexStats {
-	uint32_t distinct_keys = 0;
-	uint32_t tree_depth = 0;
-	uint32_t page_count = 0;
-	double selectivity = 1.0; // Fraction of distinct values
-	bool is_stale = true;
-
-	void mark_stale() { is_stale = true; }
-	void clear() { *this = IndexStats{}; }
-};
-
-// ============================================================================
-// Schema - Persistent table metadata (Storage concern)
-// ============================================================================
-struct ColumnInfo {
-    Str<QueryArena> name;
+// Column metadata
+struct ColumnInfo
+{
+	Str<QueryArena> name;
 	DataType type;
 };
 
-// ============================================================================
-// Index - Secondary index metadata (supports both tree types)
-// ============================================================================
-struct Index {
+// Index - Secondary index metadata
+struct Index
+{
 	Str<RegistryArena> index_name;
 	Str<RegistryArena> table_name;
 	TreeType tree_type;
@@ -90,50 +75,27 @@ struct Index {
 	} tree;
 	uint32_t column_index;
 
-	IndexStats stats; // Cached statistics
-
-	RecordLayout to_layout() const {
-		DataType key = get_column_type(table_name, column_index); // Need table ref
-		assert(column_index != 0);
-		DataType rowid = get_column_type(table_name, 0); // Need table ref
-		return RecordLayout::create(key, rowid); // TYPE_4 for rowid
-	}
-
-	// Helper to get appropriate tree pointer
-	void* get_tree_ptr() {
-		return tree_type == TreeType::BTREE
-			? static_cast<void*>(&tree.btree)
-			: static_cast<void*>(&tree.bplustree);
-	}
-
-	bool is_btree() const { return tree_type == TreeType::BTREE; }
-	bool is_bplustree() const { return tree_type == TreeType::BPLUSTREE; }
+	RecordLayout
+	to_layout() const;
 };
 
-// ============================================================================
-// Table - Complete table metadata (supports both tree types)
-// ============================================================================
-struct Table {
+// Table - Complete table metadata
+struct Table
+{
 	Str<RegistryArena> table_name;
 	Vec<ColumnInfo, RegistryArena> columns;
-	Vec<Index*, RegistryArena> indexes;
+	Map<uint32_t, Index *, RegistryArena> indexes;
 	TreeType tree_type;
 	union {
 		BTree btree;
 		BPlusTree bplustree;
 	} tree;
-	TableStats stats; // Cached statistics
 
-	RecordLayout to_layout() const {
-		Vec<DataType, QueryArena> types;
-		for (size_t i = 0; i < columns.size(); i++) {
-			types.push_back(columns[i].type);
-		}
-		return RecordLayout::create(types);
-	}
+	RecordLayout
+	to_layout() const;
 };
 
-
+// Schema snapshot for transaction support
 struct SchemaSnapshots
 {
 	struct Entry
@@ -146,49 +108,45 @@ struct SchemaSnapshots
 };
 
 // ============================================================================
-// Schema Registry Functions
+// Registry Operations (Used by VM and Executor)
 // ============================================================================
-Table *get_table(const char *table_name);
-Index *get_index(const char *table_name, uint32_t column_index);
-uint32_t get_column_index(const char *table_name, const char *col_name);
-DataType get_column_type(const char *table_name, uint32_t col_index);
 
-bool add_table(Table *table);
-bool remove_table(const char *table_name);
-bool add_index(const char *table_name, Index *index);
-bool remove_index(const char *table_name, uint32_t column_index);
-void clear_schema();
-
-// ============================================================================
-// Statistics Management (called by VM/Executor)
-// ============================================================================
-void update_table_stats(const char *table_name, const TableStats &stats);
-void update_index_stats(const char *table_name, uint32_t column_index, const IndexStats &stats);
-void invalidate_table_stats(const char *table_name);
-TableStats *get_table_stats(const char *table_name);
-IndexStats *get_index_stats(const char *table_name, uint32_t column_index);
+Table *
+get_table(const char *table_name);
+Index *
+get_index(const char *table_name, uint32_t column_index); // VM uses this
+Index *
+get_index(const char *table_name, const char *index_name); // VM uses this
+Index *
+get_index(const char *index_name);
+void
+remove_index(const char *table_name, uint32_t column_index);
+void
+remove_table(const char *table_name);
 
 // ============================================================================
-// Utility Functions
+// Schema Queries (Used by VM and Compiler)
 // ============================================================================
-void print_record(uint8_t *record, const RecordLayout *layout);
-void print_record_with_names(uint8_t *key, uint8_t *record, const Table *table);
-void print_table_info(const char *table_name);
-void print_all_tables();
-bool validate_schema();
-size_t get_table_size(const char *table_name);
-RecordLayout build_layout_from_columns(const char *table_name,
-                                       const Vec<const char *, QueryArena> &column_names);
-Vec<const char *, QueryArena> get_all_table_names();
-bool column_exists_anywhere(const char *col_name);
-uint32_t total_index_count();
-bool stats_are_fresh(const char *table_name);
 
-Index * create_index(CreateIndexNode* node);
+uint32_t
+get_column_index(const char *table_name, const char *col_name);
+DataType
+get_column_type(const char *table_name, uint32_t col_index);
 
-Table* create_table(CreateTableNode*node);
-void create_master();
+// ============================================================================
+// Factory Functions (Used by Executor)
+// ============================================================================
 
-Index* find_index(const char*name);
+Table *
+create_table(CreateTableNode *node);
+Index *
+create_index(CreateIndexNode *node);
+void
+create_master(); // Special case for sqlite_master
+
+// ============================================================================
+// Transaction Support (Used by Executor)
+// ============================================================================
+
 SchemaSnapshots
 take_snapshot();
