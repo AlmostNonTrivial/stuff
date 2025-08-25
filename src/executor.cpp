@@ -392,7 +392,7 @@ init_executor()
     	init_type_ops();
 	pager_init("db");
 
-	_debug = true;
+
 	arena::init<QueryArena>(PAGE_SIZE * 30);
 	arena::init<RegistryArena>(PAGE_SIZE * 14);
 	if (_debug)

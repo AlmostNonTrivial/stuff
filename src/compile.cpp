@@ -182,7 +182,7 @@ Vec<VMInstruction, QueryArena>
 build_from_ast(ASTNode *ast)
 {
 
-    _debug = false;
+
 	ProgramBuilder builder;
 
 	switch (ast->type)
@@ -194,7 +194,7 @@ build_from_ast(ASTNode *ast)
 	}
 
 	case AST_SELECT: {
-	_debug = true;
+
 	    build_select(builder, (SelectNode*)ast);
 	}
 

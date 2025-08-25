@@ -6,7 +6,7 @@
 #include <cstdio>
 #include <cstring>
 
-static bool _debug = true;
+static bool _debug = false;
 
 // ============================================================================
 // Registry Storage
