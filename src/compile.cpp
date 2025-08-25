@@ -100,7 +100,16 @@ struct ProgramBuilder
 
 //------------------ PROGRAMS ---------------------//
 
-// void build_(ProgramBuilder& prog, AstNode* node){}
+void build_select(ProgramBuilder& prog, SelectNode* node){
+    int table_cursor = 0;
+   	prog.emit(Opcodes::Open::create_btree(table_cursor, node->table, 0, true));
+
+
+
+
+
+
+}
 
 void
 build_insert(ProgramBuilder &prog, InsertNode *node)
@@ -129,6 +138,9 @@ build_insert(ProgramBuilder &prog, InsertNode *node)
 	prog.emit(Opcodes::Halt::create(0));
 }
 
+
+
+
 Vec<VMInstruction, QueryArena>
 build_from_ast(ASTNode *ast)
 {
@@ -140,6 +152,10 @@ build_from_ast(ASTNode *ast)
 	case AST_INSERT: {
 		build_insert(builder, (InsertNode *)ast);
 		break;
+	}
+
+	case AST_SELECT: {
+	    build_select(builder, (SelectNode*)ast);
 	}
 
 	// these done internally
