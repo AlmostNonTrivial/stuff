@@ -9,8 +9,10 @@
 #include "parser.hpp"
 #include "compile.hpp"
 #include "schema.hpp"
+#include "vec.hpp"
 #include "vm.hpp"
 #include <cassert>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -19,7 +21,13 @@
 
 struct SchemaSnapshots
 {
-	Vec<std::pair<const char *, uint32_t>, QueryArena> roots;
+	struct Entry
+	{
+		const char *table;
+		uint32_t root;
+		Vec<std::pair<uint32_t, uint32_t>, QueryArena> indexes;
+	};
+	Vec<Entry, QueryArena> entries;
 };
 
 SchemaSnapshots
@@ -29,14 +37,19 @@ take_snapshot()
 	auto tables = get_all_table_names();
 	for (int i = 0; i < tables.size(); i++)
 	{
+
 		auto table = get_table(tables[i]);
-		snap.roots.push_back({table->table_name.c_str(), table->tree.bplustree.root_page_index});
+
+		auto name = table->table_name.c_str();
+		auto root = table->tree.bplustree.root_page_index;
+		Vec<std::pair<uint32_t, uint32_t>, QueryArena> indexes;
 		for (int j = 0; j < table->indexes.size(); j++)
 		{
-			auto index = get_index(table->table_name, table->indexes[j]->column_index);
-			// snap.roots.push_back({index->index_name})
+			indexes.push_back({table->indexes[j]->column_index, table->indexes[j]->tree.btree.root_page_index});
 		}
+		snap.entries.push_back({.root = root, .table = name, .indexes = indexes});
 	}
+	return snap;
 }
 
 void
@@ -65,6 +78,7 @@ static struct ExecutorState
 	bool in_transaction;
 	bool master_table_exists;
 	uint32_t next_master_id;
+	SchemaSnapshots snapshot;
 
 	// Statistics
 	struct
@@ -208,6 +222,36 @@ update_master_rootpage(const char *name, uint32_t new_rootpage)
 
 	executor_state.master_table_exists = save_master;
 }
+void
+update_roots_in_master(const SchemaSnapshots& before, const SchemaSnapshots& after)
+{
+	for (size_t i = 0; i < after.entries.size(); i++)
+	{
+		if (i < before.entries.size())
+		{
+			// Check table root changes
+			if (before.entries[i].root != after.entries[i].root)
+			{
+				update_master_rootpage(after.entries[i].table, after.entries[i].root);
+			}
+
+			// Check index root changes
+			for (size_t j = 0; j < after.entries[i].indexes.size(); j++)
+			{
+				if (j < before.entries[i].indexes.size() &&
+				    before.entries[i].indexes[j].second != after.entries[i].indexes[j].second)
+				{
+					Index* idx = get_index(after.entries[i].table, after.entries[i].indexes[j].first);
+					if (idx)
+					{
+						update_master_rootpage(idx->index_name.c_str(), after.entries[i].indexes[j].second);
+					}
+				}
+			}
+		}
+	}
+}
+
 
 static void
 delete_master_entry(const char *name)
@@ -508,6 +552,7 @@ execute_begin()
 		printf("EXECUTOR: Beginning transaction\n");
 	}
 
+	executor_state.snapshot=	take_snapshot();
 	pager_begin_transaction();
 	executor_state.in_transaction = true;
 
@@ -528,6 +573,10 @@ execute_commit()
 	{
 		printf("EXECUTOR: Committing transaction\n");
 	}
+
+	SchemaSnapshots current = take_snapshot();
+	update_roots_in_master(executor_state.snapshot, current);
+
 
 	pager_commit();
 	executor_state.in_transaction = false;
