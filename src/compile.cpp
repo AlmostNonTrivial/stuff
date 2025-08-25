@@ -14,9 +14,9 @@
 #include <utility>
 
 // Register allocator with named registers for debugging
-struct RegisterAllocator {
-	Vec<std::pair<Str<QueryArena>, uint32_t>, QueryArena, REGISTERS>
-	    name_to_register;
+struct RegisterAllocator
+{
+	Vec<std::pair<Str<QueryArena>, uint32_t>, QueryArena, REGISTERS> name_to_register;
 
 	// we need array allocation to be contiguous, so for simplicity just
 	// increment them
@@ -24,11 +24,10 @@ struct RegisterAllocator {
 	get(const char *name)
 	{
 		auto it = name_to_register.find_with(
-		    [name](const std::pair<Str<QueryArena>, uint32_t> entry) {
-			    return entry.first.starts_with(name);
-		    });
+			[name](const std::pair<Str<QueryArena>, uint32_t> entry) { return entry.first.starts_with(name); });
 
-		if (it != -1) {
+		if (it != -1)
+		{
 			return name_to_register[it].second;
 		}
 
@@ -48,7 +47,8 @@ struct RegisterAllocator {
 	}
 };
 
-struct ProgramBuilder {
+struct ProgramBuilder
+{
 	Vec<VMInstruction, QueryArena> instructions;
 	Vec<std::pair<Str<QueryArena>, int>, QueryArena> labels;
 	RegisterAllocator regs;
@@ -77,21 +77,21 @@ struct ProgramBuilder {
 	void
 	resolve_labels()
 	{
-		for (size_t i = 0; i < instructions.size(); i++) {
+		for (size_t i = 0; i < instructions.size(); i++)
+		{
 			auto &inst = instructions[i];
 
-			if (!inst.p4 && inst.p3 == -1) {
+			if (!inst.p4 && inst.p3 == -1)
+			{
 				continue;
 			}
 			char *label = (char *)inst.p4;
 
 			auto it = labels.find_with(
-			    [label](const std::pair<Str<QueryArena>, uint32_t>
-					entry) {
-				    return entry.first.starts_with(label);
-			    });
+				[label](const std::pair<Str<QueryArena>, uint32_t> entry) { return entry.first.starts_with(label); });
 
-			if (it == -1) {
+			if (it == -1)
+			{
 				continue;
 			}
 			inst.p3 = it;
@@ -100,20 +100,33 @@ struct ProgramBuilder {
 	}
 };
 
+//------------------ PROGRAMS ---------------------//
 
+// void build_(ProgramBuilder& prog, AstNode* node){}
+
+void
+build_insert(ProgramBuilder &prog, InsertNode *node)
+{
+
+	int table_cursor = 0;
+	const char *table = node->table;
+	prog.emit(Opcodes::Open::create_btree(table_cursor, table));
+	// for(int i = 0; i < )
+
+}
 
 Vec<VMInstruction, QueryArena>
 build_from_ast(ASTNode *ast)
 {
 	ProgramBuilder builder;
 
-	switch (ast->type) {
+	switch (ast->type)
+	{
 
-
-
-
-
-
+	case AST_INSERT: {
+		build_insert(builder, (InsertNode *)ast);
+		break;
+	}
 
 	// these done internally
 	case AST_CREATE_INDEX:
@@ -121,7 +134,7 @@ build_from_ast(ASTNode *ast)
 	case AST_DROP_TABLE:
 	case AST_DROP_INDEX:
 	default:
-	    break;
+		break;
 	}
 
 	return builder.instructions;

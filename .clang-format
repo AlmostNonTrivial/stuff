@@ -1,19 +1,7 @@
 AlwaysBreakAfterReturnType: All
-BasedOnStyle: LLVM
-IndentWidth: 8
+BasedOnStyle: Microsoft
 UseTab: Always
-TabWidth: 8
-BreakBeforeBraces: Linux
-AllowShortIfStatementsOnASingleLine: false
-AllowShortFunctionsOnASingleLine: None
 AlignTrailingComments: true
-ColumnLimit: 80
-IndentCaseLabels: false
 AlignConsecutiveMacros: true
-ForEachMacros:
-  - 'list_for_each'
-  - 'list_for_each_entry'
-  - 'list_for_each_safe'
-  - 'hlist_for_each_entry'
 SpaceAfterCStyleCast: false
 SortIncludes: false
