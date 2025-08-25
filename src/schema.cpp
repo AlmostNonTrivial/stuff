@@ -1,5 +1,6 @@
 // schema.cpp
 #include "schema.hpp"
+#include "bplustree.hpp"
 #include "defs.hpp"
 #include "str.hpp"
 #include <cstdio>
@@ -181,22 +182,23 @@ bool add_table(Table *table) {
 }
 
 bool remove_table(const char *table_name) {
-    // for (size_t i = 0; i < tables.size(); i++) {
-    //     if (tables[i].table_name == table_name) {
-    //         // Clear btrees
-    //         btree_clear(&tables[i].tree);
-    //         for (size_t j = 0; j < tables[i].indexes.size(); j++) {
-    //             btree_clear(&tables[i].indexes[j].tree);
-    //         }
+    for (size_t i = 0; i < tables.size(); i++) {
+        if (tables[i].table_name == table_name) {
+            // Clear btrees
+            bplustree_clear(&tables[i].tree.bplustree);
 
-    //         // Remove from registry
-    //         // tables.erase(i);
+            for (size_t j = 0; j < tables[i].indexes.size(); j++) {
+                btree_clear(&tables[i].indexes[j].tree.btree);
+            }
 
-    //         if (_debug)
-    //             printf("Removed table '%s'\n", table_name);
-    //         return true;
-    //     }
-    // }
+            // Remove from registry
+            // tables.erase(i);
+
+            if (_debug)
+                printf("Removed table '%s'\n", table_name);
+            return true;
+        }
+    }
     return false;
 }
 
@@ -248,37 +250,37 @@ bool add_index(const char *table_name, Index *index) {
 }
 
 bool remove_index(const char *table_name, uint32_t column_index) {
-    // Table *table = get_table(table_name);
-    // if (!table)
-    //     return false;
+    Table *table = get_table(table_name);
+    if (!table)
+        return false;
 
-    // for (size_t i = 0; i < table->indexes.size(); i++) {
-    //     if (table->indexes[i].column_index == column_index) {
-    //         btree_clear(&table->indexes[i].tree);
+    for (size_t i = 0; i < table->indexes.size(); i++) {
+        if (table->indexes[i].column_index == column_index) {
+            btree_clear(&table->indexes[i].tree.btree);
 
-    //         if (_debug) {
-    //             printf("Removed index '%s' from table '%s'\n",
-    //                    table->indexes[i].index_name.c_str(), table_name);
-    //         }
+            if (_debug) {
+                printf("Removed index '%s' from table '%s'\n",
+                       table->indexes[i].index_name.c_str(), table_name);
+            }
 
-    //         // table->indexes.erase(i);
-    //         return true;
-    //     }
-    // }
-    // return false;
+            // table->indexes.erase(i);
+            return true;
+        }
+    }
+    return false;
 }
 
 void clear_schema() {
-    // for (size_t i = 0; i < tables.size(); i++) {
-    //     btree_clear(&tables[i].tree);
-    //     for (size_t j = 0; j < tables[i].indexes.size(); j++) {
-    //         btree_clear(&tables[i].indexes[j].tree);
-    //     }
-    // }
-    // tables.clear();
+    for (size_t i = 0; i < tables.size(); i++) {
+        bplustree_clear(&tables[i].tree.bplustree);
+        for (size_t j = 0; j < tables[i].indexes.size(); j++) {
+            btree_clear(&tables[i].indexes[j].tree.btree);
+        }
+    }
+    tables.clear();
 
-    // if (_debug)
-    //     printf("Cleared all schema\n");
+    if (_debug)
+        printf("Cleared all schema\n");
 }
 
 
@@ -384,8 +386,8 @@ void print_table_info(const char *table_name) {
     }
 
     printf("BTree info:\n");
-    // printf("  Root page: %u\n", table->tree.root_page_index);
-    // printf("  Record size in tree: %u\n", table->tree.record_size);
+    printf("  Root page: %u\n", table->tree.bplustree.root_page_index);
+    printf("  Record size in tree: %u\n", table->tree.bplustree.record_size);
     printf("\n");
 }
 
@@ -413,12 +415,6 @@ void print_all_tables() {
 
 // Validate that all indexes point to valid columns
 bool validate_schema() {
-    // for (size_t i = 0; i < tables.size(); i++) {
-    //     // Check btree consistency
-
-
-    // }
-
     return true;
 }
 
