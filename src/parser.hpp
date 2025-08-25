@@ -26,6 +26,7 @@ enum ASTNodeType {
     AST_CREATE_INDEX,
     AST_DROP_INDEX,
     AST_DROP_TABLE,
+    AST_ALTER_TABLE, // not implemented
 
     // DML Commands
     AST_SELECT,
@@ -59,7 +60,7 @@ inline CommandCategory get_command_category(ASTNodeType type) {
         case AST_CREATE_TABLE:
         case AST_CREATE_INDEX:
         case AST_DROP_TABLE:
-        case AST_ALTER_TABLE:
+        case AST_DROP_INDEX:
             return CMD_DDL;
 
         // DML Commands
