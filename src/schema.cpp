@@ -21,7 +21,7 @@ RecordLayout RecordLayout::create(Vec<DataType, QueryArena> &column_types) {
     layout.layout = column_types;
     layout.record_size = 0;
 
-    for (size_t i = 0; i < column_types.size(); i++) {
+    for (size_t i = 1; i < column_types.size(); i++) {
         layout.offsets.push_back(layout.record_size);
         layout.record_size += column_types[i];
     }

@@ -100,17 +100,54 @@ struct ProgramBuilder
 
 //------------------ PROGRAMS ---------------------//
 
-void build_select(ProgramBuilder& prog, SelectNode* node){
+// Complete the build_select function in compile.cpp
+void build_select(ProgramBuilder& prog, SelectNode* node) {
+    // For educational clarity, we'll implement a simple full table scan
+    // This demonstrates the core VM opcodes needed for SELECT
+
     int table_cursor = 0;
-   	prog.emit(Opcodes::Open::create_btree(table_cursor, node->table, 0, true));
 
+    // 1. Open the table cursor for reading
+    prog.emit(Opcodes::Open::create_btree(table_cursor, node->table, 0, false));
 
+    // 2. Get the table schema to know how many columns we have
+    Table* table = get_table(node->table);
+    int num_columns = table->columns.size();
 
+    // 3. Allocate registers for the result row
+    int result_start_reg = prog.regs.allocate_range(num_columns);
 
+    // 4. Rewind cursor to the beginning of the table
+    // Jump to end (Halt) if table is empty
+    int halt_addr = prog.instructions.size() + 6 + num_columns; // Calculate where Halt will be
+    prog.emit(Opcodes::Rewind::create(table_cursor, halt_addr, false));
 
+    // 5. Loop start - this is where we'll jump back to for each row
+    int loop_start = prog.here();
 
+    // 6. Extract each column from the current row into registers
+    for (int i = 0; i < num_columns; i++) {
+        prog.emit(Opcodes::Column::create(table_cursor, i, result_start_reg + i));
+    }
+
+    // 7. Emit the result row (calls the callback with the row data)
+    prog.emit(Opcodes::Result::create(result_start_reg, num_columns));
+
+    // 8. Step to the next row, jump back to loop_start if there are more rows
+    prog.emit(Opcodes::Step::create(table_cursor, halt_addr, true));
+    prog.emit(Opcodes::Goto::create(loop_start));
+
+    // 9. Clean up - close cursor and halt
+    prog.emit(Opcodes::Close::create(table_cursor));
+    prog.emit(Opcodes::Halt::create(0));
 }
 
+// Also need to fix a small issue in the Result opcode execution in vm.cpp
+// The emit_row callback should pass the count parameter correctly:
+// In vm.cpp, case OP_Result, change this line:
+//     VM.ctx->emit_row(values, 0);
+// To:
+//     VM.ctx->emit_row(values, reg_count);
 void
 build_insert(ProgramBuilder &prog, InsertNode *node)
 {
@@ -144,6 +181,8 @@ build_insert(ProgramBuilder &prog, InsertNode *node)
 Vec<VMInstruction, QueryArena>
 build_from_ast(ASTNode *ast)
 {
+
+    _debug = false;
 	ProgramBuilder builder;
 
 	switch (ast->type)
@@ -155,6 +194,7 @@ build_from_ast(ASTNode *ast)
 	}
 
 	case AST_SELECT: {
+	_debug = true;
 	    build_select(builder, (SelectNode*)ast);
 	}
 

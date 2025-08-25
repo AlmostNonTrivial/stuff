@@ -253,6 +253,9 @@ static bool expect(Parser* p, TokenType type) {
     if (p->current_type != type) {
         p->error_msg = "Unexpected token";
         p->error_pos = p->pos;
+        std::cout << p->error_msg << "expected " << type << " got " << p->current_type << std::endl;
+
+        exit(1);
         return false;
     }
     advance(p);
@@ -578,7 +581,7 @@ static ASTNode* parse_create(Parser* p) {
                 size_t len = strlen(col_name);
                 if (len > 31) len = 31;
                 col.name.assign(col_name);
-                // col.name[len] = '\0';
+                col.name[len] = '\0';
             }
 
             node->columns.push_back(col);

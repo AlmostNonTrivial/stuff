@@ -38,7 +38,7 @@ struct RecordLayout {
 	static RecordLayout create(DataType key, DataType rec = TYPE_NULL);
 
 	uint32_t get_offset(uint32_t col_index) const {
-		return col_index < offsets.size() ? offsets[col_index] : 0;
+		return offsets[col_index];
 	}
 };
 

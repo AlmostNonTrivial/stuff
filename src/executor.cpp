@@ -442,13 +442,15 @@ execute_create_table(CreateTableNode *node)
 
 	for (size_t i = 0; i < node->columns.size(); i++)
 	{
-		table->columns.push_back(node->columns[i]);
+		auto column = (node->columns[i]);
+		table->columns.push_back(column);
 	}
 
 	// Calculate record layout
 	RecordLayout layout = table->to_layout();
 	DataType key_type = table->columns[0].type;
 	uint32_t record_size = layout.record_size - key_type;
+	table->tree_type = TreeType::BPLUSTREE;
 
 	// Create BTree
 	table->tree.bplustree = bplustree_create(key_type, record_size);

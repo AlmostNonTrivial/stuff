@@ -8,6 +8,8 @@ TO CONSIDER:
 BUGS:
 // unorderd map page_to_cache
 // does embedded string in schema actually work fine
+// parser will quietly fail and fuck everything
+// master table needs compile which first needs schema
 
 TESTING:
 
