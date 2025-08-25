@@ -24,8 +24,8 @@ enum ASTNodeType {
     // DDL Commands
     AST_CREATE_TABLE,
     AST_CREATE_INDEX,
-    AST_DROP_TABLE,    // Future
-    AST_ALTER_TABLE,   // Future
+    AST_DROP_INDEX,
+    AST_DROP_TABLE,
 
     // DML Commands
     AST_SELECT,

@@ -723,6 +723,11 @@ void execute(const char *sql) {
 
     for (size_t i = 0; i < statements.size(); i++) {
         ASTNode *stmt = statements[i];
+
+
+
+
+
         stmt->statement_index = i;  // Track statement position
 
         VM_RESULT result = OK;

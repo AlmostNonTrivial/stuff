@@ -5,6 +5,7 @@
 #include "pager.hpp"
 #include "parser.hpp"
 #include "schema.hpp"
+#include "tests.hpp"
 #include "vec.hpp"
 #include "vm.hpp"
 #include <algorithm>
@@ -101,8 +102,27 @@ struct ProgramBuilder {
 
 
 
-Vec<VMInstruction, QueryArena> build_from_ast(ASTNode *ast) {
-    Vec<VMInstruction, QueryArena> program;
+Vec<VMInstruction, QueryArena>
+build_from_ast(ASTNode *ast)
+{
+	ProgramBuilder builder;
 
-    return program;
+	switch (ast->type) {
+
+
+
+
+
+
+
+	// these done internally
+	case AST_CREATE_INDEX:
+	case AST_CREATE_TABLE:
+	case AST_DROP_TABLE:
+	case AST_DROP_INDEX:
+	default:
+	    break;
+	}
+
+	return builder.instructions;
 }
