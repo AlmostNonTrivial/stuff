@@ -44,6 +44,7 @@ template <size_t N> struct stack_size_tag {
 	static constexpr size_t value = N;
 };
 
+
 // Primary template - Arena allocation
 template <typename T, typename ArenaTag, size_t InitialCapacity = 16> class Vec
 {
@@ -85,6 +86,15 @@ template <typename T, typename ArenaTag, size_t InitialCapacity = 16> class Vec
         vec->count = 0;
 
         return vec;
+    }
+
+
+
+
+
+
+    T* get_data() {
+        return data;
     }
 
 	// ========================================================================

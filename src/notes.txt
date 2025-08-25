@@ -1,16 +1,16 @@
 
-// arena
-- for btree clear, we can do some a priori calculation based on t, as to
-// does        if (table->schema.columns[i].name.starts_with(col_name) == 0) need to
-do an exact match
+TO CONSIDER:
+// does        if (table->schema.columns[i].name.starts_with(col_name) == 0) need to do an exact match
 // currently, if the master root changes we're fucked. right now we can handle 5 tables
-
-// Could we run the vm with a template output arena?
-
 // how do we actually initialise the btree on load, if we're not creating it
 
 
+BUGS:
 
 
-// add load and move
-// add seperate transaction and schema commands
+TESTING:
+
+
+
+INFRA:
+way to mass insert rows

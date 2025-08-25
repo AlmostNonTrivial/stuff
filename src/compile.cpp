@@ -98,30 +98,16 @@ struct ProgramBuilder {
 	}
 };
 
-void
-print_result_callback(TypedValue *result, size_t count)
-{
-	for (int i = 0; i < count; i++) {
-		print_value(result[i].type, result[i].data);
-		if (i != count - 1) {
-			std::cout << ", ";
-		}
-	}
-	std::cout << "\n";
-}
 
 void
 init_stuff()
 {
 
-	_debug = true;
-	arena::init<QueryArena>(PAGE_SIZE * 30);
-	arena::init<RegistryArena>(PAGE_SIZE * 14);
+
 	pager_init("stuff");
 }
 
-MemoryContext ctx = {.alloc = arena::alloc<QueryArena>,
-		     .emit_row = print_result_callback};
+
 
 void
 compile()

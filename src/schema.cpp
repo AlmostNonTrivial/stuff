@@ -413,36 +413,11 @@ void print_all_tables() {
 
 // Validate that all indexes point to valid columns
 bool validate_schema() {
-    for (size_t i = 0; i < tables.size(); i++) {
-        // Check btree consistency
-        // if (tables[i].tree.tree_type == INVALID) {
-        //     printf("Error: Table '%s' has invalid btree\n", tables[i].table_name.c_str());
-        //     return false;
-        // }
+    // for (size_t i = 0; i < tables.size(); i++) {
+    //     // Check btree consistency
 
-        // // Check each index
-        // for (size_t j = 0; j < tables[i].indexes.size(); j++) {
-        //     if (tables[i].indexes[j].column_index >= tables[i].columns.size()) {
-        //         printf("Error: Index '%s' points to invalid column %u\n",
-        //                tables[i].indexes[j].index_name.c_str(),
-        //                tables[i].indexes[j].column_index);
-        //         return false;
-        //     }
 
-        //     if (tables[i].indexes[j].tree.tree_type == INVALID) {
-        //         printf("Error: Index '%s' has invalid btree\n",
-        //                tables[i].indexes[j].index_name.c_str());
-        //         return false;
-        //     }
-        // }
-
-        // // Validate record layout
-        // RecordLayout layout = tables[i].to_layout();
-        // if (layout.column_count() != tables[i].columns.size()) {
-        //     printf("Error: Layout mismatch for table '%s'\n", tables[i].table_name.c_str());
-        //     return false;
-        // }
-    }
+    // }
 
     return true;
 }

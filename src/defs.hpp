@@ -23,7 +23,7 @@ enum DataType : uint32_t {
     TYPE_8 = 8,      // 8-byte integer
     TYPE_32 = 32, // Variable char up to 32 bytes
     TYPE_256 = 256, // Variable char up to 256 bytes
-
+    TYPE_BLOB =257
 };
 
 // VM value - uses arena allocation for data
