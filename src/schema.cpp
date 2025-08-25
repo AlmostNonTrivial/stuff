@@ -758,3 +758,24 @@ create_master()
 	// Add to schema registry
 	add_table(master);
 }
+SchemaSnapshots
+take_snapshot()
+{
+	SchemaSnapshots snap;
+	auto tables = get_all_table_names();
+	for (int i = 0; i < tables.size(); i++)
+	{
+
+		auto table = get_table(tables[i]);
+
+		auto name = table->table_name.c_str();
+		auto root = table->tree.bplustree.root_page_index;
+		Vec<std::pair<uint32_t, uint32_t>, QueryArena> indexes;
+		for (int j = 0; j < table->indexes.size(); j++)
+		{
+			indexes.push_back({table->indexes[j]->column_index, table->indexes[j]->tree.btree.root_page_index});
+		}
+		snap.entries.push_back({.root = root, .table = name, .indexes = indexes});
+	}
+	return snap;
+}

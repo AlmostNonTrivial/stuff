@@ -133,6 +133,18 @@ struct Table {
 	}
 };
 
+
+struct SchemaSnapshots
+{
+	struct Entry
+	{
+		const char *table;
+		uint32_t root;
+		Vec<std::pair<uint32_t, uint32_t>, QueryArena> indexes;
+	};
+	Vec<Entry, QueryArena> entries;
+};
+
 // ============================================================================
 // Schema Registry Functions
 // ============================================================================
@@ -178,3 +190,5 @@ Table* create_table(CreateTableNode*node);
 void create_master();
 
 Index* find_index(const char*name);
+SchemaSnapshots
+take_snapshot();

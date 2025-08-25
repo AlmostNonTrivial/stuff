@@ -19,39 +19,6 @@
 #include <cstdio>
 #include <utility>
 
-struct SchemaSnapshots
-{
-	struct Entry
-	{
-		const char *table;
-		uint32_t root;
-		Vec<std::pair<uint32_t, uint32_t>, QueryArena> indexes;
-	};
-	Vec<Entry, QueryArena> entries;
-};
-
-SchemaSnapshots
-take_snapshot()
-{
-	SchemaSnapshots snap;
-	auto tables = get_all_table_names();
-	for (int i = 0; i < tables.size(); i++)
-	{
-
-		auto table = get_table(tables[i]);
-
-		auto name = table->table_name.c_str();
-		auto root = table->tree.bplustree.root_page_index;
-		Vec<std::pair<uint32_t, uint32_t>, QueryArena> indexes;
-		for (int j = 0; j < table->indexes.size(); j++)
-		{
-			indexes.push_back({table->indexes[j]->column_index, table->indexes[j]->tree.btree.root_page_index});
-		}
-		snap.entries.push_back({.root = root, .table = name, .indexes = indexes});
-	}
-	return snap;
-}
-
 void
 print_result_callback(TypedValue *result, size_t count)
 {
@@ -99,6 +66,7 @@ insert_master_entry(const char *type, const char *name, const char *tbl_name, ui
 static void
 update_master_rootpage(const char *name, uint32_t new_rootpage)
 {
+
 	char buffer[512];
 	snprintf(buffer, sizeof(buffer), "UPDATE sqlite_master SET rootpage = %u WHERE name = '%s'", new_rootpage, name);
 
