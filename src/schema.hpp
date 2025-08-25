@@ -204,3 +204,5 @@ Index * create_index(CreateIndexNode* node);
 
 Table* create_table(CreateTableNode*node);
 void create_master();
+
+Index* find_index(const char*name);

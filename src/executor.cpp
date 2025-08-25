@@ -407,86 +407,61 @@ execute_create_index(CreateIndexNode *node)
 	return OK;
 }
 
-
 static VM_RESULT
-execute_drop_index(DropIndexNode*node)
+execute_drop_index(DropIndexNode *node)
 
 {
 
+	Index *index = find_index(node->index_name);
 
- //    // get_Index if (_debug) {
-	//     printf("EXECUTOR: Executing DROP INDEX'%s'\n", node->index_name);
-	// }
-
+	assert(index != nullptr);
 
 
-	// Table *table = get_table(node->);
-	// if (!table) {
-	//     printf("Error: Table '%s' not found\n", node->);
-	//     return ERR;
-	// }
+	remove_index(index->table_name, index->column_index);
 
-	// // Clear btrees
-	// bplustree_clear(&table->tree.bplustree);
-	// for (size_t i = 0; i < table->indexes.size(); i++) {
-	//     btree_clear(&table->indexes[i]->tree.btree);
-	// }
+	// Remove from master catalog
+	delete_master_entry(node->index_name);
 
-	// // Remove from master catalog
-	// delete_master_entry(node->table);
+	// Remove from schema registry
 
-	// // Remove from schema registry
-	// if (!remove_table(node->table)) {
-	//     printf("Error: Failed to remove table from registry\n");
-	//     return ERR;
-	// }
+	if (_debug)
+	{
+		printf("EXECUTOR: Index '%s' dropped successfully\n", node->index_name);
+	}
 
-	// if (_debug) {
-	//     printf("EXECUTOR: Table '%s' dropped successfully\n",
-	//     node->table);
-	// }
-
-	// executor_state.stats.ddl_commands++;
+	executor_state.stats.ddl_commands++;
 	return OK;
 }
-
 
 static VM_RESULT
 execute_drop_table(DropTableNode *node)
 {
-	if (_debug) {
-	    printf("EXECUTOR: Executing DROP TABLE '%s'\n", node->table);
+	if (_debug)
+	{
+		printf("EXECUTOR: Executing DROP TABLE '%s'\n", node->table);
 	}
 
-	if (strcmp(node->table, "sqlite_master") == 0) {
-	    printf("Error: Cannot drop sqlite_master table\n");
-	    return ERR;
+	if (strcmp(node->table, "sqlite_master") == 0)
+	{
+		printf("Error: Cannot drop sqlite_master table\n");
+		return ERR;
 	}
 
 	Table *table = get_table(node->table);
-	if (!table) {
-	    printf("Error: Table '%s' not found\n", node->table);
-	    return ERR;
+	if (!table)
+	{
+		printf("Error: Table '%s' not found\n", node->table);
+		return ERR;
 	}
 
-	// Clear btrees
-	bplustree_clear(&table->tree.bplustree);
-	for (size_t i = 0; i < table->indexes.size(); i++) {
-	    btree_clear(&table->indexes[i]->tree.btree);
-	}
+	remove_table(table->table_name);
 
 	// Remove from master catalog
 	delete_master_entry(node->table);
 
-	// Remove from schema registry
-	if (!remove_table(node->table)) {
-	    printf("Error: Failed to remove table from registry\n");
-	    return ERR;
-	}
-
-	if (_debug) {
-	    printf("EXECUTOR: Table '%s' dropped successfully\n",
-	    node->table);
+	if (_debug)
+	{
+		printf("EXECUTOR: Table '%s' dropped successfully\n", node->table);
 	}
 
 	executor_state.stats.ddl_commands++;
@@ -586,8 +561,8 @@ execute_ddl_command(ASTNode *stmt)
 
 	case AST_DROP_TABLE:
 		return execute_drop_table((DropTableNode *)stmt);
-		case AST_ALTER_TABLE:
-		return execute_drop_index((DropIndexNode*)stmt);
+	case AST_ALTER_TABLE:
+		return execute_drop_index((DropIndexNode *)stmt);
 
 	default:
 		printf("Error: Unimplemented DDL command: %s\n", stmt->type_name());

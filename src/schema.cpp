@@ -9,10 +9,29 @@
 
 static bool _debug = false;
 
+
+
+
+
 // ============================================================================
 // Registry Storage
 // ============================================================================
 static Vec<Table *, RegistryArena> tables;
+
+Index* find_index(const char*name)
+{
+    for(int i = 0; i < tables.size(); i++) {
+        auto table = tables[0];
+        for(int j = 0; j< table->indexes.size();j++){
+            if(table->indexes[j]->index_name.starts_with(name)){
+                return table->indexes[j];
+            }
+        }
+    }
+    return nullptr;
+}
+
+
 
 // ============================================================================
 // RecordLayout Implementation
@@ -294,8 +313,9 @@ add_index(const char *table_name, Index *index)
 	return true;
 }
 
-bool
-remove_index(const char *table_name, uint32_t column_index)
+
+
+bool remove_index(const char *table_name, uint32_t column_index)
 {
 	Table *table = get_table(table_name);
 	if (!table)
