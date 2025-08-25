@@ -734,7 +734,7 @@ step()
 			if (index_column != 0)
 			{
 				Index *index = get_index(table_name, index_column);
-				cursor.open_index(index->to_layout(), &index->tree.btree);
+				cursor.open_index(index->to_layout(), &index->btree);
 				if (_debug)
 				{
 					printf("=> Opened index cursor %d on "
@@ -745,7 +745,7 @@ step()
 			else
 			{
 				Table *table = get_table(table_name);
-				cursor.open_table(table->to_layout(), &table->tree.bplustree);
+				cursor.open_table(table->to_layout(), &table->bplustree);
 				if (_debug)
 				{
 					printf("=> Opened table cursor %d on %s", cursor_id, table_name);

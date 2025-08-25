@@ -87,7 +87,7 @@ update_roots_in_master(const SchemaSnapshots &before, const SchemaSnapshots &aft
 			// Check table root changes
 			if (before.entries[i].root != after.entries[i].root)
 			{
-				update_master_rootpage(after.entries[i].table, after.entries[i].root);
+				update_master_rootpage(after.entries[i].table.c_str(), after.entries[i].root);
 			}
 
 			// Check index root changes
@@ -96,7 +96,7 @@ update_roots_in_master(const SchemaSnapshots &before, const SchemaSnapshots &aft
 				if (j < before.entries[i].indexes.size() &&
 					before.entries[i].indexes[j].second != after.entries[i].indexes[j].second)
 				{
-					Index *idx = get_index(after.entries[i].table, after.entries[i].indexes[j].first);
+					Index *idx = get_index(after.entries[i].table.c_str(), after.entries[i].indexes[j].first);
 					if (idx)
 					{
 						update_master_rootpage(idx->index_name.c_str(), after.entries[i].indexes[j].second);
@@ -184,7 +184,7 @@ load_schema_from_master()
 			{
 				CreateTableNode *node = (CreateTableNode *)create_stmts[0];
 				Table *table = create_table(node);
-				table->tree.bplustree.root_page_index = rootpage;
+				table->bplustree.root_page_index = rootpage;
 			}
 		}
 		else if (strcmp(type, "index") == 0)
@@ -198,7 +198,7 @@ load_schema_from_master()
 				{
 					CreateIndexNode *node = (CreateIndexNode *)create_stmts[0];
 					Index *index = create_index(node);
-					index->tree.btree.root_page_index = rootpage;
+					index->btree.root_page_index = rootpage;
 				}
 			}
 		}
@@ -237,7 +237,7 @@ execute_create_table(CreateTableNode *node)
 	}
 
 	snprintf(buffer + offset, 1024 - offset, ")");
-	insert_master_entry("table", node->table, node->table, table->tree.bplustree.root_page_index, buffer);
+	insert_master_entry("table", node->table, node->table, table->bplustree.root_page_index, buffer);
 
 	return OK;
 }
@@ -250,7 +250,7 @@ execute_create_index(CreateIndexNode *node)
 
 	char buffer[512];
 	snprintf(buffer, 512, "CREATE INDEX %s ON %s (%s)", node->index_name, node->table, node->column);
-	insert_master_entry("index", node->index_name, node->table, index->tree.btree.root_page_index, buffer);
+	insert_master_entry("index", node->index_name, node->table, index->btree.root_page_index, buffer);
 
 	return OK;
 }
@@ -263,7 +263,7 @@ execute_drop_index(DropIndexNode *node)
 
 	assert(index != nullptr);
 
-	remove_index(index->table_name, index->column_index);
+	remove_index(index->table_name.c_str(), index->column_index);
 
 	delete_master_entry(node->index_name);
 
@@ -282,7 +282,7 @@ execute_drop_table(DropTableNode *node)
 
 	Table *table = get_table(node->table);
 	assert(table != nullptr);
-	remove_table(table->table_name);
+	remove_table(table->table_name.c_str());
 
 	// Remove from master catalog
 	delete_master_entry(node->table);
@@ -338,7 +338,7 @@ init_executor()
 	bool existed = pager_init("db");
 
 	arena::init<QueryArena>(PAGE_SIZE * 30);
-	arena::init<RegistryArena>(PAGE_SIZE * 14);
+	// arena::init<RegistryArena>(PAGE_SIZE * 14);
 
 	executor_state.initialized = true;
 	executor_state.in_transaction = false;
@@ -433,7 +433,7 @@ execute(const char *sql)
 
 	Vec<ASTNode *, QueryArena> statements = parse_sql(sql);
 
-	assert(statements.empty());
+	assert(!statements.empty());
 
 	for (size_t i = 0; i < statements.size(); i++)
 	{

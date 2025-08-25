@@ -1,5 +1,6 @@
 // programbuilder.cpp - Simplified version with full table scans only
 #include "compile.hpp"
+#include "str.hpp"
 #include "arena.hpp"
 #include "defs.hpp"
 #include "pager.hpp"
