@@ -371,10 +371,6 @@ init_executor()
 
 	arena::init<QueryArena>(PAGE_SIZE * 30);
 	arena::init<RegistryArena>(PAGE_SIZE * 14);
-	if (_debug)
-	{
-		printf("EXECUTOR: Initializing executor\n");
-	}
 
 	executor_state.initialized = true;
 	executor_state.in_transaction = false;
@@ -401,10 +397,6 @@ init_executor()
 static VM_RESULT
 execute_ddl_command(ASTNode *stmt)
 {
-	if (_debug)
-	{
-		printf("EXECUTOR: Dispatching DDL command: %s\n", stmt->type_name());
-	}
 
 	switch (stmt->type)
 	{
@@ -428,25 +420,11 @@ execute_ddl_command(ASTNode *stmt)
 static VM_RESULT
 execute_dml_command(ASTNode *stmt)
 {
-	if (_debug)
-	{
-		printf("EXECUTOR: Dispatching DML command to VM: %s\n", stmt->type_name());
-	}
 
 	// DML commands go through the VM
 	Vec<VMInstruction, QueryArena> program = build_from_ast(stmt);
 
-	if (_debug)
-	{
-		printf("EXECUTOR: Compiled to %zu VM instructions\n", program.size());
-	}
-
 	VM_RESULT result = vm_execute(program.get_data(), program.size(), &ctx);
-
-	if (result == OK)
-	{
-		executor_state.stats.dml_commands++;
-	}
 
 	return result;
 }
@@ -454,10 +432,6 @@ execute_dml_command(ASTNode *stmt)
 static VM_RESULT
 execute_tcl_command(ASTNode *stmt)
 {
-	if (_debug)
-	{
-		printf("EXECUTOR: Dispatching TCL command: %s\n", stmt->type_name());
-	}
 
 	switch (stmt->type)
 	{
