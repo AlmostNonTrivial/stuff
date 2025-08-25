@@ -132,3 +132,20 @@ inline void print_value(DataType type, const uint8_t* data) {
 // Arithmetic with type promotion
 bool do_arithmetic(ArithOp op, DataType type, uint8_t* dst,
                    const uint8_t* a, const uint8_t* b);
+inline const char *
+type_to_string(DataType type)
+{
+	switch (type)
+	{
+	case TYPE_4:
+		return "INT32";
+	case TYPE_8:
+		return "INT64";
+	case TYPE_32:
+		return "VARCHAR32";
+	case TYPE_256:
+		return "VARCHAR256";
+	default:
+		return "VARCHAR32";
+	}
+}

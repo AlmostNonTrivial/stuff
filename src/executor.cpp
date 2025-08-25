@@ -76,154 +76,41 @@ static struct ExecutorState
 {
 	bool initialized;
 	bool in_transaction;
-	bool master_table_exists;
 	uint32_t next_master_id;
 	SchemaSnapshots snapshot;
-
-	// Statistics
-	struct
-	{
-		uint32_t statements_executed;
-		uint32_t transactions_completed;
-		uint32_t ddl_commands;
-		uint32_t dml_commands;
-		uint32_t tcl_commands;
-		uint32_t errors;
-	} stats;
 } executor_state = {};
-
-// ============================================================================
-// Master Catalog Management
-// ============================================================================
-
-static void
-create_master_table()
-{
-	if (_debug)
-	{
-		printf("EXECUTOR: Creating sqlite_master table\n");
-	}
-	create_master();
-
-	executor_state.master_table_exists = true;
-	executor_state.next_master_id = 1;
-
-	if (_debug)
-	{
-		printf("EXECUTOR: sqlite_master table created\n");
-	}
-}
-
-static const char *
-type_to_string(DataType type)
-{
-	switch (type)
-	{
-	case TYPE_4:
-		return "INT32";
-	case TYPE_8:
-		return "INT64";
-	case TYPE_32:
-		return "VARCHAR32";
-	case TYPE_256:
-		return "VARCHAR256";
-	default:
-		return "VARCHAR32";
-	}
-}
-
-static char *
-generate_create_table_sql(const Table *table)
-{
-	char *buffer = (char *)arena::alloc<QueryArena>(1024);
-	int offset = snprintf(buffer, 1024, "CREATE TABLE %s (", table->table_name.c_str());
-
-	for (size_t i = 0; i < table->columns.size(); i++)
-	{
-		if (i > 0)
-		{
-			offset += snprintf(buffer + offset, 1024 - offset, ", ");
-		}
-		offset += snprintf(buffer + offset, 1024 - offset, "%s %s", type_to_string(table->columns[i].type),
-						   table->columns[i].name.c_str());
-	}
-
-	snprintf(buffer + offset, 1024 - offset, ")");
-	return buffer;
-}
-
-static char *
-generate_create_index_sql(const char *index_name, const char *table_name, const char *column_name)
-{
-	char *buffer = (char *)arena::alloc<QueryArena>(512);
-	snprintf(buffer, 512, "CREATE INDEX %s ON %s (%s)", index_name, table_name, column_name);
-	return buffer;
-}
 
 static void
 insert_master_entry(const char *type, const char *name, const char *tbl_name, uint32_t rootpage, const char *sql)
 {
-	if (!executor_state.master_table_exists)
-	{
-		return;
-	}
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Adding entry to sqlite_master: type=%s, "
-			   "name=%s\n",
-			   type, name);
-	}
-
 	// Build INSERT statement for master table
 	char buffer[2048];
 	snprintf(buffer, sizeof(buffer), "INSERT INTO sqlite_master VALUES (%u, '%s', '%s', '%s', %u, '%s')",
 			 executor_state.next_master_id++, type, name, tbl_name, rootpage, sql ? sql : "");
 
 	// Parse and execute (without triggering recursive catalog updates)
-	bool save_master = executor_state.master_table_exists;
-	executor_state.master_table_exists = false; // Temporarily disable
-
 	Vec<ASTNode *, QueryArena> stmts = parse_sql(buffer);
-	if (!stmts.empty())
-	{
-		Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
-		vm_execute(program.get_data(), program.size(), &ctx);
-	}
+	assert(!stmts.empty());
 
-	executor_state.master_table_exists = save_master;
+	Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
+	vm_execute(program.get_data(), program.size(), &ctx);
 }
 
 static void
 update_master_rootpage(const char *name, uint32_t new_rootpage)
 {
-	if (!executor_state.master_table_exists)
-	{
-		return;
-	}
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Updating rootpage for '%s' to %u\n", name, new_rootpage);
-	}
-
 	char buffer[512];
 	snprintf(buffer, sizeof(buffer), "UPDATE sqlite_master SET rootpage = %u WHERE name = '%s'", new_rootpage, name);
 
-	bool save_master = executor_state.master_table_exists;
-	executor_state.master_table_exists = false;
-
 	Vec<ASTNode *, QueryArena> stmts = parse_sql(buffer);
-	if (!stmts.empty())
-	{
-		Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
-		vm_execute(program.get_data(), program.size(), &ctx);
-	}
 
-	executor_state.master_table_exists = save_master;
+	assert(!stmts.empty());
+
+	Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
+	vm_execute(program.get_data(), program.size(), &ctx);
 }
 void
-update_roots_in_master(const SchemaSnapshots& before, const SchemaSnapshots& after)
+update_roots_in_master(const SchemaSnapshots &before, const SchemaSnapshots &after)
 {
 	for (size_t i = 0; i < after.entries.size(); i++)
 	{
@@ -239,9 +126,9 @@ update_roots_in_master(const SchemaSnapshots& before, const SchemaSnapshots& aft
 			for (size_t j = 0; j < after.entries[i].indexes.size(); j++)
 			{
 				if (j < before.entries[i].indexes.size() &&
-				    before.entries[i].indexes[j].second != after.entries[i].indexes[j].second)
+					before.entries[i].indexes[j].second != after.entries[i].indexes[j].second)
 				{
-					Index* idx = get_index(after.entries[i].table, after.entries[i].indexes[j].first);
+					Index *idx = get_index(after.entries[i].table, after.entries[i].indexes[j].first);
 					if (idx)
 					{
 						update_master_rootpage(idx->index_name.c_str(), after.entries[i].indexes[j].second);
@@ -252,34 +139,18 @@ update_roots_in_master(const SchemaSnapshots& before, const SchemaSnapshots& aft
 	}
 }
 
-
 static void
 delete_master_entry(const char *name)
 {
-	if (!executor_state.master_table_exists)
-	{
-		return;
-	}
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Removing entry for '%s' from sqlite_master\n", name);
-	}
-
 	char buffer[256];
 	snprintf(buffer, sizeof(buffer), "DELETE FROM sqlite_master WHERE name = '%s' OR tbl_name = '%s'", name, name);
 
-	bool save_master = executor_state.master_table_exists;
-	executor_state.master_table_exists = false;
-
 	Vec<ASTNode *, QueryArena> stmts = parse_sql(buffer);
-	if (!stmts.empty())
-	{
-		Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
-		vm_execute(program.get_data(), program.size(), &ctx);
-	}
 
-	executor_state.master_table_exists = save_master;
+	assert(!stmts.empty());
+
+	Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
+	vm_execute(program.get_data(), program.size(), &ctx);
 }
 
 static Vec<Vec<TypedValue, QueryArena>, QueryArena> results;
@@ -287,27 +158,10 @@ static Vec<Vec<TypedValue, QueryArena>, QueryArena> results;
 static void
 load_schema_from_master()
 {
-	return;
-	if (!executor_state.master_table_exists)
-	{
-		return;
-	}
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Loading schema from sqlite_master\n");
-	}
 
 	// Save and clear current schema (except master table)
 	Table *master = get_table("sqlite_master");
 	assert(master != nullptr);
-	Table master_copy;
-	if (master)
-	{
-		master_copy = *master;
-	}
-
-	clear_schema();
 
 	// Query master table to rebuild schema
 	const char *query = "SELECT * FROM sqlite_master ORDER BY id";
@@ -327,11 +181,10 @@ load_schema_from_master()
 	ctx.emit_row = capture_callback;
 
 	Vec<ASTNode *, QueryArena> stmts = parse_sql(query);
-	if (!stmts.empty())
-	{
-		Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
-		vm_execute(program.get_data(), program.size(), &ctx);
-	}
+
+	assert(!stmts.empty());
+	Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
+	vm_execute(program.get_data(), program.size(), &ctx);
 
 	ctx.emit_row = print_result_callback;
 
@@ -355,19 +208,15 @@ load_schema_from_master()
 			executor_state.next_master_id = id + 1;
 		}
 
-		if (_debug)
-		{
-			printf("  Loading: type=%s, name=%s, rootpage=%u\n", type, name, rootpage);
-		}
-
-		if (strcmp(type, "table") == 0 && strcmp(name, "sqlite_master") != 0)
+		if (strcmp(type, "table") == 0)
 		{
 			// Parse CREATE TABLE to rebuild schema
 			Vec<ASTNode *, QueryArena> create_stmts = parse_sql(sql);
 			if (!create_stmts.empty() && create_stmts[0]->type == AST_CREATE_TABLE)
 			{
 				CreateTableNode *node = (CreateTableNode *)create_stmts[0];
-				create_table(node);
+				Table *table = create_table(node);
+				table->tree.bplustree.root_page_index = rootpage;
 			}
 		}
 		else if (strcmp(type, "index") == 0)
@@ -380,15 +229,11 @@ load_schema_from_master()
 				if (!create_stmts.empty() && create_stmts[0]->type == AST_CREATE_INDEX)
 				{
 					CreateIndexNode *node = (CreateIndexNode *)create_stmts[0];
-					create_index(node);
+					Index *index = create_index(node);
+					index->tree.btree.root_page_index = rootpage;
 				}
 			}
 		}
-	}
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Loaded %zu objects from sqlite_master\n", results.size());
 	}
 
 	results.clear();
@@ -397,42 +242,6 @@ load_schema_from_master()
 // ============================================================================
 // Initialize executor
 // ============================================================================
-
-static void
-init_executor()
-{
-	init_type_ops();
-	pager_init("db");
-
-	arena::init<QueryArena>(PAGE_SIZE * 30);
-	arena::init<RegistryArena>(PAGE_SIZE * 14);
-	if (_debug)
-	{
-		printf("EXECUTOR: Initializing executor\n");
-	}
-
-	executor_state.initialized = true;
-	executor_state.in_transaction = false;
-	executor_state.master_table_exists = false;
-	executor_state.next_master_id = 1;
-
-	// Reset statistics
-	executor_state.stats = {};
-
-	// Initialize arenas if needed
-
-	// Check if master table exists
-	Table *master = get_table("sqlite_master");
-	if (!master)
-	{
-		create_master_table();
-	}
-	else
-	{
-		executor_state.master_table_exists = true;
-		load_schema_from_master();
-	}
-}
 
 // ============================================================================
 // DDL Command Handlers
@@ -445,15 +254,23 @@ execute_create_table(CreateTableNode *node)
 	assert(table != nullptr);
 
 	// Add to master catalog
-	char *sql = generate_create_table_sql(table);
-	insert_master_entry("table", node->table, node->table, table->tree.bplustree.root_page_index, sql);
 
-	if (_debug)
+	char buffer[1024];
+	int offset = snprintf(buffer, 1024, "CREATE TABLE %s (", table->table_name.c_str());
+
+	for (size_t i = 0; i < table->columns.size(); i++)
 	{
-		printf("EXECUTOR: Table '%s' created successfully\n", node->table);
+		if (i > 0)
+		{
+			offset += snprintf(buffer + offset, 1024 - offset, ", ");
+		}
+		offset += snprintf(buffer + offset, 1024 - offset, "%s %s", type_to_string(table->columns[i].type),
+						   table->columns[i].name.c_str());
 	}
 
-	executor_state.stats.ddl_commands++;
+	snprintf(buffer + offset, 1024 - offset, ")");
+	insert_master_entry("table", node->table, node->table, table->tree.bplustree.root_page_index, buffer);
+
 	return OK;
 }
 
@@ -462,16 +279,11 @@ execute_create_index(CreateIndexNode *node)
 {
 	// Create index structure
 	Index *index = create_index(node);
-	// Add to master catalog
-	char *sql = generate_create_index_sql(node->index_name, node->table, node->column);
-	insert_master_entry("index", node->index_name, node->table, index->tree.btree.root_page_index, sql);
 
-	if (_debug)
-	{
-		printf("EXECUTOR: Index '%s' created successfully\n", node->index_name);
-	}
+	char buffer[512];
+	snprintf(buffer, 512, "CREATE INDEX %s ON %s (%s)", node->index_name, node->table, node->column);
+	insert_master_entry("index", node->index_name, node->table, index->tree.btree.root_page_index, buffer);
 
-	executor_state.stats.ddl_commands++;
 	return OK;
 }
 
@@ -485,27 +297,14 @@ execute_drop_index(DropIndexNode *node)
 
 	remove_index(index->table_name, index->column_index);
 
-	// Remove from master catalog
 	delete_master_entry(node->index_name);
 
-	// Remove from schema registry
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Index '%s' dropped successfully\n", node->index_name);
-	}
-
-	executor_state.stats.ddl_commands++;
 	return OK;
 }
 
 static VM_RESULT
 execute_drop_table(DropTableNode *node)
 {
-	if (_debug)
-	{
-		printf("EXECUTOR: Executing DROP TABLE '%s'\n", node->table);
-	}
 
 	if (strcmp(node->table, "sqlite_master") == 0)
 	{
@@ -514,23 +313,12 @@ execute_drop_table(DropTableNode *node)
 	}
 
 	Table *table = get_table(node->table);
-	if (!table)
-	{
-		printf("Error: Table '%s' not found\n", node->table);
-		return ERR;
-	}
-
+	assert(table != nullptr);
 	remove_table(table->table_name);
 
 	// Remove from master catalog
 	delete_master_entry(node->table);
 
-	if (_debug)
-	{
-		printf("EXECUTOR: Table '%s' dropped successfully\n", node->table);
-	}
-
-	executor_state.stats.ddl_commands++;
 	return OK;
 }
 
@@ -541,47 +329,22 @@ execute_drop_table(DropTableNode *node)
 static VM_RESULT
 execute_begin()
 {
-	if (executor_state.in_transaction)
-	{
-		printf("Error: Already in transaction\n");
-		return ERR;
-	}
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Beginning transaction\n");
-	}
-
-	executor_state.snapshot=	take_snapshot();
+	executor_state.snapshot = take_snapshot();
 	pager_begin_transaction();
 	executor_state.in_transaction = true;
 
-	executor_state.stats.tcl_commands++;
 	return OK;
 }
 
 static VM_RESULT
 execute_commit()
 {
-	if (!executor_state.in_transaction)
-	{
-		printf("Error: Not in transaction\n");
-		return ERR;
-	}
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Committing transaction\n");
-	}
 
 	SchemaSnapshots current = take_snapshot();
 	update_roots_in_master(executor_state.snapshot, current);
 
-
 	pager_commit();
 	executor_state.in_transaction = false;
-	executor_state.stats.transactions_completed++;
-	executor_state.stats.tcl_commands++;
 
 	return OK;
 }
@@ -589,25 +352,46 @@ execute_commit()
 static VM_RESULT
 execute_rollback()
 {
-	if (!executor_state.in_transaction)
-	{
-		printf("Error: Not in transaction\n");
-		return ERR;
-	}
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Rolling back transaction\n");
-	}
-
 	pager_rollback();
 	executor_state.in_transaction = false;
 
 	// Reload schema from master table
+	// root page will be the first thing written so it will always get
+	// the root = 1;
 	load_schema_from_master();
 
-	executor_state.stats.tcl_commands++;
 	return OK;
+}
+
+void
+init_executor()
+{
+	init_type_ops();
+	bool existed = pager_init("db");
+
+	arena::init<QueryArena>(PAGE_SIZE * 30);
+	arena::init<RegistryArena>(PAGE_SIZE * 14);
+	if (_debug)
+	{
+		printf("EXECUTOR: Initializing executor\n");
+	}
+
+	executor_state.initialized = true;
+	executor_state.in_transaction = false;
+
+	executor_state.next_master_id = 1;
+
+	// Reset statistics
+
+	// load from index=1
+
+	create_master();
+	executor_state.next_master_id = 1;
+
+	if (existed)
+	{
+		load_schema_from_master();
+	}
 }
 
 // ============================================================================
@@ -699,13 +483,6 @@ execute_tcl_command(ASTNode *stmt)
 void
 execute(const char *sql)
 {
-	if (_debug)
-	{
-		printf("\n========================================\n");
-		printf("EXECUTOR: Processing SQL: %s\n", sql);
-		printf("========================================\n");
-	}
-
 	arena::reset<QueryArena>();
 
 	if (!executor_state.initialized)
@@ -715,17 +492,7 @@ execute(const char *sql)
 
 	Vec<ASTNode *, QueryArena> statements = parse_sql(sql);
 
-	if (statements.empty())
-	{
-		printf("Error: Failed to parse SQL\n");
-		executor_state.stats.errors++;
-		return;
-	}
-
-	if (_debug && statements.size() > 1)
-	{
-		printf("EXECUTOR: Parsed %zu statements\n", statements.size());
-	}
+	assert(statements.empty());
 
 	for (size_t i = 0; i < statements.size(); i++)
 	{
@@ -737,21 +504,10 @@ execute(const char *sql)
 
 		CommandCategory category = stmt->category();
 
-		if (_debug)
-		{
-			printf("\n--- Statement %zu: %s (%s) ---\n", i + 1, stmt->type_name(), get_category_name(category));
-		}
-
 		// Handle auto-transaction for DML commands
 		bool auto_transaction = false;
 		if (category == CMD_DML && stmt->type != AST_SELECT && !executor_state.in_transaction)
 		{
-
-			if (_debug)
-			{
-				printf("EXECUTOR: Starting automatic "
-					   "transaction for DML\n");
-			}
 
 			execute_begin();
 			auto_transaction = true;
@@ -764,12 +520,6 @@ execute(const char *sql)
 			// DDL commands need a transaction
 			if (!executor_state.in_transaction)
 			{
-				if (_debug)
-				{
-					printf("EXECUTOR: Starting transaction "
-						   "for DDL\n");
-				}
-
 				execute_begin();
 				auto_transaction = true;
 			}
@@ -792,25 +542,15 @@ execute(const char *sql)
 			result = ERR;
 		}
 
-		// Handle auto-transaction completion
 		if (auto_transaction)
 		{
 			if (result == OK)
 			{
-				if (_debug)
-				{
-					printf("EXECUTOR: Auto-committing "
-						   "transaction\n");
-				}
+
 				execute_commit();
 			}
 			else
 			{
-				if (_debug)
-				{
-					printf("EXECUTOR: Auto-rolling back "
-						   "transaction\n");
-				}
 				execute_rollback();
 			}
 		}
@@ -818,7 +558,6 @@ execute(const char *sql)
 		// Handle errors
 		if (result != OK)
 		{
-			executor_state.stats.errors++;
 
 			if (executor_state.in_transaction && !auto_transaction)
 			{
@@ -828,54 +567,5 @@ execute(const char *sql)
 			}
 			break; // Stop processing remaining statements
 		}
-
-		executor_state.stats.statements_executed++;
 	}
-
-	// Print statistics if in debug mode
-	if (_debug)
-	{
-		printf("\n--- Execution Statistics ---\n");
-		printf("Statements executed: %u\n", executor_state.stats.statements_executed);
-		printf("DDL commands: %u\n", executor_state.stats.ddl_commands);
-		printf("DML commands: %u\n", executor_state.stats.dml_commands);
-		printf("TCL commands: %u\n", executor_state.stats.tcl_commands);
-		printf("Transactions completed: %u\n", executor_state.stats.transactions_completed);
-		printf("Errors: %u\n", executor_state.stats.errors);
-		printf("========================================\n\n");
-	}
-}
-
-// ============================================================================
-// Utility Functions
-// ============================================================================
-
-void
-executor_print_stats()
-{
-	printf("=== Executor Statistics ===\n");
-	printf("Initialized: %s\n", executor_state.initialized ? "Yes" : "No");
-	printf("In transaction: %s\n", executor_state.in_transaction ? "Yes" : "No");
-	printf("Master table exists: %s\n", executor_state.master_table_exists ? "Yes" : "No");
-	printf("Next master ID: %u\n", executor_state.next_master_id);
-	printf("\n");
-	printf("Statements executed: %u\n", executor_state.stats.statements_executed);
-	printf("  DDL commands: %u\n", executor_state.stats.ddl_commands);
-	printf("  DML commands: %u\n", executor_state.stats.dml_commands);
-	printf("  TCL commands: %u\n", executor_state.stats.tcl_commands);
-	printf("Transactions completed: %u\n", executor_state.stats.transactions_completed);
-	printf("Errors: %u\n", executor_state.stats.errors);
-	printf("========================\n");
-}
-
-void
-executor_reset()
-{
-	executor_state = {};
-}
-
-bool
-executor_in_transaction()
-{
-	return executor_state.in_transaction;
 }

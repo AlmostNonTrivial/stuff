@@ -1,7 +1,7 @@
 #include "os_layer.hpp"
 
 // Comment out the next line to use memory filesystem instead of platform-specific
-// #define USE_PLATFORM_FS
+#define USE_PLATFORM_FS
 
 #if defined(USE_PLATFORM_FS) && defined(_WIN32)
 #include <windows.h>

@@ -337,22 +337,6 @@ remove_index(const char *table_name, uint32_t column_index)
 	return false;
 }
 
-void
-clear_schema()
-{
-	for (size_t i = 0; i < tables.size(); i++)
-	{
-		bplustree_clear(&tables[i]->tree.bplustree);
-		for (size_t j = 0; j < tables[i]->indexes.size(); j++)
-		{
-			btree_clear(&tables[i]->indexes[j]->tree.btree);
-		}
-	}
-	tables.clear();
-
-	if (_debug)
-		printf("Cleared all schema\n");
-}
 
 // ============================================================================
 // Utility Functions

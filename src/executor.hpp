@@ -6,3 +6,4 @@
 
 
 void execute(const char * sql);
+void init_executor();
