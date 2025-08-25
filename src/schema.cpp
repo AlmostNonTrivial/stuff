@@ -16,6 +16,12 @@
 
 static StringMap<Table *, RegistryArena> tables;
 
+
+
+void schema_clear() {
+    tables.clear();
+}
+
 // ============================================================================
 // RecordLayout Implementation
 // ============================================================================

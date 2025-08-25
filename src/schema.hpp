@@ -150,3 +150,5 @@ create_master(); // Special case for sqlite_master
 
 SchemaSnapshots
 take_snapshot();
+
+void schema_clear();

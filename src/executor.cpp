@@ -510,3 +510,9 @@ execute(const char *sql)
 		}
 	}
 }
+
+
+void executor_close() {
+    schema_clear();
+    executor_state.initialized = false;
+}

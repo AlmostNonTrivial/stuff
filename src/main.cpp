@@ -1,6 +1,9 @@
 #include "executor.hpp"
 #include "os_layer.hpp"
+#include "pager.hpp"
 #include "schema.hpp"
+#include "vm.hpp"
+#include <cstdlib>
 
 const char *create_customers = "CREATE TABLE Customers (INT id, VAR32 name, VAR32 email);";
 const char *create_products = "CREATE TABLE Products (INT id, VAR32 name, VAR32 email);";
@@ -19,21 +22,28 @@ next_customer(int id)
 int
 main()
 {
+	bool pass = false;
 
-	_debug = false;
-	bool existed = os_file_exists("db");
+label:
+
 	init_executor();
 
-	if (!existed)
+	execute(create_customers);
+	for (int i = 1; i < 100; i++)
 	{
-		execute(create_customers);
-		for (int i = 1; i < 100; i++)
-		{
-			execute(next_customer(i));
-		}
-		// execute(create_products);
+		execute(next_customer(i));
 	}
+	// execute(create_products);
+
 	execute(select_tables);
+	executor_close();
+	pager_close();
+
+	if (!pass)
+	{
+		pass = true;
+		goto label;
+	}
 
 	// print_table_info("sqlite_master");
 	// print_table_info("Customers");
