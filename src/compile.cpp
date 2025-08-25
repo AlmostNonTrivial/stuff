@@ -13,36 +13,35 @@
 #include <utility>
 
 // Register allocator with named registers for debugging
+// Register allocator for ProgramBuilder
 struct RegisterAllocator
 {
-	Vec<std::pair<Str<QueryArena>, uint32_t>, QueryArena, REGISTERS> name_to_register;
+	int next_free = 0;
 
-	// we need array allocation to be contiguous, so for simplicity just
-	// increment them
-	int
-	get(const char *name)
-	{
-		auto it = name_to_register.find_with(
-			[name](const std::pair<Str<QueryArena>, uint32_t> entry) { return entry.first.starts_with(name); });
-
-		if (it != -1)
-		{
-			return name_to_register[it].second;
+	// Allocate a single register
+	int allocate() {
+		if (next_free >= REGISTERS) {
+			printf("Error: Out of registers\n");
+			exit(1);
 		}
-
-		std::cout << "out of registers\n";
-		exit(1);
+		return next_free++;
 	}
 
-	void
-	free(const char *name)
-	{
+	// Allocate a contiguous range of registers
+	int allocate_range(int count) {
+		if (next_free + count > REGISTERS) {
+			printf("Error: Cannot allocate %d registers (only %d available)\n",
+			       count, REGISTERS - next_free);
+			exit(1);
+		}
+		int first = next_free;
+		next_free += count;
+		return first;
 	}
 
-	void
-	clear()
-	{
-		name_to_register.clear();
+	// Reset allocator for new program
+	void clear() {
+		next_free = 0;
 	}
 };
 
@@ -106,12 +105,28 @@ struct ProgramBuilder
 void
 build_insert(ProgramBuilder &prog, InsertNode *node)
 {
-
 	int table_cursor = 0;
 	const char *table = node->table;
-	prog.emit(Opcodes::Open::create_btree(table_cursor, table));
-	// for(int i = 0; i < )
 
+	// Open cursor with write access
+	prog.emit(Opcodes::Open::create_btree(table_cursor, table, 0, true));
+
+	// First register is for the key (first column), rest for data
+	int first_reg = prog.regs.allocate_range(node->values.size());
+
+	// Load each value into its register
+	for (size_t i = 0; i < node->values.size(); i++) {
+		ASTNode* value = node->values[i];
+		int target_reg = first_reg + i;
+		if (value->type == AST_LITERAL) {
+			LiteralNode* lit = (LiteralNode*)value;
+			prog.emit(Opcodes::Move::create_load(target_reg, lit->value.type, lit->value.data));
+		}
+	}
+
+	prog.emit(Opcodes::Insert::create(table_cursor, first_reg, node->values.size()));
+	prog.emit(Opcodes::Close::create(table_cursor));
+	prog.emit(Opcodes::Halt::create(0));
 }
 
 Vec<VMInstruction, QueryArena>

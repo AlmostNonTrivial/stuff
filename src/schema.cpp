@@ -500,3 +500,88 @@ bool stats_are_fresh(const char *table_name) {
 
     return !table->stats.is_stale && table->stats.row_count > 0;
 }
+
+
+Index * create_index(const char* table_name,const char* col_name, const char * index_name)
+{
+
+
+    Table *table = get_table(table_name);
+	if (!table)
+	{
+		printf("Error: Table '%s' not found\n", table_name);
+		return nullptr;
+	}
+
+	uint32_t col_idx = get_column_index(table_name, col_name);
+	if (col_idx == UINT32_MAX)
+	{
+		printf("Error: Column '%s' not found in table '%s'\n", col_name, table_name);
+		return nullptr;
+	}
+
+	if (col_idx == 0)
+	{
+		printf("Error: Cannot create index on primary key column\n");
+		return nullptr;
+	}
+
+	if (get_index(table_name, col_idx))
+	{
+		printf("Error: Index already exists on column '%s'\n", col_name);
+		return nullptr;
+	}
+
+
+    Index *index = (Index *)arena::alloc<RegistryArena>(sizeof(Index));
+	index->index_name = index_name;
+	index->column_index = col_idx;
+
+	DataType index_key_type = table->columns[col_idx].type;
+	DataType rowid_type = table->columns[0].type;
+	index->tree.btree.node_key_size = index_key_type;
+	index->tree.btree.record_size = rowid_type;;
+
+
+	if (!add_index(table_name, index)) {
+	    printf("Error: Failed to register index\n");
+	    btree_clear(&index->tree.btree);
+	    return nullptr;;
+	}
+	return index;
+}
+
+Table* create_table(const char* table_name)
+{
+
+
+if (_debug)
+	{
+		printf("EXECUTOR: Executing CREATE TABLE '%s'\n", table_name);
+	}
+
+	// Don't allow creating sqlite_master
+	if (strcmp(table_name, "sqlite_master") == 0)
+	{
+		printf("Error: Cannot create sqlite_master table\n");
+		return nullptr;
+	}
+
+	// Check if table already exists
+	if (get_table(table_name))
+	{
+		printf("Error: Table '%s' already exists\n", table_name);
+		return nullptr;
+	}
+
+	// Build table structure
+	Table *table = (Table *)arena::alloc<RegistryArena>(sizeof(Table));
+
+	// Add to schema registry
+	if (!add_table(table))
+	{
+		printf("Error: Failed to register table '%s'\n", table_name);
+		return nullptr;
+	}
+	return table;
+}

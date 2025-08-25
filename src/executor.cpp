@@ -429,27 +429,7 @@ init_executor()
 static VM_RESULT
 execute_create_table(CreateTableNode *node)
 {
-	if (_debug)
-	{
-		printf("EXECUTOR: Executing CREATE TABLE '%s'\n", node->table);
-	}
-
-	// Don't allow creating sqlite_master
-	if (strcmp(node->table, "sqlite_master") == 0)
-	{
-		printf("Error: Cannot create sqlite_master table\n");
-		return ERR;
-	}
-
-	// Check if table already exists
-	if (get_table(node->table))
-	{
-		printf("Error: Table '%s' already exists\n", node->table);
-		return ERR;
-	}
-
-	// Build table structure
-	Table *table = (Table *)arena::alloc<RegistryArena>(sizeof(Table));
+    Table*table = create_table(node->table);
 	table->table_name = node->table;
 
 	if (node->columns.empty())
@@ -470,18 +450,8 @@ execute_create_table(CreateTableNode *node)
 
 	// Create BTree
 	table->tree.bplustree = bplustree_create(key_type, record_size);
+	// add a validation
 
-	// if (table->tree.tree_type == INVALID) {
-	//     printf("Error: Failed to create BTree for table\n");
-	//     return ERR;
-	// }
-
-	// Add to schema registry
-	if (!add_table(table))
-	{
-		printf("Error: Failed to register table '%s'\n", node->table);
-		return ERR;
-	}
 
 	// Add to master catalog
 	char *sql = generate_create_table_sql(table);
@@ -499,57 +469,9 @@ execute_create_table(CreateTableNode *node)
 static VM_RESULT
 execute_create_index(CreateIndexNode *node)
 {
-	if (_debug)
-	{
-		printf("EXECUTOR: Executing CREATE INDEX '%s' on %s(%s)\n", node->index_name, node->table, node->column);
-	}
-
-	Table *table = get_table(node->table);
-	if (!table)
-	{
-		printf("Error: Table '%s' not found\n", node->table);
-		return ERR;
-	}
-
-	uint32_t col_idx = get_column_index(node->table, node->column);
-	if (col_idx == UINT32_MAX)
-	{
-		printf("Error: Column '%s' not found in table '%s'\n", node->column, node->table);
-		return ERR;
-	}
-
-	if (col_idx == 0)
-	{
-		printf("Error: Cannot create index on primary key column\n");
-		return ERR;
-	}
-
-	if (get_index(node->table, col_idx))
-	{
-		printf("Error: Index already exists on column '%s'\n", node->column);
-		return ERR;
-	}
-
 	// Create index structure
-	Index *index = (Index *)arena::alloc<RegistryArena>(sizeof(Index));
-	index->index_name = node->index_name;
-	index->column_index = col_idx;
-
-	DataType index_key_type = table->columns[col_idx].type;
-	DataType rowid_type = table->columns[0].type;
-
-	index->tree.btree = btree_create(index_key_type, rowid_type);
-
-	// if (index->tree.tree_type == INVALID) {
-	//     printf("Error: Failed to create BTree for index\n");
-	//     return ERR;
-	// }
-
-	// if (!add_index(node->table, index)) {
-	//     printf("Error: Failed to register index\n");
-	//     btree_clear(&index->tree);
-	//     return ERR;
-	// }
+	Index* index = create_index(node->table, node->column, node->index_name);
+	index->tree.btree = btree_create(index->tree.btree.node_key_size, index->tree.btree.record_size);
 
 	// Add to master catalog
 	char *sql = generate_create_index_sql(node->index_name, node->table, node->column);

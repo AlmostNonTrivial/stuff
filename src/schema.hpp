@@ -193,3 +193,7 @@ Vec<const char *, QueryArena> get_all_table_names();
 bool column_exists_anywhere(const char *col_name);
 uint32_t total_index_count();
 bool stats_are_fresh(const char *table_name);
+
+Index * create_index(const char* table_name,const char* col_name, const char * index_name);
+
+Table* create_table(const char* table_name);
