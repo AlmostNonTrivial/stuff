@@ -131,34 +131,6 @@ struct Table {
 		}
 		return RecordLayout::create(types);
 	}
-
-	// Helper to get appropriate tree pointer
-	void* get_tree_ptr() {
-		return tree_type == TreeType::BTREE
-			? static_cast<void*>(&tree.btree)
-			: static_cast<void*>(&tree.bplustree);
-	}
-
-	bool is_btree() const { return tree_type == TreeType::BTREE; }
-	bool is_bplustree() const { return tree_type == TreeType::BPLUSTREE; }
-
-	// Create index with specified tree type
-	bool create_index(const char* index_name, uint32_t col_index, TreeType idx_tree_type) {
-		Index idx;
-		idx.index_name = index_name;
-		idx.column_index = col_index;
-		idx.tree_type = idx_tree_type;
-
-		DataType key_type = columns[col_index].type;
-		if (idx_tree_type == TreeType::BTREE) {
-			idx.tree.btree = btree_create(key_type, TYPE_4);
-		} else {
-			idx.tree.bplustree = bplustree_create(key_type, TYPE_4);
-		}
-
-		indexes.push_back(&idx);
-		return true;
-	}
 };
 
 // ============================================================================

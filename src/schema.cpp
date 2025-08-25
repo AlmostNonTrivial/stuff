@@ -9,29 +9,27 @@
 
 static bool _debug = false;
 
-
-
-
-
 // ============================================================================
 // Registry Storage
 // ============================================================================
 static Vec<Table *, RegistryArena> tables;
 
-Index* find_index(const char*name)
+Index *
+find_index(const char *name)
 {
-    for(int i = 0; i < tables.size(); i++) {
-        auto table = tables[0];
-        for(int j = 0; j< table->indexes.size();j++){
-            if(table->indexes[j]->index_name.starts_with(name)){
-                return table->indexes[j];
-            }
-        }
-    }
-    return nullptr;
+	for (int i = 0; i < tables.size(); i++)
+	{
+		auto table = tables[0];
+		for (int j = 0; j < table->indexes.size(); j++)
+		{
+			if (table->indexes[j]->index_name.starts_with(name))
+			{
+				return table->indexes[j];
+			}
+		}
+	}
+	return nullptr;
 }
-
-
 
 // ============================================================================
 // RecordLayout Implementation
@@ -119,10 +117,7 @@ DataType
 get_column_type(const char *table_name, uint32_t col_index)
 {
 	Table *table = get_table(table_name);
-	if (!table || col_index >= table->columns.size())
-	{
-		return TYPE_NULL;
-	}
+	assert(!(!table || col_index >= table->columns.size()));
 	return table->columns[col_index].type;
 }
 
@@ -195,34 +190,37 @@ bool
 add_table(Table *table)
 {
 	// Validate table
-	// if (table->columns.empty()) {
-	//     if (_debug)
-	//         printf("Error: Table '%s' has no columns\n", table->table_name.c_str());
-	//     return false;
-	// }
+	if (table->columns.empty())
+	{
+		if (_debug)
+			printf("Error: Table '%s' has no columns\n", table->table_name.c_str());
+		return false;
+	}
 
-	// // Check for duplicate
-	// if (get_table(table->table_name.c_str())) {
-	//     if (_debug)
-	//         printf("Error: Table '%s' already exists\n", table->table_name.c_str());
-	//     return false;
-	// }
+	// Check for duplicate
+	if (get_table(table->table_name.c_str()))
+	{
+		if (_debug)
+			printf("Error: Table '%s' already exists\n", table->table_name.c_str());
+		return false;
+	}
 
-	// // Validate column count
-	// if (table->columns.size() > MAX_RECORD_LAYOUT) {
-	//     if (_debug)
-	//         printf("Error: Table '%s' has %zu columns (max %d)\n",
-	//                table->table_name.c_str(), table->columns.size(), MAX_RECORD_LAYOUT);
-	//     return false;
-	// }
+	// Validate column count
+	if (table->columns.size() > MAX_RECORD_LAYOUT)
+	{
+		if (_debug)
+			printf("Error: Table '%s' has %zu columns (max %d)\n", table->table_name.c_str(), table->columns.size(),
+				   MAX_RECORD_LAYOUT);
+		return false;
+	}
 
 	// // Calculate and validate record size
 	RecordLayout layout = table->to_layout();
-	// if (layout.record_size > PAGE_SIZE / 4) { // Reasonable limit for educational DB
-	//     if (_debug)
-	//         printf("Warning: Table '%s' has large records (%u bytes)\n",
-	//                table->table_name.c_str(), layout.record_size);
-	// }
+	if (layout.record_size > PAGE_SIZE / 4)
+	{ // Reasonable limit for educational DB
+		if (_debug)
+			printf("Warning: Table '%s' has large records (%u bytes)\n", table->table_name.c_str(), layout.record_size);
+	}
 
 	// Initialize statistics as unknown/stale
 	table->stats.clear();
@@ -269,26 +267,27 @@ bool
 add_index(const char *table_name, Index *index)
 {
 	Table *table = get_table(table_name);
-	// if (!table) {
-	//     if (_debug)
-	//         printf("Error: Table '%s' not found for index\n", table_name);
-	//     return false;
-	// }
+	if (!table)
+	{
+		if (_debug)
+			printf("Error: Table '%s' not found for index\n", table_name);
+		return false;
+	}
 
-	// if (index->column_index >= table->columns.size()) {
-	//     if (_debug)
-	//         printf("Error: Invalid column index %u for table '%s'\n",
-	//                index->column_index, table_name);
-	//     return false;
-	// }
+	if (index->column_index >= table->columns.size())
+	{
+		if (_debug)
+			printf("Error: Invalid column index %u for table '%s'\n", index->column_index, table_name);
+		return false;
+	}
 
-	// // Check for duplicate index on same column
-	// if (get_index(table_name, index->column_index)) {
-	//     if (_debug)
-	//         printf("Error: Index already exists on column %u of table '%s'\n",
-	//                index->column_index, table_name);
-	//     return false;
-	// }
+	// Check for duplicate index on same column
+	if (get_index(table_name, index->column_index))
+	{
+		if (_debug)
+			printf("Error: Index already exists on column %u of table '%s'\n", index->column_index, table_name);
+		return false;
+	}
 
 	// // Generate index name if not provided
 	if (index->index_name.empty())
@@ -313,9 +312,8 @@ add_index(const char *table_name, Index *index)
 	return true;
 }
 
-
-
-bool remove_index(const char *table_name, uint32_t column_index)
+bool
+remove_index(const char *table_name, uint32_t column_index)
 {
 	Table *table = get_table(table_name);
 	if (!table)
@@ -638,11 +636,11 @@ stats_are_fresh(const char *table_name)
 }
 
 Index *
-create_index(CreateIndexNode * node)
+create_index(CreateIndexNode *node)
 {
-    auto table_name = node->table;
-    auto col_name= node->column;
-    auto index_name = node->index_name;
+	auto table_name = node->table;
+	auto col_name = node->column;
+	auto index_name = node->index_name;
 	Table *table = get_table(table_name);
 	if (!table)
 	{
@@ -678,6 +676,7 @@ create_index(CreateIndexNode * node)
 	index->tree.btree.node_key_size = index_key_type;
 	index->tree.btree.record_size = rowid_type;
 	;
+	index->tree.btree = btree_create(index->tree.btree.node_key_size, index->tree.btree.record_size);
 
 	if (!add_index(table_name, index))
 	{
@@ -687,7 +686,6 @@ create_index(CreateIndexNode * node)
 		;
 	}
 
-	index->tree.btree = btree_create(index->tree.btree.node_key_size, index->tree.btree.record_size);
 	return index;
 }
 
@@ -718,13 +716,6 @@ create_table(CreateTableNode *node)
 	// Build table structure
 	Table *table = (Table *)arena::alloc<RegistryArena>(sizeof(Table));
 
-	// Add to schema registry
-	if (!add_table(table))
-	{
-		printf("Error: Failed to register table '%s'\n", table_name);
-		return nullptr;
-	}
-
 	table->table_name = node->table;
 
 	if (node->columns.empty())
@@ -747,13 +738,19 @@ create_table(CreateTableNode *node)
 
 	// Create BTree
 	table->tree.bplustree = bplustree_create(key_type, record_size);
+
+	if (!add_table(table))
+	{
+		printf("Error: Failed to register table '%s'\n", table_name);
+		return nullptr;
+	}
 	// add a validation
 
 	return table;
 }
 
-
-void create_master()
+void
+create_master()
 {
 
 	// Create the master table schema
@@ -773,7 +770,6 @@ void create_master()
 	uint32_t record_size = layout.record_size;
 
 	master->tree.bplustree = bplustree_create(TYPE_4, record_size);
-
 
 	// Add to schema registry
 	add_table(master);

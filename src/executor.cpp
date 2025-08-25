@@ -12,8 +12,32 @@
 #include "vm.hpp"
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include <utility>
+
+struct SchemaSnapshots
+{
+	Vec<std::pair<const char *, uint32_t>, QueryArena> roots;
+};
+
+SchemaSnapshots
+take_snapshot()
+{
+	SchemaSnapshots snap;
+	auto tables = get_all_table_names();
+	for (int i = 0; i < tables.size(); i++)
+	{
+		auto table = get_table(tables[i]);
+		snap.roots.push_back({table->table_name.c_str(), table->tree.bplustree.root_page_index});
+		for (int j = 0; j < table->indexes.size(); j++)
+		{
+			auto index = get_index(table->table_name, table->indexes[j]->column_index);
+			// snap.roots.push_back({index->index_name})
+		}
+	}
+}
 
 void
 print_result_callback(TypedValue *result, size_t count)
@@ -246,14 +270,14 @@ load_schema_from_master()
 
 	// Set up result callback to capture rows
 
-	auto capture_callback = [](TypedValue *row, size_t size) {
-		auto x = Vec<TypedValue, QueryArena>::create();
+	auto capture_callback = [](TypedValue *cols, size_t size) {
+		auto row = Vec<TypedValue, QueryArena>::create();
 		for (int i = 0; i < size; i++)
 		{
-			x->push_back(row[i]);
+			row->push_back(cols[i]);
 		}
 
-		results.push_back(*x);
+		results.push_back(*row);
 	};
 
 	ctx.emit_row = capture_callback;
@@ -409,13 +433,11 @@ execute_create_index(CreateIndexNode *node)
 
 static VM_RESULT
 execute_drop_index(DropIndexNode *node)
-
 {
 
 	Index *index = find_index(node->index_name);
 
 	assert(index != nullptr);
-
 
 	remove_index(index->table_name, index->column_index);
 
