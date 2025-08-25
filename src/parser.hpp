@@ -1,11 +1,11 @@
 #pragma once
 
 #include "defs.hpp"
-#include "vm.hpp"
-#include "arena.hpp"
-#include "schema.hpp"
-#include <cstdint>
+#include "vec.hpp"
 
+#include "arena.hpp"
+#include <cstdint>
+struct ColumnInfo;
 // ============================================================================
 // Command Categories
 // ============================================================================

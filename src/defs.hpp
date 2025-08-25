@@ -6,6 +6,12 @@
 #include <cstdint>
 
 
+inline void thr(char*err) {
+
+   std::cout << '\n' <<err <<'\n' ;
+   exit(1) ;
+}
+
 
 struct Buffer {
     void*ptr;

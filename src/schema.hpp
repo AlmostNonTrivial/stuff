@@ -4,8 +4,10 @@
 #include "btree.hpp"
 #include "bplustree.hpp"
 #include "defs.hpp"
+#include "parser.hpp"
 #include "str.hpp"
 #include "vec.hpp"
+#include <cassert>
 #include <cstdint>
 
 #define TABLE_NAME_SIZE TYPE_32
@@ -80,17 +82,21 @@ struct ColumnInfo {
 // ============================================================================
 struct Index {
 	Str<RegistryArena> index_name;
+	Str<RegistryArena> table_name;
 	TreeType tree_type;
 	union {
 		BTree btree;
 		BPlusTree bplustree;
 	} tree;
 	uint32_t column_index;
+
 	IndexStats stats; // Cached statistics
 
 	RecordLayout to_layout() const {
-		DataType key = get_column_type(nullptr, column_index); // Need table ref
-		return RecordLayout::create(key, TYPE_4); // TYPE_4 for rowid
+		DataType key = get_column_type(table_name, column_index); // Need table ref
+		assert(column_index != 0);
+		DataType rowid = get_column_type(table_name, 0); // Need table ref
+		return RecordLayout::create(key, rowid); // TYPE_4 for rowid
 	}
 
 	// Helper to get appropriate tree pointer
@@ -194,6 +200,7 @@ bool column_exists_anywhere(const char *col_name);
 uint32_t total_index_count();
 bool stats_are_fresh(const char *table_name);
 
-Index * create_index(const char* table_name,const char* col_name, const char * index_name);
+Index * create_index(CreateIndexNode* node);
 
-Table* create_table(const char* table_name);
+Table* create_table(CreateTableNode*node);
+void create_master();

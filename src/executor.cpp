@@ -10,6 +10,7 @@
 #include "compile.hpp"
 #include "schema.hpp"
 #include "vm.hpp"
+#include <cassert>
 #include <cstddef>
 #include <cstring>
 #include <cstdio>
@@ -64,27 +65,7 @@ create_master_table()
 	{
 		printf("EXECUTOR: Creating sqlite_master table\n");
 	}
-
-	// Create the master table schema
-	Table *master = (Table *)arena::alloc<RegistryArena>(sizeof(Table));
-	master->table_name = "sqlite_master";
-
-	// Columns: id (key), type, name, tbl_name, rootpage, sql
-	master->columns.push_back({"id", TYPE_4});
-	master->columns.push_back({"type", TYPE_32});	  // "table" or "index"
-	master->columns.push_back({"name", TYPE_32});	  // object name
-	master->columns.push_back({"tbl_name", TYPE_32}); // table name (for indexes)
-	master->columns.push_back({"rootpage", TYPE_4});  // root page of btree
-	master->columns.push_back({"sql", TYPE_256});	  // CREATE statement
-
-	// Create BTree for master table
-	RecordLayout layout = master->to_layout();
-	uint32_t record_size = layout.record_size - TYPE_4; // Subtract key size
-
-	master->tree.bplustree = bplustree_create(TYPE_4, record_size);
-
-	// Add to schema registry
-	add_table(master);
+	create_master();
 
 	executor_state.master_table_exists = true;
 	executor_state.next_master_id = 1;
@@ -251,6 +232,7 @@ load_schema_from_master()
 
 	// Save and clear current schema (except master table)
 	Table *master = get_table("sqlite_master");
+	assert(master != nullptr);
 	Table master_copy;
 	if (master)
 	{
@@ -258,12 +240,6 @@ load_schema_from_master()
 	}
 
 	clear_schema();
-
-	// Restore master table
-	if (master)
-	{
-		add_table(&master_copy);
-	}
 
 	// Query master table to rebuild schema
 	const char *query = "SELECT * FROM sqlite_master ORDER BY id";
@@ -323,24 +299,7 @@ load_schema_from_master()
 			if (!create_stmts.empty() && create_stmts[0]->type == AST_CREATE_TABLE)
 			{
 				CreateTableNode *node = (CreateTableNode *)create_stmts[0];
-
-				Table *table = (Table *)arena::alloc<RegistryArena>(sizeof(Table));
-				table->table_name = name;
-
-				for (size_t j = 0; j < node->columns.size(); j++)
-				{
-					table->columns.push_back(node->columns[j]);
-				}
-
-				RecordLayout layout = table->to_layout();
-				DataType key_type = table->columns[0].type;
-				uint32_t record_size = layout.record_size - key_type;
-
-				// Restore btree with existing root page
-				table->tree.bplustree = bplustree_create(key_type, record_size);
-				table->tree.bplustree.root_page_index = rootpage;
-
-				add_table(table);
+				create_table(node);
 			}
 		}
 		else if (strcmp(type, "index") == 0)
@@ -353,533 +312,478 @@ load_schema_from_master()
 				if (!create_stmts.empty() && create_stmts[0]->type == AST_CREATE_INDEX)
 				{
 					CreateIndexNode *node = (CreateIndexNode *)create_stmts[0];
-
-					uint32_t col_idx = get_column_index(tbl_name, node->column);
-					if (col_idx != UINT32_MAX)
-					{
-						Index *index = (Index *)arena::alloc<RegistryArena>(sizeof(Index));
-						index->index_name = name;
-						index->column_index = col_idx;
-
-						DataType index_key = table->columns[col_idx].type;
-						DataType rowid_type = table->columns[0].type;
-
-						index->tree.btree = btree_create(index_key, rowid_type);
-						index->tree.btree.root_page_index = rootpage;
-
-						add_index(tbl_name, index);
-					}
+					create_index(node);
 				}
 			}
-		}
-	}
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Loaded %zu objects from sqlite_master\n", results.size());
-	}
-
-	results.clear();
-}
-
-// ============================================================================
-// Initialize executor
-// ============================================================================
-
-static void
-init_executor()
-{
-    	init_type_ops();
-	pager_init("db");
-
-
-	arena::init<QueryArena>(PAGE_SIZE * 30);
-	arena::init<RegistryArena>(PAGE_SIZE * 14);
-	if (_debug)
-	{
-		printf("EXECUTOR: Initializing executor\n");
-	}
-
-	executor_state.initialized = true;
-	executor_state.in_transaction = false;
-	executor_state.master_table_exists = false;
-	executor_state.next_master_id = 1;
-
-	// Reset statistics
-	executor_state.stats = {};
-
-	// Initialize arenas if needed
-	arena::init<RegistryArena>(PAGE_SIZE * 10);
-
-	// Check if master table exists
-	Table *master = get_table("sqlite_master");
-	if (!master)
-	{
-		create_master_table();
-	}
-	else
-	{
-		executor_state.master_table_exists = true;
-		load_schema_from_master();
-	}
-}
-
-// ============================================================================
-// DDL Command Handlers
-// ============================================================================
-
-static VM_RESULT
-execute_create_table(CreateTableNode *node)
-{
-    Table*table = create_table(node->table);
-	table->table_name = node->table;
-
-	if (node->columns.empty())
-	{
-		printf("Error: Table must have at least one column\n");
-		return ERR;
-	}
-
-	for (size_t i = 0; i < node->columns.size(); i++)
-	{
-		auto column = (node->columns[i]);
-		table->columns.push_back(column);
-	}
-
-	// Calculate record layout
-	RecordLayout layout = table->to_layout();
-	DataType key_type = table->columns[0].type;
-	uint32_t record_size = layout.record_size - key_type;
-	table->tree_type = TreeType::BPLUSTREE;
-
-	// Create BTree
-	table->tree.bplustree = bplustree_create(key_type, record_size);
-	// add a validation
-
-
-	// Add to master catalog
-	char *sql = generate_create_table_sql(table);
-	insert_master_entry("table", node->table, node->table, table->tree.bplustree.root_page_index, sql);
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Table '%s' created successfully\n", node->table);
-	}
-
-	executor_state.stats.ddl_commands++;
-	return OK;
-}
-
-static VM_RESULT
-execute_create_index(CreateIndexNode *node)
-{
-	// Create index structure
-	Index* index = create_index(node->table, node->column, node->index_name);
-	index->tree.btree = btree_create(index->tree.btree.node_key_size, index->tree.btree.record_size);
-
-	// Add to master catalog
-	char *sql = generate_create_index_sql(node->index_name, node->table, node->column);
-	insert_master_entry("index", node->index_name, node->table, index->tree.btree.root_page_index, sql);
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Index '%s' created successfully\n", node->index_name);
-	}
-
-	executor_state.stats.ddl_commands++;
-	return OK;
-}
-
-struct DropTableNode
-{
-};
-
-static VM_RESULT
-execute_drop_table(DropTableNode *node)
-{
-	// if (_debug) {
-	//     printf("EXECUTOR: Executing DROP TABLE '%s'\n", node->table);
-	// }
-
-	// if (strcmp(node->table, "sqlite_master") == 0) {
-	//     printf("Error: Cannot drop sqlite_master table\n");
-	//     return ERR;
-	// }
-
-	// Table *table = get_table(node->table);
-	// if (!table) {
-	//     if (node->if_exists) {
-	//         // IF EXISTS clause - silently succeed
-	//         return OK;
-	//     }
-	//     printf("Error: Table '%s' not found\n", node->table);
-	//     return ERR;
-	// }
-
-	// // Clear btrees
-	// btree_clear(&table->tree);
-	// for (size_t i = 0; i < table->indexes.size(); i++) {
-	//     btree_clear(&table->indexes[i].tree);
-	// }
-
-	// // Remove from master catalog
-	// delete_master_entry(node->table);
-
-	// // Remove from schema registry
-	// if (!remove_table(node->table)) {
-	//     printf("Error: Failed to remove table from registry\n");
-	//     return ERR;
-	// }
-
-	// if (_debug) {
-	//     printf("EXECUTOR: Table '%s' dropped successfully\n",
-	//     node->table);
-	// }
-
-	// executor_state.stats.ddl_commands++;
-	return OK;
-}
-
-// ============================================================================
-// TCL Command Handlers
-// ============================================================================
-
-static VM_RESULT
-execute_begin()
-{
-	if (executor_state.in_transaction)
-	{
-		printf("Error: Already in transaction\n");
-		return ERR;
-	}
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Beginning transaction\n");
-	}
-
-	pager_begin_transaction();
-	executor_state.in_transaction = true;
-
-	executor_state.stats.tcl_commands++;
-	return OK;
-}
-
-static VM_RESULT
-execute_commit()
-{
-	if (!executor_state.in_transaction)
-	{
-		printf("Error: Not in transaction\n");
-		return ERR;
-	}
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Committing transaction\n");
-	}
-
-	pager_commit();
-	executor_state.in_transaction = false;
-	executor_state.stats.transactions_completed++;
-	executor_state.stats.tcl_commands++;
-
-	return OK;
-}
-
-static VM_RESULT
-execute_rollback()
-{
-	if (!executor_state.in_transaction)
-	{
-		printf("Error: Not in transaction\n");
-		return ERR;
-	}
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Rolling back transaction\n");
-	}
-
-	pager_rollback();
-	executor_state.in_transaction = false;
-
-	// Reload schema from master table
-	load_schema_from_master();
-
-	executor_state.stats.tcl_commands++;
-	return OK;
-}
-
-// ============================================================================
-// Command Execution Dispatchers
-// ============================================================================
-
-static VM_RESULT
-execute_ddl_command(ASTNode *stmt)
-{
-	if (_debug)
-	{
-		printf("EXECUTOR: Dispatching DDL command: %s\n", stmt->type_name());
-	}
-
-	switch (stmt->type)
-	{
-	case AST_CREATE_TABLE:
-		return execute_create_table((CreateTableNode *)stmt);
-
-	case AST_CREATE_INDEX:
-		return execute_create_index((CreateIndexNode *)stmt);
-
-	case AST_DROP_TABLE:
-		return execute_drop_table((DropTableNode *)stmt);
-
-		// Future DDL commands
-		// case AST_ALTER_TABLE:
-		//     return execute_alter_table((AlterTableNode *)stmt);
-
-	default:
-		printf("Error: Unimplemented DDL command: %s\n", stmt->type_name());
-		return ERR;
-	}
-}
-
-static VM_RESULT
-execute_dml_command(ASTNode *stmt)
-{
-	if (_debug)
-	{
-		printf("EXECUTOR: Dispatching DML command to VM: %s\n", stmt->type_name());
-	}
-
-	// DML commands go through the VM
-	Vec<VMInstruction, QueryArena> program = build_from_ast(stmt);
-
-	if (_debug)
-	{
-		printf("EXECUTOR: Compiled to %zu VM instructions\n", program.size());
-	}
-
-	VM_RESULT result = vm_execute(program.get_data(), program.size(), &ctx);
-
-	if (result == OK)
-	{
-		executor_state.stats.dml_commands++;
-	}
-
-	return result;
-}
-
-static VM_RESULT
-execute_tcl_command(ASTNode *stmt)
-{
-	if (_debug)
-	{
-		printf("EXECUTOR: Dispatching TCL command: %s\n", stmt->type_name());
-	}
-
-	switch (stmt->type)
-	{
-	case AST_BEGIN:
-		return execute_begin();
-
-	case AST_COMMIT:
-		return execute_commit();
-
-	case AST_ROLLBACK:
-		return execute_rollback();
-
-	default:
-		printf("Error: Unknown TCL command: %s\n", stmt->type_name());
-		return ERR;
-	}
-}
-
-
-// ============================================================================
-// Main Execute Function
-// ============================================================================
-
-void
-execute(const char *sql)
-{
-	if (_debug)
-	{
-		printf("\n========================================\n");
-		printf("EXECUTOR: Processing SQL: %s\n", sql);
-		printf("========================================\n");
-	}
-
-	arena::reset<QueryArena>();
-
-	if (!executor_state.initialized)
-	{
-		init_executor();
-	}
-
-	Vec<ASTNode *, QueryArena> statements = parse_sql(sql);
-
-	if (statements.empty())
-	{
-		printf("Error: Failed to parse SQL\n");
-		executor_state.stats.errors++;
-		return;
-	}
-
-	if (_debug && statements.size() > 1)
-	{
-		printf("EXECUTOR: Parsed %zu statements\n", statements.size());
-	}
-
-	for (size_t i = 0; i < statements.size(); i++)
-	{
-		ASTNode *stmt = statements[i];
-
-		stmt->statement_index = i; // Track statement position
-
-		VM_RESULT result = OK;
-
-		CommandCategory category = stmt->category();
+		}}
 
 		if (_debug)
 		{
-			printf("\n--- Statement %zu: %s (%s) ---\n", i + 1, stmt->type_name(), get_category_name(category));
+			printf("EXECUTOR: Loaded %zu objects from sqlite_master\n", results.size());
 		}
 
-		// Handle auto-transaction for DML commands
-		bool auto_transaction = false;
-		if (category == CMD_DML && stmt->type != AST_SELECT && !executor_state.in_transaction)
+		results.clear();
+	}
+
+	// ============================================================================
+	// Initialize executor
+	// ============================================================================
+
+	static void init_executor()
+	{
+		init_type_ops();
+		pager_init("db");
+
+		arena::init<QueryArena>(PAGE_SIZE * 30);
+		arena::init<RegistryArena>(PAGE_SIZE * 14);
+		if (_debug)
 		{
+			printf("EXECUTOR: Initializing executor\n");
+		}
+
+		executor_state.initialized = true;
+		executor_state.in_transaction = false;
+		executor_state.master_table_exists = false;
+		executor_state.next_master_id = 1;
+
+		// Reset statistics
+		executor_state.stats = {};
+
+		// Initialize arenas if needed
+
+		// Check if master table exists
+		Table *master = get_table("sqlite_master");
+		if (!master)
+		{
+			create_master_table();
+		}
+		else
+		{
+			executor_state.master_table_exists = true;
+			load_schema_from_master();
+		}
+	}
+
+	// ============================================================================
+	// DDL Command Handlers
+	// ============================================================================
+
+	static VM_RESULT execute_create_table(CreateTableNode * node)
+	{
+		Table *table = create_table(node);
+		if (table == nullptr)
+		{
+			thr("couldn't create table");
+		}
+
+		// Add to master catalog
+		char *sql = generate_create_table_sql(table);
+		insert_master_entry("table", node->table, node->table, table->tree.bplustree.root_page_index, sql);
+
+		if (_debug)
+		{
+			printf("EXECUTOR: Table '%s' created successfully\n", node->table);
+		}
+
+		executor_state.stats.ddl_commands++;
+		return OK;
+	}
+
+	static VM_RESULT execute_create_index(CreateIndexNode * node)
+	{
+		// Create index structure
+		Index* index = create_index(node);
+		// Add to master catalog
+		char *sql = generate_create_index_sql(node->index_name, node->table, node->column);
+		insert_master_entry("index", node->index_name, node->table, index->tree.btree.root_page_index, sql);
+
+		if (_debug)
+		{
+			printf("EXECUTOR: Index '%s' created successfully\n", node->index_name);
+		}
+
+		executor_state.stats.ddl_commands++;
+		return OK;
+	}
+
+	struct DropTableNode
+	{
+	};
+
+	static VM_RESULT execute_drop_table(DropTableNode * node)
+	{
+		// if (_debug) {
+		//     printf("EXECUTOR: Executing DROP TABLE '%s'\n", node->table);
+		// }
+
+		// if (strcmp(node->table, "sqlite_master") == 0) {
+		//     printf("Error: Cannot drop sqlite_master table\n");
+		//     return ERR;
+		// }
+
+		// Table *table = get_table(node->table);
+		// if (!table) {
+		//     if (node->if_exists) {
+		//         // IF EXISTS clause - silently succeed
+		//         return OK;
+		//     }
+		//     printf("Error: Table '%s' not found\n", node->table);
+		//     return ERR;
+		// }
+
+		// // Clear btrees
+		// btree_clear(&table->tree);
+		// for (size_t i = 0; i < table->indexes.size(); i++) {
+		//     btree_clear(&table->indexes[i].tree);
+		// }
+
+		// // Remove from master catalog
+		// delete_master_entry(node->table);
+
+		// // Remove from schema registry
+		// if (!remove_table(node->table)) {
+		//     printf("Error: Failed to remove table from registry\n");
+		//     return ERR;
+		// }
+
+		// if (_debug) {
+		//     printf("EXECUTOR: Table '%s' dropped successfully\n",
+		//     node->table);
+		// }
+
+		// executor_state.stats.ddl_commands++;
+		return OK;
+	}
+
+	// ============================================================================
+	// TCL Command Handlers
+	// ============================================================================
+
+	static VM_RESULT execute_begin()
+	{
+		if (executor_state.in_transaction)
+		{
+			printf("Error: Already in transaction\n");
+			return ERR;
+		}
+
+		if (_debug)
+		{
+			printf("EXECUTOR: Beginning transaction\n");
+		}
+
+		pager_begin_transaction();
+		executor_state.in_transaction = true;
+
+		executor_state.stats.tcl_commands++;
+		return OK;
+	}
+
+	static VM_RESULT execute_commit()
+	{
+		if (!executor_state.in_transaction)
+		{
+			printf("Error: Not in transaction\n");
+			return ERR;
+		}
+
+		if (_debug)
+		{
+			printf("EXECUTOR: Committing transaction\n");
+		}
+
+		pager_commit();
+		executor_state.in_transaction = false;
+		executor_state.stats.transactions_completed++;
+		executor_state.stats.tcl_commands++;
+
+		return OK;
+	}
+
+	static VM_RESULT execute_rollback()
+	{
+		if (!executor_state.in_transaction)
+		{
+			printf("Error: Not in transaction\n");
+			return ERR;
+		}
+
+		if (_debug)
+		{
+			printf("EXECUTOR: Rolling back transaction\n");
+		}
+
+		pager_rollback();
+		executor_state.in_transaction = false;
+
+		// Reload schema from master table
+		load_schema_from_master();
+
+		executor_state.stats.tcl_commands++;
+		return OK;
+	}
+
+	// ============================================================================
+	// Command Execution Dispatchers
+	// ============================================================================
+
+	static VM_RESULT execute_ddl_command(ASTNode * stmt)
+	{
+		if (_debug)
+		{
+			printf("EXECUTOR: Dispatching DDL command: %s\n", stmt->type_name());
+		}
+
+		switch (stmt->type)
+		{
+		case AST_CREATE_TABLE:
+			return execute_create_table((CreateTableNode *)stmt);
+
+		case AST_CREATE_INDEX:
+			return execute_create_index((CreateIndexNode *)stmt);
+
+		case AST_DROP_TABLE:
+			return execute_drop_table((DropTableNode *)stmt);
+
+			// Future DDL commands
+			// case AST_ALTER_TABLE:
+			//     return execute_alter_table((AlterTableNode *)stmt);
+
+		default:
+			printf("Error: Unimplemented DDL command: %s\n", stmt->type_name());
+			return ERR;
+		}
+	}
+
+	static VM_RESULT execute_dml_command(ASTNode * stmt)
+	{
+		if (_debug)
+		{
+			printf("EXECUTOR: Dispatching DML command to VM: %s\n", stmt->type_name());
+		}
+
+		// DML commands go through the VM
+		Vec<VMInstruction, QueryArena> program = build_from_ast(stmt);
+
+		if (_debug)
+		{
+			printf("EXECUTOR: Compiled to %zu VM instructions\n", program.size());
+		}
+
+		VM_RESULT result = vm_execute(program.get_data(), program.size(), &ctx);
+
+		if (result == OK)
+		{
+			executor_state.stats.dml_commands++;
+		}
+
+		return result;
+	}
+
+	static VM_RESULT execute_tcl_command(ASTNode * stmt)
+	{
+		if (_debug)
+		{
+			printf("EXECUTOR: Dispatching TCL command: %s\n", stmt->type_name());
+		}
+
+		switch (stmt->type)
+		{
+		case AST_BEGIN:
+			return execute_begin();
+
+		case AST_COMMIT:
+			return execute_commit();
+
+		case AST_ROLLBACK:
+			return execute_rollback();
+
+		default:
+			printf("Error: Unknown TCL command: %s\n", stmt->type_name());
+			return ERR;
+		}
+	}
+
+	// ============================================================================
+	// Main Execute Function
+	// ============================================================================
+
+	void execute(const char *sql)
+	{
+		if (_debug)
+		{
+			printf("\n========================================\n");
+			printf("EXECUTOR: Processing SQL: %s\n", sql);
+			printf("========================================\n");
+		}
+
+		arena::reset<QueryArena>();
+
+		if (!executor_state.initialized)
+		{
+			init_executor();
+		}
+
+		Vec<ASTNode *, QueryArena> statements = parse_sql(sql);
+
+		if (statements.empty())
+		{
+			printf("Error: Failed to parse SQL\n");
+			executor_state.stats.errors++;
+			return;
+		}
+
+		if (_debug && statements.size() > 1)
+		{
+			printf("EXECUTOR: Parsed %zu statements\n", statements.size());
+		}
+
+		for (size_t i = 0; i < statements.size(); i++)
+		{
+			ASTNode *stmt = statements[i];
+
+			stmt->statement_index = i; // Track statement position
+
+			VM_RESULT result = OK;
+
+			CommandCategory category = stmt->category();
 
 			if (_debug)
 			{
-				printf("EXECUTOR: Starting automatic "
-					   "transaction for DML\n");
+				printf("\n--- Statement %zu: %s (%s) ---\n", i + 1, stmt->type_name(), get_category_name(category));
 			}
 
-			execute_begin();
-			auto_transaction = true;
-		}
-
-		// Dispatch based on category
-		switch (category)
-		{
-		case CMD_DDL:
-			// DDL commands need a transaction
-			if (!executor_state.in_transaction)
+			// Handle auto-transaction for DML commands
+			bool auto_transaction = false;
+			if (category == CMD_DML && stmt->type != AST_SELECT && !executor_state.in_transaction)
 			{
+
 				if (_debug)
 				{
-					printf("EXECUTOR: Starting transaction "
-						   "for DDL\n");
+					printf("EXECUTOR: Starting automatic "
+						   "transaction for DML\n");
 				}
 
 				execute_begin();
 				auto_transaction = true;
 			}
 
-			result = execute_ddl_command(stmt);
-			break;
-
-		case CMD_DML:
-			// DML commands go through VM compilation
-			result = execute_dml_command(stmt);
-			break;
-
-		case CMD_TCL:
-			// Transaction control is handled directly
-			result = execute_tcl_command(stmt);
-			break;
-
-		default:
-			printf("Error: Unknown command category\n");
-			result = ERR;
-		}
-
-		// Handle auto-transaction completion
-		if (auto_transaction)
-		{
-			if (result == OK)
+			// Dispatch based on category
+			switch (category)
 			{
-				if (_debug)
+			case CMD_DDL:
+				// DDL commands need a transaction
+				if (!executor_state.in_transaction)
 				{
-					printf("EXECUTOR: Auto-committing "
-						   "transaction\n");
+					if (_debug)
+					{
+						printf("EXECUTOR: Starting transaction "
+							   "for DDL\n");
+					}
+
+					execute_begin();
+					auto_transaction = true;
 				}
-				execute_commit();
+
+				result = execute_ddl_command(stmt);
+				break;
+
+			case CMD_DML:
+				// DML commands go through VM compilation
+				result = execute_dml_command(stmt);
+				break;
+
+			case CMD_TCL:
+				// Transaction control is handled directly
+				result = execute_tcl_command(stmt);
+				break;
+
+			default:
+				printf("Error: Unknown command category\n");
+				result = ERR;
 			}
-			else
+
+			// Handle auto-transaction completion
+			if (auto_transaction)
 			{
-				if (_debug)
+				if (result == OK)
 				{
-					printf("EXECUTOR: Auto-rolling back "
-						   "transaction\n");
+					if (_debug)
+					{
+						printf("EXECUTOR: Auto-committing "
+							   "transaction\n");
+					}
+					execute_commit();
 				}
-				execute_rollback();
+				else
+				{
+					if (_debug)
+					{
+						printf("EXECUTOR: Auto-rolling back "
+							   "transaction\n");
+					}
+					execute_rollback();
+				}
 			}
-		}
 
-		// Handle errors
-		if (result != OK)
-		{
-			executor_state.stats.errors++;
-
-			if (executor_state.in_transaction && !auto_transaction)
+			// Handle errors
+			if (result != OK)
 			{
-				printf("Error occurred in transaction, rolling "
-					   "back\n");
-				execute_rollback();
+				executor_state.stats.errors++;
+
+				if (executor_state.in_transaction && !auto_transaction)
+				{
+					printf("Error occurred in transaction, rolling "
+						   "back\n");
+					execute_rollback();
+				}
+				break; // Stop processing remaining statements
 			}
-			break; // Stop processing remaining statements
+
+			executor_state.stats.statements_executed++;
 		}
 
-		executor_state.stats.statements_executed++;
+		// Print statistics if in debug mode
+		if (_debug)
+		{
+			printf("\n--- Execution Statistics ---\n");
+			printf("Statements executed: %u\n", executor_state.stats.statements_executed);
+			printf("DDL commands: %u\n", executor_state.stats.ddl_commands);
+			printf("DML commands: %u\n", executor_state.stats.dml_commands);
+			printf("TCL commands: %u\n", executor_state.stats.tcl_commands);
+			printf("Transactions completed: %u\n", executor_state.stats.transactions_completed);
+			printf("Errors: %u\n", executor_state.stats.errors);
+			printf("========================================\n\n");
+		}
 	}
 
-	// Print statistics if in debug mode
-	if (_debug)
+	// ============================================================================
+	// Utility Functions
+	// ============================================================================
+
+	void executor_print_stats()
 	{
-		printf("\n--- Execution Statistics ---\n");
+		printf("=== Executor Statistics ===\n");
+		printf("Initialized: %s\n", executor_state.initialized ? "Yes" : "No");
+		printf("In transaction: %s\n", executor_state.in_transaction ? "Yes" : "No");
+		printf("Master table exists: %s\n", executor_state.master_table_exists ? "Yes" : "No");
+		printf("Next master ID: %u\n", executor_state.next_master_id);
+		printf("\n");
 		printf("Statements executed: %u\n", executor_state.stats.statements_executed);
-		printf("DDL commands: %u\n", executor_state.stats.ddl_commands);
-		printf("DML commands: %u\n", executor_state.stats.dml_commands);
-		printf("TCL commands: %u\n", executor_state.stats.tcl_commands);
+		printf("  DDL commands: %u\n", executor_state.stats.ddl_commands);
+		printf("  DML commands: %u\n", executor_state.stats.dml_commands);
+		printf("  TCL commands: %u\n", executor_state.stats.tcl_commands);
 		printf("Transactions completed: %u\n", executor_state.stats.transactions_completed);
 		printf("Errors: %u\n", executor_state.stats.errors);
-		printf("========================================\n\n");
+		printf("========================\n");
 	}
-}
 
-// ============================================================================
-// Utility Functions
-// ============================================================================
+	void executor_reset()
+	{
+		executor_state = {};
+	}
 
-void
-executor_print_stats()
-{
-	printf("=== Executor Statistics ===\n");
-	printf("Initialized: %s\n", executor_state.initialized ? "Yes" : "No");
-	printf("In transaction: %s\n", executor_state.in_transaction ? "Yes" : "No");
-	printf("Master table exists: %s\n", executor_state.master_table_exists ? "Yes" : "No");
-	printf("Next master ID: %u\n", executor_state.next_master_id);
-	printf("\n");
-	printf("Statements executed: %u\n", executor_state.stats.statements_executed);
-	printf("  DDL commands: %u\n", executor_state.stats.ddl_commands);
-	printf("  DML commands: %u\n", executor_state.stats.dml_commands);
-	printf("  TCL commands: %u\n", executor_state.stats.tcl_commands);
-	printf("Transactions completed: %u\n", executor_state.stats.transactions_completed);
-	printf("Errors: %u\n", executor_state.stats.errors);
-	printf("========================\n");
-}
-
-void
-executor_reset()
-{
-	executor_state = {};
-}
-
-bool
-executor_in_transaction()
-{
-	return executor_state.in_transaction;
-}
+	bool executor_in_transaction()
+	{
+		return executor_state.in_transaction;
+	}
