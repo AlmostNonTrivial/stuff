@@ -39,6 +39,7 @@ enum ASTNodeType {
     AST_COMMIT,
     AST_ROLLBACK,
 
+
     // Expressions
     AST_BINARY_OP,
     AST_COLUMN_REF,
@@ -261,6 +262,7 @@ enum TokenType {
     TOK_INT, TOK_INT32, TOK_INT64,
     TOK_VARCHAR, TOK_VARCHAR32, TOK_VARCHAR256,
     TOK_VAR32,
+    TOK_DROP,
 
     // Operators
     TOK_LPAREN, TOK_RPAREN,
@@ -288,3 +290,10 @@ struct Parser {
     size_t error_pos;
 };
 Vec<ASTNode*, QueryArena> parse_sql(const char* sql);
+struct DropTableNode : ASTNode {
+    const char* table;
+};
+
+struct DropIndexNode : ASTNode {
+    const char* index_name;
+};

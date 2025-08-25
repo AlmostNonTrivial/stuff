@@ -29,6 +29,7 @@ static const KeywordEntry keywords[] = {
     {"TABLE", TOK_TABLE},
     {"INDEX", TOK_INDEX},
     {"ON", TOK_ON},
+    {"DROP", TOK_DROP},
     {"BEGIN", TOK_BEGIN},
     {"COMMIT", TOK_COMMIT},
     {"ROLLBACK", TOK_ROLLBACK},
@@ -547,6 +548,27 @@ static ASTNode* parse_delete(Parser* p) {
 
     return (ASTNode*)node;
 }
+static ASTNode* parse_drop(Parser* p) {
+    expect(p, TOK_DROP);
+
+    if (match(p, TOK_TABLE)) {
+        DropTableNode* node = (DropTableNode*)arena::alloc<QueryArena>(sizeof(DropTableNode));
+        node->type = AST_DROP_TABLE;
+        node->table = copy_identifier(p);
+        advance(p);
+        return (ASTNode*)node;
+
+    } else if (match(p, TOK_INDEX)) {
+        DropIndexNode* node = (DropIndexNode*)arena::alloc<QueryArena>(sizeof(DropIndexNode));
+        node->type = AST_DROP_INDEX;
+        node->index_name = copy_identifier(p);
+        advance(p);
+        return (ASTNode*)node;
+    }
+
+    p->error_msg = "Expected TABLE or INDEX after DROP";
+    return nullptr;
+}
 
 // Parse CREATE statement
 static ASTNode* parse_create(Parser* p) {
@@ -658,6 +680,8 @@ ASTNode* parse_statement(const char* sql) {
         case TOK_CREATE:
             ast = parse_create(&parser);
             break;
+        case TOK_DROP:
+            ast = parse_drop(&parser);
         case TOK_BEGIN:
         case TOK_COMMIT:
         case TOK_ROLLBACK:
@@ -682,6 +706,10 @@ ASTNode* parse_statement(const char* sql) {
 
     return ast;
 }
+
+
+
+
 Vec<ASTNode*, QueryArena> parse_sql(const char* sql) {
     Vec<ASTNode*, QueryArena> statements;
 
