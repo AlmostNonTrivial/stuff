@@ -371,10 +371,10 @@ load_schema_from_master()
 	static VM_RESULT execute_create_table(CreateTableNode * node)
 	{
 		Table *table = create_table(node);
-		if (table == nullptr)
-		{
-			thr("couldn't create table");
-		}
+		assert(table != nullptr);
+
+
+
 
 		// Add to master catalog
 		char *sql = generate_create_table_sql(table);
