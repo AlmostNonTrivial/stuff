@@ -5,7 +5,6 @@
 #include "pager.hpp"
 #include "parser.hpp"
 #include "schema.hpp"
-#include "tests.hpp"
 #include "vec.hpp"
 #include "vm.hpp"
 #include <algorithm>
