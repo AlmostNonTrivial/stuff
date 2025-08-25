@@ -736,6 +736,14 @@ public:
     char& operator[](size_t i) { return stack_buffer[i]; }
     const char& operator[](size_t i) const { return stack_buffer[i]; }
 
+    template<typename OtherTag, size_t OtherCap>
+       Str& operator=(const Str<OtherTag, OtherCap>& other) {
+           assign(other.c_str(), other.length());  // Must use public methods!
+           return *this;
+       }
+
+
+
     // Include all other methods (trimming, case conversion, etc.)
     // Similar implementations using stack_buffer instead of data
 
@@ -766,6 +774,7 @@ template<typename Tag, size_t Cap>
 bool operator!=(const char* lhs, const Str<Tag, Cap>& rhs) {
     return rhs != lhs;
 }
+
 
 // Usage:
 // EmbStr<64> stack_str;           // 64 bytes on stack

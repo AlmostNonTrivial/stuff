@@ -26,15 +26,15 @@ enum class TreeType {
 // RecordLayout - Pure record interpretation (VM's concern)
 // ============================================================================
 struct RecordLayout {
-	EmbVec<DataType, MAX_RECORD_LAYOUT> layout;
-	EmbVec<uint32_t, MAX_RECORD_LAYOUT> offsets;
+	Vec<DataType, QueryArena> layout;
+	Vec<uint32_t, QueryArena> offsets;
 	uint32_t record_size;
 
 	DataType key_type() const { return layout[0]; }
 	uint32_t column_count() const { return layout.size(); }
 
 	// Factory methods
-	static RecordLayout create(EmbVec<DataType, MAX_RECORD_LAYOUT> &column_types);
+	static RecordLayout create(Vec<DataType, QueryArena> &column_types);
 	static RecordLayout create(DataType key, DataType rec = TYPE_NULL);
 
 	uint32_t get_offset(uint32_t col_index) const {
@@ -71,7 +71,7 @@ struct IndexStats {
 // Schema - Persistent table metadata (Storage concern)
 // ============================================================================
 struct ColumnInfo {
-	EmbStr<COLUMN_NAME_SIZE> name;
+    Str<QueryArena> name;
 	DataType type;
 };
 
@@ -79,7 +79,7 @@ struct ColumnInfo {
 // Index - Secondary index metadata (supports both tree types)
 // ============================================================================
 struct Index {
-	EmbStr<TABLE_NAME_SIZE> index_name;
+	Str<RegistryArena> index_name;
 	TreeType tree_type;
 	union {
 		BTree btree;
@@ -108,9 +108,9 @@ struct Index {
 // Table - Complete table metadata (supports both tree types)
 // ============================================================================
 struct Table {
-	EmbStr<TABLE_NAME_SIZE> table_name;
+	Str<RegistryArena> table_name;
 	Vec<ColumnInfo, RegistryArena> columns;
-	Vec<Index, RegistryArena> indexes;
+	Vec<Index*, RegistryArena> indexes;
 	TreeType tree_type;
 	union {
 		BTree btree;
@@ -119,7 +119,7 @@ struct Table {
 	TableStats stats; // Cached statistics
 
 	RecordLayout to_layout() const {
-		EmbVec<DataType, MAX_RECORD_LAYOUT> types;
+		Vec<DataType, QueryArena> types;
 		for (size_t i = 0; i < columns.size(); i++) {
 			types.push_back(columns[i].type);
 		}
@@ -150,7 +150,7 @@ struct Table {
 			idx.tree.bplustree = bplustree_create(key_type, TYPE_4);
 		}
 
-		indexes.push_back(idx);
+		indexes.push_back(&idx);
 		return true;
 	}
 };

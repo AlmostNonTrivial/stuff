@@ -6,7 +6,8 @@ TO CONSIDER:
 
 
 BUGS:
-
+// unorderd map page_to_cache
+// does embedded string in schema actually work fine
 
 TESTING:
 

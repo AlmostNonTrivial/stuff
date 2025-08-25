@@ -1,4 +1,5 @@
 #include "pager.hpp"
+#include <map>
 #include "vec.hpp"
 #include "arena.hpp"
 #include "defs.hpp"
@@ -9,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <unordered_map>
 
 struct PagerArena{
 };
@@ -63,7 +65,8 @@ static struct {
 
 	bool in_transaction;
 
-	Vec<int32_t, PagerArena, MAX_CACHE_ENTRIES> page_to_cache;
+	// Vec<int32_t, PagerArena, MAX_CACHE_ENTRIES> page_to_cache;
+	std::unordered_map<uint32_t, uint32_t> page_to_cache;
 	Vec<uint32_t, PagerArena> free_pages_set;
 	Vec<uint32_t, PagerArena> journaled_pages;
 	Vec<uint32_t, PagerArena> new_pages_in_transaction;
@@ -229,15 +232,17 @@ cache_write_dirty()
 static void
 cache_init()
 {
+    	pager.page_to_cache.clear();
 	for (int32_t i = 0; i < MAX_CACHE_ENTRIES; i++) {
 		pager.cache_meta[i].page_index = PAGE_INVALID;
 		pager.cache_meta[i].is_dirty = false;
 		pager.cache_meta[i].is_valid = false;
 		pager.cache_meta[i].lru_next = INVALID_SLOT;
 		pager.cache_meta[i].lru_prev = INVALID_SLOT;
+		// pager.page_to_cache.push_back(-1);
 	}
 
-	pager.page_to_cache.clear();
+
 	pager.journaled_pages.clear();
 	pager.new_pages_in_transaction.clear();
 
@@ -408,6 +413,7 @@ bool
 pager_init(const char *filename)
 {
 	arena::init<PagerArena>(PAGE_SIZE * 3);
+	pager.page_to_cache.reserve(MAX_CACHE_ENTRIES);
 
 	pager.data_file = filename;
 
@@ -521,7 +527,7 @@ pager_mark_dirty(uint32_t page_index)
 	}
 
 	if ((pager.page_to_cache.contains(page_index))) {
-		pager.cache_meta[pager.page_to_cache.find(page_index)]
+		pager.cache_meta[pager.page_to_cache[page_index]]
 		    .is_dirty = true;
 	}
 }

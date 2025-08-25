@@ -11,12 +11,12 @@ static bool _debug = true;
 // ============================================================================
 // Registry Storage
 // ============================================================================
-static Vec<Table, RegistryArena> tables;
+static Vec<Table*, RegistryArena> tables;
 
 // ============================================================================
 // RecordLayout Implementation
 // ============================================================================
-RecordLayout RecordLayout::create(EmbVec<DataType, MAX_RECORD_LAYOUT> &column_types) {
+RecordLayout RecordLayout::create(Vec<DataType, QueryArena> &column_types) {
     RecordLayout layout;
     layout.layout = column_types;
     layout.record_size = 0;
@@ -30,7 +30,7 @@ RecordLayout RecordLayout::create(EmbVec<DataType, MAX_RECORD_LAYOUT> &column_ty
 }
 
 RecordLayout RecordLayout::create(DataType key, DataType rec) {
-    EmbVec<DataType, MAX_RECORD_LAYOUT> types;
+    Vec<DataType, QueryArena> types;
     types.push_back(key);
     if (rec != TYPE_NULL) {
         types.push_back(rec);
@@ -44,8 +44,8 @@ RecordLayout RecordLayout::create(DataType key, DataType rec) {
 
 Table *get_table(const char *table_name) {
     for (size_t i = 0; i < tables.size(); i++) {
-        if (tables[i].table_name == table_name) {
-            return &tables[i];
+        if (tables[i]->table_name == table_name) {
+            return tables[i];
         }
     }
     return nullptr;
@@ -57,8 +57,8 @@ Index *get_index(const char *table_name, uint32_t column_index) {
         return nullptr;
 
     for (size_t i = 0; i < table->indexes.size(); i++) {
-        if (table->indexes[i].column_index == column_index) {
-            return &table->indexes[i];
+        if (table->indexes[i]->column_index == column_index) {
+            return table->indexes[i];
         }
     }
     return nullptr;
@@ -138,40 +138,40 @@ IndexStats *get_index_stats(const char *table_name, uint32_t column_index) {
 
 bool add_table(Table *table) {
     // Validate table
-    if (table->columns.empty()) {
-        if (_debug)
-            printf("Error: Table '%s' has no columns\n", table->table_name.c_str());
-        return false;
-    }
+    // if (table->columns.empty()) {
+    //     if (_debug)
+    //         printf("Error: Table '%s' has no columns\n", table->table_name.c_str());
+    //     return false;
+    // }
 
-    // Check for duplicate
-    if (get_table(table->table_name.c_str())) {
-        if (_debug)
-            printf("Error: Table '%s' already exists\n", table->table_name.c_str());
-        return false;
-    }
+    // // Check for duplicate
+    // if (get_table(table->table_name.c_str())) {
+    //     if (_debug)
+    //         printf("Error: Table '%s' already exists\n", table->table_name.c_str());
+    //     return false;
+    // }
 
-    // Validate column count
-    if (table->columns.size() > MAX_RECORD_LAYOUT) {
-        if (_debug)
-            printf("Error: Table '%s' has %zu columns (max %d)\n",
-                   table->table_name.c_str(), table->columns.size(), MAX_RECORD_LAYOUT);
-        return false;
-    }
+    // // Validate column count
+    // if (table->columns.size() > MAX_RECORD_LAYOUT) {
+    //     if (_debug)
+    //         printf("Error: Table '%s' has %zu columns (max %d)\n",
+    //                table->table_name.c_str(), table->columns.size(), MAX_RECORD_LAYOUT);
+    //     return false;
+    // }
 
-    // Calculate and validate record size
+    // // Calculate and validate record size
     RecordLayout layout = table->to_layout();
-    if (layout.record_size > PAGE_SIZE / 4) { // Reasonable limit for educational DB
-        if (_debug)
-            printf("Warning: Table '%s' has large records (%u bytes)\n",
-                   table->table_name.c_str(), layout.record_size);
-    }
+    // if (layout.record_size > PAGE_SIZE / 4) { // Reasonable limit for educational DB
+    //     if (_debug)
+    //         printf("Warning: Table '%s' has large records (%u bytes)\n",
+    //                table->table_name.c_str(), layout.record_size);
+    // }
 
     // Initialize statistics as unknown/stale
     table->stats.clear();
     table->stats.is_stale = true;
 
-    tables.push_back(*table);
+    tables.push_back(table);
 
     if (_debug) {
         printf("Added table '%s' with %zu columns, record size %u bytes\n",
@@ -183,12 +183,12 @@ bool add_table(Table *table) {
 
 bool remove_table(const char *table_name) {
     for (size_t i = 0; i < tables.size(); i++) {
-        if (tables[i].table_name == table_name) {
+        if (tables[i]->table_name == table_name) {
             // Clear btrees
-            bplustree_clear(&tables[i].tree.bplustree);
+            bplustree_clear(&tables[i]->tree.bplustree);
 
-            for (size_t j = 0; j < tables[i].indexes.size(); j++) {
-                btree_clear(&tables[i].indexes[j].tree.btree);
+            for (size_t j = 0; j < tables[i]->indexes.size(); j++) {
+                btree_clear(&tables[i]->indexes[j]->tree.btree);
             }
 
             // Remove from registry
@@ -204,28 +204,28 @@ bool remove_table(const char *table_name) {
 
 bool add_index(const char *table_name, Index *index) {
     Table *table = get_table(table_name);
-    if (!table) {
-        if (_debug)
-            printf("Error: Table '%s' not found for index\n", table_name);
-        return false;
-    }
+    // if (!table) {
+    //     if (_debug)
+    //         printf("Error: Table '%s' not found for index\n", table_name);
+    //     return false;
+    // }
 
-    if (index->column_index >= table->columns.size()) {
-        if (_debug)
-            printf("Error: Invalid column index %u for table '%s'\n",
-                   index->column_index, table_name);
-        return false;
-    }
+    // if (index->column_index >= table->columns.size()) {
+    //     if (_debug)
+    //         printf("Error: Invalid column index %u for table '%s'\n",
+    //                index->column_index, table_name);
+    //     return false;
+    // }
 
-    // Check for duplicate index on same column
-    if (get_index(table_name, index->column_index)) {
-        if (_debug)
-            printf("Error: Index already exists on column %u of table '%s'\n",
-                   index->column_index, table_name);
-        return false;
-    }
+    // // Check for duplicate index on same column
+    // if (get_index(table_name, index->column_index)) {
+    //     if (_debug)
+    //         printf("Error: Index already exists on column %u of table '%s'\n",
+    //                index->column_index, table_name);
+    //     return false;
+    // }
 
-    // Generate index name if not provided
+    // // Generate index name if not provided
     if (index->index_name.empty()) {
         char name_buf[TABLE_NAME_SIZE + 1 + COLUMN_NAME_SIZE];
         snprintf(name_buf, sizeof(name_buf), "%s_%s_idx", table_name,
@@ -237,7 +237,7 @@ bool add_index(const char *table_name, Index *index) {
     index->stats.clear();
     index->stats.is_stale = true;
 
-    table->indexes.push_back(*index);
+    table->indexes.push_back(index);
 
     if (_debug) {
         printf("Added index '%s' on column '%s' of table '%s' (needs ANALYZE)\n",
@@ -255,12 +255,12 @@ bool remove_index(const char *table_name, uint32_t column_index) {
         return false;
 
     for (size_t i = 0; i < table->indexes.size(); i++) {
-        if (table->indexes[i].column_index == column_index) {
-            btree_clear(&table->indexes[i].tree.btree);
+        if (table->indexes[i]->column_index == column_index) {
+            btree_clear(&table->indexes[i]->tree.btree);
 
             if (_debug) {
                 printf("Removed index '%s' from table '%s'\n",
-                       table->indexes[i].index_name.c_str(), table_name);
+                       table->indexes[i]->index_name.c_str(), table_name);
             }
 
             // table->indexes.erase(i);
@@ -272,9 +272,9 @@ bool remove_index(const char *table_name, uint32_t column_index) {
 
 void clear_schema() {
     for (size_t i = 0; i < tables.size(); i++) {
-        bplustree_clear(&tables[i].tree.bplustree);
-        for (size_t j = 0; j < tables[i].indexes.size(); j++) {
-            btree_clear(&tables[i].indexes[j].tree.btree);
+        bplustree_clear(&tables[i]->tree.bplustree);
+        for (size_t j = 0; j < tables[i]->indexes.size(); j++) {
+            btree_clear(&tables[i]->indexes[j]->tree.btree);
         }
     }
     tables.clear();
@@ -367,22 +367,22 @@ void print_table_info(const char *table_name) {
     }
 
     if (!table->indexes.empty()) {
-        printf("Indexes (%zu):\n", table->indexes.size());
-        for (size_t i = 0; i < table->indexes.size(); i++) {
-            printf("  - %s on column %u (%s)",
-                   table->indexes[i].index_name.c_str(),
-                   table->indexes[i].column_index,
-                   table->columns[table->indexes[i].column_index].name.c_str());
+        // printf("Indexes (%zu):\n", table->indexes.size());
+        // for (size_t i = 0; i < table->indexes.size(); i++) {
+        //     printf("  - %s on column %u (%s)",
+        //            table->indexes[i].index_name.c_str(),
+        //            table->indexes[i].column_index,
+        //            table->columns[table->indexes[i].column_index].name.c_str());
 
-            if (!table->indexes[i].stats.is_stale && table->indexes[i].stats.distinct_keys > 0) {
-                printf(" (selectivity: %.2f%%)", table->indexes[i].stats.selectivity * 100);
-            } else if (table->indexes[i].stats.is_stale) {
-                printf(" (stats: STALE)");
-            } else {
-                printf(" (stats: NONE)");
-            }
-            printf("\n");
-        }
+        //     if (!table->indexes[i].stats.is_stale && table->indexes[i].stats.distinct_keys > 0) {
+        //         printf(" (selectivity: %.2f%%)", table->indexes[i].stats.selectivity * 100);
+        //     } else if (table->indexes[i].stats.is_stale) {
+        //         printf(" (stats: STALE)");
+        //     } else {
+        //         printf(" (stats: NONE)");
+        //     }
+        //     printf("\n");
+        // }
     }
 
     printf("BTree info:\n");
@@ -398,7 +398,7 @@ void print_all_tables() {
     // Count how many need analysis
     uint32_t stale_count = 0;
     for (size_t i = 0; i < tables.size(); i++) {
-        if (tables[i].stats.is_stale)
+        if (tables[i]->stats.is_stale)
             stale_count++;
     }
 
@@ -409,7 +409,7 @@ void print_all_tables() {
     printf("\n");
 
     for (size_t i = 0; i < tables.size(); i++) {
-        print_table_info(tables[i].table_name.c_str());
+        print_table_info(tables[i]->table_name.c_str());
     }
 }
 
@@ -446,7 +446,7 @@ RecordLayout build_layout_from_columns(const char *table_name,
         return RecordLayout::create(TYPE_NULL); // Return empty layout
     }
 
-    EmbVec<DataType, MAX_RECORD_LAYOUT> types;
+    Vec<DataType, QueryArena> types;
 
     for (size_t i = 0; i < column_names.size(); i++) {
         uint32_t idx = get_column_index(table_name, column_names[i]);
@@ -466,7 +466,7 @@ RecordLayout build_layout_from_columns(const char *table_name,
 Vec<const char *, QueryArena> get_all_table_names() {
     Vec<const char *, QueryArena> names;
     for (size_t i = 0; i < tables.size(); i++) {
-        names.push_back(tables[i].table_name.c_str());
+        names.push_back(tables[i]->table_name.c_str());
     }
     return names;
 }
@@ -474,8 +474,8 @@ Vec<const char *, QueryArena> get_all_table_names() {
 // Check if a column name exists in any table
 bool column_exists_anywhere(const char *col_name) {
     for (size_t i = 0; i < tables.size(); i++) {
-        for (size_t j = 0; j < tables[i].columns.size(); j++) {
-            if (tables[i].columns[j].name == col_name) {
+        for (size_t j = 0; j < tables[i]->columns.size(); j++) {
+            if (tables[i]->columns[j].name == col_name) {
                 return true;
             }
         }
@@ -487,7 +487,7 @@ bool column_exists_anywhere(const char *col_name) {
 uint32_t total_index_count() {
     uint32_t count = 0;
     for (size_t i = 0; i < tables.size(); i++) {
-        count += tables[i].indexes.size();
+        count += tables[i]->indexes.size();
     }
     return count;
 }
