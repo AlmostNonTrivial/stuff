@@ -224,7 +224,7 @@ Table* create_table(CreateTableNode* node, int root_page)
     // Calculate record layout
     RecordLayout layout = table->to_layout();
     DataType key_type = table->columns[0].type;
-    uint32_t record_size = layout.record_size - key_type;
+    uint32_t record_size = layout.record_size;
 
 
     // Create BPlusTree
@@ -301,7 +301,7 @@ void create_master(bool existed)
     master->columns.push_back({"sql", TYPE_256});
 
     RecordLayout layout = master->to_layout();
-    uint32_t record_size = layout.record_size - TYPE_4;
+    uint32_t record_size = layout.record_size;
 
     master->bplustree = bplustree_create(TYPE_4, record_size, !existed);
 	master->bplustree.root_page_index = 1;

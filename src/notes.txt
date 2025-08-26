@@ -1,8 +1,6 @@
 
 TO CONSIDER:
-// get rid of stl
-// perfect containers
-// is two names nessessary? DELETE FROM sqlite_master WHERE name = 'Products' OR tbl_name = 'Products'
+mass delete program logic
 BUGS:
 
 TESTING:
@@ -10,5 +8,4 @@ TESTING:
 
 TODO:
 query validation.
-get rid of name
-not need manual id.
+get rid of stl and perfect containers

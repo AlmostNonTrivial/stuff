@@ -32,8 +32,22 @@ print_result_callback(TypedValue *result, size_t count)
 	}
 	std::cout << "\n";
 }
+
+
+
+
 MemoryContext ctx = {.alloc = arena::alloc<QueryArena>, .emit_row = print_result_callback};
 static Vec<Vec<TypedValue, QueryArena>, QueryArena> last_results;
+
+
+void print_results() {
+    int count = last_results.size();
+   	for (int i = 0; i < count; i++)
+	{
+	    print_result_callback(last_results[i].get_data(), last_results[i].size());
+	}
+
+}
 
 static void capture_result_callback(TypedValue* result, size_t count) {
     auto row = Vec<TypedValue, QueryArena>::create();
@@ -312,7 +326,8 @@ execute_rollback()
 {
 	pager_rollback();
 	executor_state.in_transaction = false;
-
+	schema_clear();
+	create_master(true);
 	// Reload schema from master table
 	// root page will be the first thing written so it will always get
 	// the root = 1;
@@ -335,7 +350,6 @@ executor_init(bool existed)
 
 	if (!existed)
 	{
-
 		pager_begin_transaction();
 		create_master(false);
 		pager_commit();

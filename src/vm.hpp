@@ -35,6 +35,7 @@ enum OpCode : uint32_t {
 	OP_Insert = 34,
 	OP_Delete = 35,
 	OP_Update = 36,
+
 	// Register operations
 	OP_Move = 40,
 	OP_Load = 41,
@@ -351,15 +352,27 @@ print(const VMInstruction &inst)
 namespace Delete
 {
 inline VMInstruction
-create(int32_t cursor_id)
+create(int32_t cursor_id, int32_t cursor_valid_reg, int32_t delete_occured_reg)
 {
-	return {OP_Delete, cursor_id, 0, 0, nullptr, 0};
+	return {OP_Delete, cursor_id, cursor_valid_reg, delete_occured_reg, nullptr, 0};
 }
 inline int32_t
 cursor_id(const VMInstruction &inst)
 {
 	return inst.p1;
 }
+inline int32_t
+delete_occured_reg(const VMInstruction &inst)
+{
+	return inst.p3;
+}
+inline int32_t
+cursor_valid_reg(const VMInstruction &inst)
+{
+	return inst.p2;
+}
+
+
 inline void
 print(const VMInstruction &inst)
 {
@@ -778,11 +791,7 @@ print_cursor_state(int cursor_id, const char *state)
 {
 	printf("Cursor[%d]: %s\n", cursor_id, state);
 }
-inline void
-enable_trace(bool enable)
-{
-	_debug = enable;
-}
+
 } // namespace Debug
 // VM Runtime Definitions
 #define REGISTERS 40

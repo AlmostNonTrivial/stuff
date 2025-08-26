@@ -447,6 +447,8 @@ split(BPlusTree &tree, BTreeNode *node)
 
 		parent = root; // Continue with root as the parent
 		node = new_internal;
+		rising_key = get_key_at(tree, node, split_index);
+
 	}
 	else
 	{

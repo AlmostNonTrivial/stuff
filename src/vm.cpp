@@ -518,6 +518,9 @@ step()
 		case GT:
 			test_result = (cmp_result > 0);
 			break;
+		case GE:
+			test_result = (cmp_result > 0);
+			break;
 		}
 		*(uint32_t *)result.data = test_result ? 1 : 0;
 		if (_debug)
@@ -847,8 +850,14 @@ step()
 	}
 	case OP_Delete: {
 		int32_t cursor_id = Opcodes::Delete::cursor_id(*inst);
+		int32_t delete_occured = Opcodes::Delete::delete_occured_reg(*inst);
+		int32_t cursor_valid = Opcodes::Delete::cursor_valid_reg(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
-		bool success = cursor->remove();
+		int32_t success = cursor->remove() ? 1 : 0;
+		int32_t valid = cursor->is_valid() ? 1 : 0;
+		set_register(&VM.registers[delete_occured], (uint8_t *)&success, TYPE_4);
+		set_register(&VM.registers[cursor_valid], (uint8_t *)&valid, TYPE_4);
+
 		if (_debug)
 		{
 			printf("=> Cursor %d delete %s", cursor_id, success ? "OK" : "FAILED");

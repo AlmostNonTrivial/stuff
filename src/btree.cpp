@@ -246,17 +246,14 @@ btree_create(DataType key, uint32_t record_size, bool init)
 	tree.internal_min_keys = min_keys;
 	tree.internal_split_index = split_index;
 
-
-	if (init) {
-        BTreeNode *root = create_node(tree, true);
-        tree.root_page_index = root->index;
-    }
-
+	if (init)
+	{
+		BTreeNode *root = create_node(tree, true);
+		tree.root_page_index = root->index;
+	}
 
 	return tree;
 }
-
-
 
 static BTreeNode *
 get_parent(BTreeNode *node)
@@ -389,6 +386,7 @@ split(BTree &tree, BTreeNode *node)
 
 		parent = root;		 // Continue with root as the parent
 		node = new_internal; // node now points to where its data actually is
+		rising_key = get_key_at(tree, node, split_index);
 	}
 	else
 	{
@@ -765,9 +763,9 @@ merge_right(BTree &tree, BTreeNode *node)
 	{
 		if (parent->parent == 0 && parent->num_keys == 0)
 		{
-		swap_with_root(tree, parent, node);
-        destroy_node(node);
-        return parent;
+			swap_with_root(tree, parent, node);
+			destroy_node(parent); // Destroy the old root (now in parent's location)
+			return node;		  // Return node which is now the root
 		}
 		else
 		{
@@ -850,8 +848,8 @@ repair_after_delete(BTree &tree, BTreeNode *node)
 			BTreeNode *only_child = get_child(tree, node, 0);
 			if (only_child)
 			{
-			    swap_with_root(tree, node, only_child);
-                destroy_node(only_child);
+				swap_with_root(tree, node, only_child);
+				destroy_node(node); // Destroy the old root (now at node's location)
 			}
 		}
 		return;

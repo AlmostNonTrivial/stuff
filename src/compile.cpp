@@ -121,8 +121,12 @@ struct ProgramBuilder
 void
 build_select(ProgramBuilder &prog, SelectNode *node)
 {
-	// For educational clarity, we'll implement a simple full table scan
-	// This demonstrates the core VM opcodes needed for SELECT
+	// Get table info
+	Table *table = get_table(node->table);
+	if (!table) {
+		printf("Error: Table '%s' not found\n", node->table);
+		return;
+	}
 
 	int table_cursor = 0;
 
@@ -130,34 +134,69 @@ build_select(ProgramBuilder &prog, SelectNode *node)
 	prog.emit(Opcodes::Open::create_btree(table_cursor, node->table, 0, false));
 
 	// 2. Get the table schema to know how many columns we have
-	Table *table = get_table(node->table);
 	int num_columns = table->columns.size();
 
 	// 3. Allocate registers for the result row
 	int result_start_reg = prog.regs.allocate_range(num_columns);
 
 	// 4. Rewind cursor to the beginning of the table
-	prog.emit(Opcodes::Rewind::create(table_cursor, "halt", false));
+	prog.emit(Opcodes::Rewind::create(table_cursor, "select_done", false));
 
 	// 5. Loop start - this is where we'll jump back to for each row
-	prog.label("loop_start");
+	prog.label("select_loop");
 
-	// 6. Extract each column from the current row into registers
+	// 6. Evaluate WHERE clause if present
+	if (node->where && node->where->condition) {
+		// Handle single comparison: column op value
+		BinaryOpNode *cond = (BinaryOpNode*)node->where->condition;
+
+		if (cond->type == AST_BINARY_OP && !cond->is_and) {
+			// Load the column value from cursor
+			ColumnRefNode *col_ref = (ColumnRefNode*)cond->left;
+			uint32_t col_idx = get_column_index(node->table, col_ref->name);
+
+			int test_reg = prog.regs.allocate();
+			int value_reg = prog.regs.allocate();
+			int result_reg = prog.regs.allocate();
+
+			// Load column value
+			prog.emit(Opcodes::Column::create(table_cursor, col_idx, test_reg));
+
+			// Load comparison value
+			if (cond->right->type == AST_LITERAL) {
+				LiteralNode *lit = (LiteralNode*)cond->right;
+				prog.emit(Opcodes::Move::create_load(value_reg, lit->value.type, lit->value.data));
+			}
+
+			// Perform comparison
+			prog.emit(Opcodes::Test::create(result_reg, test_reg, value_reg, cond->op));
+
+			// Jump to "skip_row" if condition is false
+			prog.emit(Opcodes::JumpIf::create(result_reg, "skip_row", false));
+		}
+	}
+
+	// 7. Extract each column from the current row into registers
 	for (int i = 0; i < num_columns; i++)
 	{
 		prog.emit(Opcodes::Column::create(table_cursor, i, result_start_reg + i));
 	}
 
-	// 7. Emit the result row (calls the callback with the row data)
+	// 8. Emit the result row (calls the callback with the row data)
 	prog.emit(Opcodes::Result::create(result_start_reg, num_columns));
 
-	// 8. Step to the next row, jump back to loop_start if there are more rows
-	prog.emit(Opcodes::Step::create(table_cursor, "halt", true));
-	prog.emit(Opcodes::Goto::create("loop_start"));
+	// 9. Label for skipping row (WHERE condition false)
+	prog.label("skip_row");
 
-	// 9. Clean up - close cursor and halt
+	// 10. Step to the next row, jump to "select_done" if no more rows
+	prog.emit(Opcodes::Step::create(table_cursor, "select_done", true));
+
+	// 11. Loop back
+	prog.emit(Opcodes::Goto::create("select_loop"));
+
+	// 12. Done - close cursor and halt
+	prog.label("select_done");
 	prog.emit(Opcodes::Close::create(table_cursor));
-	prog.label("halt");
 	prog.emit(Opcodes::Halt::create(0));
 
 	prog.resolve_labels();
@@ -324,10 +363,14 @@ void build_delete(ProgramBuilder &prog, DeleteNode *node)
     // 2. Rewind to beginning, jump to "delete_done" if empty
     prog.emit(Opcodes::Rewind::create(table_cursor, "delete_done", false));
 
-    // 3. Main loop start
+    // 3. Allocate registers for tracking state
+    int cursor_valid_reg = prog.regs.allocate();
+    int delete_occurred_reg = prog.regs.allocate();
+
+    // 4. Main loop start
     prog.label("delete_loop");
 
-    // 4. Evaluate WHERE clause if present
+    // 5. Evaluate WHERE clause if present
     if (node->where && node->where->condition) {
         // Handle WHERE clause evaluation
         BinaryOpNode *cond = (BinaryOpNode*)node->where->condition;
@@ -353,24 +396,26 @@ void build_delete(ProgramBuilder &prog, DeleteNode *node)
             // Perform comparison
             prog.emit(Opcodes::Test::create(result_reg, test_reg, value_reg, cond->op));
 
-            // Jump to "skip_delete" if condition is false
-            prog.emit(Opcodes::JumpIf::create(result_reg, "skip_delete", false));
+            // Jump to "no_delete" if condition is false
+            prog.emit(Opcodes::JumpIf::create(result_reg, "no_delete", false));
         }
     }
 
-    // 5. Delete the current row
-    prog.emit(Opcodes::Delete::create(table_cursor));
+    // 6. Delete the current row (sets cursor_valid_reg and delete_occurred_reg)
+    prog.emit(Opcodes::Delete::create(table_cursor, cursor_valid_reg, delete_occurred_reg));
 
-    // 6. Label for skipping delete (WHERE condition false)
-    prog.label("skip_delete");
+    // 7. Check if cursor is still valid after delete
+    prog.emit(Opcodes::JumpIf::create(cursor_valid_reg, "delete_done", false));
 
-    // 7. Step to next row, jump to "delete_done" if no more rows
-    prog.emit(Opcodes::Step::create(table_cursor, "delete_done", true));
-
-    // 8. Loop back
+    // 8. Delete occurred and cursor valid, loop back (cursor already advanced due to key shift)
     prog.emit(Opcodes::Goto::create("delete_loop"));
 
-    // 9. Done - close and halt
+    // 9. No delete case - need to step to next row
+    prog.label("no_delete");
+    prog.emit(Opcodes::Step::create(table_cursor, "delete_done", true));
+    prog.emit(Opcodes::Goto::create("delete_loop"));
+
+    // 10. Done - close and halt
     prog.label("delete_done");
     prog.emit(Opcodes::Close::create(table_cursor));
     prog.emit(Opcodes::Halt::create(0));
@@ -378,7 +423,6 @@ void build_delete(ProgramBuilder &prog, DeleteNode *node)
     // Resolve all labels
     prog.resolve_labels();
 }
-
 // Also update build_from_ast to handle UPDATE:
 Vec<VMInstruction, QueryArena>
 build_from_ast(ASTNode *ast)
