@@ -2,7 +2,7 @@
 #include "vm.hpp"
 #include "parser.hpp"
 #include "arena.hpp"
-#include "schema.hpp"
+#include "catalog.hpp"
 #include <utility>
 
 // Main entry points for AST-based building

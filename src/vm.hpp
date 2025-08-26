@@ -6,7 +6,7 @@
 #include "memtree.hpp"
 #include "btree.hpp"
 #include "defs.hpp"
-#include "schema.hpp"
+#include "catalog.hpp"
 #include "vec.hpp"
 #include <cstddef>
 #include <cstdint>
@@ -70,9 +70,9 @@ namespace Opcodes
 namespace Goto
 {
 inline VMInstruction
-create(int32_t target)
+create(char*label)
 {
-	return {OP_Goto, 0, target, 0, nullptr, 0};
+	return {OP_Goto, 0, -1, 0, label, 0};
 }
 inline int32_t
 target(const VMInstruction &inst)
@@ -182,10 +182,10 @@ print(const VMInstruction &inst)
 namespace Rewind
 {
 inline VMInstruction
-create(int32_t cursor_id, int32_t jump_if_empty = -1, bool to_end = false)
+create(int32_t cursor_id, char*label, bool to_end = false)
 {
-	return {OP_Rewind, cursor_id, jump_if_empty,
-		0,	   nullptr,   (uint8_t)to_end};
+	return {OP_Rewind, cursor_id, -1,
+		0,	   label,   (uint8_t)to_end};
 }
 inline int32_t
 cursor_id(const VMInstruction &inst)
@@ -212,9 +212,9 @@ print(const VMInstruction &inst)
 namespace Step
 {
 inline VMInstruction
-create(int32_t cursor_id, int32_t jump_if_done = -1, bool forward = true)
+create(int32_t cursor_id, char* jump_label = nullptr, bool forward = true)
 {
-	return {OP_Step, cursor_id, jump_if_done, 0, nullptr, (uint8_t)forward};
+	return {OP_Step, cursor_id, -1, 0, jump_label, (uint8_t)forward};
 }
 inline int32_t
 cursor_id(const VMInstruction &inst)
@@ -516,10 +516,10 @@ print(const VMInstruction &inst)
 namespace JumpIf
 {
 inline VMInstruction
-create(int32_t test_reg, int32_t jump_target, bool jump_on_true = true)
+create(int32_t test_reg, char* jump_label, bool jump_on_true = true)
 {
-	return {OP_JumpIf, test_reg, jump_target,
-		0,	   nullptr,  (uint8_t)jump_on_true};
+	return {OP_JumpIf, test_reg, -1,
+		0,	   jump_label,  (uint8_t)jump_on_true};
 }
 inline int32_t
 test_reg(const VMInstruction &inst)

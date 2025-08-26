@@ -7,7 +7,7 @@
 #include "btree.hpp"
 #include "defs.hpp"
 #include "memtree.hpp"
-#include "schema.hpp"
+#include "catalog.hpp"
 #include "pattern.hpp"
 #include <cstdint>
 #include <cstdio>
@@ -62,65 +62,32 @@ struct VmCursor
 	// ========================================================================
 	// Initialization
 	// ========================================================================
+	// Legacy compatibility functions
 	void
-	open_btree_table(const RecordLayout &table_layout, BTree *tree)
-	{
-		exit(1);
-		// type = BTREE_TABLE;
-		// memcpy(&layout, &table_layout, sizeof(RecordLayout));
-		// storage.btree_ptr = tree;
-		// cursor.btree.tree = storage.btree_ptr;
-		// cursor.btree.state = CURSOR_INVALID;
-	}
-
-	void
-	open_bplus_table(const RecordLayout &table_layout, BPlusTree *tree)
+	open_table(const RecordLayout &table_layout, BPlusTree *tree)
 	{
 		type = BPLUS_TABLE;
-		memcpy(&layout, &table_layout, sizeof(RecordLayout));
+		layout = table_layout;
 		storage.bptree_ptr = tree;
 		cursor.bptree.tree = storage.bptree_ptr;
 		cursor.bptree.state = BPT_CURSOR_INVALID;
 	}
 
 	void
-	open_btree_index(const RecordLayout &index_layout, BTree *tree)
+	open_index(const RecordLayout &index_layout, BTree *tree)
 	{
 		type = BTREE_INDEX;
-		memcpy(&layout, &index_layout, sizeof(RecordLayout));
+		layout = index_layout;
 		storage.btree_ptr = tree;
 		cursor.btree.tree = storage.btree_ptr;
 		cursor.btree.state = CURSOR_INVALID;
 	}
 
 	void
-	open_BTREE_INDEX(const RecordLayout &index_layout, BPlusTree *tree)
-	{
-		type = BTREE_INDEX;
-		memcpy(&layout, &index_layout, sizeof(RecordLayout));
-		storage.bptree_ptr = tree;
-		cursor.bptree.tree = storage.bptree_ptr;
-		cursor.bptree.state = BPT_CURSOR_INVALID;
-	}
-
-	// Legacy compatibility functions
-	void
-	open_table(const RecordLayout &table_layout, BPlusTree *tree)
-	{
-		open_bplus_table(table_layout, tree);
-	}
-
-	void
-	open_index(const RecordLayout &index_layout, BTree *tree)
-	{
-		open_btree_index(index_layout, tree);
-	}
-
-	void
 	open_ephemeral(const RecordLayout &ephemeral_layout)
 	{
 		type = EPHEMERAL;
-		memcpy(&layout, &ephemeral_layout, sizeof(RecordLayout));
+		layout = ephemeral_layout;
 		storage.mem_tree = memtree_create(layout.key_type(), layout.record_size);
 		cursor.mem.tree = &storage.mem_tree;
 		cursor.mem.state = MemCursor::INVALID;
@@ -278,7 +245,6 @@ struct VmCursor
 		auto rec = record + layout.get_offset(col_index - 1);
 
 		return rec;
-
 	}
 
 	DataType

@@ -5,13 +5,16 @@
 #include "defs.hpp"
 #include "pager.hpp"
 #include "parser.hpp"
-#include "schema.hpp"
+#include "catalog.hpp"
 #include "vec.hpp"
 #include "vm.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <unordered_map>
 #include <utility>
+
+#include "map.hpp"
 
 // Register allocator with named registers for debugging
 // Register allocator for ProgramBuilder
@@ -56,7 +59,9 @@ struct RegisterAllocator
 struct ProgramBuilder
 {
 	Vec<VMInstruction, QueryArena> instructions;
-	Vec<std::pair<Str<QueryArena>, int>, QueryArena> labels;
+
+
+	std::unordered_map<const char*,int> labels;
 	RegisterAllocator regs;
 
 	// Fluent interface
@@ -70,7 +75,7 @@ struct ProgramBuilder
 	ProgramBuilder &
 	label(const char *name)
 	{
-		labels.push_back(std::make_pair(name, instructions.size()));
+		labels[name] = instructions.size();
 		return *this;
 	}
 
@@ -87,20 +92,24 @@ struct ProgramBuilder
 		{
 			auto &inst = instructions[i];
 
-			if (!inst.p4 && inst.p3 == -1)
+			if (!inst.p4)
 			{
 				continue;
 			}
 			char *label = (char *)inst.p4;
 
-			auto it = labels.find_with(
-				[label](const std::pair<Str<QueryArena>, uint32_t> entry) { return entry.first.starts_with(label); });
 
-			if (it == -1)
+
+			if (!labels.contains(label))
 			{
 				continue;
 			}
-			inst.p3 = it;
+			if(inst.p2 == -1) {
+				inst.p2 = labels[label];
+			}
+			if(inst.p3 == -1) {
+				inst.p3 = labels[label];
+			}
 			inst.p4 = nullptr;
 		}
 	}
@@ -128,12 +137,10 @@ build_select(ProgramBuilder &prog, SelectNode *node)
 	int result_start_reg = prog.regs.allocate_range(num_columns);
 
 	// 4. Rewind cursor to the beginning of the table
-	// Jump to end (Halt) if table is empty
-	int halt_addr = prog.instructions.size() + 6 + num_columns; // Calculate where Halt will be
-	prog.emit(Opcodes::Rewind::create(table_cursor, halt_addr, false));
+	prog.emit(Opcodes::Rewind::create(table_cursor, "halt", false));
 
 	// 5. Loop start - this is where we'll jump back to for each row
-	int loop_start = prog.here();
+	prog.label("loop_start");
 
 	// 6. Extract each column from the current row into registers
 	for (int i = 0; i < num_columns; i++)
@@ -145,11 +152,12 @@ build_select(ProgramBuilder &prog, SelectNode *node)
 	prog.emit(Opcodes::Result::create(result_start_reg, num_columns));
 
 	// 8. Step to the next row, jump back to loop_start if there are more rows
-	prog.emit(Opcodes::Step::create(table_cursor, halt_addr, true));
-	prog.emit(Opcodes::Goto::create(loop_start));
+	prog.emit(Opcodes::Step::create(table_cursor, "halt", true));
+	prog.emit(Opcodes::Goto::create("loop_start"));
 
 	// 9. Clean up - close cursor and halt
 	prog.emit(Opcodes::Close::create(table_cursor));
+	prog.label("halt");
 	prog.emit(Opcodes::Halt::create(0));
 }
 
@@ -205,10 +213,8 @@ build_update(ProgramBuilder &prog, UpdateNode *node)
 	prog.emit(Opcodes::Open::create_btree(table_cursor, node->table, 0, true));
 
 	// 2. Rewind to beginning, jump to "done" if empty
-	prog.emit(Opcodes::Rewind::create(table_cursor, -1, false));
-	// Will resolve "done" label later
-	prog.instructions.back().p2 = -1;
-	prog.instructions.back().p4 = (void*)"update_done";
+	prog.emit(Opcodes::Rewind::create(table_cursor, "update_done", false));
+
 
 	// 3. Main loop start
 	prog.label("update_loop");
@@ -240,9 +246,7 @@ build_update(ProgramBuilder &prog, UpdateNode *node)
 			prog.emit(Opcodes::Test::create(result_reg, test_reg, value_reg, cond->op));
 
 			// Jump to "skip_update" if condition is false
-			VMInstruction jump_inst = Opcodes::JumpIf::create(result_reg, -1, false);
-			jump_inst.p2 = -1;
-			jump_inst.p4 = (void*)"skip_update";
+			VMInstruction jump_inst = Opcodes::JumpIf::create(result_reg, "skip_update", false);
 			prog.emit(jump_inst);
 		}
 	}
@@ -280,20 +284,18 @@ build_update(ProgramBuilder &prog, UpdateNode *node)
 	prog.label("skip_update");
 
 	// 8. Step to next row, jump to "done" if no more rows
-	prog.emit(Opcodes::Step::create(table_cursor, -1, true));
+	prog.emit(Opcodes::Step::create(table_cursor, "end", true));
 	// Will resolve "done" label
-	prog.instructions.back().p2 = -1;
-	prog.instructions.back().p4 = (void*)"update_done";
 
 	// 9. Loop back
-	VMInstruction goto_inst = Opcodes::Goto::create(-1);
-	goto_inst.p2 = -1;
-	goto_inst.p4 = (void*)"update_loop";
+	VMInstruction goto_inst = Opcodes::Goto::create("update_loop");
 	prog.emit(goto_inst);
 
 	// 10. Done - close and halt
 	prog.label("update_done");
 	prog.emit(Opcodes::Close::create(table_cursor));
+
+	prog.label("end");
 	prog.emit(Opcodes::Halt::create(0));
 
 	// Resolve all labels

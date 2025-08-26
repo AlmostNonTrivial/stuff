@@ -8,7 +8,7 @@
 #include "pager.hpp"
 #include "parser.hpp"
 #include "compile.hpp"
-#include "schema.hpp"
+#include "catalog.hpp"
 #include "vec.hpp"
 #include "vm.hpp"
 #include <cassert>
@@ -67,6 +67,7 @@ static void
 update_master_rootpage(const char *name, uint32_t new_rootpage)
 {
 
+    // _debug = true;
 	char buffer[512];
 	snprintf(buffer, sizeof(buffer), "UPDATE sqlite_master SET rootpage = %u WHERE name = '%s'", new_rootpage, name);
 

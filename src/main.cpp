@@ -1,7 +1,7 @@
 #include "executor.hpp"
 #include "os_layer.hpp"
 #include "pager.hpp"
-#include "schema.hpp"
+#include "catalog.hpp"
 #include "vm.hpp"
 #include <cstdlib>
 
@@ -27,23 +27,25 @@ main()
 label:
 
 	init_executor();
-
-	execute(create_customers);
-	for (int i = 1; i < 100; i++)
+	if (!pass)
 	{
-		execute(next_customer(i));
-	}
-	// execute(create_products);
 
-	execute(select_tables);
+		execute(create_customers);
+		execute(create_products);
+		execute(select_tables);
+	}
+
+
 	executor_close();
 	pager_close();
 
-	if (!pass)
-	{
-		pass = true;
-		goto label;
-	}
+	// if (!pass)
+	// {
+	// 	pass = true;
+	// 	goto label;
+	// }
+
+
 
 	// print_table_info("sqlite_master");
 	// print_table_info("Customers");

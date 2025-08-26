@@ -1,5 +1,5 @@
 // schema.cpp - STL container version
-#include "schema.hpp"
+#include "catalog.hpp"
 #include "parser.hpp"
 #include "bplustree.hpp"
 #include "defs.hpp"
