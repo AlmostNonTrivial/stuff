@@ -6,6 +6,9 @@
 #include <cstdlib>
 #include <cstring>
 
+
+struct GlobalArena {};
+
 #ifdef _WIN32
     #include <windows.h>
 #else
@@ -280,4 +283,198 @@ namespace arena {
     template <typename Tag> void print_stats() {
         Arena<Tag>::print_stats();
     }
+}
+
+
+
+
+template <typename T, typename ArenaTag = GlobalArena, size_t InitialSize = 8>
+struct Array {
+    T* data = nullptr;
+    size_t size = 0;
+    size_t capacity = 0;
+};
+
+template <typename T, typename Tag, size_t InitSize>
+T* array_push(Array<T, Tag, InitSize>* arr, const T& value) {
+    // Lazy init on first push
+    if (!arr->data) {
+        arr->capacity = InitSize;
+        arr->data = (T*)Arena<Tag>::alloc(arr->capacity * sizeof(T));
+    }
+
+    // Grow if needed
+    if (arr->size >= arr->capacity) {
+        size_t new_cap = arr->capacity * 2;
+        T* new_data = (T*)Arena<Tag>::alloc(new_cap * sizeof(T));
+        memcpy(new_data, arr->data, arr->size * sizeof(T));
+
+        arr->data = new_data;
+        arr->capacity = new_cap;
+    }
+
+    arr->data[arr->size] = value;
+    return &arr->data[arr->size++];
+}
+
+
+template <typename T, typename Tag = GlobalArena, size_t InitSize = 0>
+Array<T, Tag, InitSize>* array_create() {
+    auto* arr = (Array<T, Tag, InitSize>*)Arena<Tag>::alloc(sizeof(Array<T, Tag, InitSize>));
+    arr->data = nullptr;
+    arr->size = 0;
+    arr->capacity = 0;
+    return arr;
+}
+// Hash any integer type
+template <typename T>
+inline size_t hash_int(T key) {
+    size_t h = (size_t)key;
+    h = (h ^ (h >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    h = (h ^ (h >> 27)) * 0x94d049bb133111ebULL;
+    return h ^ (h >> 31);
+}
+
+// Simple entry with state
+template <typename K, typename V>
+struct HashEntry {
+    K key;
+    V value;
+    uint8_t state = 0;  // 0=empty, 1=occupied, 2=deleted
+};
+
+template <typename K, typename V, typename Tag = GlobalArena>
+struct HashMap {
+    Array<HashEntry<K, V>, Tag, 16> entries;
+    size_t count = 0;
+};
+
+
+// HashSet just reuses HashMap with dummy value
+template <typename K, typename Tag = GlobalArena>
+using HashSet = HashMap<K, uint8_t, Tag>;
+
+// Get value by key
+template <typename K, typename V, typename Tag>
+V* hashmap_get(HashMap<K, V, Tag>* map, K key) {
+    if (map->entries.size == 0) return nullptr;
+
+    size_t idx = hash_int(key) & (map->entries.capacity - 1);
+    while (map->entries.data[idx].state != 0) {  // Keep going until empty slot
+        if (map->entries.data[idx].state == 1 && map->entries.data[idx].key == key) {
+            return &map->entries.data[idx].value;
+        }
+        idx = (idx + 1) & (map->entries.capacity - 1);
+    }
+    return nullptr;
+}
+
+// Delete by key
+template <typename K, typename V, typename Tag>
+bool hashmap_delete(HashMap<K, V, Tag>* map, K key) {
+    if (map->entries.size == 0) return false;
+
+    size_t idx = hash_int(key) & (map->entries.capacity - 1);
+    while (map->entries.data[idx].state != 0) {
+        if (map->entries.data[idx].state == 1 && map->entries.data[idx].key == key) {
+            map->entries.data[idx].state = 2;  // Mark as deleted (tombstone)
+            map->count--;
+            return true;
+        }
+        idx = (idx + 1) & (map->entries.capacity - 1);
+    }
+    return false;
+}
+
+// Fixed insert with rehashing
+template <typename K, typename V, typename Tag>
+V* hashmap_insert(HashMap<K, V, Tag>* map, K key, V value) {
+    // Initialize or grow at 70% load
+    if (map->entries.capacity == 0 || map->count >= map->entries.capacity * 0.7) {
+        size_t new_cap = map->entries.capacity ? map->entries.capacity * 2 : 16;
+
+        // Keep old entries
+        Array<HashEntry<K, V>, Tag, 16> old = map->entries;
+
+        // Create new array
+        map->entries.data = (HashEntry<K, V>*)Arena<Tag>::alloc(new_cap * sizeof(HashEntry<K, V>));
+        map->entries.capacity = new_cap;
+        map->entries.size = new_cap;
+        memset(map->entries.data, 0, new_cap * sizeof(HashEntry<K, V>));
+
+        // Rehash old entries
+        map->count = 0;
+        for (size_t i = 0; i < old.capacity; i++) {
+            if (old.data[i].state == 1) {
+                hashmap_insert(map, old.data[i].key, old.data[i].value);
+            }
+        }
+    }
+
+    size_t idx = hash_int(key) & (map->entries.capacity - 1);
+    while (map->entries.data[idx].state == 1) {
+        if (map->entries.data[idx].key == key) {
+            map->entries.data[idx].value = value;
+            return &map->entries.data[idx].value;
+        }
+        idx = (idx + 1) & (map->entries.capacity - 1);
+    }
+
+    map->entries.data[idx] = {key, value, 1};
+    map->count++;
+    return &map->entries.data[idx].value;
+}
+
+// HashSet helpers
+template <typename K, typename Tag>
+bool hashset_insert(HashSet<K, Tag>* set, K key) {
+    void* existing = hashmap_get(set, key);
+    if (existing != nullptr) return false;
+    hashmap_insert(set, key, uint8_t(0));
+    return true;
+}
+
+template <typename K, typename Tag>
+bool hashset_contains(HashSet<K, Tag>* set, K key) {
+    return hashmap_get(set, key) != nullptr;
+}
+
+template <typename K, typename Tag>
+bool hashset_delete(HashSet<K, Tag>* set, K key) {
+    return hashmap_delete(set, key);
+}
+
+// String is just an array of chars
+template <typename Tag = GlobalArena, size_t InitSize = 64>
+using String = Array<char, Tag, InitSize>;
+
+// Copy a C string
+template <typename Tag, size_t InitSize>
+void string_set(String<Tag, InitSize>* s, const char* cstr) {
+    s->size = 0;
+    while (*cstr) {
+        array_push(s, *cstr++);
+    }
+    array_push(s, '\0');
+}
+
+// Append to string
+template <typename Tag, size_t InitSize>
+void string_append(String<Tag, InitSize>* s, const char* cstr) {
+    if (s->size > 0 && s->data[s->size - 1] == '\0') {
+        s->size--;  // Remove old null terminator
+    }
+    while (*cstr) {
+        array_push(s, *cstr++);
+    }
+    array_push(s, '\0');
+}
+
+// Hash a string (for use with HashMap)
+inline size_t hash_string(const char* str) {
+    size_t h = 0;
+    while (*str) {
+        h = h * 31 + (unsigned char)*str++;
+    }
+    return h;
 }
