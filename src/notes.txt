@@ -5,7 +5,7 @@ TO CONSIDER:
 // how do we actually initialise the btree on load, if we're not creating it
 // i'm not sure if the master root is updated automatically by the vm
 // the stl caused memory issues because I used memcpy and not the bloody = copy
-
+// is two names nessessary? DELETE FROM sqlite_master WHERE name = 'Products' OR tbl_name = 'Products'
 BUGS:
 // unorderd map page_to_cache
 // does embedded string in schema actually work fine
@@ -13,7 +13,9 @@ BUGS:
 // master table needs compile which first needs schema
 
 TESTING:
-
+-- create index
+-- delete from table to force merge (root change)
+-- root table change
 
 
 

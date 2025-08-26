@@ -20,7 +20,7 @@ struct BTree {
 
 // B-Tree management functions
 BTree
-btree_create(DataType key, uint32_t record_size);
+btree_create(DataType key, uint32_t record_size, bool init);
 bool
 btree_clear(BTree *tree);
 

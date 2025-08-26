@@ -198,7 +198,7 @@ DataType get_column_type(const char* table_name, uint32_t col_index)
 // Factory Functions
 // ============================================================================
 
-Table* create_table(CreateTableNode* node)
+Table* create_table(CreateTableNode* node, int root_page)
 {
     assert(node != nullptr);
     assert(!node->columns.empty());
@@ -210,6 +210,7 @@ Table* create_table(CreateTableNode* node)
     assert(get_table(table_name) == nullptr);
 
     auto table = std::make_unique<Table>();
+
     table->table_name = table_name;
 
     for (size_t i = 0; i < node->columns.size(); i++)
@@ -227,7 +228,10 @@ Table* create_table(CreateTableNode* node)
 
 
     // Create BPlusTree
-    table->bplustree = bplustree_create(key_type, record_size);
+    table->bplustree = bplustree_create(key_type, record_size, 0 == root_page);
+    if(0 != root_page) {
+     table->bplustree.root_page_index = root_page;
+    }
 
     assert(table != nullptr);
     assert(!table->columns.empty());
@@ -238,7 +242,7 @@ Table* create_table(CreateTableNode* node)
     return raw_ptr;
 }
 
-Index* create_index(CreateIndexNode* node)
+Index* create_index(CreateIndexNode* node, int root_page)
 {
     assert(node != nullptr);
 
@@ -262,7 +266,10 @@ Index* create_index(CreateIndexNode* node)
 
     DataType index_key_type = table->columns[col_idx].type;
     DataType rowid_type = table->columns[0].type;
-    index->btree = btree_create(index_key_type, rowid_type);
+    index->btree = btree_create(index_key_type, rowid_type, 0 == root_page);
+    if(0 != root_page) {
+        index->btree.root_page_index = root_page;
+    }
 
     assert(index != nullptr);
     assert(index->column_index < table->columns.size());
@@ -280,7 +287,7 @@ Index* create_index(CreateIndexNode* node)
     return index;
 }
 
-void create_master()
+void create_master(bool existed)
 {
     auto master = std::make_unique<Table>();
     master->table_name = "sqlite_master";
@@ -296,41 +303,12 @@ void create_master()
     RecordLayout layout = master->to_layout();
     uint32_t record_size = layout.record_size - TYPE_4;
 
-    master->bplustree = bplustree_create(TYPE_4, record_size);
-
+    master->bplustree = bplustree_create(TYPE_4, record_size, !existed);
+	master->bplustree.root_page_index = 1;
     assert(master != nullptr);
     assert(!master->columns.empty());
     assert(master->columns.size() <= MAX_RECORD_LAYOUT);
     assert(get_table(master->table_name.c_str()) == nullptr); // No duplicates
 
     tables[master->table_name] = std::move(master);
-}
-
-// ============================================================================
-// Transaction Support
-// ============================================================================
-
-SchemaSnapshots take_snapshot()
-{
-    SchemaSnapshots snap;
-
-    for (auto& [table_name, table] : tables)
-    {
-        assert(table != nullptr);
-
-        SchemaSnapshots::Entry entry;
-        entry.table = table->table_name;
-        entry.root = table->bplustree.root_page_index;
-
-        for (auto& [col_idx, index] : table->indexes)
-        {
-            if (index) {
-                uint32_t idx_root = index->btree.root_page_index;
-                entry.indexes.push_back({col_idx, idx_root});
-            }
-        }
-
-        snap.entries.push_back(entry);
-    }
-    return snap;
 }

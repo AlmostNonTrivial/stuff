@@ -82,16 +82,6 @@ struct Table
 };
 
 // Schema snapshot for transaction support
-struct SchemaSnapshots
-{
-    struct Entry
-    {
-        std::string table;
-        uint32_t root;
-        std::vector<std::pair<uint32_t, uint32_t>> indexes;
-    };
-    std::vector<Entry> entries;
-};
 
 // ============================================================================
 // Registry Operations (Used by VM and Executor)
@@ -115,13 +105,12 @@ DataType get_column_type(const char* table_name, uint32_t col_index);
 // Factory Functions (Used by Executor)
 // ============================================================================
 
-Table* create_table(CreateTableNode* node);
-Index* create_index(CreateIndexNode* node);
-void create_master(); // Special case for sqlite_master
-
+Table* create_table(CreateTableNode* node, int root_page);
+Index* create_index(CreateIndexNode* node, int root_page);
+void create_master(bool existed);
 // ============================================================================
 // Transaction Support (Used by Executor)
 // ============================================================================
 
-SchemaSnapshots take_snapshot();
+
 void schema_clear();

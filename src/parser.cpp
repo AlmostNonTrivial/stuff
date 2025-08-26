@@ -682,6 +682,7 @@ ASTNode* parse_statement(const char* sql) {
             break;
         case TOK_DROP:
             ast = parse_drop(&parser);
+            break;
         case TOK_BEGIN:
         case TOK_COMMIT:
         case TOK_ROLLBACK:

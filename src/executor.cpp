@@ -44,7 +44,6 @@ static struct ExecutorState
 	bool initialized;
 	bool in_transaction;
 	uint32_t next_master_id;
-	SchemaSnapshots snapshot;
 } executor_state = {};
 
 static void
@@ -64,55 +63,10 @@ insert_master_entry(const char *type, const char *name, const char *tbl_name, ui
 }
 
 static void
-update_master_rootpage(const char *name, uint32_t new_rootpage)
-{
-
-	// _debug = true;
-	char buffer[512];
-	snprintf(buffer, sizeof(buffer), "UPDATE sqlite_master SET rootpage = %u WHERE name = '%s'", new_rootpage, name);
-
-	Vec<ASTNode *, QueryArena> stmts = parse_sql(buffer);
-
-	assert(!stmts.empty());
-
-	Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
-	vm_execute(program.get_data(), program.size(), &ctx);
-}
-void
-update_roots_in_master(const SchemaSnapshots &before, const SchemaSnapshots &after)
-{
-	for (size_t i = 0; i < after.entries.size(); i++)
-	{
-		if (i < before.entries.size())
-		{
-			// Check table root changes
-			if (before.entries[i].root != after.entries[i].root)
-			{
-				update_master_rootpage(after.entries[i].table.c_str(), after.entries[i].root);
-			}
-
-			// Check index root changes
-			for (size_t j = 0; j < after.entries[i].indexes.size(); j++)
-			{
-				if (j < before.entries[i].indexes.size() &&
-					before.entries[i].indexes[j].second != after.entries[i].indexes[j].second)
-				{
-					Index *idx = get_index(after.entries[i].table.c_str(), after.entries[i].indexes[j].first);
-					if (idx)
-					{
-						update_master_rootpage(idx->index_name.c_str(), after.entries[i].indexes[j].second);
-					}
-				}
-			}
-		}
-	}
-}
-
-static void
 delete_master_entry(const char *name)
 {
 	char buffer[256];
-	snprintf(buffer, sizeof(buffer), "DELETE FROM sqlite_master WHERE name = '%s' OR tbl_name = '%s'", name, name);
+	snprintf(buffer, sizeof(buffer), "DELETE FROM sqlite_master WHERE name = '%s';", name);
 
 	Vec<ASTNode *, QueryArena> stmts = parse_sql(buffer);
 
@@ -150,7 +104,7 @@ load_schema_from_master()
 	ctx.emit_row = capture_callback;
 
 	Vec<ASTNode *, QueryArena> stmts = parse_sql(query);
-	_debug = true;
+	// _debug = true;
 	assert(!stmts.empty());
 	Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
 	vm_execute(program.get_data(), program.size(), &ctx);
@@ -184,8 +138,8 @@ load_schema_from_master()
 			if (!create_stmts.empty() && create_stmts[0]->type == AST_CREATE_TABLE)
 			{
 				CreateTableNode *node = (CreateTableNode *)create_stmts[0];
-				Table *table = create_table(node);
-				table->bplustree.root_page_index = rootpage;
+				create_table(node, rootpage);
+
 			}
 		}
 		else if (strcmp(type, "index") == 0)
@@ -198,8 +152,8 @@ load_schema_from_master()
 				if (!create_stmts.empty() && create_stmts[0]->type == AST_CREATE_INDEX)
 				{
 					CreateIndexNode *node = (CreateIndexNode *)create_stmts[0];
-					Index *index = create_index(node);
-					index->btree.root_page_index = rootpage;
+					create_index(node, rootpage);
+
 				}
 			}
 		}
@@ -219,7 +173,7 @@ load_schema_from_master()
 static VM_RESULT
 execute_create_table(CreateTableNode *node)
 {
-	Table *table = create_table(node);
+	Table *table = create_table(node, 0);
 	assert(table != nullptr);
 
 	// Add to master catalog
@@ -247,7 +201,7 @@ static VM_RESULT
 execute_create_index(CreateIndexNode *node)
 {
 	// Create index structure
-	Index *index = create_index(node);
+	Index *index = create_index(node, 0);
 
 	char buffer[512];
 	snprintf(buffer, 512, "CREATE INDEX %s ON %s (%s)", node->index_name, node->table, node->column);
@@ -298,7 +252,7 @@ execute_drop_table(DropTableNode *node)
 static VM_RESULT
 execute_begin()
 {
-	executor_state.snapshot = take_snapshot();
+
 	pager_begin_transaction();
 	executor_state.in_transaction = true;
 
@@ -308,10 +262,6 @@ execute_begin()
 static VM_RESULT
 execute_commit()
 {
-
-	SchemaSnapshots current = take_snapshot();
-	update_roots_in_master(executor_state.snapshot, current);
-
 	pager_commit();
 	executor_state.in_transaction = false;
 
@@ -332,10 +282,11 @@ execute_rollback()
 	return OK;
 }
 
-void executor_init(bool existed)
+void
+executor_init(bool existed)
 {
 	init_type_ops();
-
+	pager_init("db");
 
 	arena::init<QueryArena>(PAGE_SIZE * 30);
 	// arena::init<RegistryArena>(PAGE_SIZE * 14);
@@ -343,15 +294,17 @@ void executor_init(bool existed)
 	executor_state.initialized = true;
 	executor_state.in_transaction = false;
 
-
-	create_master();
-
 	if (!existed)
 	{
+
+		pager_begin_transaction();
+		create_master(false);
+		pager_commit();
 		executor_state.next_master_id = 1;
 	}
 	else
 	{
+		create_master(true);
 		load_schema_from_master();
 	}
 }
@@ -374,7 +327,7 @@ execute_ddl_command(ASTNode *stmt)
 
 	case AST_DROP_TABLE:
 		return execute_drop_table((DropTableNode *)stmt);
-	case AST_ALTER_TABLE:
+	case AST_DROP_INDEX:
 		return execute_drop_index((DropIndexNode *)stmt);
 
 	default:
@@ -424,8 +377,6 @@ void
 execute(const char *sql)
 {
 	arena::reset<QueryArena>();
-
-
 
 	Vec<ASTNode *, QueryArena> statements = parse_sql(sql);
 
@@ -512,5 +463,5 @@ executor_shutdown()
 {
 	schema_clear();
 	executor_state.initialized = false;
-	// pager_close();
+	pager_close();
 }
