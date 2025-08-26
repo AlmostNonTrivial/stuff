@@ -6,5 +6,6 @@
 
 
 void execute(const char * sql);
-void init_executor();
-void executor_close();
+
+void executor_init(bool existed);
+void executor_shutdown();

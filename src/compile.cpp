@@ -159,6 +159,8 @@ build_select(ProgramBuilder &prog, SelectNode *node)
 	prog.emit(Opcodes::Close::create(table_cursor));
 	prog.label("halt");
 	prog.emit(Opcodes::Halt::create(0));
+
+	prog.resolve_labels();
 }
 
 // Also need to fix a small issue in the Result opcode execution in vm.cpp
@@ -194,6 +196,8 @@ build_insert(ProgramBuilder &prog, InsertNode *node)
 	prog.emit(Opcodes::Insert::create(table_cursor, first_reg, node->values.size()));
 	prog.emit(Opcodes::Close::create(table_cursor));
 	prog.emit(Opcodes::Halt::create(0));
+
+	prog.resolve_labels();
 }
 // Add this function to compile.cpp after build_insert
 

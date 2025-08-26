@@ -67,7 +67,7 @@ static void
 update_master_rootpage(const char *name, uint32_t new_rootpage)
 {
 
-    // _debug = true;
+	// _debug = true;
 	char buffer[512];
 	snprintf(buffer, sizeof(buffer), "UPDATE sqlite_master SET rootpage = %u WHERE name = '%s'", new_rootpage, name);
 
@@ -133,7 +133,7 @@ load_schema_from_master()
 	assert(master != nullptr);
 
 	// Query master table to rebuild schema
-	const char *query = "SELECT * FROM sqlite_master ORDER BY id";
+	const char *query = "SELECT * FROM sqlite_master;";
 
 	// Set up result callback to capture rows
 
@@ -150,7 +150,7 @@ load_schema_from_master()
 	ctx.emit_row = capture_callback;
 
 	Vec<ASTNode *, QueryArena> stmts = parse_sql(query);
-
+	_debug = true;
 	assert(!stmts.empty());
 	Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
 	vm_execute(program.get_data(), program.size(), &ctx);
@@ -332,27 +332,25 @@ execute_rollback()
 	return OK;
 }
 
-void
-init_executor()
+void executor_init(bool existed)
 {
 	init_type_ops();
-	bool existed = pager_init("db");
+
 
 	arena::init<QueryArena>(PAGE_SIZE * 30);
 	// arena::init<RegistryArena>(PAGE_SIZE * 14);
 
 	executor_state.initialized = true;
 	executor_state.in_transaction = false;
-	executor_state.next_master_id = 1;
 
-	// Reset statistics
-
-	// load from index=1
 
 	create_master();
-	executor_state.next_master_id = 1;
 
-	if (existed)
+	if (!existed)
+	{
+		executor_state.next_master_id = 1;
+	}
+	else
 	{
 		load_schema_from_master();
 	}
@@ -427,10 +425,7 @@ execute(const char *sql)
 {
 	arena::reset<QueryArena>();
 
-	if (!executor_state.initialized)
-	{
-		init_executor();
-	}
+
 
 	Vec<ASTNode *, QueryArena> statements = parse_sql(sql);
 
@@ -512,8 +507,10 @@ execute(const char *sql)
 	}
 }
 
-
-void executor_close() {
-    schema_clear();
-    executor_state.initialized = false;
+void
+executor_shutdown()
+{
+	schema_clear();
+	executor_state.initialized = false;
+	// pager_close();
 }
