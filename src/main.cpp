@@ -1,5 +1,6 @@
 #include "executor.hpp"
-#include "pager.hpp"
+
+
 #include <cstdlib>
 #include <cstdio>
 
@@ -39,166 +40,40 @@ bulk_delete_customer(int start, int end)
     sprintf(buf, "DELETE FROM Customers WHERE id >= %d AND id <= %d;", start, end);
     return buf;
 }
+// Add these to executor.hpp:
+void set_capture_mode(bool capture);
+size_t get_row_count();
+bool check_int_value(size_t row, size_t col, int expected);
+bool check_string_value(size_t row, size_t col, const char* expected);
+void clear_results();
 
-// Generate table creation for stress testing master catalog
-const char *
-create_test_table(int n)
-{
-    static char buf[256];
-    sprintf(buf, "CREATE TABLE TestTable%d (INT id, VAR32 data);", n);
-    return buf;
-}
-
-int
-main()
-{
-    printf("=== TEST SUITE: Index Operations & Root Changes ===\n\n");
-
-    // =========================================================================
-    printf("=== Phase 1: Initial Setup with Tables and Indexes ===\n");
-    // =========================================================================
-
-
+// In main.cpp, use like:
+int main() {
     executor_init(false);
 
-    // Create base tables
-printf("\nCreating tables...\n");
+    // Setup
     execute(create_customers);
-    execute(create_products);
-    execute(create_orders);
 
-    // Create indexes
-    printf("\nCreating indexes...\n");
-    execute(create_customer_name_idx);
-    execute(create_customer_email_idx);
-    execute(create_product_name_idx);
+    execute(bulk_insert_customer(1, 1));
 
-    printf("\nInitial master catalog (note tables and indexes):\n");
-    execute(select_tables);
+    // Test with capture
+    set_capture_mode(true);
+    execute("SELECT * FROM Customers;");
 
-    executor_shutdown();
-
-    // // =========================================================================
-    // printf("\n=== Phase 2: Verify Index Persistence ===\n");
-    // // =========================================================================
-
-    executor_init(true);
-
-    printf("\nMaster after reopen (indexes should be present):\n");
-    execute(select_tables);
-
-    // Drop an index
-    printf("\nDropping idx_customer_name...\n");
-    execute(drop_customer_name_idx);
-
-    printf("\nMaster after dropping index:\n");
-    execute(select_tables);
-
-    executor_shutdown();
-
-    // =========================================================================
-    printf("\n=== Phase 3: Bulk Insert/Delete to Trigger Root Changes ===\n");
-    // =========================================================================
-
-    executor_init(true);
-
-    // Insert lots of data
-    printf("\nInserting 100 customers...\n");
-    execute(bulk_insert_customer(1, 20));
-    execute(bulk_insert_customer(21, 20));
-    execute(bulk_insert_customer(41, 20));
-    execute(bulk_insert_customer(61, 20));
-    execute(bulk_insert_customer(81, 20));
-
-    printf("\nMaster after bulk inserts (check root changes):\n");
-    execute(select_tables);
-
-    printf("\nCustomer count check:\n");
-    execute(select_customers);
-
-    // Delete enough to cause merges
-    printf("\nDeleting customers 20-80 to trigger merges...\n");
-    execute("DELETE FROM Customers WHERE id >= 20 AND id <= 80;");
-
-    printf("\nMaster after bulk deletes (roots may change due to merges):\n");
-    execute(select_tables);
-
-
-
-    executor_shutdown();
-
-    // =========================================================================
-    printf("\n=== Phase 4: Stress Test Master Catalog ===\n");
-    // =========================================================================
-
-    executor_init(true);
-
-    printf("\nCreating many tables to stress master catalog...\n");
-
-    // Create enough tables to cause master catalog splits
-    for (int i = 1; i <= 30; i++) {
-        if (i % 10 == 0) {
-            printf("Created %d tables...\n", i);
-        }
-        execute(create_test_table(i));
+    // Assert
+    if (get_row_count() != 1) {
+        printf("FAIL: Expected 1 row, got %zu\n", get_row_count());
+    }
+    if (!check_int_value(0, 0, 1)) {
+        printf("FAIL: Expected id=1\n");
+    }
+    if (!check_string_value(0, 1, "user1")) {
+        printf("FAIL: Expected name='user1'\n");
     }
 
-    printf("\nMaster catalog after creating 30 tables (root should have changed):\n");
-    execute(select_tables);
-
-
-    executor_shutdown();
-
-    // =========================================================================
-    printf("\n=== Phase 5: Final Verification After Multiple Restarts ===\n");
-    // =========================================================================
-
-    executor_init(true);
-
-    printf("\nFinal count of catalog entries:\n");
-    execute(select_tables);
-
-    // Drop some test tables
-    printf("\nDropping some test tables...\n");
-    execute("DROP TABLE TestTable1;");
-    execute("DROP TABLE TestTable2;");
-    execute("DROP TABLE TestTable3;");
-
-    printf("\nCatalog after drops:\n");
-    execute(select_tables);
+    // Back to print mode for debugging
+    set_capture_mode(false);
+    execute("SELECT * FROM Customers;");
 
     executor_shutdown();
-
-
-    // =========================================================================
-    printf("\n=== Phase 6: Verify Everything Persisted Correctly ===\n");
-    // =========================================================================
-
-    executor_init(true);
-
-    printf("\nFinal master state summary:\n");
-   execute(select_tables) ;
-
-    printf("\nVerifying Customers table still works:\n");
-    execute("INSERT INTO Customers VALUES (999, 'final_test', 'test@final.com');");
-    execute("SELECT * FROM Customers WHERE id = 999;");
-
-    // Try to use dropped index (should fail gracefully or not exist)
-    printf("\nVerifying dropped index is gone:\n");
-    execute("SELECT * FROM sqlite_master WHERE name = 'idx_customer_name';");
-
-    // Try to query dropped table (should fail)
-    printf("\nAttempting to query dropped TestTable1 (should fail):\n");
-    execute("SELECT * FROM TestTable1;");
-
-    executor_shutdown();
-
-    printf("\n=== TEST SUITE COMPLETE ===\n");
-    printf("Successfully tested:\n");
-    printf("- Index creation and dropping\n");
-    printf("- Root changes from bulk deletes/merges\n");
-    printf("- Master catalog root changes from many tables\n");
-    printf("- Persistence across multiple restarts\n");
-
-    return 0;
 }

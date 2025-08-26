@@ -32,8 +32,58 @@ print_result_callback(TypedValue *result, size_t count)
 	}
 	std::cout << "\n";
 }
-
 MemoryContext ctx = {.alloc = arena::alloc<QueryArena>, .emit_row = print_result_callback};
+static Vec<Vec<TypedValue, QueryArena>, QueryArena> last_results;
+
+static void capture_result_callback(TypedValue* result, size_t count) {
+    auto row = Vec<TypedValue, QueryArena>::create();
+    for (size_t i = 0; i < count; i++) {
+        row->push_back(result[i]);
+    }
+    last_results.push_back(*row);
+}
+
+// Add a mode flag
+static bool capture_mode = false;
+
+void set_capture_mode(bool capture) {
+    capture_mode = capture;
+    if (capture) {
+        ctx.emit_row = capture_result_callback;
+        last_results.clear();
+    } else {
+        ctx.emit_row = print_result_callback;
+    }
+}
+
+// Simple accessors
+size_t get_row_count() {
+    return last_results.size();
+}
+
+bool check_int_value(size_t row, size_t col, int expected) {
+    if (row >= last_results.size()) return false;
+    if (col >= last_results[row].size()) return false;
+
+    TypedValue& val = last_results[row][col];
+    if (val.type != TYPE_4) return false;
+
+    return *(uint32_t*)val.data == expected;
+}
+
+bool check_string_value(size_t row, size_t col, const char* expected) {
+    if (row >= last_results.size()) return false;
+    if (col >= last_results[row].size()) return false;
+
+    TypedValue& val = last_results[row][col];
+    return strcmp((char*)val.data, expected) == 0;
+}
+
+void clear_results() {
+    last_results.clear();
+}
+
+
 
 // ============================================================================
 // Executor State
@@ -76,7 +126,7 @@ delete_master_entry(const char *name)
 	vm_execute(program.get_data(), program.size(), &ctx);
 }
 
-static Vec<Vec<TypedValue, QueryArena>, QueryArena> results;
+
 
 static void
 load_schema_from_master()
@@ -91,30 +141,19 @@ load_schema_from_master()
 
 	// Set up result callback to capture rows
 
-	auto capture_callback = [](TypedValue *cols, size_t size) {
-		auto row = Vec<TypedValue, QueryArena>::create();
-		for (int i = 0; i < size; i++)
-		{
-			row->push_back(cols[i]);
-		}
-
-		results.push_back(*row);
-	};
-
-	ctx.emit_row = capture_callback;
+	set_capture_mode(true);
 
 	Vec<ASTNode *, QueryArena> stmts = parse_sql(query);
-	// _debug = true;
 	assert(!stmts.empty());
 	Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
 	vm_execute(program.get_data(), program.size(), &ctx);
 
-	ctx.emit_row = print_result_callback;
+	set_capture_mode(false);
 
 	// Process results to rebuild schema
-	for (size_t i = 0; i < results.size(); i++)
+	for (size_t i = 0; i < last_results.size(); i++)
 	{
-		auto &row = results[i];
+		auto &row = last_results[i];
 		if (row.size() < 6)
 			continue;
 
@@ -159,7 +198,7 @@ load_schema_from_master()
 		}
 	}
 
-	results.clear();
+	clear_results();
 }
 
 // ============================================================================
@@ -321,10 +360,8 @@ execute_ddl_command(ASTNode *stmt)
 	{
 	case AST_CREATE_TABLE:
 		return execute_create_table((CreateTableNode *)stmt);
-
 	case AST_CREATE_INDEX:
 		return execute_create_index((CreateIndexNode *)stmt);
-
 	case AST_DROP_TABLE:
 		return execute_drop_table((DropTableNode *)stmt);
 	case AST_DROP_INDEX:
@@ -359,7 +396,6 @@ execute_tcl_command(ASTNode *stmt)
 
 	case AST_COMMIT:
 		return execute_commit();
-
 	case AST_ROLLBACK:
 		return execute_rollback();
 
@@ -396,7 +432,6 @@ execute(const char *sql)
 		bool auto_transaction = false;
 		if (category == CMD_DML && stmt->type != AST_SELECT && !executor_state.in_transaction)
 		{
-
 			execute_begin();
 			auto_transaction = true;
 		}

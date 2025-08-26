@@ -1,25 +1,14 @@
 
 TO CONSIDER:
-// does        if (table->schema.columns[i].name.starts_with(col_name) == 0) need to do an exact match
-// currently, if the master root changes we're fucked. right now we can handle 5 tables
-// how do we actually initialise the btree on load, if we're not creating it
-// i'm not sure if the master root is updated automatically by the vm
-// the stl caused memory issues because I used memcpy and not the bloody = copy
+// get rid of stl
+// perfect containers
 // is two names nessessary? DELETE FROM sqlite_master WHERE name = 'Products' OR tbl_name = 'Products'
 BUGS:
-// unorderd map page_to_cache
-// does embedded string in schema actually work fine
-// parser will quietly fail and fuck everything
-// master table needs compile which first needs schema
 
 TESTING:
--- create index
--- delete from table to force merge (root change)
--- root table change
 
 
-
-
-
-INFRA:
-way to mass insert rows
+TODO:
+query validation.
+get rid of name
+not need manual id.
