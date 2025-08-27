@@ -2,7 +2,7 @@
 #include <cstdint>
 #include "defs.hpp"
 #define PAGE_INVALID 0
-#define PAGE_ROOT    0
+
 
 #define MAX_CACHE_ENTRIES 100
 #define FREE_PAGES_PER_FREE_PAGE ((PAGE_SIZE - (sizeof(unsigned int) * 4)) / 4)
