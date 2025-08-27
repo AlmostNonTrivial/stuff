@@ -5,9 +5,20 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-typedef int os_file_handle_t;
+
 typedef int64_t os_file_offset_t;
 typedef size_t os_file_size_t;
+
+
+// os_layer.hpp
+#ifdef _WIN32
+    typedef void* os_file_handle_t;
+    #define OS_INVALID_HANDLE ((os_file_handle_t)INVALID_HANDLE_VALUE)
+#else
+    typedef int os_file_handle_t;
+    #define OS_INVALID_HANDLE ((os_file_handle_t)-1)
+#endif
+
 
 os_file_handle_t os_file_open(const char* filename, bool read_write, bool create);
 void os_file_close(os_file_handle_t handle);
@@ -19,5 +30,7 @@ void os_file_sync(os_file_handle_t handle);
 void os_file_seek(os_file_handle_t handle, os_file_offset_t offset);
 os_file_offset_t os_file_size(os_file_handle_t handle);
 void os_file_truncate(os_file_handle_t handle, os_file_offset_t size);
+
+
 
 #endif

@@ -73,7 +73,7 @@ void os_file_truncate(os_file_handle_t handle, os_file_offset_t size) {
 #include <fcntl.h>
 #include <sys/stat.h>
 
-#define OS_INVALID_HANDLE -1
+
 
 os_file_handle_t os_file_open(const char* filename, bool read_write, bool create) {
     int flags = read_write ? O_RDWR : O_RDONLY;
@@ -134,19 +134,17 @@ void os_file_truncate(os_file_handle_t handle, os_file_offset_t size) {
 #include <cstring>
 #include <algorithm>
 
-#define OS_INVALID_HANDLE 0
 
-struct MemoryFile {
-    std::vector<uint8_t> data;
+
+struct FileHandle {
+    std::string filepath;
     size_t position;
     bool read_write;
-
-    MemoryFile() : position(0), read_write(false) {}
 };
 
 struct MemoryFileSystem {
-    std::unordered_map<std::string, MemoryFile> files;
-    std::unordered_map<os_file_handle_t, std::string> open_handles;
+    std::unordered_map<std::string, std::vector<uint8_t>> files;
+    std::unordered_map<os_file_handle_t, FileHandle> handles;
     os_file_handle_t next_handle;
 
     MemoryFileSystem() : next_handle(1) {}
@@ -157,30 +155,25 @@ static MemoryFileSystem g_filesystem;
 os_file_handle_t os_file_open(const char* filename, bool read_write, bool create) {
     std::string filepath(filename);
 
-    // Check if file exists
-    auto file_it = g_filesystem.files.find(filepath);
-
-    if (file_it == g_filesystem.files.end()) {
+    // Check if file exists, create if needed
+    if (g_filesystem.files.find(filepath) == g_filesystem.files.end()) {
         if (!create) {
             return OS_INVALID_HANDLE;
         }
         // Create new file
-        g_filesystem.files[filepath] = MemoryFile();
-        file_it = g_filesystem.files.find(filepath);
+        g_filesystem.files[filepath] = std::vector<uint8_t>();
     }
 
-    file_it->second.position = 0;
-    file_it->second.read_write = read_write;
-
+    // Create new handle with its own state
     os_file_handle_t handle = g_filesystem.next_handle++;
-    g_filesystem.open_handles[handle] = filepath;
+    g_filesystem.handles[handle] = {filepath, 0, read_write};
 
     return handle;
 }
 
 void os_file_close(os_file_handle_t handle) {
     if (handle != OS_INVALID_HANDLE) {
-        g_filesystem.open_handles.erase(handle);
+        g_filesystem.handles.erase(handle);
     }
 }
 
@@ -194,55 +187,51 @@ void os_file_delete(const char* filename) {
     g_filesystem.files.erase(filepath);
 
     // Close any open handles to this file
-    for (auto it = g_filesystem.open_handles.begin(); it != g_filesystem.open_handles.end();) {
-        if (it->second == filepath) {
-            it = g_filesystem.open_handles.erase(it);
+    for (auto it = g_filesystem.handles.begin(); it != g_filesystem.handles.end();) {
+        if (it->second.filepath == filepath) {
+            it = g_filesystem.handles.erase(it);
         } else {
             ++it;
         }
     }
 }
 
-static MemoryFile* get_file_from_handle(os_file_handle_t handle) {
-    auto handle_it = g_filesystem.open_handles.find(handle);
-    if (handle_it == g_filesystem.open_handles.end()) {
-        return nullptr;
-    }
-
-    auto file_it = g_filesystem.files.find(handle_it->second);
-    if (file_it == g_filesystem.files.end()) {
-        return nullptr;
-    }
-
-    return &file_it->second;
-}
-
 os_file_size_t os_file_read(os_file_handle_t handle, void* buffer, os_file_size_t size) {
-    MemoryFile* file = get_file_from_handle(handle);
-    if (!file) return 0;
+    auto handle_it = g_filesystem.handles.find(handle);
+    if (handle_it == g_filesystem.handles.end()) {
+        return 0;
+    }
 
-    os_file_size_t bytes_to_read = std::min(size, (os_file_size_t)(file->data.size() - file->position));
+    auto& file_data = g_filesystem.files[handle_it->second.filepath];
+    size_t& position = handle_it->second.position;
+
+    os_file_size_t bytes_to_read = std::min(size, (os_file_size_t)(file_data.size() - position));
 
     if (bytes_to_read > 0) {
-        memcpy(buffer, file->data.data() + file->position, bytes_to_read);
-        file->position += bytes_to_read;
+        memcpy(buffer, file_data.data() + position, bytes_to_read);
+        position += bytes_to_read;
     }
 
     return bytes_to_read;
 }
 
 os_file_size_t os_file_write(os_file_handle_t handle, const void* buffer, os_file_size_t size) {
-    MemoryFile* file = get_file_from_handle(handle);
-    if (!file || !file->read_write) return 0;
-
-    // Resize file if necessary
-    size_t required_size = file->position + size;
-    if (file->data.size() < required_size) {
-        file->data.resize(required_size);
+    auto handle_it = g_filesystem.handles.find(handle);
+    if (handle_it == g_filesystem.handles.end() || !handle_it->second.read_write) {
+        return 0;
     }
 
-    memcpy(file->data.data() + file->position, buffer, size);
-    file->position += size;
+    auto& file_data = g_filesystem.files[handle_it->second.filepath];
+    size_t& position = handle_it->second.position;
+
+    // Resize file if necessary
+    size_t required_size = position + size;
+    if (file_data.size() < required_size) {
+        file_data.resize(required_size);
+    }
+
+    memcpy(file_data.data() + position, buffer, size);
+    position += size;
 
     return size;
 }
@@ -253,26 +242,36 @@ void os_file_sync(os_file_handle_t handle) {
 }
 
 void os_file_seek(os_file_handle_t handle, os_file_offset_t offset) {
-    MemoryFile* file = get_file_from_handle(handle);
-    if (!file) return;
+    auto handle_it = g_filesystem.handles.find(handle);
+    if (handle_it == g_filesystem.handles.end()) {
+        return;
+    }
 
-    file->position = std::min((size_t)offset, file->data.size());
+    // Don't limit to file size - allow seeking beyond EOF
+    handle_it->second.position = (size_t)offset;
 }
-
 os_file_offset_t os_file_size(os_file_handle_t handle) {
-    MemoryFile* file = get_file_from_handle(handle);
-    if (!file) return 0;
+    auto handle_it = g_filesystem.handles.find(handle);
+    if (handle_it == g_filesystem.handles.end()) {
+        return 0;
+    }
 
-    return (os_file_offset_t)file->data.size();
+    auto& file_data = g_filesystem.files[handle_it->second.filepath];
+    return (os_file_offset_t)file_data.size();
 }
 
 void os_file_truncate(os_file_handle_t handle, os_file_offset_t size) {
-    MemoryFile* file = get_file_from_handle(handle);
-    if (!file || !file->read_write) return;
+    auto handle_it = g_filesystem.handles.find(handle);
+    if (handle_it == g_filesystem.handles.end() || !handle_it->second.read_write) {
+        return;
+    }
 
-    file->data.resize((size_t)size);
-    if (file->position > (size_t)size) {
-        file->position = (size_t)size;
+    auto& file_data = g_filesystem.files[handle_it->second.filepath];
+    file_data.resize((size_t)size);
+
+    // Adjust position if it's beyond new size
+    if (handle_it->second.position > (size_t)size) {
+        handle_it->second.position = (size_t)size;
     }
 }
 
