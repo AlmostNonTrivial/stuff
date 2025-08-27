@@ -365,7 +365,7 @@ add_to_free_list(uint32_t page_index)
 static uint32_t
 take_from_free_list()
 {
-	if (pager.root.free_page == PAGE_INVALID || pager.free_pages_set.count == 0)
+	if (pager.root.free_page == PAGE_INVALID || pager.free_pages_set.size== 0)
 	{
 		return PAGE_INVALID;
 	}
@@ -688,7 +688,7 @@ pager_get_stats()
 {
 	PagerMeta data;
 	data.total_pages = pager.root.page_counter - 1;
-	data.free_pages = pager.free_pages_set.count;
+	data.free_pages = pager.free_pages_set.size;
 
 	data.cached_pages = 0;
 	data.dirty_pages = 0;

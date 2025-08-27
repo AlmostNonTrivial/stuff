@@ -407,183 +407,7 @@ array_create()
 	arr->capacity = 0;
 	return arr;
 }
-// Hash any integer type
-template <typename T>
-inline size_t
-hash_int(T key)
-{
-	size_t h = (size_t)key;
-	h = (h ^ (h >> 30)) * 0xbf58476d1ce4e5b9ULL;
-	h = (h ^ (h >> 27)) * 0x94d049bb133111ebULL;
-	return h ^ (h >> 31);
-}
 
-// Simple entry with state
-template <typename K, typename V> struct HashEntry
-{
-	K		key;
-	V		value;
-	uint8_t state = 0; // 0=empty, 1=occupied, 2=deleted
-};
-
-template <typename K, typename V, typename Tag = GlobalArena> struct HashMap
-{
-	HashEntry<K, V> *data = nullptr;
-	size_t			 capacity = 0;
-	size_t			 count = 0;
-	size_t			 cursor = 0;
-};
-
-// HashSet just reuses HashMap with dummy value
-template <typename K, typename Tag = GlobalArena> using HashSet = HashMap<K, uint8_t, Tag>;
-
-// Get value by key
-template <typename K, typename V, typename Tag>
-V *
-hashmap_get(HashMap<K, V, Tag> *map, K key)
-{
-	if (map->capacity == 0)
-		return nullptr;
-
-	size_t idx = hash_int(key) & (map->capacity - 1);
-	while (map->data[idx].state != 0)
-	{ // Keep going until empty slot
-		if (map->data[idx].state == 1 && map->data[idx].key == key)
-		{
-			return &map->data[idx].value;
-		}
-		idx = (idx + 1) & (map->capacity - 1);
-	}
-	return nullptr;
-}
-
-// Delete by key
-template <typename K, typename V, typename Tag>
-bool
-hashmap_delete(HashMap<K, V, Tag> *map, K key)
-{
-	if (map->capacity == 0)
-		return false;
-
-	size_t idx = hash_int(key) & (map->capacity - 1);
-	while (map->data[idx].state != 0)
-	{
-		if (map->data[idx].state == 1 && map->data[idx].key == key)
-		{
-			map->data[idx].state = 2; // Mark as deleted (tombstone)
-			map->count--;
-			return true;
-		}
-		idx = (idx + 1) & (map->capacity - 1);
-	}
-	return false;
-}
-
-// Fixed insert with rehashing
-template <typename K, typename V, typename Tag>
-V *
-hashmap_insert(HashMap<K, V, Tag> *map, K key, V value)
-{
-	// Initialize or grow at 70% load
-	if (map->capacity == 0 || map->count >= map->capacity * 0.7)
-	{
-		size_t new_cap = map->capacity ? map->capacity * 2 : 16;
-
-		// Keep old data
-		HashEntry<K, V> *old_data = map->data;
-		size_t			 old_cap = map->capacity;
-
-		// Create new array
-		map->data = (HashEntry<K, V> *)Arena<Tag>::alloc(new_cap * sizeof(HashEntry<K, V>));
-		map->capacity = new_cap;
-		memset(map->data, 0, new_cap * sizeof(HashEntry<K, V>));
-
-		// Rehash old entries
-		map->count = 0;
-		for (size_t i = 0; i < old_cap; i++)
-		{
-			if (old_data[i].state == 1)
-			{
-				hashmap_insert(map, old_data[i].key, old_data[i].value);
-			}
-		}
-	}
-
-	size_t idx = hash_int(key) & (map->capacity - 1);
-	while (map->data[idx].state == 1)
-	{
-		if (map->data[idx].key == key)
-		{
-			map->data[idx].value = value;
-			return &map->data[idx].value;
-		}
-		idx = (idx + 1) & (map->capacity - 1);
-	}
-
-	map->data[idx] = {key, value, 1};
-	map->count++;
-	return &map->data[idx].value;
-}
-
-template <typename K, typename V, typename Tag>
-HashEntry<K, V> *
-hashmap_next(HashMap<K, V, Tag> *map)
-{
-	if (!map->data)
-		return nullptr;
-
-	while (map->cursor < map->capacity)
-	{
-		HashEntry<K, V> *entry = &map->data[map->cursor++];
-		if (entry->state == 1)
-		{ // Found occupied entry
-			return entry;
-		}
-	}
-	return nullptr;
-}
-
-template <typename K, typename V, typename Tag>
-void
-hashmap_clear(HashMap<K, V, Tag> *map)
-{
-	memset(map->data, 0, sizeof(HashEntry<K, V>) * map->count);
-	map->count = 0;
-}
-
-// HashSet helpers
-template <typename K, typename Tag>
-bool
-hashset_insert(HashSet<K, Tag> *set, K key)
-{
-	void *existing = hashmap_get(set, key);
-	if (existing != nullptr)
-		return false;
-	hashmap_insert(set, key, uint8_t(0));
-	return true;
-}
-
-template <typename K, typename Tag>
-bool
-hashset_contains(HashSet<K, Tag> *set, K key)
-{
-	return hashmap_get(set, key) != nullptr;
-}
-
-template <typename K, typename Tag>
-bool
-hashset_delete(HashSet<K, Tag> *set, K key)
-{
-	return hashmap_delete(set, key);
-}
-
-// HashSet versions just delegate
-template <typename K, typename Tag>
-void
-hashset_clear(HashSet<K, Tag> *set)
-{
-	hashmap_clear(set);
-}
 
 // String is just an array of chars
 template <typename Tag = GlobalArena, size_t InitSize = 64> using String = Array<char, Tag, InitSize>;
@@ -627,4 +451,422 @@ hash_string(const char *str)
 		h = h * 31 + (unsigned char)*str++;
 	}
 	return h;
+}
+
+
+// ------------------ hash
+// Red-Black Tree based HashMap implementation
+template <typename K, typename V, typename Tag = GlobalArena>
+struct HashMap
+{
+    enum Color { RED, BLACK };
+
+    struct Node
+    {
+        K key;
+        V value;
+        Node* left;
+        Node* right;
+        Node* parent;
+        Color color;
+    };
+
+    Node* root = nullptr;
+    size_t size = 0;
+};
+
+template <typename K, typename V, typename Tag>
+struct HashPair
+{
+    K key;
+    V value;
+};
+
+// Helper functions for Red-Black tree
+template <typename K, typename V, typename Tag>
+static void
+rotate_left(HashMap<K, V, Tag>* map, typename HashMap<K, V, Tag>::Node* x)
+{
+    auto* y = x->right;
+    x->right = y->left;
+
+    if (y->left)
+        y->left->parent = x;
+
+    y->parent = x->parent;
+
+    if (!x->parent)
+        map->root = y;
+    else if (x == x->parent->left)
+        x->parent->left = y;
+    else
+        x->parent->right = y;
+
+    y->left = x;
+    x->parent = y;
+}
+
+template <typename K, typename V, typename Tag>
+static void
+rotate_right(HashMap<K, V, Tag>* map, typename HashMap<K, V, Tag>::Node* x)
+{
+    auto* y = x->left;
+    x->left = y->right;
+
+    if (y->right)
+        y->right->parent = x;
+
+    y->parent = x->parent;
+
+    if (!x->parent)
+        map->root = y;
+    else if (x == x->parent->right)
+        x->parent->right = y;
+    else
+        x->parent->left = y;
+
+    y->right = x;
+    x->parent = y;
+}
+
+template <typename K, typename V, typename Tag>
+static void
+insert_fixup(HashMap<K, V, Tag>* map, typename HashMap<K, V, Tag>::Node* z)
+{
+    while (z->parent && z->parent->color == HashMap<K, V, Tag>::RED)
+    {
+        if (z->parent == z->parent->parent->left)
+        {
+            auto* y = z->parent->parent->right;
+            if (y && y->color == HashMap<K, V, Tag>::RED)
+            {
+                z->parent->color = HashMap<K, V, Tag>::BLACK;
+                y->color = HashMap<K, V, Tag>::BLACK;
+                z->parent->parent->color = HashMap<K, V, Tag>::RED;
+                z = z->parent->parent;
+            }
+            else
+            {
+                if (z == z->parent->right)
+                {
+                    z = z->parent;
+                    rotate_left(map, z);
+                }
+                z->parent->color = HashMap<K, V, Tag>::BLACK;
+                z->parent->parent->color = HashMap<K, V, Tag>::RED;
+                rotate_right(map, z->parent->parent);
+            }
+        }
+        else
+        {
+            auto* y = z->parent->parent->left;
+            if (y && y->color == HashMap<K, V, Tag>::RED)
+            {
+                z->parent->color = HashMap<K, V, Tag>::BLACK;
+                y->color = HashMap<K, V, Tag>::BLACK;
+                z->parent->parent->color = HashMap<K, V, Tag>::RED;
+                z = z->parent->parent;
+            }
+            else
+            {
+                if (z == z->parent->left)
+                {
+                    z = z->parent;
+                    rotate_right(map, z);
+                }
+                z->parent->color = HashMap<K, V, Tag>::BLACK;
+                z->parent->parent->color = HashMap<K, V, Tag>::RED;
+                rotate_left(map, z->parent->parent);
+            }
+        }
+    }
+    map->root->color = HashMap<K, V, Tag>::BLACK;
+}
+
+template <typename K, typename V, typename Tag>
+V*
+hashmap_get(HashMap<K, V, Tag>* map, K key)
+{
+    auto* current = map->root;
+    while (current)
+    {
+        if (key < current->key)
+            current = current->left;
+        else if (key > current->key)
+            current = current->right;
+        else
+            return &current->value;
+    }
+    return nullptr;
+}
+
+template <typename K, typename V, typename Tag>
+V*
+hashmap_insert(HashMap<K, V, Tag>* map, K key, V value)
+{
+    // Create new node
+    auto* node = (typename HashMap<K, V, Tag>::Node*)Arena<Tag>::alloc(sizeof(typename HashMap<K, V, Tag>::Node));
+    node->key = key;
+    node->value = value;
+    node->left = nullptr;
+    node->right = nullptr;
+    node->color = HashMap<K, V, Tag>::RED;
+
+    // BST insert
+    typename HashMap<K, V, Tag>::Node* parent = nullptr;
+    typename HashMap<K, V, Tag>::Node* current = map->root;
+
+    while (current)
+    {
+        parent = current;
+        if (key < current->key)
+            current = current->left;
+        else if (key > current->key)
+            current = current->right;
+        else
+        {
+            // Key exists, update value
+            current->value = value;
+            return &current->value;
+        }
+    }
+
+    node->parent = parent;
+
+    if (!parent)
+    {
+        map->root = node;
+    }
+    else if (key < parent->key)
+    {
+        parent->left = node;
+    }
+    else
+    {
+        parent->right = node;
+    }
+
+    map->size++;
+
+    // Fix Red-Black properties
+    insert_fixup(map, node);
+
+    return &node->value;
+}
+
+template <typename K, typename V, typename Tag>
+static typename HashMap<K, V, Tag>::Node*
+tree_minimum(typename HashMap<K, V, Tag>::Node* node)
+{
+    while (node->left)
+        node = node->left;
+    return node;
+}
+
+template <typename K, typename V, typename Tag>
+static void
+transplant(HashMap<K, V, Tag>* map, typename HashMap<K, V, Tag>::Node* u, typename HashMap<K, V, Tag>::Node* v)
+{
+    if (!u->parent)
+        map->root = v;
+    else if (u == u->parent->left)
+        u->parent->left = v;
+    else
+        u->parent->right = v;
+
+    if (v)
+        v->parent = u->parent;
+}
+
+template <typename K, typename V, typename Tag>
+static void
+delete_fixup(HashMap<K, V, Tag>* map, typename HashMap<K, V, Tag>::Node* x, typename HashMap<K, V, Tag>::Node* x_parent)
+{
+    while (x != map->root && (!x || x->color == HashMap<K, V, Tag>::BLACK))
+    {
+        if (x == x_parent->left)
+        {
+            auto* w = x_parent->right;
+            if (w->color == HashMap<K, V, Tag>::RED)
+            {
+                w->color = HashMap<K, V, Tag>::BLACK;
+                x_parent->color = HashMap<K, V, Tag>::RED;
+                rotate_left(map, x_parent);
+                w = x_parent->right;
+            }
+            if ((!w->left || w->left->color == HashMap<K, V, Tag>::BLACK) &&
+                (!w->right || w->right->color == HashMap<K, V, Tag>::BLACK))
+            {
+                w->color = HashMap<K, V, Tag>::RED;
+                x = x_parent;
+                x_parent = x->parent;
+            }
+            else
+            {
+                if (!w->right || w->right->color == HashMap<K, V, Tag>::BLACK)
+                {
+                    if (w->left)
+                        w->left->color = HashMap<K, V, Tag>::BLACK;
+                    w->color = HashMap<K, V, Tag>::RED;
+                    rotate_right(map, w);
+                    w = x_parent->right;
+                }
+                w->color = x_parent->color;
+                x_parent->color = HashMap<K, V, Tag>::BLACK;
+                if (w->right)
+                    w->right->color = HashMap<K, V, Tag>::BLACK;
+                rotate_left(map, x_parent);
+                x = map->root;
+            }
+        }
+        else
+        {
+            auto* w = x_parent->left;
+            if (w->color == HashMap<K, V, Tag>::RED)
+            {
+                w->color = HashMap<K, V, Tag>::BLACK;
+                x_parent->color = HashMap<K, V, Tag>::RED;
+                rotate_right(map, x_parent);
+                w = x_parent->left;
+            }
+            if ((!w->right || w->right->color == HashMap<K, V, Tag>::BLACK) &&
+                (!w->left || w->left->color == HashMap<K, V, Tag>::BLACK))
+            {
+                w->color = HashMap<K, V, Tag>::RED;
+                x = x_parent;
+                x_parent = x->parent;
+            }
+            else
+            {
+                if (!w->left || w->left->color == HashMap<K, V, Tag>::BLACK)
+                {
+                    if (w->right)
+                        w->right->color = HashMap<K, V, Tag>::BLACK;
+                    w->color = HashMap<K, V, Tag>::RED;
+                    rotate_left(map, w);
+                    w = x_parent->left;
+                }
+                w->color = x_parent->color;
+                x_parent->color = HashMap<K, V, Tag>::BLACK;
+                if (w->left)
+                    w->left->color = HashMap<K, V, Tag>::BLACK;
+                rotate_right(map, x_parent);
+                x = map->root;
+            }
+        }
+    }
+    if (x)
+        x->color = HashMap<K, V, Tag>::BLACK;
+}
+
+template <typename K, typename V, typename Tag>
+bool
+hashmap_delete(HashMap<K, V, Tag>* map, K key)
+{
+    // Find node
+    auto* z = map->root;
+    while (z)
+    {
+        if (key < z->key)
+            z = z->left;
+        else if (key > z->key)
+            z = z->right;
+        else
+            break;
+    }
+
+    if (!z)
+        return false;
+
+    auto* y = z;
+    auto y_original_color = y->color;
+    typename HashMap<K, V, Tag>::Node* x = nullptr;
+    typename HashMap<K, V, Tag>::Node* x_parent = nullptr;
+
+    if (!z->left)
+    {
+        x = z->right;
+        x_parent = z->parent;
+        transplant(map, z, z->right);
+    }
+    else if (!z->right)
+    {
+        x = z->left;
+        x_parent = z->parent;
+        transplant(map, z, z->left);
+    }
+    else
+    {
+        y = tree_minimum<K, V, Tag>(z->right);
+        y_original_color = y->color;
+        x = y->right;
+
+        if (y->parent == z)
+        {
+            x_parent = y;
+        }
+        else
+        {
+            x_parent = y->parent;
+            transplant(map, y, y->right);
+            y->right = z->right;
+            y->right->parent = y;
+        }
+
+        transplant(map, z, y);
+        y->left = z->left;
+        y->left->parent = y;
+        y->color = z->color;
+    }
+
+    map->size--;
+
+    if (y_original_color == HashMap<K, V, Tag>::BLACK)
+        delete_fixup(map, x, x_parent);
+
+    return true;
+}
+
+template <typename K, typename V, typename Tag>
+void
+hashmap_clear(HashMap<K, V, Tag>* map)
+{
+    map->root = nullptr;
+    map->size = 0;
+    // Nodes are abandoned in arena
+}
+
+// HashSet reuses HashMap
+template <typename K, typename Tag = GlobalArena> using HashSet = HashMap<K, uint8_t, Tag>;
+
+// HashSet implementation
+template <typename K, typename Tag>
+bool
+hashset_insert(HashSet<K, Tag>* set, K key)
+{
+    auto* existing = hashmap_get(set, key);
+    if (existing)
+        return false;
+
+    hashmap_insert(set, key, uint8_t(1));
+    return true;
+}
+
+
+template <typename K, typename Tag>
+bool hashset_contains(HashSet<K, Tag>* set, K key)
+{
+    return hashmap_get(set, key) != nullptr;
+}
+
+template <typename K, typename Tag>
+bool hashset_delete(HashSet<K, Tag>* set, K key)
+{
+    return hashmap_delete(set, key);
+}
+
+template <typename K, typename Tag>
+void hashset_clear(HashSet<K, Tag>* set)
+{
+    hashmap_clear(set);
 }
