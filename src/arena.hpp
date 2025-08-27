@@ -347,6 +347,7 @@ template <typename K, typename V, typename Tag = GlobalArena>
 struct HashMap {
     Array<HashEntry<K, V>, Tag, 16> entries;
     size_t count = 0;
+    size_t cursor = 0;
 };
 
 
@@ -425,6 +426,30 @@ V* hashmap_insert(HashMap<K, V, Tag>* map, K key, V value) {
     return &map->entries.data[idx].value;
 }
 
+template <typename K, typename V>
+HashEntry<K, V>* hashmap_next(HashMap<K, V> *map) {
+    if (!map->entries) return nullptr;
+
+    while (map->index < map->capacity) {
+        HashEntry<K, V>* entry = &map->entries[map->index++];
+        if (entry->state == 1) {  // Found occupied entry
+            return entry;
+        }
+    }
+    return nullptr;
+}
+
+template <typename K, typename V, typename Tag>
+void hashmap_clear(HashMap<K, V, Tag>* map) {
+    map->count = 0;
+    // Mark all entries as empty - this is important to avoid
+    // false positives from old data
+    for (size_t i = 0; i < map->entries.capacity; i++) {
+        map->entries.data[i].state = 0;
+    }
+}
+
+
 // HashSet helpers
 template <typename K, typename Tag>
 bool hashset_insert(HashSet<K, Tag>* set, K key) {
@@ -444,6 +469,13 @@ bool hashset_delete(HashSet<K, Tag>* set, K key) {
     return hashmap_delete(set, key);
 }
 
+// HashSet versions just delegate
+template <typename K, typename Tag>
+void hashset_clear(HashSet<K, Tag>* set) {
+    hashmap_clear(set);
+}
+
+
 // String is just an array of chars
 template <typename Tag = GlobalArena, size_t InitSize = 64>
 using String = Array<char, Tag, InitSize>;
@@ -457,6 +489,7 @@ void string_set(String<Tag, InitSize>* s, const char* cstr) {
     }
     array_push(s, '\0');
 }
+
 
 // Append to string
 template <typename Tag, size_t InitSize>

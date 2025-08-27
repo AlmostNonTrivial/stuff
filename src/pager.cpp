@@ -10,23 +10,28 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <set>
+#include <stdatomic.h>
 #include <unordered_map>
 
-struct PagerArena{
+struct PagerArena
+{
 };
 
 // Constants
-#define INVALID_SLOT		 -1
+#define INVALID_SLOT			 -1
 #define JOURNAL_FILENAME_SIZE	 256
 #define FREE_PAGES_PER_FREE_PAGE ((PAGE_SIZE - (sizeof(unsigned int) * 4)) / 4)
 
 // Internal structures
-struct Page {
+struct Page
+{
 	uint32_t index;
 	char padding[PAGE_SIZE - sizeof(uint32_t)];
 };
 
-struct FreePage {
+struct FreePage
+{
 	uint32_t index;
 	uint32_t next_free_page;
 	uint32_t prev_free_page;
@@ -34,13 +39,15 @@ struct FreePage {
 	uint32_t free_pages[FREE_PAGES_PER_FREE_PAGE];
 };
 
-struct RootPage {
+struct RootPage
+{
 	uint32_t page_counter;
 	uint32_t free_page;
 	char padding[PAGE_SIZE - (sizeof(uint32_t) * 2)];
 };
 
-struct CacheMetadata {
+struct CacheMetadata
+{
 	uint32_t page_index;
 	bool is_dirty;
 	bool is_valid;
@@ -48,9 +55,9 @@ struct CacheMetadata {
 	int32_t lru_prev;
 };
 
-
 // Global pager state
-static struct {
+static struct
+{
 	os_file_handle_t data_fd;
 	os_file_handle_t journal_fd;
 
@@ -65,25 +72,23 @@ static struct {
 
 	bool in_transaction;
 
-	// Vec<int32_t, PagerArena, MAX_CACHE_ENTRIES> page_to_cache;
-	std::unordered_map<uint32_t, uint32_t> page_to_cache;
-	Vec<uint32_t, PagerArena> free_pages_set;
-	Vec<uint32_t, PagerArena> journaled_pages;
-	Vec<uint32_t, PagerArena> new_pages_in_transaction;
-	Vec<uint32_t, PagerArena> pages_in_use;
+	HashMap<uint32_t, uint32_t, PagerArena> page_to_cache;
+	HashSet<uint32_t, PagerArena> free_pages_set;
+	HashSet<uint32_t, PagerArena> journaled_pages;
+	HashSet<uint32_t, PagerArena> new_pages_in_transaction;
 
 	const char *data_file;
 	char journal_file[JOURNAL_FILENAME_SIZE];
 } pager = {.data_fd = -1,
-	   .journal_fd = -1,
-	   .root = {},
-	   .root_dirty = false,
-	   .cache_meta = {},
-	   .cache_data = {},
-	   .lru_head = INVALID_SLOT,
-	   .lru_tail = INVALID_SLOT,
-	   .in_transaction = false,
-	   .data_file = nullptr};
+		   .journal_fd = -1,
+		   .root = {},
+		   .root_dirty = false,
+		   .cache_meta = {},
+		   .cache_data = {},
+		   .lru_head = INVALID_SLOT,
+		   .lru_tail = INVALID_SLOT,
+		   .in_transaction = false,
+		   .data_file = nullptr};
 
 // Internal functions implementation
 static void
@@ -104,16 +109,21 @@ static void
 journal_page(uint32_t page_index, const void *data)
 {
 	if (!pager.in_transaction || pager.journal_fd == -1 ||
-	    pager.new_pages_in_transaction.contains(page_index) ||
-	    pager.journaled_pages.contains(page_index)) {
+		hashset_contains(&pager.new_pages_in_transaction, page_index) ||
+		hashset_contains(&pager.journaled_pages, page_index))
+	{
 		return;
 	}
 
-	if (page_index == PAGE_ROOT) {
+	if (page_index == PAGE_ROOT)
+	{
 		os_file_seek(pager.journal_fd, PAGE_INVALID);
-	} else {
+	}
+	else
+	{
 		int64_t pos_before = os_file_size(pager.journal_fd);
-		if (pos_before < PAGE_SIZE) {
+		if (pos_before < PAGE_SIZE)
+		{
 			pos_before = PAGE_SIZE;
 		}
 		os_file_seek(pager.journal_fd, pos_before);
@@ -128,15 +138,21 @@ lru_remove(int32_t slot)
 {
 	CacheMetadata *entry = &pager.cache_meta[slot];
 
-	if (entry->lru_prev != INVALID_SLOT) {
+	if (entry->lru_prev != INVALID_SLOT)
+	{
 		pager.cache_meta[entry->lru_prev].lru_next = entry->lru_next;
-	} else {
+	}
+	else
+	{
 		pager.lru_head = entry->lru_next;
 	}
 
-	if (entry->lru_next != INVALID_SLOT) {
+	if (entry->lru_next != INVALID_SLOT)
+	{
 		pager.cache_meta[entry->lru_next].lru_prev = entry->lru_prev;
-	} else {
+	}
+	else
+	{
 		pager.lru_tail = entry->lru_prev;
 	}
 
@@ -152,13 +168,15 @@ lru_add_head(int32_t slot)
 	entry->lru_next = pager.lru_head;
 	entry->lru_prev = INVALID_SLOT;
 
-	if (pager.lru_head != INVALID_SLOT) {
+	if (pager.lru_head != INVALID_SLOT)
+	{
 		pager.cache_meta[pager.lru_head].lru_prev = slot;
 	}
 
 	pager.lru_head = slot;
 
-	if (pager.lru_tail == INVALID_SLOT) {
+	if (pager.lru_tail == INVALID_SLOT)
+	{
 		pager.lru_tail = slot;
 	}
 }
@@ -166,7 +184,8 @@ lru_add_head(int32_t slot)
 static void
 cache_move_to_head(int32_t slot)
 {
-	if (pager.lru_head == slot) {
+	if (pager.lru_head == slot)
+	{
 		return;
 	}
 
@@ -177,23 +196,20 @@ cache_move_to_head(int32_t slot)
 static int32_t
 cache_evict_lru()
 {
-	if (pager.lru_tail == INVALID_SLOT) {
+	if (pager.lru_tail == INVALID_SLOT)
+	{
 		return INVALID_SLOT;
 	}
 
 	int32_t slot = pager.lru_tail;
 	CacheMetadata *entry = &pager.cache_meta[slot];
 
-	if (entry->is_dirty) {
+	if (entry->is_dirty)
+	{
 		write_page_to_disk(entry->page_index, pager.cache_data[slot]);
 	}
 
-	pager.page_to_cache.erase(entry->page_index);
-
-	if (pager.pages_in_use.contains(entry->page_index)) {
-		printf("evicting page in use\n");
-		exit(1);
-	}
+	hashmap_delete(&pager.page_to_cache, entry->page_index);
 
 	lru_remove(slot);
 
@@ -204,11 +220,13 @@ cache_evict_lru()
 	return slot;
 }
 
-static int32_t
+static uint32_t
 cache_find_slot()
 {
-	for (int32_t i = 0; i < MAX_CACHE_ENTRIES; i++) {
-		if (!pager.cache_meta[i].is_valid) {
+	for (uint32_t i = 0; i < MAX_CACHE_ENTRIES; i++)
+	{
+		if (!pager.cache_meta[i].is_valid)
+		{
 			return i;
 		}
 	}
@@ -219,11 +237,11 @@ cache_find_slot()
 static void
 cache_write_dirty()
 {
-	for (int32_t i = 0; i < MAX_CACHE_ENTRIES; i++) {
-		if (pager.cache_meta[i].is_valid &&
-		    pager.cache_meta[i].is_dirty) {
-			write_page_to_disk(pager.cache_meta[i].page_index,
-					   pager.cache_data[i]);
+	for (uint32_t i = 0; i < MAX_CACHE_ENTRIES; i++)
+	{
+		if (pager.cache_meta[i].is_valid && pager.cache_meta[i].is_dirty)
+		{
+			write_page_to_disk(pager.cache_meta[i].page_index, pager.cache_data[i]);
 			pager.cache_meta[i].is_dirty = false;
 		}
 	}
@@ -232,30 +250,33 @@ cache_write_dirty()
 static void
 cache_init()
 {
-    	pager.page_to_cache.clear();
-	for (int32_t i = 0; i < MAX_CACHE_ENTRIES; i++) {
+	for (uint32_t i = 0; i < MAX_CACHE_ENTRIES; i++)
+	{
 		pager.cache_meta[i].page_index = PAGE_INVALID;
 		pager.cache_meta[i].is_dirty = false;
 		pager.cache_meta[i].is_valid = false;
 		pager.cache_meta[i].lru_next = INVALID_SLOT;
 		pager.cache_meta[i].lru_prev = INVALID_SLOT;
-		// pager.page_to_cache.push_back(-1);
 	}
 
-
-	pager.journaled_pages.clear();
-	pager.new_pages_in_transaction.clear();
-
+	hashset_clear(&pager.free_pages_set);
+	hashset_clear(&pager.journaled_pages);
+	hashset_clear(&pager.new_pages_in_transaction);
+	hashmap_clear(&pager.page_to_cache);
 	pager.lru_head = INVALID_SLOT;
 	pager.lru_tail = INVALID_SLOT;
+	arena::reset<PagerArena>();
 }
 
 static void
 load_root()
 {
-	if (read_page_from_disk(PAGE_ROOT, &pager.root)) {
+	if (read_page_from_disk(PAGE_ROOT, &pager.root))
+	{
 		pager.root_dirty = false;
-	} else {
+	}
+	else
+	{
 		pager.root.page_counter = 1;
 		pager.root.free_page = PAGE_INVALID;
 		pager.root_dirty = true;
@@ -267,7 +288,8 @@ save_root()
 {
 	journal_page(PAGE_ROOT, &pager.root);
 
-	if (pager.root_dirty) {
+	if (pager.root_dirty)
+	{
 		write_page_to_disk(PAGE_ROOT, &pager.root);
 		pager.root_dirty = false;
 	}
@@ -279,7 +301,7 @@ create_free_page(uint32_t prev_free_page)
 	uint32_t index = pager.root.page_counter++;
 	pager.root_dirty = true;
 
-	int32_t slot = cache_find_slot();
+	uint32_t slot = cache_find_slot();
 	CacheMetadata *entry = &pager.cache_meta[slot];
 
 	memset(pager.cache_data[slot], PAGE_INVALID, PAGE_SIZE);
@@ -287,7 +309,7 @@ create_free_page(uint32_t prev_free_page)
 	entry->is_valid = true;
 	entry->is_dirty = true;
 
-	pager.page_to_cache[index] = slot;
+	hashmap_insert(&pager.page_to_cache, index, slot);
 	lru_add_head(slot);
 
 	FreePage *free = reinterpret_cast<FreePage *>(pager.cache_data[slot]);
@@ -297,17 +319,18 @@ create_free_page(uint32_t prev_free_page)
 	free->next_free_page = PAGE_INVALID;
 	free->index = index;
 
-	if (prev_free_page != PAGE_INVALID) {
+	if (prev_free_page != PAGE_INVALID)
+	{
 		void *prev_data = pager_get(prev_free_page);
-		if (prev_data) {
-			FreePage *prev_free =
-			    static_cast<FreePage *>(prev_data);
+		if (prev_data)
+		{
+			FreePage *prev_free = static_cast<FreePage *>(prev_data);
 			prev_free->next_free_page = index;
 			pager_mark_dirty(prev_free_page);
 		}
 	}
 
-	pager.new_pages_in_transaction.insert_unique(index);
+	hashset_insert(&pager.new_pages_in_transaction, index);
 
 	return index;
 }
@@ -315,30 +338,32 @@ create_free_page(uint32_t prev_free_page)
 static void
 add_to_free_list(uint32_t page_index)
 {
-	if (page_index == PAGE_INVALID ||
-	    page_index >= pager.root.page_counter) {
+	if (page_index == PAGE_INVALID || page_index >= pager.root.page_counter)
+	{
 		return;
 	}
 
-	pager.free_pages_set.insert_unique(page_index);
+	hashset_insert(&pager.free_pages_set, page_index);
 
-	if (pager.root.free_page == PAGE_INVALID) {
+	if (pager.root.free_page == PAGE_INVALID)
+	{
 		pager.root.free_page = create_free_page(PAGE_INVALID);
-		pager.new_pages_in_transaction.insert_unique(
-		    pager.root.free_page);
+		hashset_insert(&pager.new_pages_in_transaction, pager.root.free_page);
 		pager.root_dirty = true;
 	}
 
 	void *data = pager_get(pager.root.free_page);
-	if (!data) {
+	if (!data)
+	{
 		return;
 	}
 
 	FreePage *page = static_cast<FreePage *>(data);
 
-	if (page->free_pointer >= FREE_PAGES_PER_FREE_PAGE) {
+	if (page->free_pointer >= FREE_PAGES_PER_FREE_PAGE)
+	{
 		uint32_t new_free_page = create_free_page(pager.root.free_page);
-		pager.new_pages_in_transaction.insert_unique(new_free_page);
+		hashset_insert(&pager.new_pages_in_transaction, pager.root.free_page);
 		pager.root.free_page = new_free_page;
 		pager.root_dirty = true;
 
@@ -352,28 +377,30 @@ add_to_free_list(uint32_t page_index)
 static uint32_t
 take_from_free_list()
 {
-	if (pager.root.free_page == PAGE_INVALID ||
-	    pager.free_pages_set.empty()) {
+	if (pager.root.free_page == PAGE_INVALID || pager.free_pages_set.count == 0)
+	{
 		return PAGE_INVALID;
 	}
 
-	FreePage *page =
-	    static_cast<FreePage *>(pager_get(pager.root.free_page));
+	FreePage *page = static_cast<FreePage *>(pager_get(pager.root.free_page));
 
-	if (page->free_pointer == PAGE_INVALID) {
+	if (page->free_pointer == PAGE_INVALID)
+	{
 		uint32_t empty_free_page_index = pager.root.free_page;
 
-		if (page->prev_free_page != PAGE_INVALID) {
+		if (page->prev_free_page != PAGE_INVALID)
+		{
 			pager.root.free_page = page->prev_free_page;
 			pager.root_dirty = true;
 
-			FreePage *prev_data = static_cast<FreePage *>(
-			    pager_get(page->prev_free_page));
+			FreePage *prev_data = static_cast<FreePage *>(pager_get(page->prev_free_page));
 			prev_data->next_free_page = PAGE_INVALID;
 			pager_mark_dirty(prev_data->prev_free_page);
 
 			return empty_free_page_index;
-		} else {
+		}
+		else
+		{
 			pager.root.free_page = PAGE_INVALID;
 			pager.root_dirty = true;
 			return PAGE_INVALID;
@@ -385,7 +412,8 @@ take_from_free_list()
 	uint32_t free_page_index = page->free_pages[page->free_pointer];
 	page->free_pages[page->free_pointer] = PAGE_INVALID;
 
-	pager.free_pages_set.erase(free_page_index);
+
+	hashset_delete(&pager.free_pages_set, free_page_index);
 
 	return free_page_index;
 }
@@ -393,15 +421,15 @@ take_from_free_list()
 static void
 build_free_pages_set()
 {
-	pager.free_pages_set.clear();
-
 	uint32_t current_free_page = pager.root.free_page;
-	while (current_free_page != PAGE_INVALID) {
+	while (current_free_page != PAGE_INVALID)
+	{
 		void *data = pager_get(current_free_page);
 		FreePage *page = static_cast<FreePage *>(data);
 
-		for (uint32_t i = 0; i < page->free_pointer; i++) {
-			pager.free_pages_set.insert_unique(page->free_pages[i]);
+		for (uint32_t i = 0; i < page->free_pointer; i++)
+		{
+			hashset_insert(&pager.free_pages_set, page->free_pages[i]);
 		}
 
 		current_free_page = page->prev_free_page;
@@ -412,29 +440,31 @@ build_free_pages_set()
 bool
 pager_init(const char *filename)
 {
-	arena::init<PagerArena>(PAGE_SIZE * 3);
-	pager.page_to_cache.reserve(MAX_CACHE_ENTRIES);
+	arena::init<PagerArena>();
 
 	pager.data_file = filename;
 
-	snprintf(pager.journal_file, sizeof(pager.journal_file), "%s-journal",
-		 filename);
+	snprintf(pager.journal_file, sizeof(pager.journal_file), "%s-journal", filename);
 
 	bool exists = os_file_exists(filename);
 	pager.data_fd = os_file_open(filename, true, true);
 
 	bool journal_exists = os_file_exists(pager.journal_file);
-	if (journal_exists) {
+	if (journal_exists)
+	{
 		pager.in_transaction = true;
 		pager_rollback();
 	}
 
 	cache_init();
 
-	if (exists) {
+	if (exists)
+	{
 		load_root();
 		build_free_pages_set();
-	} else {
+	}
+	else
+	{
 		pager.root.page_counter = 1;
 		pager.root.free_page = PAGE_INVALID;
 		pager.root_dirty = true;
@@ -447,28 +477,30 @@ pager_init(const char *filename)
 void *
 pager_get(uint32_t page_index)
 {
-	if (page_index >= pager.root.page_counter || page_index == PAGE_ROOT) {
+	if (page_index >= pager.root.page_counter || page_index == PAGE_ROOT)
+	{
 		return nullptr;
 	}
 
-	if (pager.free_pages_set.contains(page_index)) {
+
+	if (hashset_contains(&pager.free_pages_set, page_index))
+	{
 		return nullptr;
 	}
 
-	if (pager.in_transaction) {
-		pager.pages_in_use.insert_unique(page_index);
-	}
+	if (hashmap_get(&pager.page_to_cache, page_index))
+	{
+		uint32_t slot = *hashmap_get(&pager.page_to_cache, page_index);
 
-	if (pager.page_to_cache.contains(page_index)) {
-		int32_t slot = pager.page_to_cache[page_index];
 		cache_move_to_head(slot);
 		return pager.cache_data[slot];
 	}
 
-	int32_t slot = cache_find_slot();
+	uint32_t slot = cache_find_slot();
 	CacheMetadata *entry = &pager.cache_meta[slot];
 
-	if (!read_page_from_disk(page_index, pager.cache_data[slot])) {
+	if (!read_page_from_disk(page_index, pager.cache_data[slot]))
+	{
 		return nullptr;
 	}
 
@@ -476,7 +508,7 @@ pager_get(uint32_t page_index)
 	entry->is_valid = true;
 	entry->is_dirty = false;
 
-	pager.page_to_cache[page_index] = slot;
+	hashmap_insert(&pager.page_to_cache, page_index, slot);
 	lru_add_head(slot);
 
 	return pager.cache_data[slot];
@@ -485,20 +517,22 @@ pager_get(uint32_t page_index)
 uint32_t
 pager_new()
 {
-	if (!pager.in_transaction) {
+	if (!pager.in_transaction)
+	{
 		return PAGE_INVALID;
 	}
 
 	uint32_t page_index = take_from_free_list();
 
-	if (page_index == PAGE_INVALID) {
+	if (page_index == PAGE_INVALID)
+	{
 		page_index = pager.root.page_counter++;
 		pager.root_dirty = true;
 	}
 
-	pager.new_pages_in_transaction.insert_unique(page_index);
+	hashset_insert(&pager.new_pages_in_transaction, page_index) ;
 
-	int32_t slot = cache_find_slot();
+	uint32_t slot = cache_find_slot();
 	CacheMetadata *entry = &pager.cache_meta[slot];
 
 	memset(pager.cache_data[slot], PAGE_INVALID, PAGE_SIZE);
@@ -506,7 +540,8 @@ pager_new()
 	entry->is_valid = true;
 	entry->is_dirty = true;
 
-	pager.page_to_cache[page_index] = slot;
+
+	hashmap_insert(&pager.page_to_cache, page_index, slot);
 	lru_add_head(slot);
 
 	return page_index;
@@ -515,28 +550,29 @@ pager_new()
 void
 pager_mark_dirty(uint32_t page_index)
 {
-	if (page_index > pager.root.page_counter || !pager.in_transaction) {
+	if (page_index > pager.root.page_counter || !pager.in_transaction)
+	{
 		return;
 	}
 
-	if (!(pager.journaled_pages.contains(page_index)) &&
-	    !(pager.new_pages_in_transaction.contains(page_index))) {
+	if (!(hashset_contains(&pager.journaled_pages, page_index)) && !(hashset_contains(&pager.new_pages_in_transaction, page_index)))
+	{
 		void *data = pager_get(page_index);
 		journal_page(page_index, data);
-		pager.journaled_pages.insert_unique(page_index);
+		hashset_insert(&pager.journaled_pages, page_index);
 	}
 
-	if ((pager.page_to_cache.contains(page_index))) {
-		pager.cache_meta[pager.page_to_cache[page_index]]
-		    .is_dirty = true;
+	if (hashmap_get(&pager.page_to_cache, page_index))
+	{
+		pager.cache_meta[*hashmap_get(&pager.page_to_cache, page_index)].is_dirty = true;
 	}
 }
 
 void
 pager_delete(uint32_t page_index)
 {
-	if (page_index == PAGE_INVALID ||
-	    page_index >= pager.root.page_counter || !pager.in_transaction) {
+	if (page_index == PAGE_INVALID || page_index >= pager.root.page_counter || !pager.in_transaction)
+	{
 		return;
 	}
 
@@ -549,7 +585,8 @@ pager_delete(uint32_t page_index)
 void
 pager_begin_transaction()
 {
-	if (pager.in_transaction) {
+	if (pager.in_transaction)
+	{
 		return;
 	}
 
@@ -557,20 +594,17 @@ pager_begin_transaction()
 
 	pager.in_transaction = true;
 
-	pager.journaled_pages.clear();
-	pager.new_pages_in_transaction.clear();
-	pager.pages_in_use.clear();
-
 	pager.journal_fd = os_file_open(pager.journal_file, true, true);
 
 	journal_page(PAGE_ROOT, &pager.root);
-	pager.journaled_pages.insert_unique(PAGE_ROOT);
+	hashset_insert(&pager.journaled_pages, (uint32_t)PAGE_ROOT);
 }
 
 void
 pager_commit()
 {
-	if (!pager.in_transaction) {
+	if (!pager.in_transaction)
+	{
 		return;
 	}
 
@@ -586,34 +620,36 @@ pager_commit()
 
 	pager.journal_fd = -1;
 	pager.in_transaction = false;
-	pager.journaled_pages.clear();
-	pager.new_pages_in_transaction.clear();
-	pager.pages_in_use.clear();
+
+	hashset_clear(&pager.journaled_pages);
+	hashset_clear(&pager.new_pages_in_transaction);
 }
 
 void
 pager_rollback()
 {
-	if (!pager.in_transaction) {
+	if (!pager.in_transaction)
+	{
 		return;
 	}
 
 	int64_t journal_size = os_file_size(pager.journal_fd);
 
-	if (journal_size >= PAGE_SIZE) {
+	if (journal_size >= PAGE_SIZE)
+	{
 		os_file_seek(pager.journal_fd, PAGE_INVALID);
-		if (os_file_read(pager.journal_fd, &pager.root, PAGE_SIZE) ==
-		    PAGE_SIZE) {
+		if (os_file_read(pager.journal_fd, &pager.root, PAGE_SIZE) == PAGE_SIZE)
+		{
 			pager.root_dirty = true;
 			save_root();
 		}
 
-		for (int64_t pos = PAGE_SIZE; pos < journal_size;
-		     pos += PAGE_SIZE) {
+		for (int64_t pos = PAGE_SIZE; pos < journal_size; pos += PAGE_SIZE)
+		{
 			uint8_t page_data[PAGE_SIZE];
 			os_file_seek(pager.journal_fd, pos);
-			if (os_file_read(pager.journal_fd, page_data,
-					 PAGE_SIZE) != PAGE_SIZE) {
+			if (os_file_read(pager.journal_fd, page_data, PAGE_SIZE) != PAGE_SIZE)
+			{
 				break;
 			}
 
@@ -622,28 +658,27 @@ pager_rollback()
 			write_page_to_disk(page_index, page_data);
 		}
 
-		os_file_truncate(pager.data_fd,
-				 pager.root.page_counter * PAGE_SIZE);
+		os_file_truncate(pager.data_fd, pager.root.page_counter * PAGE_SIZE);
 		os_file_close(pager.journal_fd);
 		os_file_delete(pager.journal_file);
 		pager.journal_fd = -1;
-		pager.new_pages_in_transaction.clear();
+
 	}
 
 	cache_init();
 	build_free_pages_set();
 	pager.in_transaction = false;
-	pager.pages_in_use.clear();
+
 }
 
 void
 pager_sync()
 {
-	for (int32_t i = 0; i < MAX_CACHE_ENTRIES; i++) {
-		if (pager.cache_meta[i].is_valid &&
-		    pager.cache_meta[i].is_dirty) {
-			write_page_to_disk(pager.cache_meta[i].page_index,
-					   pager.cache_data[i]);
+	for (int32_t i = 0; i < MAX_CACHE_ENTRIES; i++)
+	{
+		if (pager.cache_meta[i].is_valid && pager.cache_meta[i].is_dirty)
+		{
+			write_page_to_disk(pager.cache_meta[i].page_index, pager.cache_data[i]);
 			pager.cache_meta[i].is_dirty = false;
 		}
 	}
@@ -658,11 +693,8 @@ pager_close()
 	os_file_close(pager.data_fd);
 
 	pager.in_transaction = false;
-	pager.free_pages_set.clear();
-	pager.page_to_cache.clear();
-	pager.journaled_pages.clear();
-	pager.new_pages_in_transaction.clear();
-	pager.pages_in_use.clear();
+	arena::shutdown<PagerArena>();
+
 	pager.data_fd = -1;
 }
 
@@ -671,15 +703,18 @@ pager_get_stats()
 {
 	PagerMeta data;
 	data.total_pages = pager.root.page_counter - 1;
-	data.free_pages = pager.free_pages_set.size();
+	data.free_pages = pager.free_pages_set.count;
 
 	data.cached_pages = 0;
 	data.dirty_pages = 0;
 
-	for (int32_t i = 0; i < MAX_CACHE_ENTRIES; i++) {
-		if (pager.cache_meta[i].is_valid) {
+	for (int32_t i = 0; i < MAX_CACHE_ENTRIES; i++)
+	{
+		if (pager.cache_meta[i].is_valid)
+		{
 			(data.cached_pages)++;
-			if (pager.cache_meta[i].is_dirty) {
+			if (pager.cache_meta[i].is_dirty)
+			{
 				(data.dirty_pages)++;
 			}
 		}
