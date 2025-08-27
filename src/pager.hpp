@@ -4,7 +4,7 @@
 #define PAGE_INVALID 0
 
 
-#define MAX_CACHE_ENTRIES 100
+#define MAX_CACHE_ENTRIES 3
 #define FREE_PAGES_PER_FREE_PAGE ((PAGE_SIZE - (sizeof(unsigned int) * 4)) / 4)
 struct PagerMeta {
 	uint32_t total_pages, cached_pages, dirty_pages, free_pages;
