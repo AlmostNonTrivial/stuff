@@ -19,7 +19,7 @@ struct Page
 
 
 bool
-pager_init(const char *filename);
+pager_open(const char *filename);
 
 void *
 pager_get(uint32_t page_index);
@@ -27,16 +27,16 @@ pager_get(uint32_t page_index);
 uint32_t
 pager_new();
 
-void
+bool
 pager_mark_dirty(uint32_t page_index);
 
-void
+bool
 pager_delete(uint32_t page_index);
-void
+bool
 pager_begin_transaction();
-void
+bool
 pager_commit();
-void
+bool
 pager_rollback();
 
 PagerMeta
