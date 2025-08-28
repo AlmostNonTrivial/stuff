@@ -39,9 +39,6 @@ pager_commit();
 void
 pager_rollback();
 
-void
-pager_sync();
-
 PagerMeta
 pager_get_stats();
 

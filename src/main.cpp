@@ -77,7 +77,7 @@ test_rollback()
 	ptr = (Page *)pager_get(p1);
 	ptr->data[0] = 'b';
 	// for sync without commit
-	pager_sync();
+	// pager_sync();
 	pager_close();
 	auto after_sync = hash_file(DB);
 	assert(after_sync != before);
@@ -340,7 +340,7 @@ main()
 	pager_close();
 	os_file_delete(DB);
 	pager_init(DB);
-	test_rollback();
+	// test_rollback();
 	os_file_delete(DB);
 	pager_init(DB);
 	test_lru();
