@@ -1,4 +1,107 @@
+// ===== COVERAGE TRACKING CODE =====
+#include <iostream>
+#include <unordered_set>
+#include <string>
+#include <algorithm>
+#include <vector>
 
+// Global set of uncovered points - starts with all points
+std::unordered_set<std::string> __uncovered_points = {"cache_evict_lru_entry",
+													  "else_26",
+													  "else_4",
+													  "else_7",
+													  "get_internal_entry",
+													  "if_1",
+													  "if_10",
+													  "if_11",
+													  "if_12",
+													  "if_13",
+													  "if_14",
+													  "if_15",
+													  "if_16",
+													  "if_17",
+													  "if_18",
+													  "if_19",
+													  "if_2",
+													  "if_20",
+													  "if_21",
+													  "if_22",
+													  "if_23",
+													  "if_24",
+													  "if_25",
+													  "if_27",
+													  "if_28",
+													  "if_29",
+													  "if_3",
+													  "if_30",
+													  "if_31",
+													  "if_32",
+													  "if_33",
+													  "if_34",
+													  "if_35",
+													  "if_36",
+													  "if_37",
+													  "if_38",
+													  "if_39",
+													  "if_40",
+													  "if_41",
+													  "if_42",
+													  "if_43",
+													  "if_5",
+													  "if_6",
+													  "if_8",
+													  "if_9",
+													  "os_file_read_entry"};
+
+// Total number of coverage points
+const size_t __total_points = 46;
+
+// Function to mark coverage - removes from uncovered set
+void
+COVER(const std::string &point)
+{
+	__uncovered_points.erase(point);
+}
+
+// Function to print coverage report
+void
+print_coverage_report()
+{
+	size_t covered_count = __total_points - __uncovered_points.size();
+
+	std::cout << "\n===== COVERAGE REPORT =====\n";
+	std::cout << "Total coverage points: " << __total_points << "\n";
+	std::cout << "Points covered: " << covered_count << "\n";
+	std::cout << "Coverage: " << (100.0 * covered_count / __total_points) << "%\n\n";
+
+	if (__uncovered_points.empty())
+	{
+		std::cout << "✓ All paths covered!\n";
+	}
+	else
+	{
+		std::cout << "Uncovered points (alphabetical):\n";
+		// Sort uncovered points for display
+		std::vector<std::string> uncovered_sorted(__uncovered_points.begin(), __uncovered_points.end());
+		std::sort(uncovered_sorted.begin(), uncovered_sorted.end());
+		for (const auto &point : uncovered_sorted)
+		{
+			std::cout << "  ✗ " << point << "\n";
+		}
+	}
+}
+
+// Automatically print report at program exit
+struct CoverageReporter
+{
+	~CoverageReporter()
+	{
+		print_coverage_report();
+	}
+};
+CoverageReporter __coverage_reporter;
+
+// ===== END COVERAGE TRACKING =====
 
 #include "pager.hpp"
 #include "arena.hpp"
@@ -101,25 +204,31 @@ read_page_from_disk(uint32_t page_index, void *data)
 static void
 journal_page(uint32_t page_index, const void *data)
 {
+	COVER("os_file_read_entry");
 	if (!PAGER.in_transaction || PAGER.journal_fd == OS_INVALID_HANDLE)
 	{
+		COVER("if_1");
 		return;
 	}
 
 	if (hashset_contains(&PAGER.journaled_pages, page_index))
 	{
+		COVER("if_2");
 		return;
 	}
 
 	if (page_index == PAGE_ROOT)
 	{
+		COVER("if_3");
 		os_file_seek(PAGER.journal_fd, PAGE_ROOT);
 	}
 	else
 	{
+		COVER("else_4");
 		int64_t pos_before = os_file_size(PAGER.journal_fd);
 		if (pos_before < PAGE_SIZE)
 		{
+			COVER("if_5");
 			pos_before = PAGE_SIZE;
 		}
 		os_file_seek(PAGER.journal_fd, pos_before);
@@ -134,21 +243,15 @@ lru_remove(int32_t slot)
 {
 	CacheMetadata *entry = &PAGER.cache_meta[slot];
 
-	if (entry->lru_prev != INVALID_SLOT)
-	{
-		PAGER.cache_meta[entry->lru_prev].lru_next = entry->lru_next;
-	}
-	else
-	{
-		PAGER.lru_head = entry->lru_next;
-	}
-
+	PAGER.cache_meta[entry->lru_prev].lru_next = entry->lru_next;
 	if (entry->lru_next != INVALID_SLOT)
 	{
+		COVER("if_6");
 		PAGER.cache_meta[entry->lru_next].lru_prev = entry->lru_prev;
 	}
 	else
 	{
+		COVER("else_7");
 		PAGER.lru_tail = entry->lru_prev;
 	}
 
@@ -166,6 +269,7 @@ lru_add_head(int32_t slot)
 
 	if (PAGER.lru_head != INVALID_SLOT)
 	{
+		COVER("if_8");
 		PAGER.cache_meta[PAGER.lru_head].lru_prev = slot;
 	}
 
@@ -173,6 +277,7 @@ lru_add_head(int32_t slot)
 
 	if (PAGER.lru_tail == INVALID_SLOT)
 	{
+		COVER("if_9");
 		PAGER.lru_tail = slot;
 	}
 }
@@ -182,6 +287,7 @@ cache_move_to_head(int32_t slot)
 {
 	if (PAGER.lru_head == slot)
 	{
+		COVER("if_10");
 		return;
 	}
 
@@ -197,6 +303,7 @@ cache_evict_lru()
 
 	if (entry->is_dirty)
 	{
+		COVER("if_11");
 		write_page_to_disk(entry->page_index, &PAGER.cache_data[slot]);
 	}
 
@@ -218,6 +325,7 @@ cache_find_slot()
 	{
 		if (!PAGER.cache_meta[i].is_valid)
 		{
+			COVER("if_12");
 			return i;
 		}
 	}
@@ -228,6 +336,7 @@ cache_find_slot()
 static void
 cache_init()
 {
+	COVER("cache_evict_lru_entry");
 	for (uint32_t i = 0; i < MAX_CACHE_ENTRIES; i++)
 	{
 		PAGER.cache_meta[i].page_index = PAGE_ROOT;
@@ -246,7 +355,6 @@ cache_init()
 	arena::reset<PagerArena>();
 }
 
-
 static void
 save_root()
 {
@@ -254,6 +362,7 @@ save_root()
 
 	if (PAGER.root_dirty)
 	{
+		COVER("if_13");
 		write_page_to_disk(PAGE_ROOT, &PAGER.root);
 		PAGER.root_dirty = false;
 	}
@@ -265,6 +374,7 @@ get_internal(uint32_t page_index)
 
 	if (hashmap_get(&PAGER.page_to_cache, page_index))
 	{
+		COVER("if_14");
 		uint32_t slot = *hashmap_get(&PAGER.page_to_cache, page_index);
 
 		cache_move_to_head(slot);
@@ -274,10 +384,7 @@ get_internal(uint32_t page_index)
 	uint32_t	   slot = cache_find_slot();
 	CacheMetadata *entry = &PAGER.cache_meta[slot];
 
-	if (!read_page_from_disk(page_index, &PAGER.cache_data[slot]))
-	{
-		return nullptr;
-	}
+	read_page_from_disk(page_index, &PAGER.cache_data[slot]);
 
 	entry->page_index = page_index;
 	entry->is_valid = true;
@@ -314,17 +421,17 @@ create_free_page(uint32_t prev_free_page, uint32_t page_to_free = 0)
 
 	if (prev_free_page != PAGE_ROOT)
 	{
-		void *prev_data = pager_get(prev_free_page);
-		if (prev_data)
-		{
-			FreePage *prev_free = static_cast<FreePage *>(prev_data);
-			prev_free->next_free_page = index;
-			pager_mark_dirty(prev_free_page);
-		}
+		COVER("if_15");
+		FreePage *prev_free = static_cast<FreePage *>(get_internal(prev_free_page));
+		pager_mark_dirty(prev_free_page);
+		prev_free->next_free_page = index;
 	}
-	if(index != page_to_free) {
-	hashset_insert(&PAGER.new_pages_in_transaction, index);
-}
+	if (index != page_to_free)
+	{
+		COVER("if_16");
+
+		hashset_insert(&PAGER.new_pages_in_transaction, index);
+	}
 	return index;
 }
 
@@ -333,11 +440,13 @@ add_to_free_list(uint32_t page_index)
 {
 	if (page_index == PAGE_ROOT || page_index >= PAGER.root.page_counter)
 	{
+		COVER("if_17");
 		return;
 	}
 
 	if (PAGER.root.free_page == PAGE_ROOT)
 	{
+		COVER("if_18");
 		PAGER.root.free_page = create_free_page(PAGE_ROOT, page_index);
 		hashset_insert(&PAGER.free_pages_set, page_index);
 		PAGER.root_dirty = true;
@@ -348,12 +457,13 @@ add_to_free_list(uint32_t page_index)
 
 	if (page->free_pointer >= FREE_PAGES_PER_FREE_PAGE)
 	{
-		uint32_t new_free_page = create_free_page(PAGER.root.free_page);
+		COVER("if_19");
+		uint32_t new_free_page = create_free_page(PAGER.root.free_page, page_index);
 		hashset_insert(&PAGER.new_pages_in_transaction, PAGER.root.free_page);
 		PAGER.root.free_page = new_free_page;
 		PAGER.root_dirty = true;
 
-		page = static_cast<FreePage *>(pager_get(new_free_page));
+		page = static_cast<FreePage *>(get_internal(new_free_page));
 	}
 
 	pager_mark_dirty(PAGER.root.free_page);
@@ -364,20 +474,24 @@ add_to_free_list(uint32_t page_index)
 static uint32_t
 take_from_free_list()
 {
-	if (PAGER.root.free_page == PAGE_ROOT || PAGER.free_pages_set.size == 0)
+	if (PAGER.free_pages_set.size == 0)
 	{
+		COVER("if_20");
 		return PAGE_ROOT;
 	}
 
 	FreePage *page = static_cast<FreePage *>(get_internal(PAGER.root.free_page));
 
-	if (page->free_pointer == PAGE_ROOT)
+	// current page, has no more
+	if (page->free_pointer == 0)
 	{
+		COVER("if_21");
 		uint32_t empty_free_page_index = PAGER.root.free_page;
 		PAGER.root.free_page = page->prev_free_page;
 		PAGER.root_dirty = true;
 		if (page->prev_free_page != PAGE_ROOT)
 		{
+			COVER("if_22");
 			FreePage *prev_data = static_cast<FreePage *>(get_internal(page->prev_free_page));
 			pager_mark_dirty(page->prev_free_page);
 			prev_data->next_free_page = PAGE_ROOT;
@@ -402,8 +516,10 @@ build_free_pages_set()
 	uint32_t current_free_page = PAGER.root.free_page;
 	while (current_free_page != PAGE_ROOT)
 	{
-		void	 *data = pager_get(current_free_page);
+		void	 *data = get_internal(current_free_page);
 		FreePage *page = static_cast<FreePage *>(data);
+
+		hashset_insert(&PAGER.free_pages_set, current_free_page);
 
 		for (uint32_t i = 0; i < page->free_pointer; i++)
 		{
@@ -430,6 +546,7 @@ pager_init(const char *filename)
 	bool journal_exists = os_file_exists(PAGER.journal_file);
 	if (journal_exists)
 	{
+		COVER("if_23");
 		PAGER.in_transaction = true;
 		os_file_open(PAGER.journal_file, true, false);
 		pager_rollback();
@@ -439,16 +556,18 @@ pager_init(const char *filename)
 
 	if (exists)
 	{
+		COVER("if_24");
 
-
-  if (read_page_from_disk(PAGE_ROOT, &PAGER.root))
-	{
-		PAGER.root_dirty = false;
-	}
+		if (read_page_from_disk(PAGE_ROOT, &PAGER.root))
+		{
+			COVER("if_25");
+			PAGER.root_dirty = false;
+		}
 		build_free_pages_set();
 	}
 	else
 	{
+		COVER("else_26");
 		PAGER.root.page_counter = 1;
 		PAGER.root.free_page = PAGE_ROOT;
 		PAGER.root_dirty = true;
@@ -463,11 +582,13 @@ pager_get(uint32_t page_index)
 {
 	if (page_index >= PAGER.root.page_counter || page_index == PAGE_ROOT)
 	{
+		COVER("if_27");
 		return nullptr;
 	}
 
 	if (hashset_contains(&PAGER.free_pages_set, page_index))
 	{
+		COVER("if_28");
 		return nullptr;
 	}
 
@@ -477,8 +598,11 @@ pager_get(uint32_t page_index)
 uint32_t
 pager_new()
 {
+	COVER("get_internal_entry");
+
 	if (!PAGER.in_transaction)
 	{
+		COVER("if_29");
 		return PAGE_ROOT;
 	}
 
@@ -486,6 +610,7 @@ pager_new()
 
 	if (page_index == 0)
 	{
+		COVER("if_30");
 		page_index = PAGER.root.page_counter++;
 		PAGER.root_dirty = true;
 	}
@@ -512,12 +637,14 @@ pager_mark_dirty(uint32_t page_index)
 {
 	if (page_index >= PAGER.root.page_counter || !PAGER.in_transaction)
 	{
+		COVER("if_31");
 		return;
 	}
 
 	if (!(hashset_contains(&PAGER.journaled_pages, page_index)) &&
 		!(hashset_contains(&PAGER.new_pages_in_transaction, page_index)))
 	{
+		COVER("if_32");
 		void *data = pager_get(page_index);
 		journal_page(page_index, data);
 		hashset_insert(&PAGER.journaled_pages, page_index);
@@ -525,6 +652,7 @@ pager_mark_dirty(uint32_t page_index)
 
 	if (hashmap_get(&PAGER.page_to_cache, page_index))
 	{
+		COVER("if_33");
 		PAGER.cache_meta[*hashmap_get(&PAGER.page_to_cache, page_index)].is_dirty = true;
 	}
 }
@@ -534,13 +662,18 @@ pager_delete(uint32_t page_index)
 {
 	if (page_index == PAGE_ROOT || page_index >= PAGER.root.page_counter || !PAGER.in_transaction)
 	{
+		COVER("if_34");
 		return;
 	}
 
-	pager_get(page_index);
+	get_internal(page_index);
 	pager_mark_dirty(page_index);
 
 	add_to_free_list(page_index);
+
+	uint32_t s1 = PAGER.free_pages_set.size;
+	build_free_pages_set();
+	assert(PAGER.free_pages_set.size == s1);
 }
 
 void
@@ -548,6 +681,7 @@ pager_begin_transaction()
 {
 	if (PAGER.in_transaction)
 	{
+		COVER("if_35");
 		return;
 	}
 
@@ -563,6 +697,7 @@ pager_commit()
 {
 	if (!PAGER.in_transaction)
 	{
+		COVER("if_36");
 		return;
 	}
 
@@ -585,6 +720,7 @@ pager_rollback()
 {
 	if (!PAGER.in_transaction)
 	{
+		COVER("if_37");
 		return;
 	}
 
@@ -592,9 +728,11 @@ pager_rollback()
 
 	if (journal_size >= PAGE_SIZE)
 	{
+		COVER("if_38");
 		os_file_seek(PAGER.journal_fd, PAGE_ROOT);
 		if (os_file_read(PAGER.journal_fd, &PAGER.root, PAGE_SIZE) == PAGE_SIZE)
 		{
+			COVER("if_39");
 			PAGER.root_dirty = true;
 			save_root();
 		}
@@ -605,6 +743,7 @@ pager_rollback()
 			os_file_seek(PAGER.journal_fd, pos);
 			if (os_file_read(PAGER.journal_fd, page_data, PAGE_SIZE) != PAGE_SIZE)
 			{
+				COVER("if_40");
 				break;
 			}
 
@@ -631,6 +770,7 @@ pager_sync()
 	{
 		if (PAGER.cache_meta[i].is_valid && PAGER.cache_meta[i].is_dirty)
 		{
+			COVER("if_41");
 			write_page_to_disk(PAGER.cache_meta[i].page_index, &PAGER.cache_data[i]);
 			PAGER.cache_meta[i].is_dirty = false;
 		}
@@ -665,9 +805,11 @@ pager_get_stats()
 	{
 		if (PAGER.cache_meta[i].is_valid)
 		{
+			COVER("if_42");
 			(data.cached_pages)++;
 			if (PAGER.cache_meta[i].is_dirty)
 			{
+				COVER("if_43");
 				(data.dirty_pages)++;
 			}
 		}
