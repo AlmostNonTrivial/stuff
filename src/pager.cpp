@@ -18,6 +18,9 @@ struct PagerArena
 #define JOURNAL_FILENAME_SIZE 256
 #define PAGE_ROOT			  0
 
+
+static_assert(MAX_CACHE_ENTRIES >= 3, "Cache size must be atleast 3");
+
 // Internal structures
 
 struct FreePage
@@ -538,9 +541,6 @@ pager_delete(uint32_t page_index)
 	add_to_free_list(page_index);
 	toggle_ordering();
 
-	auto x = PAGER.free_pages_set.size;
-	build_free_pages_set();
-	assert(x == PAGER.free_pages_set.size);
 
 }
 
