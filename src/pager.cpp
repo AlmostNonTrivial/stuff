@@ -1,5 +1,4 @@
 
-
 #include "pager.hpp"
 #include "arena.hpp"
 #include "os_layer.hpp"
@@ -18,7 +17,6 @@ struct PagerArena
 #define JOURNAL_FILENAME_SIZE 256
 #define PAGE_ROOT			  0
 
-
 static_assert(MAX_CACHE_ENTRIES >= 3, "Cache size must be atleast 3");
 
 // Internal structures
@@ -26,7 +24,6 @@ static_assert(MAX_CACHE_ENTRIES >= 3, "Cache size must be atleast 3");
 struct FreePage
 {
 	uint32_t index;
-	uint32_t next_free_page;
 	uint32_t prev_free_page;
 	uint32_t free_pointer;
 	uint32_t free_pages[FREE_PAGES_PER_FREE_PAGE];
@@ -39,6 +36,10 @@ struct RootPage
 	char	 padding[PAGE_SIZE - (sizeof(uint32_t) * 2)];
 };
 
+static_assert(PAGE_SIZE == sizeof(Page));
+static_assert(PAGE_SIZE == sizeof(RootPage));
+static_assert(PAGE_SIZE == sizeof(FreePage));
+
 struct CacheMetadata
 {
 	uint32_t page_index;
@@ -47,13 +48,6 @@ struct CacheMetadata
 	int32_t	 lru_next;
 	int32_t	 lru_prev;
 };
-
-bool ordering = true;
-
-
-void toggle_ordering() {
-    ordering = !ordering;
-}
 
 // Global pager state
 static struct
@@ -70,15 +64,15 @@ static struct
 	int32_t lru_head;
 	int32_t lru_tail;
 
-	bool in_transaction;
+	bool		in_transaction;
+	const char *data_file;
+	char		journal_file[JOURNAL_FILENAME_SIZE];
 
 	HashMap<uint32_t, uint32_t, PagerArena> page_to_cache;
 	HashSet<uint32_t, PagerArena>			free_pages_set;
 	HashSet<uint32_t, PagerArena>			journaled_pages;
 	HashSet<uint32_t, PagerArena>			new_pages_in_transaction;
 
-	const char *data_file;
-	char		journal_file[JOURNAL_FILENAME_SIZE];
 } PAGER = {.data_fd = OS_INVALID_HANDLE,
 		   .journal_fd = OS_INVALID_HANDLE,
 		   .root = {},
@@ -89,9 +83,11 @@ static struct
 		   .lru_tail = INVALID_SLOT,
 		   .in_transaction = false,
 		   .data_file = nullptr,
-		   .new_pages_in_transaction = {},
+		   .journal_file = NULL,
+		   .page_to_cache = {},
 		   .free_pages_set = {},
-		   .journaled_pages = {}};
+		   .journaled_pages = {},
+		   .new_pages_in_transaction = {}};
 
 // Internal functions implementation
 static void
@@ -143,8 +139,14 @@ static void
 lru_remove(int32_t slot)
 {
 	CacheMetadata *entry = &PAGER.cache_meta[slot];
-
-	PAGER.cache_meta[entry->lru_prev].lru_next = entry->lru_next;
+	if (entry->lru_prev != INVALID_SLOT)
+	{
+		PAGER.cache_meta[entry->lru_prev].lru_next = entry->lru_next;
+	}
+	else
+	{
+		PAGER.lru_head = entry->lru_next;
+	}
 	if (entry->lru_next != INVALID_SLOT)
 	{
 		PAGER.cache_meta[entry->lru_next].lru_prev = entry->lru_prev;
@@ -267,9 +269,8 @@ get_internal(uint32_t page_index)
 	if (hashmap_get(&PAGER.page_to_cache, page_index))
 	{
 		uint32_t slot = *hashmap_get(&PAGER.page_to_cache, page_index);
-		if(ordering) {
-			cache_move_to_head(slot);
-		}
+
+		cache_move_to_head(slot);
 
 		return &PAGER.cache_data[slot];
 	}
@@ -277,7 +278,10 @@ get_internal(uint32_t page_index)
 	uint32_t	   slot = cache_find_slot();
 	CacheMetadata *entry = &PAGER.cache_meta[slot];
 
-	read_page_from_disk(page_index, &PAGER.cache_data[slot]);
+	if (!read_page_from_disk(page_index, &PAGER.cache_data[slot]))
+	{
+		return nullptr;
+	}
 
 	entry->page_index = page_index;
 	entry->is_valid = true;
@@ -292,7 +296,7 @@ static uint32_t
 create_free_page(uint32_t prev_free_page, uint32_t page_to_free)
 {
 
-	// get_internal(page_to_free);
+	get_internal(page_to_free);
 
 	PAGER.root_dirty = true;
 
@@ -304,15 +308,7 @@ create_free_page(uint32_t prev_free_page, uint32_t page_to_free)
 
 	free->free_pointer = PAGE_ROOT;
 	free->prev_free_page = prev_free_page;
-	free->next_free_page = PAGE_ROOT;
 	free->index = page_to_free;
-
-	if (prev_free_page != PAGE_ROOT)
-	{
-		FreePage *prev_free = static_cast<FreePage *>(get_internal(prev_free_page));
-		pager_mark_dirty(prev_free_page);
-		prev_free->next_free_page = page_to_free;
-	}
 
 	return page_to_free;
 }
@@ -360,12 +356,7 @@ take_from_free_list()
 		uint32_t empty_free_page_index = PAGER.root.free_page;
 		PAGER.root.free_page = page->prev_free_page;
 		PAGER.root_dirty = true;
-		if (page->prev_free_page != PAGE_ROOT)
-		{
-			FreePage *prev_data = static_cast<FreePage *>(get_internal(page->prev_free_page));
-			pager_mark_dirty(page->prev_free_page);
-			prev_data->next_free_page = PAGE_ROOT;
-		}
+
 		hashset_delete(&PAGER.free_pages_set, empty_free_page_index);
 		return empty_free_page_index;
 	}
@@ -401,8 +392,6 @@ build_free_pages_set()
 	}
 }
 
-
-
 // Public API implementation
 bool
 pager_init(const char *filename)
@@ -420,7 +409,7 @@ pager_init(const char *filename)
 	if (journal_exists)
 	{
 		PAGER.in_transaction = true;
-		os_file_open(PAGER.journal_file, true, false);
+		PAGER.journal_fd = os_file_open(PAGER.journal_file, true, false);
 		pager_rollback();
 	}
 
@@ -465,8 +454,6 @@ pager_get(uint32_t page_index)
 uint32_t
 pager_new()
 {
-
-
 
 	if (!PAGER.in_transaction)
 	{
@@ -534,14 +521,9 @@ pager_delete(uint32_t page_index)
 		get_internal(PAGER.root.free_page);
 	}
 
-	toggle_ordering();
-
 	pager_mark_dirty(page_index);
 
 	add_to_free_list(page_index);
-	toggle_ordering();
-
-
 }
 
 void

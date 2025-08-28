@@ -5,7 +5,7 @@
 
 
 #define MAX_CACHE_ENTRIES 3
-#define FREE_PAGES_PER_FREE_PAGE ((PAGE_SIZE - (sizeof(uint32_t) * 4)) / sizeof(uint32_t))
+#define FREE_PAGES_PER_FREE_PAGE ((PAGE_SIZE - (sizeof(uint32_t) * 3)) / sizeof(uint32_t))
 struct PagerMeta {
 	uint32_t total_pages, cached_pages, dirty_pages, free_pages;
 };
@@ -16,6 +16,7 @@ struct Page
 	uint32_t index;
 	char data[PAGE_SIZE - sizeof(uint32_t)];
 };
+
 
 bool
 pager_init(const char *filename);
