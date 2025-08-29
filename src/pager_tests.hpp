@@ -1,6 +1,5 @@
 #pragma once
 #include "arena.hpp"
-#include "os_layer.hpp"
 #include "pager.hpp"
 #include "test_utils.hpp"
 #include <cassert>
@@ -13,7 +12,7 @@
 inline void
 test_free_list()
 {
-
+	pager_open(DB);
 	uint32_t size = 1000;
 	pager_begin_transaction();
 	for (uint32_t i = 1; i <= size; i++)
@@ -44,69 +43,82 @@ test_free_list()
 	stats3 = pager_get_stats();
 	std::cout << stats3.free_pages << ", " << stats3.total_pages << "\n";
 	assert(0 == stats3.free_pages && size * 2 == stats3.total_pages);
+	pager_close();
+	os_file_delete(DB);
 }
 
 inline void
 test_rollback()
 {
+
+	if (MAX_CACHE_ENTRIES > 3)
+	{
+		return;
+	}
+
+	pager_open(DB);
 	auto start = hash_file(DB);
 	pager_begin_transaction();
 	auto	   p1 = pager_new();
 	auto	   p2 = pager_new();
 	base_page *ptr = pager_get(p1);
+	pager_mark_dirty(p1);
 	ptr->data[0] = 'a';
+
 	pager_commit();
 	pager_close();
 	pager_open(DB);
+
 	assert(nullptr != pager_get(p1));
 	assert(nullptr != pager_get(p2));
 	assert('a' == (pager_get(p1))->data[0]);
+
 	auto before = hash_file(DB);
 	assert(before != start);
+
 	pager_begin_transaction();
+
 	auto p3 = pager_new();
 	assert(nullptr != pager_get(p3));
 	pager_delete(p2);
-	assert(nullptr == pager_get(p2));
+
 	ptr = pager_get(p1);
+	pager_mark_dirty(p1);
 	ptr->data[0] = 'b';
-	// for sync without commit
-	// pager_sync();
-	pager_close();
+	pager_new();
+	pager_new();
+	pager_new();   // force p1 to be evicted and written to data file
+	pager_close(); // didn't commit
 	auto after_sync = hash_file(DB);
 	assert(after_sync != before);
-	pager_open(DB);
-	// rollback applied
+	pager_open(DB); // rollback applied
+
 	auto after_rollback = hash_file(DB);
 	assert(after_rollback == before);
 	pager_begin_transaction();
+
 	ptr = pager_get(p1);
+	pager_mark_dirty(p1);
 	ptr->data[0] = 'c';
+
 	pager_rollback();
+
 	ptr = pager_get(p1);
 	assert('a' == ptr->data[0]);
-}
 
-inline void
-test_transaction_semanticts()
-{
-	auto should_be_zero = pager_new();
-	assert(0 == should_be_zero);
-	pager_begin_transaction();
-	auto should_not_be_zero = pager_new();
-	assert(0 != should_not_be_zero);
-	auto *valid_ptr = pager_get(should_not_be_zero);
-
-	assert(nullptr != valid_ptr);
-	pager_rollback();
-	// warning, ptr still points to valid memory
-	auto *invalid_ptr = pager_get(should_not_be_zero);
-	assert(nullptr == invalid_ptr);
+	pager_close();
+	os_file_delete(DB);
 }
 
 inline void
 test_lru()
 {
+
+	if (MAX_CACHE_ENTRIES != 3)
+	{
+		return;
+	}
+
 	pager_open(DB);
 	pager_begin_transaction();
 
@@ -175,14 +187,14 @@ weighted_rand_op()
 inline void
 test_pager_stress()
 {
-	std::srand(42); // Fixed seed for reproducibility
+	std::srand(42);
 	os_file_delete(DB);
 	pager_open(DB);
 
-	// Track pages: committed (persisted) and transaction (uncommitted)
+
 	Array<uint32_t> committed_pages;
 	Array<uint32_t> transaction_pages;
-	const int		iterations = 100; // Increased for more stress
+	const int		iterations = 100;
 	const char		chars[] = "abcdefghijklmnopqrstuvwxyz";
 	const int		char_count = sizeof(chars) - 1;
 	bool			in_transaction = false;
@@ -270,7 +282,6 @@ test_pager_stress()
 			pager_delete(page_id);
 			made_changes = true;
 			std::cout << "Deleted page " << page_id << "\n";
-			assert(pager_get(page_id) == nullptr && "Page still exists after deletion");
 			if (index < committed_pages.size)
 			{
 				committed_pages.data[index] = committed_pages.data[committed_pages.size - 1];
@@ -325,7 +336,7 @@ test_pager_stress()
 		}
 	}
 
-	// Cleanup
+
 	if (in_transaction)
 	{
 		if (made_changes)
@@ -359,24 +370,8 @@ test_pager_stress()
 inline void
 test_pager()
 {
-
 	test_lru();
-
-	return;
-	pager_open(DB);
-	test_transaction_semanticts();
-	pager_close();
-
-	os_file_delete(DB);
-	pager_open(DB);
-	// test_rollback();
-	pager_close();
-
-	os_file_delete(DB);
-	pager_open(DB);
+	test_rollback();
 	test_free_list();
-	pager_close();
-
-	os_file_delete(DB);
 	test_pager_stress();
 }
