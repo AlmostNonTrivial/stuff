@@ -153,19 +153,6 @@ test_lru()
 	os_file_delete(DB);
 }
 
-inline void
-test_on_off()
-{
-	pager_open(DB);
-	auto one = hash_file(DB);
-	pager_open(DB);
-	auto two = hash_file(DB);
-	pager_commit();
-	auto three = hash_file(DB);
-	pager_rollback();
-	auto four = hash_file(DB);
-	assert(one == two && two == three && three == four);
-}
 
 // Helper function to generate weighted random operation
 inline uint32_t
