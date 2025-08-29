@@ -1,8 +1,9 @@
 #pragma once
 #include <cstdint>
 #include "defs.hpp"
-#define PAGE_INVALID 0
 
+#define PAGE_INVALID 0
+#define MAX_CACHE_ENTRIES	  64
 
 /*
 ** BASE PAGE STRUCTURE
@@ -30,7 +31,7 @@ struct pager_meta
 
 bool
 pager_open(const char *filename);
-void *
+base_page *
 pager_get(uint32_t page_index);
 uint32_t
 pager_new();

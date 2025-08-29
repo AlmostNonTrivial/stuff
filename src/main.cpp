@@ -5,6 +5,6 @@
 
 int main()
 {
-    pager_tests();
+    test_pager();
     std::cout <<"tests passed\n";
 }

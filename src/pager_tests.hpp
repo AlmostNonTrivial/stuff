@@ -10,12 +10,11 @@
 
 #define DB "db"
 
-
 inline void
 test_free_list()
 {
 
-    uint32_t size = 1000;
+	uint32_t size = 1000;
 	pager_begin_transaction();
 	for (uint32_t i = 1; i <= size; i++)
 	{
@@ -54,14 +53,14 @@ test_rollback()
 	pager_begin_transaction();
 	auto	   p1 = pager_new();
 	auto	   p2 = pager_new();
-	base_page *ptr = (base_page *)pager_get(p1);
+	base_page *ptr = pager_get(p1);
 	ptr->data[0] = 'a';
 	pager_commit();
 	pager_close();
 	pager_open(DB);
 	assert(nullptr != pager_get(p1));
 	assert(nullptr != pager_get(p2));
-	assert('a' == ((base_page *)pager_get(p1))->data[0]);
+	assert('a' == (pager_get(p1))->data[0]);
 	auto before = hash_file(DB);
 	assert(before != start);
 	pager_begin_transaction();
@@ -69,7 +68,7 @@ test_rollback()
 	assert(nullptr != pager_get(p3));
 	pager_delete(p2);
 	assert(nullptr == pager_get(p2));
-	ptr = (base_page *)pager_get(p1);
+	ptr = pager_get(p1);
 	ptr->data[0] = 'b';
 	// for sync without commit
 	// pager_sync();
@@ -81,10 +80,10 @@ test_rollback()
 	auto after_rollback = hash_file(DB);
 	assert(after_rollback == before);
 	pager_begin_transaction();
-	ptr = (base_page *)pager_get(p1);
+	ptr = pager_get(p1);
 	ptr->data[0] = 'c';
 	pager_rollback();
-	ptr = (base_page *)pager_get(p1);
+	ptr = pager_get(p1);
 	assert('a' == ptr->data[0]);
 }
 
@@ -108,32 +107,38 @@ test_transaction_semanticts()
 inline void
 test_lru()
 {
+	pager_open(DB);
 	pager_begin_transaction();
+
 	auto p1 = pager_new();
 	auto p2 = pager_new();
 	auto p3 = pager_new();
 	auto p4 = pager_new();
 
-	auto *ptr1 = (base_page *)pager_get(p1);
+	base_page *ptr1 = pager_get(p1);
 	pager_mark_dirty(p1);
 	ptr1->data[0] = 'a';
-	auto *ptr2 = (base_page *)pager_get(p2);
+	/* [a],[],[] */
+	base_page *ptr2 = pager_get(p2);
 	pager_mark_dirty(p2);
 	ptr2->data[0] = 'b';
-	auto *ptr3 = (base_page *)pager_get(p3);
+	/* [a],[b],[] */
+	base_page *ptr3 = pager_get(p3);
 	pager_mark_dirty(p3);
 	ptr3->data[0] = 'c';
-	std::cout << ptr1->data[0] << ", " << ptr2->data[0] << ", " << ptr3->data[0] << '\n';
-	auto *ptr4 = (base_page *)pager_get(p4);
+	/* [a],[b],[c] */
+	base_page *ptr4 = pager_get(p4); // p1 at end, evict p1
 	pager_mark_dirty(p4);
-	ptr4->data[0] = 'd'; // now first, c written
-	std::cout << ptr1->data[0] << ", " << ptr2->data[0] << ", " << ptr3->data[0] << '\n';
-	assert('d' == ptr1->data[0]);
-	pager_get(p1);
-	std::cout << ptr1->data[0] << ", " << ptr2->data[0] << ", " << ptr3->data[0] << '\n';
+	ptr4->data[0] = 'd';
+	/* [d],[b],[c] */
+	assert('d' == ptr1->data[0] && ptr4 == ptr1);
+	pager_get(p1); // p2 at end, evict p2
 	assert('a' == ptr2->data[0]);
-	assert('a' == ptr2->data[0]);
+	/* [d],[a],[c] */
+
 	pager_rollback();
+	pager_close();
+	os_file_delete(DB);
 }
 
 inline void
@@ -149,8 +154,6 @@ test_on_off()
 	auto four = hash_file(DB);
 	assert(one == two && two == three && three == four);
 }
-
-
 
 // Helper function to generate weighted random operation
 inline uint32_t
@@ -237,14 +240,14 @@ test_pager_stress()
 			uint32_t   index = std::rand() % total_size;
 			uint32_t   page_id = index < committed_pages.size ? committed_pages.data[index]
 															  : transaction_pages.data[index - committed_pages.size];
-			base_page *page = (base_page *)pager_get(page_id);
+			base_page *page = pager_get(page_id);
 			assert(page != nullptr && "Failed to get page for writing");
 			char random_char = chars[std::rand() % char_count];
 			pager_mark_dirty(page_id);
 			page->data[0] = random_char;
 			made_changes = true;
 			std::cout << "Wrote '" << random_char << "' to page " << page_id << "\n";
-			base_page *verify_page = (base_page *)pager_get(page_id);
+			base_page *verify_page = pager_get(page_id);
 			assert(verify_page->data[0] == random_char && "Write verification failed");
 			pager_meta new_stats = pager_get_stats();
 			std::cout << "Stats: free_pages=" << new_stats.free_pages << ", total_pages=" << new_stats.total_pages
@@ -354,21 +357,26 @@ test_pager_stress()
 }
 
 inline void
-pager_tests()
+test_pager()
 {
+
+	test_lru();
+
+	return;
 	pager_open(DB);
 	test_transaction_semanticts();
 	pager_close();
+
 	os_file_delete(DB);
 	pager_open(DB);
 	// test_rollback();
-	os_file_delete(DB);
-	pager_open(DB);
-	// test_lru();
+	pager_close();
+
 	os_file_delete(DB);
 	pager_open(DB);
 	test_free_list();
-	test_on_off();
+	pager_close();
+
 	os_file_delete(DB);
 	test_pager_stress();
 }

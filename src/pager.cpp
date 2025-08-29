@@ -75,7 +75,6 @@ struct pager_arena
 #define JOURNAL_POSTFIX		  "%s-journal"
 #define JOURNAL_FILENAME_SIZE FILENAME_SIZE + 12
 #define ROOT_PAGE_INDEX		  0U
-#define MAX_CACHE_ENTRIES	  64
 
 /* Minimum 3 ensures the lru system works */
 static_assert(MAX_CACHE_ENTRIES >= 3, "Cache size must be at least 3 for proper operation");
@@ -89,8 +88,8 @@ static_assert(MAX_CACHE_ENTRIES >= 3, "Cache size must be at least 3 for proper 
 */
 struct free_page
 {
-	uint32_t index;                /* Self-reference for journal recovery */
-	uint32_t previous_free_page;   /* Forms singly-linked list (0 = end) */
+	uint32_t index;				 /* Self-reference for journal recovery */
+	uint32_t previous_free_page; /* Forms singly-linked list (0 = end) */
 	uint8_t	 padding[PAGE_SIZE - sizeof(uint32_t) * 2];
 };
 
@@ -104,11 +103,10 @@ struct free_page
 */
 struct root_page
 {
-	uint32_t page_counter;    /* Next page ID to allocate (high water mark) */
-	uint32_t free_page_head;  /* Head of free list (0 = empty list) */
+	uint32_t page_counter;	 /* Next page ID to allocate (high water mark) */
+	uint32_t free_page_head; /* Head of free list (0 = empty list) */
 	char	 padding[PAGE_SIZE - (sizeof(uint32_t) * 2)];
 };
-
 
 /*
 ** Critical invariants to ensure our reinterpret_casts are safe
@@ -130,11 +128,11 @@ static_assert(PAGE_SIZE == sizeof(free_page), "free_page size mismatch");
 */
 struct cache_metadata
 {
-	uint32_t page_index;      /* Which page is cached in this slot */
-	bool	 is_dirty;        /* Needs write-back on eviction? */
-	bool	 is_valid;        /* Is this slot currently in use? */
-	int32_t	 lru_next;        /* Next slot in LRU order (-1 = end) */
-	int32_t	 lru_prev;        /* Previous slot in LRU order (-1 = end) */
+	uint32_t page_index;  /* Which page is cached in this slot */
+	bool	 is_dirty;	  /* Needs write-back on eviction? */
+	bool	 is_occupied; /* Is this slot currently in use? */
+	int32_t	 lru_next;	  /* Next slot in LRU order (-1 = end) */
+	int32_t	 lru_prev;	  /* Previous slot in LRU order (-1 = end) */
 };
 
 /*
@@ -153,12 +151,12 @@ static struct
 	root_page root;
 
 	/* Page cache with parallel arrays pattern for better memory layout */
-	cache_metadata cache_meta[MAX_CACHE_ENTRIES];  /* LRU and state tracking */
-	base_page	   cache_data[MAX_CACHE_ENTRIES];  /* Actual page data */
+	cache_metadata cache_meta[MAX_CACHE_ENTRIES]; /* LRU and state tracking */
+	base_page	   cache_data[MAX_CACHE_ENTRIES]; /* Actual page data */
 
 	/* LRU list endpoints for O(1) access to head (MRU) and tail (LRU) */
-	int32_t lru_head;  /* Most recently used slot */
-	int32_t lru_tail;  /* Least recently used slot (eviction candidate) */
+	int32_t lru_head; /* Most recently used slot */
+	int32_t lru_tail; /* Least recently used slot (eviction candidate) */
 
 	/* Transaction state */
 	bool in_transaction;
@@ -174,14 +172,9 @@ static struct
 	**                         (already saved or newly created)
 	*/
 	hash_map<uint32_t, uint32_t, pager_arena> page_to_cache;
-	hash_set<uint32_t, pager_arena>		   free_pages_set;
-	hash_set<uint32_t, pager_arena>		   journaled_or_new_pages;
+	hash_set<uint32_t, pager_arena>			  journaled_or_new_pages;
 
 } PAGER = {};
-
-
-bool
-mark_dirty_internal(uint32_t page_index);
 
 static void
 write_page_to_disk(uint32_t page_index, const void *data)
@@ -200,7 +193,7 @@ read_page_from_disk(uint32_t page_index, void *data)
 /*
 ** Write a page to the journal file.
 **
-** Algorithm:
+**
 **   1. Mark page as journaled in the journaled_or_new_pages set
 **   2. If root page, write at offset 0
 **   3. Otherwise, append to end of journal
@@ -292,7 +285,7 @@ cache_move_to_head(int32_t slot)
 /*
 ** Evict the least recently used page from the cache.
 **
-** Algorithm:
+**
 **   1. Select the tail of the LRU list
 **   2. If page is dirty, write to disk
 **   3. Remove from page_to_cache map
@@ -315,7 +308,7 @@ cache_evict_lru_entry()
 
 	lru_remove_from_list(slot);
 
-	entry->is_valid = false;
+	entry->is_occupied = false;
 	entry->is_dirty = false;
 	entry->page_index = ROOT_PAGE_INDEX;
 
@@ -327,7 +320,7 @@ cache_find_free_slot()
 {
 	for (uint32_t i = 0; i < MAX_CACHE_ENTRIES; i++)
 	{
-		if (!PAGER.cache_meta[i].is_valid)
+		if (!PAGER.cache_meta[i].is_occupied)
 		{
 			return i;
 		}
@@ -343,12 +336,11 @@ cache_reset()
 	{
 		PAGER.cache_meta[i].page_index = ROOT_PAGE_INDEX;
 		PAGER.cache_meta[i].is_dirty = false;
-		PAGER.cache_meta[i].is_valid = false;
+		PAGER.cache_meta[i].is_occupied = false;
 		PAGER.cache_meta[i].lru_next = INVALID_SLOT;
 		PAGER.cache_meta[i].lru_prev = INVALID_SLOT;
 	}
 
-	hashset_clear(&PAGER.free_pages_set);
 	hashset_clear(&PAGER.journaled_or_new_pages);
 	hashmap_clear(&PAGER.page_to_cache);
 
@@ -359,7 +351,7 @@ cache_reset()
 /*
 ** Fetch a page into cache.
 **
-** Algorithm:
+**
 **   1. Check if page is already cached via page_to_cache map
 **   2. If cached, move to head of LRU and return
 **   3. Otherwise find a free cache slot (may evict)
@@ -368,7 +360,7 @@ cache_reset()
 **   6. Insert into page_to_cache map
 **   7. Add to head of LRU list
 */
-static void *
+static base_page *
 cache_get_or_load(uint32_t page_index)
 {
 	uint32_t *slot_ptr = hashmap_get(&PAGER.page_to_cache, page_index);
@@ -385,7 +377,7 @@ cache_get_or_load(uint32_t page_index)
 	read_page_from_disk(page_index, &PAGER.cache_data[slot]);
 
 	entry->page_index = page_index;
-	entry->is_valid = true;
+	entry->is_occupied = true;
 	entry->is_dirty = false;
 
 	hashmap_insert(&PAGER.page_to_cache, page_index, slot);
@@ -397,7 +389,7 @@ cache_get_or_load(uint32_t page_index)
 /*
 ** Add a page to the free list.
 **
-** Algorithm:
+**
 **   1. Ensure page is loaded
 **   2. Mark it dirty; it will be written to the journal
 **   3. Reinterpret the page as a free_page, the index will be the same
@@ -410,40 +402,36 @@ add_page_to_free_list(uint32_t page_index)
 {
 	free_page *free_page_ptr = reinterpret_cast<free_page *>(cache_get_or_load(page_index));
 
-	mark_dirty_internal(page_index);
+	pager_mark_dirty(page_index);
 
 	uint32_t current_free_page = PAGER.root.free_page_head;
 	/* free_page_ptr->index already == page_index */
 	free_page_ptr->previous_free_page = current_free_page;
 
 	PAGER.root.free_page_head = page_index;
-
-	hashset_insert(&PAGER.free_pages_set, page_index);
 }
 
 /*
 ** Take a page from the free list.
 **
-** Algorithm:
+**
 **   1. Check if free list is empty, return 0 if so
 **   2. Load the current head of free list
 **   3. Update root to point to the current's previous_free_page
-**   4. Remove from free_pages_set
 **   5. Return the reclaimed page index
 */
 static uint32_t
 take_page_from_free_list()
 {
-	if (PAGER.free_pages_set.size == 0 || PAGER.root.free_page_head == 0)
+	if (PAGER.root.free_page_head == 0)
 	{
 		return ROOT_PAGE_INDEX;
 	}
 
-	free_page *current_free_page = static_cast<free_page *>(cache_get_or_load(PAGER.root.free_page_head));
-	mark_dirty_internal(PAGER.root.free_page_head);
+	free_page *current_free_page = reinterpret_cast<free_page *>(cache_get_or_load(PAGER.root.free_page_head));
+	pager_mark_dirty(PAGER.root.free_page_head);
 
 	PAGER.root.free_page_head = current_free_page->previous_free_page;
-	hashset_delete(&PAGER.free_pages_set, current_free_page->index);
 
 	return current_free_page->index;
 }
@@ -451,34 +439,34 @@ take_page_from_free_list()
 /*
 ** Rebuild free page set by walking the linked list.
 **
-** Algorithm:
+**
 **   1. Start from root.free_page_head
 **   2. Load each free page
 **   3. Add to free_pages_set
 **   4. Follow previous_free_page link
 **   5. Stop when reaching ROOT_PAGE_INDEX (sentinel)
 */
-static void
-rebuild_free_pages_set()
+static uint32_t
+count_free_pages()
 {
+	uint32_t count = 0;
 	uint32_t current_free_page_index = PAGER.root.free_page_head;
-	hashset_clear(&PAGER.free_pages_set);
-
-	while (current_free_page_index != ROOT_PAGE_INDEX)
+	while (ROOT_PAGE_INDEX != current_free_page_index)
 	{
-
-		free_page *free_page_ptr = static_cast<free_page *>(cache_get_or_load(current_free_page_index));
-
-		hashset_insert(&PAGER.free_pages_set, current_free_page_index);
+		free_page *free_page_ptr = reinterpret_cast<free_page *>(cache_get_or_load(current_free_page_index));
 
 		current_free_page_index = free_page_ptr->previous_free_page;
+
+		count++;
 	}
+
+	return count;
 }
 
 /*
 ** Open a database file.
 **
-** Algorithm:
+**
 **   1. Initialize arena allocator, it will reset and decommit if already initialised
 **   2. Open data file (create if needed)
 **   3. Check for journal file (crash recovery)
@@ -528,7 +516,6 @@ pager_open(const char *filename)
 	if (exists)
 	{
 		read_page_from_disk(ROOT_PAGE_INDEX, &PAGER.root);
-		rebuild_free_pages_set();
 	}
 	else
 	{
@@ -543,21 +530,16 @@ pager_open(const char *filename)
 /*
 ** Get a page for reading/writing.
 **
-** Algorithm:
+**
 **   1. Validate page index is in valid range
 **   2. Check page is not root (internal only)
 **   3. Check page is not in free list
 **   4. Load page into cache and return pointer to cache memory
 */
-void *
+base_page *
 pager_get(uint32_t page_index)
 {
 	if (page_index >= PAGER.root.page_counter || page_index == ROOT_PAGE_INDEX)
-	{
-		return nullptr;
-	}
-
-	if (hashset_contains(&PAGER.free_pages_set, page_index))
 	{
 		return nullptr;
 	}
@@ -568,7 +550,7 @@ pager_get(uint32_t page_index)
 /*
 ** Allocate a new page.
 **
-** Algorithm:
+**
 **   1. Verify transaction is active
 **   2. Try to reclaim a page from free list
 **   3. If no free pages, allocate new page index
@@ -600,7 +582,7 @@ pager_new()
 	PAGER.cache_data[slot].index = page_index;
 
 	entry->page_index = page_index;
-	entry->is_valid = true;
+	entry->is_occupied = true;
 	entry->is_dirty = true;
 
 	hashmap_insert(&PAGER.page_to_cache, page_index, slot);
@@ -608,18 +590,30 @@ pager_new()
 
 	return page_index;
 }
-
 /*
-** Mark a page as modified (internal).
+** Mark a page as modified.
 **
-** Algorithm:
+** NOTE:
+** This must be called BEFORE modifying the page data, so the pre-modified data is journaled.
+**
+**
+**
+**   1. Validate page index and transaction state
+**   2. Ensure page is not free
+**   3. Call internal mark dirty
 **   1. If page not yet journaled, write to journal
 **   2. Mark in journaled_or_new_pages set
 **   3. If cached, set dirty flag
 */
+
 bool
-mark_dirty_internal(uint32_t page_index)
+pager_mark_dirty(uint32_t page_index)
 {
+	if (page_index >= PAGER.root.page_counter || !PAGER.in_transaction)
+	{
+		return false;
+	}
+
 	if (!hashset_contains(&PAGER.journaled_or_new_pages, page_index))
 	{
 		journal_write_page(page_index, cache_get_or_load(page_index));
@@ -635,37 +629,9 @@ mark_dirty_internal(uint32_t page_index)
 }
 
 /*
-** Mark a page as modified.
-**
-** NOTE:
-** This must be called BEFORE modifying the page data, so the pre-modified data is journaled.
-**
-**
-** Algorithm:
-**   1. Validate page index and transaction state
-**   2. Ensure page is not free
-**   3. Call internal mark dirty
-*/
-bool
-pager_mark_dirty(uint32_t page_index)
-{
-	if (page_index >= PAGER.root.page_counter || !PAGER.in_transaction)
-	{
-		return false;
-	}
-
-	if (hashset_contains(&PAGER.free_pages_set, page_index))
-	{
-		return false;
-	}
-
-	return mark_dirty_internal(page_index);
-}
-
-/*
 ** Delete a page.
 **
-** Algorithm:
+**
 **   1. Validate page can be deleted (not root, valid index, not already free)
 **   2. Verify transaction is active
 **   3. Add page to free list
@@ -678,11 +644,6 @@ pager_delete(uint32_t page_index)
 		return false;
 	}
 
-	if (hashset_contains(&PAGER.free_pages_set, page_index))
-	{
-		return false;
-	}
-
 	add_page_to_free_list(page_index);
 
 	return true;
@@ -691,7 +652,7 @@ pager_delete(uint32_t page_index)
 /*
 ** Begin a transaction.
 **
-** Algorithm:
+**
 **   1. Check not already in transaction
 **   2. Create journal file
 **   3. Write root page to journal
@@ -721,7 +682,7 @@ pager_begin_transaction()
 /*
 ** Commit a transaction.
 **
-** Algorithm:
+**
 **   1. Write all dirty cached pages to disk
 **   2. Write root page with updated metadata
 **   3. Sync data file
@@ -738,7 +699,7 @@ pager_commit()
 
 	for (int32_t i = 0; i < MAX_CACHE_ENTRIES; i++)
 	{
-		if (PAGER.cache_meta[i].is_valid && PAGER.cache_meta[i].is_dirty)
+		if (PAGER.cache_meta[i].is_occupied && PAGER.cache_meta[i].is_dirty)
 		{
 			write_page_to_disk(PAGER.cache_meta[i].page_index, &PAGER.cache_data[i]);
 			PAGER.cache_meta[i].is_dirty = false;
@@ -766,7 +727,7 @@ pager_commit()
 ** The root page always goes at offset 0 in the journal, other pages, can simply be read back
 ** to front as they contain their own index in the data file
 **
-** Algorithm:
+**
 **   1. Read root page from journal
 **   2. Restore root to disk
 **   3. Read each journaled page and restore to original location
@@ -815,7 +776,7 @@ pager_rollback()
 
 	cache_reset();
 	arena::reset_and_decommit<pager_arena>();
-	rebuild_free_pages_set();
+
 	PAGER.in_transaction = false;
 
 	return true;
@@ -838,14 +799,14 @@ pager_get_stats()
 	pager_meta stats;
 
 	stats.total_pages = PAGER.root.page_counter - 1;
-	stats.free_pages = PAGER.free_pages_set.size;
+	stats.free_pages = count_free_pages();
 
 	stats.cached_pages = 0;
 	stats.dirty_pages = 0;
 
 	for (int32_t i = 0; i < MAX_CACHE_ENTRIES; i++)
 	{
-		if (PAGER.cache_meta[i].is_valid)
+		if (PAGER.cache_meta[i].is_occupied)
 		{
 			stats.cached_pages++;
 			if (PAGER.cache_meta[i].is_dirty)
