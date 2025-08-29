@@ -19,7 +19,8 @@
 **
 ** Free List: Deleted pages are linked into a singly-linked free list, with
 ** the head pointer stored in the root page. New allocations preferentially
-** reuse free pages before growing the file.
+** reuse free pages before growing the file. Note that free pages remain
+** accessible - the caller is responsible for not using deleted pages.
 **
 ** Transactions: The pager implements transactions using a write-ahead journal.
 ** Before modifying a page, its original content is saved to a journal file.
@@ -167,12 +168,11 @@ static struct
 	** Acceleration structures:
 	**
 	** page_to_cache: O(1) lookup of "is page X cached, and where?"
-	** free_pages_set: O(1) check of "is page X free?" without walking list
 	** journaled_or_new_pages: Track pages that don't need journaling
 	**                         (already saved or newly created)
 	*/
 	hash_map<uint32_t, uint32_t, pager_arena> page_to_cache;
-	hash_set<uint32_t, pager_arena>			  journaled_or_new_pages;
+	hash_set<uint32_t, pager_arena>		   journaled_or_new_pages;
 
 } PAGER = {};
 
@@ -393,9 +393,8 @@ cache_get_or_load(uint32_t page_index)
 **   1. Ensure page is loaded
 **   2. Mark it dirty; it will be written to the journal
 **   3. Reinterpret the page as a free_page, the index will be the same
-**   previous_free_page as the current
-**   4. Update root to point to new head
-**   5. Add to free_pages_set
+**   4. Set previous_free_page to the current free list head
+**   5. Update root to point to new head
 */
 static void
 add_page_to_free_list(uint32_t page_index)
@@ -415,9 +414,10 @@ add_page_to_free_list(uint32_t page_index)
 ** Take a page from the free list.
 **
 **
-**   1. Check if free list is empty, return 0 if so
+**   1. Check if free list is empty (head == 0), return 0 if so
 **   2. Load the current head of free list
-**   3. Update root to point to the current's previous_free_page
+**   3. Mark it dirty since we're modifying it
+**   4. Update root to point to the current's previous_free_page
 **   5. Return the reclaimed page index
 */
 static uint32_t
@@ -428,23 +428,25 @@ take_page_from_free_list()
 		return ROOT_PAGE_INDEX;
 	}
 
-	free_page *current_free_page = reinterpret_cast<free_page *>(cache_get_or_load(PAGER.root.free_page_head));
-	pager_mark_dirty(PAGER.root.free_page_head);
+	uint32_t current_index = PAGER.root.free_page_head;
+	free_page *current_free_page = reinterpret_cast<free_page *>(cache_get_or_load(current_index));
+	pager_mark_dirty(current_index);
 
 	PAGER.root.free_page_head = current_free_page->previous_free_page;
 
-	return current_free_page->index;
+	return current_index;
 }
 
 /*
-** Rebuild free page set by walking the linked list.
+** Count free pages by walking the linked list.
 **
+** NOTE: This is O(n) in the number of free pages, which could be
+** expensive for large databases with many free pages.
 **
 **   1. Start from root.free_page_head
 **   2. Load each free page
-**   3. Add to free_pages_set
-**   4. Follow previous_free_page link
-**   5. Stop when reaching ROOT_PAGE_INDEX (sentinel)
+**   3. Follow previous_free_page link
+**   4. Stop when reaching ROOT_PAGE_INDEX (sentinel)
 */
 static uint32_t
 count_free_pages()
@@ -471,7 +473,7 @@ count_free_pages()
 **   2. Open data file (create if needed)
 **   3. Check for journal file (crash recovery)
 **   4. If journal exists, rollback incomplete transaction
-**   5. If existing database, load root page and rebuild free set
+**   5. If existing database, load root page
 **   6. If new database, initialize root page
 */
 bool
@@ -530,11 +532,12 @@ pager_open(const char *filename)
 /*
 ** Get a page for reading/writing.
 **
+** NOTE: Free pages remain accessible - it's the caller's responsibility
+** to track which pages are allocated vs free.
 **
 **   1. Validate page index is in valid range
 **   2. Check page is not root (internal only)
-**   3. Check page is not in free list
-**   4. Load page into cache and return pointer to cache memory
+**   3. Load page into cache and return pointer to cache memory
 */
 base_page *
 pager_get(uint32_t page_index)
@@ -597,15 +600,11 @@ pager_new()
 ** This must be called BEFORE modifying the page data, so the pre-modified data is journaled.
 **
 **
-**
 **   1. Validate page index and transaction state
-**   2. Ensure page is not free
-**   3. Call internal mark dirty
-**   1. If page not yet journaled, write to journal
-**   2. Mark in journaled_or_new_pages set
-**   3. If cached, set dirty flag
+**   2. If page not yet journaled, write to journal
+**   3. Mark in journaled_or_new_pages set
+**   4. If cached, set dirty flag
 */
-
 bool
 pager_mark_dirty(uint32_t page_index)
 {
@@ -632,7 +631,7 @@ pager_mark_dirty(uint32_t page_index)
 ** Delete a page.
 **
 **
-**   1. Validate page can be deleted (not root, valid index, not already free)
+**   1. Validate page can be deleted (not root, valid index)
 **   2. Verify transaction is active
 **   3. Add page to free list
 */
@@ -724,8 +723,8 @@ pager_commit()
 ** Rollback a transaction.
 **
 ** NOTE:
-** The root page always goes at offset 0 in the journal, other pages, can simply be read back
-** to front as they contain their own index in the data file
+** The root page always goes at offset 0 in the journal, other pages can simply be read
+** sequentially as they contain their own index in the data file
 **
 **
 **   1. Read root page from journal
@@ -733,7 +732,7 @@ pager_commit()
 **   3. Read each journaled page and restore to original location
 **   4. Truncate file to remove any newly allocated pages
 **   5. Delete journal
-**   6. Reset cache and rebuild free set (inefficient, but simpler)
+**   6. Reset cache
 */
 bool
 pager_rollback()
