@@ -48,7 +48,6 @@
 
 #include "pager.hpp"
 #include "arena.hpp"
-#include "defs.hpp"
 #include "os_layer.hpp"
 #include <cstddef>
 #include <cstdint>
@@ -110,21 +109,6 @@ struct root_page
 	char	 padding[PAGE_SIZE - (sizeof(uint32_t) * 2)];
 };
 
-/*
-** BASE PAGE STRUCTURE
-**
-** Generic page layout used for all data pages. A page knowing it's own
-** index allows us to append them in arbitrary positions in the journal,
-** and rollback safely
-**
-** This is the "type" that free_page and other page types can be cast from,
-** since they all share the index field at offset 0.
-*/
-struct base_page
-{
-	uint32_t index;           /* Page's position in the file (self-identifying) */
-	char	 data[PAGE_SIZE - sizeof(uint32_t)];
-};
 
 /*
 ** Critical invariants to ensure our reinterpret_casts are safe
