@@ -5,3 +5,7 @@
 
 array<VMInstruction, QueryArena>
 build_from_ast(Statement *ast);
+
+
+
+void test_ephemeral_with_builder() ;

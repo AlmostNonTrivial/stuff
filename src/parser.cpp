@@ -529,7 +529,7 @@ parse_primary_expr(Parser *parser)
 		lexer_next_token(parser->lexer);
 		Expr *expr = (Expr *)Arena<ParserArena>::alloc(sizeof(Expr));
 		expr->type = EXPR_LITERAL;
-		expr->lit_type = TYPE_8;
+		expr->lit_type = TYPE_4;
 
 		char *num_str = (char *)Arena<ParserArena>::alloc(token.length + 1);
 		memcpy(num_str, token.text, token.length);
@@ -554,7 +554,7 @@ parse_primary_expr(Parser *parser)
 		lexer_next_token(parser->lexer);
 		Expr *expr = (Expr *)Arena<ParserArena>::alloc(sizeof(Expr));
 		expr->type = EXPR_LITERAL;
-		expr->lit_type = TYPE_256;
+		expr->lit_type = TYPE_32;
 		expr->str_val = intern_string(token.text, token.length);
 		return expr;
 	}
@@ -1248,18 +1248,18 @@ parse_data_type(Parser *parser)
 				if (len <= 32)
 					return TYPE_32;
 				else
-					return TYPE_256;
+					return TYPE_256;  // Only TYPE_256 for explicitly large sizes
 			}
 			consume_token(parser, TOKEN_RPAREN);
 		}
-		return TYPE_256;
+		return TYPE_32;  // Default VARCHAR to TYPE_32
 	}
 	if (consume_keyword(parser, "TEXT"))
 	{
-		return TYPE_256;
+		return TYPE_32;  // Change TEXT default to TYPE_32
 	}
 
-	return TYPE_256;
+	return TYPE_32;  // Default to TYPE_32 instead of TYPE_256
 }
 
 CreateIndexStmt *

@@ -144,7 +144,10 @@ insert_master_entry(const char *type, const char *name, const char *tbl_name, ui
 
 	// Parse and execute (without triggering recursive catalog updates)
 	auto stmts = parse_sql(buffer);
+
 	assert(0!=stmts->size);
+		print_ast(stmts->data[0]);
+
 
 	array<VMInstruction, QueryArena> program = build_from_ast(stmts->data[0]);
 	vm_execute(program.data, program.size, &ctx);
@@ -474,7 +477,7 @@ execute(const char *sql)
 
 		// Handle auto-transaction for DML commands
 		bool auto_transaction = false;
-		if (category == CMD_DML && stmt->type != STMT_SELECT&& !executor_state.in_transaction)
+		if (category == CMD_DML && stmt->type != STMT_SELECT && !executor_state.in_transaction)
 		{
 			execute_begin();
 			auto_transaction = true;
@@ -542,6 +545,144 @@ execute(const char *sql)
 
 }
 
+
+
+
+
+static CommandCategory get_program_category(ProgramType type) {
+    switch (type) {
+        case PROG_DDL_CREATE_TABLE:
+        case PROG_DDL_CREATE_INDEX:
+        case PROG_DDL_DROP_TABLE:
+        case PROG_DDL_DROP_INDEX:
+            return CMD_DDL;
+
+        case PROG_DML_SELECT:
+        case PROG_DML_INSERT:
+        case PROG_DML_UPDATE:
+        case PROG_DML_DELETE:
+            return CMD_DML;
+
+        case PROG_TCL_BEGIN:
+        case PROG_TCL_COMMIT:
+        case PROG_TCL_ROLLBACK:
+            return CMD_TCL;
+
+        default:
+            return CMD_DML;
+    }
+}
+
+static VM_RESULT execute_compiled_ddl(CompiledProgram* prog) {
+    // DDL needs special handling - use the AST node if provided
+    if (prog->ast_node) {
+        switch (prog->type) {
+            case PROG_DDL_CREATE_TABLE:
+                return execute_create_table((CreateTableStmt*)prog->ast_node);
+            case PROG_DDL_CREATE_INDEX:
+                return execute_create_index((CreateIndexStmt*)prog->ast_node);
+            case PROG_DDL_DROP_TABLE:
+                return execute_drop_table((DropTableStmt*)prog->ast_node);
+            case PROG_DDL_DROP_INDEX:
+                return execute_drop_index((DropIndexStmt*)prog->ast_node);
+            default:
+                break;
+        }
+    }
+    // Fallback to VM execution if no AST node
+    return vm_execute(prog->instructions.data, prog->instructions.size, &ctx);
+}
+
+static VM_RESULT execute_compiled_dml(CompiledProgram* prog) {
+    return vm_execute(prog->instructions.data, prog->instructions.size, &ctx);
+}
+
+static VM_RESULT execute_compiled_tcl(CompiledProgram* prog) {
+    switch (prog->type) {
+        case PROG_TCL_BEGIN:
+            return execute_begin();
+        case PROG_TCL_COMMIT:
+            return execute_commit();
+        case PROG_TCL_ROLLBACK:
+            return execute_rollback();
+        default:
+            return ERR;
+    }
+}
+
+void execute_programs(CompiledProgram* programs, size_t program_count) {
+    if (!executor_state.initialized) {
+        printf("Error: Executor not initialized\n");
+        return;
+    }
+
+    for (size_t i = 0; i < program_count; i++) {
+        CompiledProgram* prog = &programs[i];
+
+        if (_debug) {
+            printf("Executing pre-compiled program %zu (type=%d)\n", i, prog->type);
+        }
+
+        VM_RESULT result = OK;
+        CommandCategory category = get_program_category(prog->type);
+
+        // Handle auto-transaction for DML commands (except SELECT)
+        bool auto_transaction = false;
+        if (category == CMD_DML &&
+            prog->type != PROG_DML_SELECT &&
+            !executor_state.in_transaction) {
+            execute_begin();
+            auto_transaction = true;
+        }
+
+        // DDL commands also need a transaction
+        if (category == CMD_DDL && !executor_state.in_transaction) {
+            execute_begin();
+            auto_transaction = true;
+        }
+
+        // Dispatch based on category
+        switch (category) {
+            case CMD_DDL:
+                result = execute_compiled_ddl(prog);
+                break;
+
+            case CMD_DML:
+                result = execute_compiled_dml(prog);
+                break;
+
+            case CMD_TCL:
+                result = execute_compiled_tcl(prog);
+                break;
+
+            default:
+                printf("Error: Unknown command category\n");
+                result = ERR;
+        }
+
+        // Handle auto-transaction completion
+        if (auto_transaction) {
+            if (result == OK) {
+                execute_commit();
+            } else {
+                execute_rollback();
+            }
+        }
+
+        // Handle errors
+        if (result != OK) {
+            if (executor_state.in_transaction && !auto_transaction) {
+                printf("Error occurred in transaction, rolling back\n");
+                execute_rollback();
+            }
+            break; // Stop processing remaining programs
+        }
+    }
+
+    // Clean up arenas just like execute() does
+    arena::reset_and_decommit<QueryArena>();
+    arena::reset_and_decommit<ParserArena>();
+}
 
 void
 executor_shutdown()

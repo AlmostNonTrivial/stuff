@@ -78,7 +78,7 @@ struct VmCursor
 	}
 
 	void
-	open_ephemeral(const RecordLayout &ephemeral_layout)
+	open_ephemeral(const RecordLayout &ephemeral_layout, MemoryContext*ctx)
 	{
 		type = EPHEMERAL;
 		layout = ephemeral_layout;
@@ -86,7 +86,9 @@ struct VmCursor
 		storage.mem_tree = memtree_create( key_type, layout.record_size);
 		cursor.mem.tree = &storage.mem_tree;
 		cursor.mem.state = MemCursor::INVALID;
+		cursor.mem.ctx = ctx;
 	}
+
 
 	void
 	open_blob(MemoryContext *ctx)
@@ -672,7 +674,7 @@ step()
 		if (is_ephemeral)
 		{
 			RecordLayout *layout = Opcodes::Open::ephemeral_schema(*inst);
-			cursor.open_ephemeral(*layout);
+			cursor.open_ephemeral(*layout, VM.ctx);
 			if (_debug)
 			{
 				printf("=> Opened ephemeral cursor %d", cursor_id);
