@@ -1,328 +1,855 @@
-#include "arena.hpp"
-#include <cstdint>
-#include <random>
-#include <chrono>
-#include <unordered_map>
+#include "parser.hpp"
 #include <cassert>
-#include <vector>
+#include <cstring>
+#include <cstdio>
 
-// Structure to hold operation data for replay
-struct Operation {
-    enum Type { INSERT, LOOKUP, DELETE, UPDATE };
-    Type type;
-    int key_idx;
-    uint32_t value;
-};
-
-void performance_comparison_test() {
-    printf("=== STRING MAP vs STD::UNORDERED_MAP PERFORMANCE COMPARISON ===\n\n");
-
-    // Generate test strings
-    const int POOL_SIZE = 10000;
-    std::vector<std::string> string_pool;
-    string_pool.reserve(POOL_SIZE);
-
-    std::mt19937 rng(12345);
-    std::uniform_int_distribution<int> key_len_dist(1, 100);
-    std::uniform_int_distribution<int> char_dist(33, 126);
-
-    printf("Generating %d test strings...\n", POOL_SIZE);
-    for (int i = 0; i < POOL_SIZE; i++) {
-        int len = key_len_dist(rng);
-        std::string str;
-        str.reserve(len);
-
-        int pattern = i % 5;
-        switch (pattern) {
-            case 0: // Random
-                for (int j = 0; j < len; j++) {
-                    str += char(char_dist(rng));
-                }
-                break;
-            case 1: // Common prefix
-                str = std::string(len, 'A');
-                for (int j = len - 5; j < len && j >= 0; j++) {
-                    str[j] = char_dist(rng);
-                }
-                break;
-            case 2: // Common suffix
-                str = std::string(len, 'Z');
-                for (int j = 0; j < 5 && j < len; j++) {
-                    str[j] = char_dist(rng);
-                }
-                break;
-            case 3: // Repetitive
-                for (int j = 0; j < len; j++) {
-                    str += char('A' + (j % 3));
-                }
-                if (len > 0) str[len - 1] = '0' + (i % 10);
-                break;
-            case 4: // Near-duplicates
-                str = std::string(len, 'X');
-                if (len > 0) str[len / 2] = '0' + (i % 62);
-                break;
-        }
-        string_pool.push_back(str);
-    }
-
-    // Generate operations sequence
-    const int ITERATIONS = 1000000;
-    std::vector<Operation> operations;
-    operations.reserve(ITERATIONS);
-
-    std::uniform_int_distribution<int> op_dist(0, 99);
-    std::uniform_int_distribution<uint32_t> value_dist(0, 0xFFFFFFFF);
-
-    printf("Generating %d operations...\n", ITERATIONS);
-    for (int i = 0; i < ITERATIONS; i++) {
-        Operation op;
-        int op_type = op_dist(rng);
-        op.key_idx = rng() % POOL_SIZE;
-        op.value = value_dist(rng);
-
-        if (op_type < 40) {
-            op.type = Operation::INSERT;
-        } else if (op_type < 70) {
-            op.type = Operation::LOOKUP;
-        } else if (op_type < 85) {
-            op.type = Operation::DELETE;
-        } else {
-            op.type = Operation::UPDATE;
-        }
-
-        operations.push_back(op);
-    }
-
-    printf("\n");
-
-    // Test std::unordered_map
-    {
-        printf("Testing std::unordered_map...\n");
-        std::unordered_map<std::string, uint32_t> std_map;
-        std_map.reserve(POOL_SIZE);
-
-        size_t insert_count = 0, lookup_count = 0, delete_count = 0, update_count = 0;
-        size_t lookup_hits = 0, delete_hits = 0;
-
-        auto start = std::chrono::high_resolution_clock::now();
-
-        for (const auto& op : operations) {
-            const std::string& key = string_pool[op.key_idx];
-
-            switch (op.type) {
-                case Operation::INSERT:
-                    std_map[key] = op.value;
-                    insert_count++;
-                    break;
-
-                case Operation::LOOKUP: {
-                    auto it = std_map.find(key);
-                    if (it != std_map.end()) {
-                        volatile uint32_t v = it->second; // Prevent optimization
-                        (void)v;
-                        lookup_hits++;
-                    }
-                    lookup_count++;
-                    break;
-                }
-
-                case Operation::DELETE:
-                    if (std_map.erase(key) > 0) {
-                        delete_hits++;
-                    }
-                    delete_count++;
-                    break;
-
-                case Operation::UPDATE:
-                    if (std_map.find(key) != std_map.end()) {
-                        std_map[key] = op.value;
-                        update_count++;
-                    }
-                    break;
-            }
-        }
-
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-
-        printf("  Time:              %lld μs (%.3f ms)\n", duration.count(), duration.count() / 1000.0);
-        printf("  Ops/second:        %.0f\n", (ITERATIONS * 1000000.0) / duration.count());
-        printf("  Final size:        %zu\n", std_map.size());
-        printf("  Inserts:           %zu\n", insert_count);
-        printf("  Lookups:           %zu (hits: %zu)\n", lookup_count, lookup_hits);
-        printf("  Deletes:           %zu (hits: %zu)\n", delete_count, delete_hits);
-        printf("  Updates:           %zu\n", update_count);
-        printf("\n");
-    }
-
-    // Test string_map
-    {
-        printf("Testing string_map...\n");
-
-        struct TestArena {};
-        Arena<TestArena>::init(64 * 1024 * 1024, 256 * 1024 * 1024);
-
-        string_map<uint32_t, TestArena> m;
-        stringmap_init(&m, POOL_SIZE);
-
-        size_t insert_count = 0, lookup_count = 0, delete_count = 0, update_count = 0;
-        size_t lookup_hits = 0, delete_hits = 0;
-
-        auto start = std::chrono::high_resolution_clock::now();
-
-        for (const auto& op : operations) {
-            const char* key = string_pool[op.key_idx].c_str();
-
-            switch (op.type) {
-                case Operation::INSERT:
-                    stringmap_insert(&m, key, op.value);
-                    insert_count++;
-                    break;
-
-                case Operation::LOOKUP: {
-                    uint32_t* result = stringmap_get(&m, key);
-                    if (result) {
-                        volatile uint32_t v = *result; // Prevent optimization
-                        (void)v;
-                        lookup_hits++;
-                    }
-                    lookup_count++;
-                    break;
-                }
-
-                case Operation::DELETE:
-                    if (stringmap_delete(&m, key)) {
-                        delete_hits++;
-                    }
-                    delete_count++;
-                    break;
-
-                case Operation::UPDATE:
-                    if (stringmap_get(&m, key)) {
-                        stringmap_insert(&m, key, op.value);
-                        update_count++;
-                    }
-                    break;
-            }
-        }
-
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-
-        printf("  Time:              %lld μs (%.3f ms)\n", duration.count(), duration.count() / 1000.0);
-        printf("  Ops/second:        %.0f\n", (ITERATIONS * 1000000.0) / duration.count());
-        printf("  Final size:        %u\n", m.size);
-        printf("  Capacity:          %u\n", m.capacity);
-        printf("  Tombstones:        %u\n", m.tombstones);
-        printf("  Inserts:           %zu\n", insert_count);
-        printf("  Lookups:           %zu (hits: %zu)\n", lookup_count, lookup_hits);
-        printf("  Deletes:           %zu (hits: %zu)\n", delete_count, delete_hits);
-        printf("  Updates:           %zu\n", update_count);
-        printf("\n");
-        printf("  Arena Statistics:\n");
-        printf("    Used:            %.2f MB\n", Arena<TestArena>::used() / (1024.0 * 1024.0));
-        printf("    Committed:       %.2f MB\n", Arena<TestArena>::committed() / (1024.0 * 1024.0));
-        printf("    Reclaimed:       %.2f MB\n", Arena<TestArena>::reclaimed() / (1024.0 * 1024.0));
-        printf("    Reused:          %.2f MB\n", Arena<TestArena>::reused() / (1024.0 * 1024.0));
-
-        Arena<TestArena>::shutdown();
-    }
-
-    // Additional focused benchmarks
-    printf("\n=== FOCUSED BENCHMARKS ===\n\n");
-
-    // Benchmark: Sequential inserts
-    {
-        printf("Sequential Insert Test (10,000 unique keys):\n");
-
-        // std::unordered_map
-        {
-            std::unordered_map<std::string, uint32_t> std_map;
-            auto start = std::chrono::high_resolution_clock::now();
-            for (int i = 0; i < 10000; i++) {
-                std_map[string_pool[i]] = i;
-            }
-            auto end = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-            printf("  std::unordered_map: %lld μs\n", duration.count());
-        }
-
-        // string_map
-        {
-            struct BenchArena {};
-            Arena<BenchArena>::init(8 * 1024 * 1024);
-            string_map<uint32_t, BenchArena> m;
-            stringmap_init(&m);
-
-            auto start = std::chrono::high_resolution_clock::now();
-            for (uint32_t i = 0; i < 10000; i++) {
-                stringmap_insert(&m, string_pool[i].c_str(), i);
-            }
-            auto end = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-            printf("  string_map:         %lld μs\n", duration.count());
-
-            Arena<BenchArena>::shutdown();
-        }
-    }
-
-    // Benchmark: Lookup-heavy workload
-    {
-        printf("\nLookup Test (100,000 lookups on 5,000 keys):\n");
-
-        // Prepare both maps with same data
-        std::unordered_map<std::string, uint32_t> std_map;
-        for (int i = 0; i < 5000; i++) {
-            std_map[string_pool[i]] = i;
-        }
-
-        struct LookupArena {};
-        Arena<LookupArena>::init(8 * 1024 * 1024);
-        string_map<uint32_t, LookupArena> m;
-        stringmap_init(&m);
-        for (uint32_t i = 0; i < 5000; i++) {
-            stringmap_insert(&m, string_pool[i].c_str(), i);
-        }
-
-        // std::unordered_map lookups
-        {
-            auto start = std::chrono::high_resolution_clock::now();
-            for (int i = 0; i < 100000; i++) {
-                auto it = std_map.find(string_pool[i % 5000]);
-                volatile uint32_t v = it->second;
-                (void)v;
-            }
-            auto end = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-            printf("  std::unordered_map: %lld μs\n", duration.count());
-        }
-
-        // string_map lookups
-        {
-            auto start = std::chrono::high_resolution_clock::now();
-            for (int i = 0; i < 100000; i++) {
-                uint32_t* result = stringmap_get(&m, string_pool[i % 5000].c_str());
-                volatile uint32_t v = *result;
-                (void)v;
-            }
-            auto end = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-            printf("  string_map:         %lld μs\n", duration.count());
-        }
-
-        Arena<LookupArena>::shutdown();
-    }
-
-    printf("\n✓ COMPARISON TEST COMPLETE\n");
+// Helper to compare strings
+static bool str_eq(const char* a, const char* b) {
+    if (!a && !b) return true;
+    if (!a || !b) return false;
+    return strcmp(a, b) == 0;
 }
 
+// Test basic SELECT
+static void test_select_basic() {
+    printf("Testing basic SELECT...\n");
+
+    Parser parser;
+    parser_init(&parser, "SELECT * FROM users");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    assert(stmt->type == STMT_SELECT);
+
+    SelectStmt* select = stmt->select_stmt;
+    assert(select != nullptr);
+    assert(select->select_list->size == 1);
+    assert(select->select_list->data[0]->type == EXPR_STAR);
+    assert(str_eq(select->from_table->table_name, "users"));
+    assert(select->from_table->alias == nullptr);
+    assert(select->where_clause == nullptr);
+    assert(!select->is_distinct);
+
+    parser_reset(&parser);
+    printf("  ✓ Basic SELECT passed\n");
+}
+
+// Test SELECT with columns
+static void test_select_columns() {
+    printf("Testing SELECT with columns...\n");
+
+    Parser parser;
+    parser_init(&parser, "SELECT id, name, email FROM users");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    assert(stmt->type == STMT_SELECT);
+
+    SelectStmt* select = stmt->select_stmt;
+    assert(select->select_list->size == 3);
+
+    assert(select->select_list->data[0]->type == EXPR_COLUMN);
+    assert(str_eq(select->select_list->data[0]->column_name, "id"));
+
+    assert(select->select_list->data[1]->type == EXPR_COLUMN);
+    assert(str_eq(select->select_list->data[1]->column_name, "name"));
+
+    assert(select->select_list->data[2]->type == EXPR_COLUMN);
+    assert(str_eq(select->select_list->data[2]->column_name, "email"));
+
+    parser_reset(&parser);
+    printf("  ✓ SELECT with columns passed\n");
+}
+
+// Test SELECT with WHERE
+static void test_select_where() {
+    printf("Testing SELECT with WHERE...\n");
+
+    Parser parser;
+    parser_init(&parser, "SELECT * FROM users WHERE id = 42 AND active = 1");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    SelectStmt* select = stmt->select_stmt;
+    assert(select->where_clause != nullptr);
+    assert(select->where_clause->type == EXPR_BINARY_OP);
+    assert(select->where_clause->op == OP_AND);
+
+    // Check left side: id = 42
+    Expr* left = select->where_clause->left;
+    assert(left->type == EXPR_BINARY_OP);
+    assert(left->op == OP_EQ);
+    assert(left->left->type == EXPR_COLUMN);
+    assert(str_eq(left->left->column_name, "id"));
+    assert(left->right->type == EXPR_LITERAL);
+    assert(left->right->int_val == 42);
+
+    // Check right side: active = 1
+    Expr* right = select->where_clause->right;
+    assert(right->type == EXPR_BINARY_OP);
+    assert(right->op == OP_EQ);
+    assert(right->left->type == EXPR_COLUMN);
+    assert(str_eq(right->left->column_name, "active"));
+    assert(right->right->type == EXPR_LITERAL);
+    assert(right->right->int_val == 1);
+
+    parser_reset(&parser);
+    printf("  ✓ SELECT with WHERE passed\n");
+}
+
+// Test SELECT with complex WHERE
+static void test_select_complex_where() {
+    printf("Testing SELECT with complex WHERE...\n");
+
+    Parser parser;
+    parser_init(&parser,
+        "SELECT * FROM products WHERE price > 100 AND (category = 'electronics' OR category = 'computers')");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    SelectStmt* select = stmt->select_stmt;
+    assert(select->where_clause != nullptr);
+    assert(select->where_clause->type == EXPR_BINARY_OP);
+    assert(select->where_clause->op == OP_AND);
+
+    // Check price > 100
+    Expr* price_check = select->where_clause->left;
+    assert(price_check->type == EXPR_BINARY_OP);
+    assert(price_check->op == OP_GT);
+    assert(str_eq(price_check->left->column_name, "price"));
+    assert(price_check->right->int_val == 100);
+
+    // Check OR expression
+    Expr* or_expr = select->where_clause->right;
+    assert(or_expr->type == EXPR_BINARY_OP);
+    assert(or_expr->op == OP_OR);
+
+    parser_reset(&parser);
+    printf("  ✓ SELECT with complex WHERE passed\n");
+}
+
+// Test SELECT with JOIN
+static void test_select_join() {
+    printf("Testing SELECT with JOIN...\n");
+
+    Parser parser;
+    parser_init(&parser,
+        "SELECT u.name, o.total FROM users u INNER JOIN orders o ON u.id = o.user_id");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    SelectStmt* select = stmt->select_stmt;
+
+    // Check select list
+    assert(select->select_list->size == 2);
+    assert(select->select_list->data[0]->type == EXPR_COLUMN);
+    assert(str_eq(select->select_list->data[0]->table_name, "u"));
+    assert(str_eq(select->select_list->data[0]->column_name, "name"));
+
+    // Check FROM table with alias
+    assert(str_eq(select->from_table->table_name, "users"));
+    assert(str_eq(select->from_table->alias, "u"));
+
+    // Check JOIN
+    assert(select->joins != nullptr);
+    assert(select->joins->size == 1);
+    assert(select->joins->data[0]->type == JOIN_INNER);
+    assert(str_eq(select->joins->data[0]->table->table_name, "orders"));
+    assert(str_eq(select->joins->data[0]->table->alias, "o"));
+
+    // Check JOIN condition
+    Expr* join_cond = select->joins->data[0]->condition;
+    assert(join_cond != nullptr);
+    assert(join_cond->type == EXPR_BINARY_OP);
+    assert(join_cond->op == OP_EQ);
+
+    parser_reset(&parser);
+    printf("  ✓ SELECT with JOIN passed\n");
+}
+
+// Test SELECT with multiple JOINs
+static void test_select_multiple_joins() {
+    printf("Testing SELECT with multiple JOINs...\n");
+
+    Parser parser;
+    parser_init(&parser,
+        "SELECT * FROM users "
+        "LEFT JOIN orders ON users.id = orders.user_id "
+        "RIGHT JOIN products ON orders.product_id = products.id");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    SelectStmt* select = stmt->select_stmt;
+    assert(select->joins->size == 2);
+    assert(select->joins->data[0]->type == JOIN_LEFT);
+    assert(select->joins->data[1]->type == JOIN_RIGHT);
+
+    parser_reset(&parser);
+    printf("  ✓ SELECT with multiple JOINs passed\n");
+}
+
+// Test SELECT with ORDER BY
+static void test_select_order_by() {
+    printf("Testing SELECT with ORDER BY...\n");
+
+    Parser parser;
+    parser_init(&parser, "SELECT * FROM users ORDER BY name ASC, created_at DESC");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    SelectStmt* select = stmt->select_stmt;
+    assert(select->order_by != nullptr);
+    assert(select->order_by->size == 2);
+
+    assert(select->order_by->data[0]->expr->type == EXPR_COLUMN);
+    assert(str_eq(select->order_by->data[0]->expr->column_name, "name"));
+    assert(select->order_by->data[0]->dir == ORDER_ASC);
+
+    assert(select->order_by->data[1]->expr->type == EXPR_COLUMN);
+    assert(str_eq(select->order_by->data[1]->expr->column_name, "created_at"));
+    assert(select->order_by->data[1]->dir == ORDER_DESC);
+
+    parser_reset(&parser);
+    printf("  ✓ SELECT with ORDER BY passed\n");
+}
+
+// Test SELECT with GROUP BY and HAVING
+static void test_select_group_by() {
+    printf("Testing SELECT with GROUP BY and HAVING...\n");
+
+    Parser parser;
+    parser_init(&parser,
+        "SELECT category, COUNT(*) FROM products GROUP BY category HAVING COUNT(*) > 5");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    SelectStmt* select = stmt->select_stmt;
+
+    // Check select list has function
+    assert(select->select_list->size == 2);
+    assert(select->select_list->data[1]->type == EXPR_FUNCTION);
+    assert(str_eq(select->select_list->data[1]->func_name, "COUNT"));
+    assert(select->select_list->data[1]->args->size == 1);
+    assert(select->select_list->data[1]->args->data[0]->type == EXPR_STAR);
+
+    // Check GROUP BY
+    assert(select->group_by != nullptr);
+    assert(select->group_by->size == 1);
+    assert(select->group_by->data[0]->type == EXPR_COLUMN);
+    assert(str_eq(select->group_by->data[0]->column_name, "category"));
+
+    // Check HAVING
+    assert(select->having_clause != nullptr);
+    assert(select->having_clause->type == EXPR_BINARY_OP);
+    assert(select->having_clause->op == OP_GT);
+
+    parser_reset(&parser);
+    printf("  ✓ SELECT with GROUP BY and HAVING passed\n");
+}
+
+// Test SELECT with LIMIT and OFFSET
+static void test_select_limit_offset() {
+    printf("Testing SELECT with LIMIT and OFFSET...\n");
+
+    Parser parser;
+    parser_init(&parser, "SELECT * FROM users LIMIT 10 OFFSET 20");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    SelectStmt* select = stmt->select_stmt;
+    assert(select->limit == 10);
+    assert(select->offset == 20);
+
+    parser_reset(&parser);
+    printf("  ✓ SELECT with LIMIT and OFFSET passed\n");
+}
+
+// Test SELECT DISTINCT
+static void test_select_distinct() {
+    printf("Testing SELECT DISTINCT...\n");
+
+    Parser parser;
+    parser_init(&parser, "SELECT DISTINCT category FROM products");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    SelectStmt* select = stmt->select_stmt;
+    assert(select->is_distinct);
+
+    parser_reset(&parser);
+    printf("  ✓ SELECT DISTINCT passed\n");
+}
+
+// Test INSERT basic
+static void test_insert_basic() {
+    printf("Testing basic INSERT...\n");
+
+    Parser parser;
+    parser_init(&parser, "INSERT INTO users VALUES (1, 'John', 'john@example.com')");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    assert(stmt->type == STMT_INSERT);
+
+    InsertStmt* insert = stmt->insert_stmt;
+    assert(str_eq(insert->table_name, "users"));
+    assert(insert->columns == nullptr);  // No column list specified
+    assert(insert->values->size == 1);
+    assert(insert->values->data[0]->size == 3);
+
+    // Check values
+    assert(insert->values->data[0]->data[0]->type == EXPR_LITERAL);
+    assert(insert->values->data[0]->data[0]->int_val == 1);
+
+    assert(insert->values->data[0]->data[1]->type == EXPR_LITERAL);
+    assert(str_eq(insert->values->data[0]->data[1]->str_val, "John"));
+
+    assert(insert->values->data[0]->data[2]->type == EXPR_LITERAL);
+    assert(str_eq(insert->values->data[0]->data[2]->str_val, "john@example.com"));
+
+    parser_reset(&parser);
+    printf("  ✓ Basic INSERT passed\n");
+}
+
+// Test INSERT with columns
+static void test_insert_with_columns() {
+    printf("Testing INSERT with columns...\n");
+
+    Parser parser;
+    parser_init(&parser,
+        "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    InsertStmt* insert = stmt->insert_stmt;
+    assert(insert->columns != nullptr);
+    assert(insert->columns->size == 3);
+    assert(str_eq(insert->columns->data[0], "id"));
+    assert(str_eq(insert->columns->data[1], "name"));
+    assert(str_eq(insert->columns->data[2], "email"));
+
+    parser_reset(&parser);
+    printf("  ✓ INSERT with columns passed\n");
+}
+
+// Test INSERT with multiple rows
+static void test_insert_multiple_rows() {
+    printf("Testing INSERT with multiple rows...\n");
+
+    Parser parser;
+    parser_init(&parser,
+        "INSERT INTO users VALUES (1, 'John'), (2, 'Jane'), (3, 'Bob')");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    InsertStmt* insert = stmt->insert_stmt;
+    assert(insert->values->size == 3);
+
+    // Check first row
+    assert(insert->values->data[0]->data[0]->int_val == 1);
+    assert(str_eq(insert->values->data[0]->data[1]->str_val, "John"));
+
+    // Check second row
+    assert(insert->values->data[1]->data[0]->int_val == 2);
+    assert(str_eq(insert->values->data[1]->data[1]->str_val, "Jane"));
+
+    // Check third row
+    assert(insert->values->data[2]->data[0]->int_val == 3);
+    assert(str_eq(insert->values->data[2]->data[1]->str_val, "Bob"));
+
+    parser_reset(&parser);
+    printf("  ✓ INSERT with multiple rows passed\n");
+}
+
+// Test UPDATE basic
+static void test_update_basic() {
+    printf("Testing basic UPDATE...\n");
+
+    Parser parser;
+    parser_init(&parser, "UPDATE users SET name = 'Jane' WHERE id = 1");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    assert(stmt->type == STMT_UPDATE);
+
+    UpdateStmt* update = stmt->update_stmt;
+    assert(str_eq(update->table_name, "users"));
+    assert(update->columns->size == 1);
+    assert(str_eq(update->columns->data[0], "name"));
+    assert(update->values->size == 1);
+    assert(update->values->data[0]->type == EXPR_LITERAL);
+    assert(str_eq(update->values->data[0]->str_val, "Jane"));
+
+    // Check WHERE
+    assert(update->where_clause != nullptr);
+    assert(update->where_clause->type == EXPR_BINARY_OP);
+    assert(update->where_clause->op == OP_EQ);
+
+    parser_reset(&parser);
+    printf("  ✓ Basic UPDATE passed\n");
+}
+
+// Test UPDATE multiple columns
+static void test_update_multiple_columns() {
+    printf("Testing UPDATE with multiple columns...\n");
+
+    Parser parser;
+    parser_init(&parser,
+        "UPDATE users SET name = 'Jane', email = 'jane@example.com', age = 30 WHERE id = 1");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    UpdateStmt* update = stmt->update_stmt;
+    assert(update->columns->size == 3);
+    assert(str_eq(update->columns->data[0], "name"));
+    assert(str_eq(update->columns->data[1], "email"));
+    assert(str_eq(update->columns->data[2], "age"));
+
+    assert(update->values->size == 3);
+    assert(str_eq(update->values->data[0]->str_val, "Jane"));
+    assert(str_eq(update->values->data[1]->str_val, "jane@example.com"));
+    assert(update->values->data[2]->int_val == 30);
+
+    parser_reset(&parser);
+    printf("  ✓ UPDATE with multiple columns passed\n");
+}
+
+// Test DELETE basic
+static void test_delete_basic() {
+    printf("Testing basic DELETE...\n");
+
+    Parser parser;
+    parser_init(&parser, "DELETE FROM users WHERE id = 1");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    assert(stmt->type == STMT_DELETE);
+
+    DeleteStmt* del = stmt->delete_stmt;
+    assert(str_eq(del->table_name, "users"));
+    assert(del->where_clause != nullptr);
+    assert(del->where_clause->type == EXPR_BINARY_OP);
+    assert(del->where_clause->op == OP_EQ);
+
+    parser_reset(&parser);
+    printf("  ✓ Basic DELETE passed\n");
+}
+
+// Test DELETE without WHERE
+static void test_delete_all() {
+    printf("Testing DELETE without WHERE...\n");
+
+    Parser parser;
+    parser_init(&parser, "DELETE FROM users");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    DeleteStmt* del = stmt->delete_stmt;
+    assert(str_eq(del->table_name, "users"));
+    assert(del->where_clause == nullptr);
+
+    parser_reset(&parser);
+    printf("  ✓ DELETE without WHERE passed\n");
+}
+
+// Test CREATE TABLE
+static void test_create_table() {
+    printf("Testing CREATE TABLE...\n");
+
+    Parser parser;
+    parser_init(&parser,
+        "CREATE TABLE users ("
+        "  id BIGINT PRIMARY KEY,"
+        "  name VARCHAR(100) NOT NULL,"
+        "  email VARCHAR(255),"
+        "  age INT"
+        ")");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    assert(stmt->type == STMT_CREATE_TABLE);
+
+    CreateTableStmt* create = stmt->create_table_stmt;
+    assert(str_eq(create->table_name, "users"));
+    assert(create->columns->size == 4);
+
+    // Check id column
+    assert(str_eq(create->columns->data[0]->name, "id"));
+    assert(create->columns->data[0]->type == TYPE_8);
+    assert(create->columns->data[0]->is_primary_key);
+    assert(create->columns->data[0]->is_not_null);
+
+    // Check name column
+    assert(str_eq(create->columns->data[1]->name, "name"));
+    assert(create->columns->data[1]->type == TYPE_256);
+    assert(!create->columns->data[1]->is_primary_key);
+    assert(create->columns->data[1]->is_not_null);
+
+    // Check email column
+    assert(str_eq(create->columns->data[2]->name, "email"));
+    assert(create->columns->data[2]->type == TYPE_256);
+    assert(!create->columns->data[2]->is_primary_key);
+    assert(!create->columns->data[2]->is_not_null);
+
+    // Check age column
+    assert(str_eq(create->columns->data[3]->name, "age"));
+    assert(create->columns->data[3]->type == TYPE_4);
+
+    parser_reset(&parser);
+    printf("  ✓ CREATE TABLE passed\n");
+}
+
+// Test CREATE TABLE IF NOT EXISTS
+static void test_create_table_if_not_exists() {
+    printf("Testing CREATE TABLE IF NOT EXISTS...\n");
+
+    Parser parser;
+    parser_init(&parser,
+        "CREATE TABLE IF NOT EXISTS users (id INT PRIMARY KEY)");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    CreateTableStmt* create = stmt->create_table_stmt;
+    assert(create->if_not_exists);
+
+    parser_reset(&parser);
+    printf("  ✓ CREATE TABLE IF NOT EXISTS passed\n");
+}
+
+// Test DROP TABLE
+static void test_drop_table() {
+    printf("Testing DROP TABLE...\n");
+
+    Parser parser;
+    parser_init(&parser, "DROP TABLE users");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    assert(stmt->type == STMT_DROP_TABLE);
+
+    DropTableStmt* drop = stmt->drop_table_stmt;
+    assert(str_eq(drop->table_name, "users"));
+    assert(!drop->if_exists);
+
+    parser_reset(&parser);
+    printf("  ✓ DROP TABLE passed\n");
+}
+
+// Test DROP TABLE IF EXISTS
+static void test_drop_table_if_exists() {
+    printf("Testing DROP TABLE IF EXISTS...\n");
+
+    Parser parser;
+    parser_init(&parser, "DROP TABLE IF EXISTS users");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    DropTableStmt* drop = stmt->drop_table_stmt;
+    assert(str_eq(drop->table_name, "users"));
+    assert(drop->if_exists);
+
+    parser_reset(&parser);
+    printf("  ✓ DROP TABLE IF EXISTS passed\n");
+}
+
+// Test transaction statements
+static void test_transactions() {
+    printf("Testing transaction statements...\n");
+
+    Parser parser;
+
+    // Test BEGIN
+    parser_init(&parser, "BEGIN");
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    assert(stmt->type == STMT_BEGIN);
+    parser_reset(&parser);
+
+    // Test COMMIT
+    parser_init(&parser, "COMMIT");
+    stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    assert(stmt->type == STMT_COMMIT);
+    parser_reset(&parser);
+
+    // Test ROLLBACK
+    parser_init(&parser, "ROLLBACK");
+    stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    assert(stmt->type == STMT_ROLLBACK);
+    parser_reset(&parser);
+
+    printf("  ✓ Transaction statements passed\n");
+}
+
+// Test expressions
+static void test_expressions() {
+    printf("Testing complex expressions...\n");
+
+    Parser parser;
+
+    // Test arithmetic expressions
+    parser_init(&parser, "SELECT price * quantity + tax - discount FROM orders");
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    SelectStmt* select = stmt->select_stmt;
+    Expr* expr = select->select_list->data[0];
+
+    // Should be: ((price * quantity) + tax) - discount
+    assert(expr->type == EXPR_BINARY_OP);
+    assert(expr->op == OP_SUB);
+
+    parser_reset(&parser);
+
+    // Test comparison with arithmetic
+    parser_init(&parser, "SELECT * FROM products WHERE price * 1.1 > 100");
+    stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    select = stmt->select_stmt;
+    assert(select->where_clause != nullptr);
+    assert(select->where_clause->type == EXPR_BINARY_OP);
+    assert(select->where_clause->op == OP_GT);
+
+    parser_reset(&parser);
+
+    // Test NOT expression
+    parser_init(&parser, "SELECT * FROM users WHERE NOT active = 1");
+    stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    select = stmt->select_stmt;
+    assert(select->where_clause != nullptr);
+    assert(select->where_clause->type == EXPR_UNARY_OP);
+    assert(select->where_clause->unary_op == OP_NOT);
+
+    parser_reset(&parser);
+
+    printf("  ✓ Complex expressions passed\n");
+}
+
+// Test function calls
+static void test_functions() {
+    printf("Testing function calls...\n");
+
+    Parser parser;
+    parser_init(&parser,
+        "SELECT COUNT(*), SUM(amount), AVG(price), MAX(score), MIN(age) FROM stats");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    SelectStmt* select = stmt->select_stmt;
+    assert(select->select_list->size == 5);
+
+    // Test COUNT(*)
+    assert(select->select_list->data[0]->type == EXPR_FUNCTION);
+    assert(str_eq(select->select_list->data[0]->func_name, "COUNT"));
+    assert(select->select_list->data[0]->args->size == 1);
+    assert(select->select_list->data[0]->args->data[0]->type == EXPR_STAR);
+
+    // Test SUM(amount)
+    assert(select->select_list->data[1]->type == EXPR_FUNCTION);
+    assert(str_eq(select->select_list->data[1]->func_name, "SUM"));
+    assert(select->select_list->data[1]->args->size == 1);
+    assert(select->select_list->data[1]->args->data[0]->type == EXPR_COLUMN);
+
+    parser_reset(&parser);
+    printf("  ✓ Function calls passed\n");
+}
+
+// Test LIKE operator
+static void test_like_operator() {
+    printf("Testing LIKE operator...\n");
+
+    Parser parser;
+    parser_init(&parser, "SELECT * FROM users WHERE name LIKE 'John%'");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    SelectStmt* select = stmt->select_stmt;
+    assert(select->where_clause != nullptr);
+    assert(select->where_clause->type == EXPR_BINARY_OP);
+    assert(select->where_clause->op == OP_LIKE);
+    assert(select->where_clause->left->type == EXPR_COLUMN);
+    assert(str_eq(select->where_clause->left->column_name, "name"));
+    assert(select->where_clause->right->type == EXPR_LITERAL);
+    assert(str_eq(select->where_clause->right->str_val, "John%"));
+
+    parser_reset(&parser);
+    printf("  ✓ LIKE operator passed\n");
+}
+
+// Test NULL handling
+static void test_null_handling() {
+    printf("Testing NULL handling...\n");
+
+    Parser parser;
+
+    // Test NULL in INSERT
+    parser_init(&parser, "INSERT INTO users VALUES (1, NULL, 'test@example.com')");
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    InsertStmt* insert = stmt->insert_stmt;
+    assert(insert->values->data[0]->data[1]->type == EXPR_NULL);
+
+    parser_reset(&parser);
+
+    // Test NULL in WHERE
+    parser_init(&parser, "SELECT * FROM users WHERE email = NULL");
+    stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    SelectStmt* select = stmt->select_stmt;
+    assert(select->where_clause->right->type == EXPR_NULL);
+
+    parser_reset(&parser);
+
+    printf("  ✓ NULL handling passed\n");
+}
+
+// Test semicolon handling
+static void test_semicolon_handling() {
+    printf("Testing semicolon handling...\n");
+
+    Parser parser;
+
+    // With semicolon
+    parser_init(&parser, "SELECT * FROM users;");
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    parser_reset(&parser);
+
+    // Without semicolon
+    parser_init(&parser, "SELECT * FROM users");
+    stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    parser_reset(&parser);
+
+    printf("  ✓ Semicolon handling passed\n");
+}
+
+// Test case insensitivity
+static void test_case_insensitivity() {
+    printf("Testing case insensitivity...\n");
+
+    Parser parser;
+    parser_init(&parser, "SeLeCt * FrOm users WhErE id = 1 OrDeR bY name");
+
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    assert(stmt->type == STMT_SELECT);
+
+    SelectStmt* select = stmt->select_stmt;
+    assert(str_eq(select->from_table->table_name, "users"));
+    assert(select->where_clause != nullptr);
+    assert(select->order_by != nullptr);
+
+    parser_reset(&parser);
+    printf("  ✓ Case insensitivity passed\n");
+}
+
+// Test edge cases
+static void test_edge_cases() {
+    printf("Testing edge cases...\n");
+
+    Parser parser;
+
+    // Empty input
+    parser_init(&parser, "");
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt == nullptr);
+    parser_reset(&parser);
+
+    // Invalid syntax
+    parser_init(&parser, "SELECT FROM");
+    stmt = parser_parse_statement(&parser);
+    assert(stmt == nullptr || stmt->select_stmt == nullptr);
+    parser_reset(&parser);
+
+    // Nested parentheses
+    parser_init(&parser, "SELECT * FROM users WHERE ((id = 1))");
+    stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    parser_reset(&parser);
+
+    printf("  ✓ Edge cases passed\n");
+}
+
+// Main test runner
 int main() {
-    try {
-        performance_comparison_test();
-    } catch (const std::exception& e) {
-        fprintf(stderr, "Test failed with exception: %s\n", e.what());
-        return 1;
-    }
+    printf("\n========================================\n");
+    printf("    PARSER TEST SUITE\n");
+    printf("========================================\n\n");
+
+    // SELECT tests
+    test_select_basic();
+    test_select_columns();
+    test_select_where();
+    test_select_complex_where();
+    test_select_join();
+    test_select_multiple_joins();
+    test_select_order_by();
+    test_select_group_by();
+    test_select_limit_offset();
+    test_select_distinct();
+
+    // INSERT tests
+    test_insert_basic();
+    test_insert_with_columns();
+    test_insert_multiple_rows();
+
+    // UPDATE tests
+    test_update_basic();
+    test_update_multiple_columns();
+
+    // DELETE tests
+    test_delete_basic();
+    test_delete_all();
+
+    // DDL tests
+    test_create_table();
+    test_create_table_if_not_exists();
+    test_drop_table();
+    test_drop_table_if_exists();
+
+    // Transaction tests
+    test_transactions();
+
+    // Expression tests
+    test_expressions();
+    test_functions();
+    test_like_operator();
+    test_null_handling();
+
+    // Misc tests
+    test_semicolon_handling();
+    test_case_insensitivity();
+    test_edge_cases();
+
+    printf("\n========================================\n");
+    printf("    ALL TESTS PASSED! ✓\n");
+    printf("========================================\n\n");
+
+    // Clean up arena
+    Arena<ParserArena>::shutdown();
 
     return 0;
 }
