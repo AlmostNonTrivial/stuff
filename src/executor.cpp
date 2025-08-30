@@ -25,10 +25,6 @@ enum CommandCategory {
     CMD_TCL,  // Transaction Control Language (BEGIN, COMMIT, ROLLBACK)
 };
 CommandCategory get_cmd_category(const Statement* stmt) {
-    if (!stmt) {
-        return CMD_DDL; // Default to DDL for invalid input, adjust as needed
-    }
-
     switch (stmt->type) {
         case STMT_CREATE_TABLE:
         case STMT_CREATE_INDEX:
@@ -255,6 +251,8 @@ load_schema_from_master()
 static VM_RESULT
 execute_create_table(CreateTableStmt*node)
 {
+
+    print_ast((Statement*)node);
 	Table *table = create_table(node, 0);
 	assert(table != nullptr);
 
@@ -370,9 +368,9 @@ executor_init(bool existed)
 {
 	init_type_ops();
 	pager_open("db");
-
 	arena::init<QueryArena>(PAGE_SIZE * 30);
-	// arena::init<RegistryArena>(PAGE_SIZE * 14);
+	arena::init<ParserArena>(PAGE_SIZE * 30);
+	arena::init<SchemaArena>(PAGE_SIZE * 14);
 
 	executor_state.initialized = true;
 	executor_state.in_transaction = false;
@@ -398,7 +396,7 @@ executor_init(bool existed)
 static VM_RESULT
 execute_ddl_command(Statement*stmt)
 {
-
+    print_ast(stmt);
 	switch (stmt->type)
 	{
 	case STMT_CREATE_TABLE:
@@ -455,9 +453,10 @@ execute_tcl_command(Statement*stmt)
 
 
 void
-execute_internal(const char *sql)
+execute(const char *sql)
 {
-	arena::reset<QueryArena>();
+	arena::reset_and_decommit<QueryArena>();
+	arena::reset_and_decommit<ParserArena>();
 
 	auto statements = parse_sql(sql);
 
@@ -466,6 +465,10 @@ execute_internal(const char *sql)
 	for (size_t i = 0; i < statements->size; i++)
 	{
 		Statement*stmt = statements->data[i];
+
+		if(_debug) {
+		    print_ast(stmt);
+		}
 
 
 		VM_RESULT result = OK;

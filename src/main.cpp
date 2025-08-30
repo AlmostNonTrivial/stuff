@@ -9,10 +9,11 @@
 int main()
 {
 
-    init_type_ops();
 
 
-    test_parser();
+
+    // test_parser();
     // test_pager();
-    // test_integration();
+    test_integration();
+    return 0;
 }

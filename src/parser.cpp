@@ -320,6 +320,7 @@ lexer_peek_token(Lexer *lex)
 void
 parser_init(Parser *parser, const char *input)
 {
+
 	Arena<ParserArena>::init(PAGE_SIZE);
 
 	parser->lexer = (Lexer *)Arena<ParserArena>::alloc(sizeof(Lexer));
@@ -331,7 +332,7 @@ parser_init(Parser *parser, const char *input)
 void
 parser_reset(Parser *parser)
 {
-	Arena<ParserArena>::reset();
+	// Arena<ParserArena>::reset();
 }
 
 bool
@@ -1724,4 +1725,464 @@ parse_sql(const char *sql)
 	Parser parser;
 	parser_init(&parser, sql);
 	return parser_parse_statements(&parser);
+}
+
+
+
+
+// Helper function for indentation
+static void print_indent(int depth)
+{
+    for (int i = 0; i < depth; ++i) {
+        printf("  ");
+    }
+}
+
+// Forward declarations
+static void print_expr(Expr* expr, int depth);
+static void print_select_stmt(SelectStmt* stmt, int depth);
+
+// Print binary operator name
+static const char* binary_op_to_string(BinaryOp op)
+{
+    switch (op) {
+    case OP_ADD: return "+";
+    case OP_SUB: return "-";
+    case OP_MUL: return "*";
+    case OP_DIV: return "/";
+    case OP_MOD: return "%";
+    case OP_EQ: return "=";
+    case OP_NE: return "!=";
+    case OP_LT: return "<";
+    case OP_LE: return "<=";
+    case OP_GT: return ">";
+    case OP_GE: return ">=";
+    case OP_AND: return "AND";
+    case OP_OR: return "OR";
+    case OP_LIKE: return "LIKE";
+    case OP_IN: return "IN";
+    default: return "UNKNOWN";
+    }
+}
+
+// Print unary operator name
+static const char* unary_op_to_string(UnaryOp op)
+{
+    switch (op) {
+    case OP_NOT: return "NOT";
+    case OP_NEG: return "-";
+    default: return "UNKNOWN";
+    }
+}
+
+// Print data type name
+static const char* data_type_to_string(DataType type)
+{
+    switch (type) {
+    case TYPE_4: return "INT";
+    case TYPE_8: return "LONG";
+    case TYPE_32:case TYPE_256: return "TEXT";
+    case TYPE_BLOB: return "BLOB";
+    default: return "UNKNOWN";
+    }
+}
+
+// Print join type
+static const char* join_type_to_string(JoinType type)
+{
+    switch (type) {
+    case JOIN_INNER: return "INNER";
+    case JOIN_LEFT: return "LEFT";
+    case JOIN_RIGHT: return "RIGHT";
+    case JOIN_CROSS: return "CROSS";
+    default: return "UNKNOWN";
+    }
+}
+
+// Print expression
+static void print_expr(Expr* expr, int depth)
+{
+    if (!expr) {
+        print_indent(depth);
+        printf("<null>\n");
+        return;
+    }
+
+    print_indent(depth);
+
+    switch (expr->type) {
+    case EXPR_LITERAL:
+        printf("Literal[%s]: ", data_type_to_string(expr->lit_type));
+        switch (expr->lit_type) {
+        case TYPE_4:
+            printf("%lld\n", expr->int_val);
+            break;
+        case TYPE_32:
+        case TYPE_256:
+            printf("'%s'\n", expr->str_val);
+            break;
+        default:
+            printf("<unknown>\n");
+        }
+        break;
+
+    case EXPR_COLUMN:
+        printf("Column: ");
+        if (expr->table_name) {
+            printf("%s.", expr->table_name);
+        }
+        printf("%s\n", expr->column_name);
+        break;
+
+    case EXPR_BINARY_OP:
+        printf("BinaryOp: %s\n", binary_op_to_string(expr->op));
+        print_indent(depth + 1);
+        printf("Left:\n");
+        print_expr(expr->left, depth + 2);
+        print_indent(depth + 1);
+        printf("Right:\n");
+        print_expr(expr->right, depth + 2);
+        break;
+
+    case EXPR_UNARY_OP:
+        printf("UnaryOp: %s\n", unary_op_to_string(expr->unary_op));
+        print_expr(expr->operand, depth + 1);
+        break;
+
+    case EXPR_FUNCTION:
+        printf("Function: %s\n", expr->func_name);
+        if (expr->args && expr->args->size > 0) {
+            print_indent(depth + 1);
+            printf("Arguments:\n");
+            for (uint32_t i = 0; i < expr->args->size; ++i) {
+                print_expr(expr->args->data[i], depth + 2);
+            }
+        }
+        break;
+
+    case EXPR_STAR:
+        printf("Star (*)\n");
+        break;
+
+    case EXPR_LIST:
+        printf("List:\n");
+        if (expr->list_items) {
+            for (uint32_t i = 0; i < expr->list_items->size; ++i) {
+                print_expr(expr->list_items->data[i], depth + 1);
+            }
+        }
+        break;
+
+    case EXPR_SUBQUERY:
+        printf("Subquery:\n");
+        print_select_stmt(expr->subquery, depth + 1);
+        break;
+
+    case EXPR_NULL:
+        printf("NULL\n");
+        break;
+
+    default:
+        printf("Unknown expression type\n");
+    }
+}
+
+// Print SELECT statement
+static void print_select_stmt(SelectStmt* stmt, int depth)
+{
+    print_indent(depth);
+    printf("SELECT\n");
+
+    if (stmt->is_distinct) {
+        print_indent(depth + 1);
+        printf("DISTINCT\n");
+    }
+
+    // Select list
+    if (stmt->select_list && stmt->select_list->size > 0) {
+        print_indent(depth + 1);
+        printf("Columns:\n");
+        for (uint32_t i = 0; i < stmt->select_list->size; ++i) {
+            print_expr(stmt->select_list->data[i], depth + 2);
+        }
+    }
+
+    // FROM clause
+    if (stmt->from_table) {
+        print_indent(depth + 1);
+        printf("FROM: %s", stmt->from_table->table_name);
+        if (stmt->from_table->alias) {
+            printf(" AS %s", stmt->from_table->alias);
+        }
+        printf("\n");
+    }
+
+    // JOIN clauses
+    if (stmt->joins && stmt->joins->size > 0) {
+        for (uint32_t i = 0; i < stmt->joins->size; ++i) {
+            JoinClause* join = stmt->joins->data[i];
+            print_indent(depth + 1);
+            printf("%s JOIN: %s", join_type_to_string(join->type),
+                   join->table->table_name);
+            if (join->table->alias) {
+                printf(" AS %s", join->table->alias);
+            }
+            printf("\n");
+            if (join->condition) {
+                print_indent(depth + 2);
+                printf("ON:\n");
+                print_expr(join->condition, depth + 3);
+            }
+        }
+    }
+
+    // WHERE clause
+    if (stmt->where_clause) {
+        print_indent(depth + 1);
+        printf("WHERE:\n");
+        print_expr(stmt->where_clause, depth + 2);
+    }
+
+    // GROUP BY
+    if (stmt->group_by && stmt->group_by->size > 0) {
+        print_indent(depth + 1);
+        printf("GROUP BY:\n");
+        for (uint32_t i = 0; i < stmt->group_by->size; ++i) {
+            print_expr(stmt->group_by->data[i], depth + 2);
+        }
+    }
+
+    // HAVING
+    if (stmt->having_clause) {
+        print_indent(depth + 1);
+        printf("HAVING:\n");
+        print_expr(stmt->having_clause, depth + 2);
+    }
+
+    // ORDER BY
+    if (stmt->order_by && stmt->order_by->size > 0) {
+        print_indent(depth + 1);
+        printf("ORDER BY:\n");
+        for (uint32_t i = 0; i < stmt->order_by->size; ++i) {
+            OrderByClause* order = stmt->order_by->data[i];
+            print_expr(order->expr, depth + 2);
+            print_indent(depth + 2);
+            printf("Direction: %s\n", order->dir == ORDER_ASC ? "ASC" : "DESC");
+        }
+    }
+
+    // LIMIT/OFFSET
+    if (stmt->limit >= 0) {
+        print_indent(depth + 1);
+        printf("LIMIT: %lld\n", stmt->limit);
+    }
+    if (stmt->offset > 0) {
+        print_indent(depth + 1);
+        printf("OFFSET: %lld\n", stmt->offset);
+    }
+}
+
+// Print INSERT statement
+static void print_insert_stmt(InsertStmt* stmt, int depth)
+{
+    print_indent(depth);
+    printf("INSERT INTO %s\n", stmt->table_name);
+
+    // Column list
+    if (stmt->columns && stmt->columns->size > 0) {
+        print_indent(depth + 1);
+        printf("Columns:\n");
+        for (uint32_t i = 0; i < stmt->columns->size; ++i) {
+            print_indent(depth + 2);
+            printf("%s\n", stmt->columns->data[i]);
+        }
+    }
+
+    // Values
+    if (stmt->values && stmt->values->size > 0) {
+        print_indent(depth + 1);
+        printf("Values:\n");
+        for (uint32_t i = 0; i < stmt->values->size; ++i) {
+            print_indent(depth + 2);
+            printf("Row %u:\n", i + 1);
+            array<Expr*, ParserArena>* row = stmt->values->data[i];
+            for (uint32_t j = 0; j < row->size; ++j) {
+                print_expr(row->data[j], depth + 3);
+            }
+        }
+    }
+}
+
+// Print UPDATE statement
+static void print_update_stmt(UpdateStmt* stmt, int depth)
+{
+    print_indent(depth);
+    printf("UPDATE %s\n", stmt->table_name);
+
+    // SET clause
+    if (stmt->columns && stmt->values) {
+        print_indent(depth + 1);
+        printf("SET:\n");
+        for (uint32_t i = 0; i < stmt->columns->size; ++i) {
+            print_indent(depth + 2);
+            printf("%s =\n", stmt->columns->data[i]);
+            print_expr(stmt->values->data[i], depth + 3);
+        }
+    }
+
+    // WHERE clause
+    if (stmt->where_clause) {
+        print_indent(depth + 1);
+        printf("WHERE:\n");
+        print_expr(stmt->where_clause, depth + 2);
+    }
+}
+
+// Print DELETE statement
+static void print_delete_stmt(DeleteStmt* stmt, int depth)
+{
+    print_indent(depth);
+    printf("DELETE FROM %s\n", stmt->table_name);
+
+    if (stmt->where_clause) {
+        print_indent(depth + 1);
+        printf("WHERE:\n");
+        print_expr(stmt->where_clause, depth + 2);
+    }
+}
+
+// Print CREATE TABLE statement
+static void print_create_table_stmt(CreateTableStmt* stmt, int depth)
+{
+    print_indent(depth);
+    printf("CREATE TABLE ");
+    if (stmt->if_not_exists) {
+        printf("IF NOT EXISTS ");
+    }
+    printf("%s\n", stmt->table_name);
+
+    if (stmt->columns && stmt->columns->size > 0) {
+        print_indent(depth + 1);
+        printf("Columns:\n");
+        for (uint32_t i = 0; i < stmt->columns->size; ++i) {
+            ColumnDef* col = stmt->columns->data[i];
+            print_indent(depth + 2);
+            printf("%s %s", col->name, data_type_to_string(col->type));
+            if (col->is_primary_key) {
+                printf(" PRIMARY KEY");
+            }
+            if (col->is_not_null) {
+                printf(" NOT NULL");
+            }
+            printf("\n");
+        }
+    }
+}
+
+// Print CREATE INDEX statement
+static void print_create_index_stmt(CreateIndexStmt* stmt, int depth)
+{
+    print_indent(depth);
+    printf("CREATE ");
+    if (stmt->is_unique) {
+        printf("UNIQUE ");
+    }
+    printf("INDEX ");
+    if (stmt->if_not_exists) {
+        printf("IF NOT EXISTS ");
+    }
+    printf("%s ON %s\n", stmt->index_name, stmt->table_name);
+
+    if (stmt->columns && stmt->columns->size > 0) {
+        print_indent(depth + 1);
+        printf("Columns:\n");
+        for (uint32_t i = 0; i < stmt->columns->size; ++i) {
+            print_indent(depth + 2);
+            printf("%s\n", stmt->columns->data[i]);
+        }
+    }
+}
+
+// Print DROP TABLE statement
+static void print_drop_table_stmt(DropTableStmt* stmt, int depth)
+{
+    print_indent(depth);
+    printf("DROP TABLE ");
+    if (stmt->if_exists) {
+        printf("IF EXISTS ");
+    }
+    printf("%s\n", stmt->table_name);
+}
+
+// Print DROP INDEX statement
+static void print_drop_index_stmt(DropIndexStmt* stmt, int depth)
+{
+    print_indent(depth);
+    printf("DROP INDEX ");
+    if (stmt->if_exists) {
+        printf("IF EXISTS ");
+    }
+    printf("%s", stmt->index_name);
+    if (stmt->table_name) {
+        printf(" ON %s", stmt->table_name);
+    }
+    printf("\n");
+}
+
+// Main function to print any statement
+void print_ast(Statement* stmt)
+{
+    if (!stmt) {
+        printf("Null statement\n");
+        return;
+    }
+
+    switch (stmt->type) {
+    case STMT_SELECT:
+        print_select_stmt(stmt->select_stmt, 0);
+        break;
+
+    case STMT_INSERT:
+        print_insert_stmt(stmt->insert_stmt, 0);
+        break;
+
+    case STMT_UPDATE:
+        print_update_stmt(stmt->update_stmt, 0);
+        break;
+
+    case STMT_DELETE:
+        print_delete_stmt(stmt->delete_stmt, 0);
+        break;
+
+    case STMT_CREATE_TABLE:
+        print_create_table_stmt(stmt->create_table_stmt, 0);
+        break;
+
+    case STMT_CREATE_INDEX:
+        print_create_index_stmt(stmt->create_index_stmt, 0);
+        break;
+
+    case STMT_DROP_TABLE:
+        print_drop_table_stmt(stmt->drop_table_stmt, 0);
+        break;
+
+    case STMT_DROP_INDEX:
+        print_drop_index_stmt(stmt->drop_index_stmt, 0);
+        break;
+
+    case STMT_BEGIN:
+        printf("BEGIN TRANSACTION\n");
+        break;
+
+    case STMT_COMMIT:
+        printf("COMMIT\n");
+        break;
+
+    case STMT_ROLLBACK:
+        printf("ROLLBACK\n");
+        break;
+
+    default:
+        printf("Unknown statement type\n");
+    }
 }

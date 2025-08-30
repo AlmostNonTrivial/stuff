@@ -400,3 +400,5 @@ array<Statement *, ParserArena> *
 parser_parse_statements(Parser *parser);
 array<Statement *, ParserArena> *
 parse_sql(const char *sql);
+
+void print_ast(Statement* stmt);
