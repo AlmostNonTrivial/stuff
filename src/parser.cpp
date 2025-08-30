@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <cstdio>
 
-// SQL Keywords
+// SQL Keywords - keep it simple
 static const char* sql_keywords[] = {
     "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", "UPDATE", "SET",
     "DELETE", "CREATE", "TABLE", "DROP", "BEGIN", "COMMIT", "ROLLBACK",
@@ -12,17 +12,10 @@ static const char* sql_keywords[] = {
     "NULL", "DISTINCT", "AS", "ORDER", "BY", "GROUP", "HAVING", "LIMIT",
     "OFFSET", "ASC", "DESC", "IF", "EXISTS", "PRIMARY", "KEY", "INT",
     "BIGINT", "VARCHAR", "TEXT", "LIKE", "IN", "BETWEEN", "IS", "TRUE",
-    "FALSE", "COUNT", "SUM", "AVG", "MIN", "MAX"
+    "FALSE", "COUNT", "SUM", "AVG", "MIN", "MAX", "NOT"
 };
 
-// Initialize keywords map
-static void init_keywords(string_map<bool, ParserArena>* keywords) {
-    for (const char* kw : sql_keywords) {
-        stringmap_insert(keywords, kw, true);
-    }
-}
-
-// String interning using arena
+// String interning
 const char* intern_string(const char* str, uint32_t length) {
     char* interned = (char*)Arena<ParserArena>::alloc(length + 1);
     memcpy(interned, str, length);
@@ -30,20 +23,29 @@ const char* intern_string(const char* str, uint32_t length) {
     return interned;
 }
 
-// Case-insensitive string comparison for keywords
+// Case-insensitive comparison
 static bool str_eq_ci(const char* a, uint32_t a_len, const char* b) {
-    uint32_t b_len = strlen(b);
+    size_t b_len = strlen(b);
     if (a_len != b_len) return false;
 
     for (uint32_t i = 0; i < a_len; i++) {
-        if (toupper(a[i]) != toupper(b[i])) {
-            return false;
-        }
+        if (toupper(a[i]) != toupper(b[i])) return false;
     }
     return true;
 }
 
-// Lexer implementation
+// Check if identifier is a keyword
+static bool is_keyword(const char* text, uint32_t length) {
+    for (const char* kw : sql_keywords) {
+        if (str_eq_ci(text, length, kw)) return true;
+    }
+    return false;
+}
+
+//=============================================================================
+// LEXER - Keep it simple and correct
+//=============================================================================
+
 void lexer_init(Lexer* lex, const char* input) {
     lex->input = input;
     lex->current = input;
@@ -62,7 +64,7 @@ static void skip_whitespace(Lexer* lex) {
             lex->column = 1;
             lex->current++;
         } else if (lex->current[0] == '-' && lex->current[1] == '-') {
-            // Skip SQL comment
+            // SQL comment
             while (*lex->current && *lex->current != '\n') {
                 lex->current++;
             }
@@ -88,69 +90,55 @@ Token lexer_next_token(Lexer* lex) {
     }
 
     // Single character tokens
-    switch (*lex->current) {
-        case '(':
-            token.type = TOKEN_LPAREN;
+    char c = *lex->current;
+    switch (c) {
+        case '(': token.type = TOKEN_LPAREN; token.length = 1; break;
+        case ')': token.type = TOKEN_RPAREN; token.length = 1; break;
+        case ',': token.type = TOKEN_COMMA; token.length = 1; break;
+        case ';': token.type = TOKEN_SEMICOLON; token.length = 1; break;
+        case '.': token.type = TOKEN_DOT; token.length = 1; break;
+        case '*': case '+': case '-': case '/': case '%':
+            token.type = TOKEN_OPERATOR;
             token.length = 1;
-            lex->current++;
-            lex->column++;
-            lex->current_token = token;
-            return token;
-
-        case ')':
-            token.type = TOKEN_RPAREN;
+            break;
+        case '=':
+            token.type = TOKEN_OPERATOR;
             token.length = 1;
-            lex->current++;
-            lex->column++;
-            lex->current_token = token;
-            return token;
-
-        case ',':
-            token.type = TOKEN_COMMA;
-            token.length = 1;
-            lex->current++;
-            lex->column++;
-            lex->current_token = token;
-            return token;
-
-        case ';':
-            token.type = TOKEN_SEMICOLON;
-            token.length = 1;
-            lex->current++;
-            lex->column++;
-            lex->current_token = token;
-            return token;
-
-        case '.':
-            token.type = TOKEN_DOT;
-            token.length = 1;
-            lex->current++;
-            lex->column++;
-            lex->current_token = token;
-            return token;
-
-        case '*':
-            token.type = TOKEN_STAR;
-            token.length = 1;
-            lex->current++;
-            lex->column++;
-            lex->current_token = token;
-            return token;
+            break;
+        case '!':
+            if (lex->current[1] == '=') {
+                token.type = TOKEN_OPERATOR;
+                token.length = 2;
+            } else {
+                token.type = TOKEN_OPERATOR;
+                token.length = 1;
+            }
+            break;
+        case '<':
+            if (lex->current[1] == '=' || lex->current[1] == '>') {
+                token.type = TOKEN_OPERATOR;
+                token.length = 2;
+            } else {
+                token.type = TOKEN_OPERATOR;
+                token.length = 1;
+            }
+            break;
+        case '>':
+            if (lex->current[1] == '=') {
+                token.type = TOKEN_OPERATOR;
+                token.length = 2;
+            } else {
+                token.type = TOKEN_OPERATOR;
+                token.length = 1;
+            }
+            break;
+        default:
+            // Not a single-char token, continue below
+            token.length = 0;
+            break;
     }
 
-    // Operators
-    if (strchr("+-/%<>=!", *lex->current)) {
-        token.type = TOKEN_OPERATOR;
-        token.length = 1;
-
-        // Check for two-character operators
-        if ((lex->current[0] == '<' && lex->current[1] == '=') ||
-            (lex->current[0] == '>' && lex->current[1] == '=') ||
-            (lex->current[0] == '!' && lex->current[1] == '=') ||
-            (lex->current[0] == '<' && lex->current[1] == '>')) {
-            token.length = 2;
-        }
-
+    if (token.length > 0) {
         lex->current += token.length;
         lex->column += token.length;
         lex->current_token = token;
@@ -158,8 +146,8 @@ Token lexer_next_token(Lexer* lex) {
     }
 
     // String literals
-    if (*lex->current == '\'' || *lex->current == '"') {
-        char quote = *lex->current;
+    if (c == '\'' || c == '"') {
+        char quote = c;
         lex->current++;
         lex->column++;
 
@@ -188,7 +176,7 @@ Token lexer_next_token(Lexer* lex) {
     }
 
     // Numbers
-    if (isdigit(*lex->current)) {
+    if (isdigit(c) || (c == '.' && isdigit(lex->current[1]))) {
         const char* start = lex->current;
 
         while (isdigit(*lex->current)) {
@@ -196,7 +184,6 @@ Token lexer_next_token(Lexer* lex) {
             lex->column++;
         }
 
-        // Check for decimal point
         if (*lex->current == '.' && isdigit(lex->current[1])) {
             lex->current++;
             lex->column++;
@@ -214,7 +201,7 @@ Token lexer_next_token(Lexer* lex) {
     }
 
     // Identifiers and keywords
-    if (isalpha(*lex->current) || *lex->current == '_') {
+    if (isalpha(c) || c == '_') {
         const char* start = lex->current;
 
         while (isalnum(*lex->current) || *lex->current == '_') {
@@ -224,21 +211,13 @@ Token lexer_next_token(Lexer* lex) {
 
         token.text = start;
         token.length = lex->current - start;
-
-        // Check if it's a keyword
-        token.type = TOKEN_IDENTIFIER;
-        for (const char* kw : sql_keywords) {
-            if (str_eq_ci(start, token.length, kw)) {
-                token.type = TOKEN_KEYWORD;
-                break;
-            }
-        }
+        token.type = is_keyword(start, token.length) ? TOKEN_KEYWORD : TOKEN_IDENTIFIER;
 
         lex->current_token = token;
         return token;
     }
 
-    // Unknown character
+    // Unknown
     token.type = TOKEN_EOF;
     token.length = 1;
     lex->current++;
@@ -248,35 +227,32 @@ Token lexer_next_token(Lexer* lex) {
 }
 
 Token lexer_peek_token(Lexer* lex) {
-    // Save current state
     const char* saved_current = lex->current;
     uint32_t saved_line = lex->line;
     uint32_t saved_column = lex->column;
+    Token saved_token = lex->current_token;
 
-    // Get next token
     Token token = lexer_next_token(lex);
 
-    // Restore state
     lex->current = saved_current;
     lex->line = saved_line;
     lex->column = saved_column;
+    lex->current_token = saved_token;
 
     return token;
 }
 
-// Parser implementation
-void parser_init(Parser* parser, const char* input) {
-    // Initialize arena
-    Arena<ParserArena>::init(64 * 1024, 1024 * 1024);  // 64KB initial, 1MB max
+//=============================================================================
+// PARSER
+//=============================================================================
 
-    // Create and initialize lexer
+void parser_init(Parser* parser, const char* input) {
+    Arena<ParserArena>::init(64 * 1024, 1024 * 1024);
+
     parser->lexer = (Lexer*)Arena<ParserArena>::alloc(sizeof(Lexer));
     lexer_init(parser->lexer, input);
 
-    // Initialize keywords map
-    parser->keywords = (string_map<bool, ParserArena>*)Arena<ParserArena>::alloc(sizeof(string_map<bool, ParserArena>));
-    stringmap_init(parser->keywords);
-    init_keywords(parser->keywords);
+    parser->keywords = nullptr; // Not really needed with our simpler approach
 }
 
 void parser_reset(Parser* parser) {
@@ -306,72 +282,212 @@ bool peek_keyword(Parser* parser, const char* keyword) {
     return token.type == TOKEN_KEYWORD && str_eq_ci(token.text, token.length, keyword);
 }
 
-// Expression parsing (recursive descent)
+bool consume_operator(Parser* parser, const char* op) {
+    Token token = lexer_peek_token(parser->lexer);
+    if (token.type == TOKEN_OPERATOR &&
+        token.length == strlen(op) &&
+        memcmp(token.text, op, token.length) == 0) {
+        lexer_next_token(parser->lexer);
+        return true;
+    }
+    return false;
+}
+
+bool peek_operator(Parser* parser) {
+    Token token = lexer_peek_token(parser->lexer);
+    return token.type == TOKEN_OPERATOR;
+}
+
+//=============================================================================
+// EXPRESSION PARSING - Simple precedence climbing
+//=============================================================================
+
+// Forward declarations
+Expr* parse_expression(Parser* parser);
+Expr* parse_binary_expr(Parser* parser, Expr* left, int min_prec);
+
+// Get operator precedence (higher = tighter binding)
+static int get_precedence(BinaryOp op) {
+    switch (op) {
+        case OP_OR:  return 1;
+        case OP_AND: return 2;
+        case OP_EQ: case OP_NE: case OP_LT:
+        case OP_LE: case OP_GT: case OP_GE: case OP_LIKE: return 3;
+        case OP_ADD: case OP_SUB: return 4;
+        case OP_MUL: case OP_DIV: case OP_MOD: return 5;
+        default: return 0;
+    }
+}
+
+// Peek at binary operator without consuming
+static BinaryOp peek_binary_op(Parser* parser) {
+    Token token = lexer_peek_token(parser->lexer);
+
+    // Check keywords first
+    if (token.type == TOKEN_KEYWORD) {
+        if (str_eq_ci(token.text, token.length, "AND")) return OP_AND;
+        if (str_eq_ci(token.text, token.length, "OR")) return OP_OR;
+        if (str_eq_ci(token.text, token.length, "LIKE")) return OP_LIKE;
+        return (BinaryOp)-1;
+    }
+
+    if (token.type == TOKEN_OPERATOR) {
+        if (token.length == 1) {
+            switch (*token.text) {
+                case '=': return OP_EQ;
+                case '<': return OP_LT;
+                case '>': return OP_GT;
+                case '+': return OP_ADD;
+                case '-': return OP_SUB;
+                case '*': return OP_MUL;
+                case '/': return OP_DIV;
+                case '%': return OP_MOD;
+            }
+        } else if (token.length == 2) {
+            if (memcmp(token.text, "!=", 2) == 0) return OP_NE;
+            if (memcmp(token.text, "<>", 2) == 0) return OP_NE;
+            if (memcmp(token.text, "<=", 2) == 0) return OP_LE;
+            if (memcmp(token.text, ">=", 2) == 0) return OP_GE;
+        }
+    }
+
+    return (BinaryOp)-1;
+}
+
+// Consume binary operator token
+static void consume_binary_op(Parser* parser, BinaryOp op) {
+    Token token = lexer_peek_token(parser->lexer);
+
+    if (token.type == TOKEN_KEYWORD) {
+        if ((op == OP_AND && str_eq_ci(token.text, token.length, "AND")) ||
+            (op == OP_OR && str_eq_ci(token.text, token.length, "OR")) ||
+            (op == OP_LIKE && str_eq_ci(token.text, token.length, "LIKE"))) {
+            lexer_next_token(parser->lexer);
+        }
+    } else if (token.type == TOKEN_OPERATOR) {
+        lexer_next_token(parser->lexer);
+    }
+}
+
+// Parse primary expression (literals, identifiers, parentheses)
+// Special handling: * is EXPR_STAR only when standalone in select list or COUNT(*)
 Expr* parse_primary_expr(Parser* parser) {
     Token token = lexer_peek_token(parser->lexer);
 
-    if (token.type == TOKEN_NUMBER) {
-        lexer_next_token(parser->lexer);
-        Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
-        expr->type = EXPR_LITERAL;
-        expr->lit_type = TYPE_8;  // Default to BIGINT
-
-        // Simple number parsing (could be improved)
-        char* num_str = (char*)Arena<ParserArena>::alloc(token.length + 1);
-        memcpy(num_str, token.text, token.length);
-        num_str[token.length] = '\0';
-        expr->int_val = atoll(num_str);
-
-        return expr;
-    }
-
-    if (token.type == TOKEN_STRING) {
-        lexer_next_token(parser->lexer);
-        Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
-        expr->type = EXPR_LITERAL;
-        expr->lit_type = TYPE_256;  // VARCHAR
-        expr->str_val = intern_string(token.text, token.length);
-        return expr;
-    }
-
-    if (token.type == TOKEN_STAR) {
-        lexer_next_token(parser->lexer);
-        Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
-        expr->type = EXPR_STAR;
-        return expr;
-    }
-
+    // NULL literal
     if (consume_keyword(parser, "NULL")) {
         Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
         expr->type = EXPR_NULL;
         return expr;
     }
 
+    // Number literal
+    if (token.type == TOKEN_NUMBER) {
+        lexer_next_token(parser->lexer);
+        Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
+        expr->type = EXPR_LITERAL;
+        expr->lit_type = TYPE_8;
+
+        char* num_str = (char*)Arena<ParserArena>::alloc(token.length + 1);
+        memcpy(num_str, token.text, token.length);
+        num_str[token.length] = '\0';
+
+        // Check for decimal point
+        if (strchr(num_str, '.')) {
+            expr->float_val = atof(num_str);
+        } else {
+            expr->int_val = atoll(num_str);
+        }
+
+        return expr;
+    }
+
+    // String literal
+    if (token.type == TOKEN_STRING) {
+        lexer_next_token(parser->lexer);
+        Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
+        expr->type = EXPR_LITERAL;
+        expr->lit_type = TYPE_256;
+        expr->str_val = intern_string(token.text, token.length);
+        return expr;
+    }
+
+    // Parenthesized expression
     if (consume_token(parser, TOKEN_LPAREN)) {
         Expr* expr = parse_expression(parser);
         if (!consume_token(parser, TOKEN_RPAREN)) {
-            // Error: expected closing paren
-            return nullptr;
+            return nullptr; // Error: missing closing paren
         }
         return expr;
     }
 
-    if (token.type == TOKEN_IDENTIFIER) {
+    // NOT operator - fixed to handle comparison expressions properly
+    if (consume_keyword(parser, "NOT")) {
+        Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
+        expr->type = EXPR_UNARY_OP;
+        expr->unary_op = OP_NOT;
+
+        // Parse the operand - should be able to include comparisons but not AND/OR
+        // Start with a primary expression
+        Expr* operand = parse_primary_expr(parser);
+        if (!operand) return nullptr;
+
+        // Continue parsing binary operators with precedence > AND (i.e., >= 3)
+        // This allows NOT to capture comparison expressions but not AND/OR
+        operand = parse_binary_expr(parser, operand, 3);
+
+        expr->operand = operand;
+        return expr;
+    }
+
+    // Unary minus
+    if (token.type == TOKEN_OPERATOR && token.length == 1 && *token.text == '-') {
         lexer_next_token(parser->lexer);
+        Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
+        expr->type = EXPR_UNARY_OP;
+        expr->unary_op = OP_NEG;
+        expr->operand = parse_primary_expr(parser);
+        return expr;
+    }
+
+    // Check for aggregate function keywords that can be used as functions
+    bool is_function_keyword = false;
+    if (token.type == TOKEN_KEYWORD) {
+        if (str_eq_ci(token.text, token.length, "COUNT") ||
+            str_eq_ci(token.text, token.length, "SUM") ||
+            str_eq_ci(token.text, token.length, "AVG") ||
+            str_eq_ci(token.text, token.length, "MIN") ||
+            str_eq_ci(token.text, token.length, "MAX")) {
+            is_function_keyword = true;
+        }
+    }
+
+    // Identifier or function keyword (column reference or function call)
+    if (token.type == TOKEN_IDENTIFIER || is_function_keyword) {
+        lexer_next_token(parser->lexer);
+        const char* first_name = intern_string(token.text, token.length);
 
         // Check for function call
         if (consume_token(parser, TOKEN_LPAREN)) {
             Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
             expr->type = EXPR_FUNCTION;
-            expr->func_name = intern_string(token.text, token.length);
+            expr->func_name = first_name;
             expr->args = array_create<Expr*, ParserArena>();
 
-            // Parse arguments
             if (!consume_token(parser, TOKEN_RPAREN)) {
                 do {
-                    Expr* arg = parse_expression(parser);
-                    if (!arg) return nullptr;
-                    array_push(expr->args, arg);
+                    // Special case for * in COUNT(*)
+                    Token next = lexer_peek_token(parser->lexer);
+                    if (next.type == TOKEN_OPERATOR && next.length == 1 && *next.text == '*') {
+                        lexer_next_token(parser->lexer);
+                        Expr* star = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
+                        star->type = EXPR_STAR;
+                        array_push(expr->args, star);
+                    } else {
+                        Expr* arg = parse_expression(parser);
+                        if (!arg) return nullptr;
+                        array_push(expr->args, arg);
+                    }
                 } while (consume_token(parser, TOKEN_COMMA));
 
                 if (!consume_token(parser, TOKEN_RPAREN)) {
@@ -382,19 +498,22 @@ Expr* parse_primary_expr(Parser* parser) {
             return expr;
         }
 
-        // Column reference
+        // Column reference (possibly with table prefix)
         Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
         expr->type = EXPR_COLUMN;
 
-        // Check for table.column
-        const char* first_name = intern_string(token.text, token.length);
         if (consume_token(parser, TOKEN_DOT)) {
             token = lexer_next_token(parser->lexer);
-            if (token.type != TOKEN_IDENTIFIER) {
+            if (token.type == TOKEN_IDENTIFIER) {
+                expr->table_name = first_name;
+                expr->column_name = intern_string(token.text, token.length);
+            } else if (token.type == TOKEN_OPERATOR && token.length == 1 && *token.text == '*') {
+                // Handle table.*
+                expr->table_name = first_name;
+                expr->column_name = intern_string("*", 1);
+            } else {
                 return nullptr;
             }
-            expr->table_name = first_name;
-            expr->column_name = intern_string(token.text, token.length);
         } else {
             expr->table_name = nullptr;
             expr->column_name = first_name;
@@ -403,55 +522,53 @@ Expr* parse_primary_expr(Parser* parser) {
         return expr;
     }
 
+    // Special case: standalone * (for SELECT * or in special contexts)
+    // This should only happen when * is not being used as multiplication
+    if (token.type == TOKEN_OPERATOR && token.length == 1 && *token.text == '*') {
+        lexer_next_token(parser->lexer);
+        Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
+        expr->type = EXPR_STAR;
+        return expr;
+    }
+
     return nullptr;
 }
 
-Expr* parse_unary_expr(Parser* parser) {
-    if (consume_keyword(parser, "NOT")) {
-        Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
-        expr->type = EXPR_UNARY_OP;
-        expr->unary_op = OP_NOT;
-        expr->operand = parse_unary_expr(parser);
-        return expr;
-    }
-
-    Token token = lexer_peek_token(parser->lexer);
-    if (token.type == TOKEN_OPERATOR && token.length == 1 && *token.text == '-') {
-        lexer_next_token(parser->lexer);
-        Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
-        expr->type = EXPR_UNARY_OP;
-        expr->unary_op = OP_NEG;
-        expr->operand = parse_unary_expr(parser);
-        return expr;
-    }
-
-    return parse_primary_expr(parser);
-}
-
-Expr* parse_multiplicative_expr(Parser* parser) {
-    Expr* left = parse_unary_expr(parser);
-    if (!left) return nullptr;
-
+// Parse binary expression with precedence climbing
+Expr* parse_binary_expr(Parser* parser, Expr* left, int min_prec) {
     while (true) {
-        Token token = lexer_peek_token(parser->lexer);
-        if (token.type != TOKEN_OPERATOR) break;
+        // Peek at next operator
+        BinaryOp op = peek_binary_op(parser);
+        if (op == (BinaryOp)-1) break;
 
-        BinaryOp op;
-        if (token.length == 1 && *token.text == '*') {
-            op = OP_MUL;
-        } else if (token.length == 1 && *token.text == '/') {
-            op = OP_DIV;
-        } else if (token.length == 1 && *token.text == '%') {
-            op = OP_MOD;
-        } else {
-            break;
-        }
+        int prec = get_precedence(op);
+        if (prec < min_prec) break;
 
-        lexer_next_token(parser->lexer);
+        // Consume the operator
+        consume_binary_op(parser, op);
 
-        Expr* right = parse_unary_expr(parser);
+        // Parse right side - start with primary
+        Expr* right = parse_primary_expr(parser);
         if (!right) return nullptr;
 
+        // While next operator has higher precedence, accumulate it into right side
+        while (true) {
+            BinaryOp next_op = peek_binary_op(parser);
+            if (next_op == (BinaryOp)-1) break;
+
+            int next_prec = get_precedence(next_op);
+
+            // Higher precedence means tighter binding - recurse with higher min_prec
+            // For right-associative operators, use >= instead of >
+            if (next_prec > prec) {
+                right = parse_binary_expr(parser, right, next_prec);
+                if (!right) return nullptr;
+            } else {
+                break;
+            }
+        }
+
+        // Create binary op node
         Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
         expr->type = EXPR_BINARY_OP;
         expr->op = op;
@@ -463,140 +580,18 @@ Expr* parse_multiplicative_expr(Parser* parser) {
     return left;
 }
 
-Expr* parse_additive_expr(Parser* parser) {
-    Expr* left = parse_multiplicative_expr(parser);
-    if (!left) return nullptr;
-
-    while (true) {
-        Token token = lexer_peek_token(parser->lexer);
-        if (token.type != TOKEN_OPERATOR) break;
-
-        BinaryOp op;
-        if (token.length == 1 && *token.text == '+') {
-            op = OP_ADD;
-        } else if (token.length == 1 && *token.text == '-') {
-            op = OP_SUB;
-        } else {
-            break;
-        }
-
-        lexer_next_token(parser->lexer);
-
-        Expr* right = parse_multiplicative_expr(parser);
-        if (!right) return nullptr;
-
-        Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
-        expr->type = EXPR_BINARY_OP;
-        expr->op = op;
-        expr->left = left;
-        expr->right = right;
-        left = expr;
-    }
-
-    return left;
-}
-
-Expr* parse_comparison_expr(Parser* parser) {
-    Expr* left = parse_additive_expr(parser);
-    if (!left) return nullptr;
-
-    Token token = lexer_peek_token(parser->lexer);
-
-    // Check for LIKE operator
-    if (peek_keyword(parser, "LIKE")) {
-        consume_keyword(parser, "LIKE");
-
-        Expr* right = parse_additive_expr(parser);
-        if (!right) return nullptr;
-
-        Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
-        expr->type = EXPR_BINARY_OP;
-        expr->op = OP_LIKE;
-        expr->left = left;
-        expr->right = right;
-        return expr;
-    }
-
-    if (token.type == TOKEN_OPERATOR) {
-        BinaryOp op;
-
-        if (token.length == 1 && *token.text == '=') {
-            op = OP_EQ;
-        } else if (token.length == 2 && token.text[0] == '!' && token.text[1] == '=') {
-            op = OP_NE;
-        } else if (token.length == 2 && token.text[0] == '<' && token.text[1] == '>') {
-            op = OP_NE;
-        } else if (token.length == 1 && *token.text == '<') {
-            op = OP_LT;
-        } else if (token.length == 2 && token.text[0] == '<' && token.text[1] == '=') {
-            op = OP_LE;
-        } else if (token.length == 1 && *token.text == '>') {
-            op = OP_GT;
-        } else if (token.length == 2 && token.text[0] == '>' && token.text[1] == '=') {
-            op = OP_GE;
-        } else {
-            return left;
-        }
-
-        lexer_next_token(parser->lexer);
-
-        Expr* right = parse_additive_expr(parser);
-        if (!right) return nullptr;
-
-        Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
-        expr->type = EXPR_BINARY_OP;
-        expr->op = op;
-        expr->left = left;
-        expr->right = right;
-        return expr;
-    }
-
-    return left;
-}
-
-Expr* parse_and_expr(Parser* parser) {
-    Expr* left = parse_comparison_expr(parser);
-    if (!left) return nullptr;
-
-    while (consume_keyword(parser, "AND")) {
-        Expr* right = parse_comparison_expr(parser);
-        if (!right) return nullptr;
-
-        Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
-        expr->type = EXPR_BINARY_OP;
-        expr->op = OP_AND;
-        expr->left = left;
-        expr->right = right;
-        left = expr;
-    }
-
-    return left;
-}
-
-Expr* parse_or_expr(Parser* parser) {
-    Expr* left = parse_and_expr(parser);
-    if (!left) return nullptr;
-
-    while (consume_keyword(parser, "OR")) {
-        Expr* right = parse_and_expr(parser);
-        if (!right) return nullptr;
-
-        Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
-        expr->type = EXPR_BINARY_OP;
-        expr->op = OP_OR;
-        expr->left = left;
-        expr->right = right;
-        left = expr;
-    }
-
-    return left;
-}
-
+// Main expression parser entry point
 Expr* parse_expression(Parser* parser) {
-    return parse_or_expr(parser);
+    Expr* left = parse_primary_expr(parser);
+    if (!left) return nullptr;
+
+    return parse_binary_expr(parser, left, 0);
 }
 
-// Parse table reference
+//=============================================================================
+// STATEMENT PARSING
+//=============================================================================
+
 TableRef* parse_table_ref(Parser* parser) {
     Token token = lexer_next_token(parser->lexer);
     if (token.type != TOKEN_IDENTIFIER) {
@@ -607,7 +602,7 @@ TableRef* parse_table_ref(Parser* parser) {
     table->table_name = intern_string(token.text, token.length);
     table->alias = nullptr;
 
-    // Check for alias
+    // Check for alias (AS keyword is optional)
     if (consume_keyword(parser, "AS")) {
         token = lexer_next_token(parser->lexer);
         if (token.type != TOKEN_IDENTIFIER) {
@@ -616,7 +611,8 @@ TableRef* parse_table_ref(Parser* parser) {
         table->alias = intern_string(token.text, token.length);
     } else {
         token = lexer_peek_token(parser->lexer);
-        if (token.type == TOKEN_IDENTIFIER) {
+        if (token.type == TOKEN_IDENTIFIER &&
+            !is_keyword(token.text, token.length)) {
             lexer_next_token(parser->lexer);
             table->alias = intern_string(token.text, token.length);
         }
@@ -625,7 +621,6 @@ TableRef* parse_table_ref(Parser* parser) {
     return table;
 }
 
-// Parse SELECT statement
 SelectStmt* parse_select(Parser* parser) {
     if (!consume_keyword(parser, "SELECT")) {
         return nullptr;
@@ -634,26 +629,24 @@ SelectStmt* parse_select(Parser* parser) {
     SelectStmt* stmt = (SelectStmt*)Arena<ParserArena>::alloc(sizeof(SelectStmt));
     memset(stmt, 0, sizeof(SelectStmt));
 
-    // Check for DISTINCT
+    // DISTINCT
     stmt->is_distinct = consume_keyword(parser, "DISTINCT");
 
-    // Parse select list
+    // Select list
     stmt->select_list = array_create<Expr*, ParserArena>();
-
     do {
         Expr* expr = parse_expression(parser);
         if (!expr) return nullptr;
         array_push(stmt->select_list, expr);
     } while (consume_token(parser, TOKEN_COMMA));
 
-    // Parse FROM clause
+    // FROM clause
     if (consume_keyword(parser, "FROM")) {
         stmt->from_table = parse_table_ref(parser);
         if (!stmt->from_table) return nullptr;
 
-        // Parse JOINs
+        // JOINs
         stmt->joins = array_create<JoinClause*, ParserArena>();
-
         while (true) {
             JoinType join_type;
 
@@ -691,13 +684,13 @@ SelectStmt* parse_select(Parser* parser) {
         }
     }
 
-    // Parse WHERE clause
+    // WHERE clause
     if (consume_keyword(parser, "WHERE")) {
         stmt->where_clause = parse_expression(parser);
         if (!stmt->where_clause) return nullptr;
     }
 
-    // Parse GROUP BY
+    // GROUP BY
     if (consume_keyword(parser, "GROUP")) {
         if (!consume_keyword(parser, "BY")) return nullptr;
 
@@ -708,14 +701,14 @@ SelectStmt* parse_select(Parser* parser) {
             array_push(stmt->group_by, expr);
         } while (consume_token(parser, TOKEN_COMMA));
 
-        // Parse HAVING
+        // HAVING
         if (consume_keyword(parser, "HAVING")) {
             stmt->having_clause = parse_expression(parser);
             if (!stmt->having_clause) return nullptr;
         }
     }
 
-    // Parse ORDER BY
+    // ORDER BY
     if (consume_keyword(parser, "ORDER")) {
         if (!consume_keyword(parser, "BY")) return nullptr;
 
@@ -736,7 +729,7 @@ SelectStmt* parse_select(Parser* parser) {
         } while (consume_token(parser, TOKEN_COMMA));
     }
 
-    // Parse LIMIT
+    // LIMIT
     stmt->limit = -1;
     if (consume_keyword(parser, "LIMIT")) {
         Token token = lexer_next_token(parser->lexer);
@@ -748,7 +741,7 @@ SelectStmt* parse_select(Parser* parser) {
         stmt->limit = atoll(num_str);
     }
 
-    // Parse OFFSET
+    // OFFSET
     stmt->offset = 0;
     if (consume_keyword(parser, "OFFSET")) {
         Token token = lexer_next_token(parser->lexer);
@@ -763,7 +756,6 @@ SelectStmt* parse_select(Parser* parser) {
     return stmt;
 }
 
-// Parse INSERT statement
 InsertStmt* parse_insert(Parser* parser) {
     if (!consume_keyword(parser, "INSERT")) {
         return nullptr;
@@ -781,7 +773,7 @@ InsertStmt* parse_insert(Parser* parser) {
     InsertStmt* stmt = (InsertStmt*)Arena<ParserArena>::alloc(sizeof(InsertStmt));
     stmt->table_name = intern_string(token.text, token.length);
 
-    // Parse column list (optional)
+    // Optional column list
     stmt->columns = nullptr;
     if (consume_token(parser, TOKEN_LPAREN)) {
         stmt->columns = array_create<const char*, ParserArena>();
@@ -801,7 +793,7 @@ InsertStmt* parse_insert(Parser* parser) {
         return nullptr;
     }
 
-    // Parse value lists
+    // Value lists
     stmt->values = array_create<array<Expr*, ParserArena>*, ParserArena>();
 
     do {
@@ -827,7 +819,6 @@ InsertStmt* parse_insert(Parser* parser) {
     return stmt;
 }
 
-// Parse UPDATE statement
 UpdateStmt* parse_update(Parser* parser) {
     if (!consume_keyword(parser, "UPDATE")) {
         return nullptr;
@@ -845,7 +836,7 @@ UpdateStmt* parse_update(Parser* parser) {
         return nullptr;
     }
 
-    // Parse assignments
+    // Parse SET assignments
     stmt->columns = array_create<const char*, ParserArena>();
     stmt->values = array_create<Expr*, ParserArena>();
 
@@ -854,9 +845,8 @@ UpdateStmt* parse_update(Parser* parser) {
         if (token.type != TOKEN_IDENTIFIER) return nullptr;
         array_push(stmt->columns, intern_string(token.text, token.length));
 
-        if (!consume_token(parser, TOKEN_OPERATOR) ||
-            parser->lexer->current_token.length != 1 ||
-            *parser->lexer->current_token.text != '=') {
+        // Must have '=' operator
+        if (!consume_operator(parser, "=")) {
             return nullptr;
         }
 
@@ -865,7 +855,7 @@ UpdateStmt* parse_update(Parser* parser) {
         array_push(stmt->values, expr);
     } while (consume_token(parser, TOKEN_COMMA));
 
-    // Parse WHERE clause
+    // WHERE clause
     stmt->where_clause = nullptr;
     if (consume_keyword(parser, "WHERE")) {
         stmt->where_clause = parse_expression(parser);
@@ -875,7 +865,6 @@ UpdateStmt* parse_update(Parser* parser) {
     return stmt;
 }
 
-// Parse DELETE statement
 DeleteStmt* parse_delete(Parser* parser) {
     if (!consume_keyword(parser, "DELETE")) {
         return nullptr;
@@ -893,7 +882,7 @@ DeleteStmt* parse_delete(Parser* parser) {
     DeleteStmt* stmt = (DeleteStmt*)Arena<ParserArena>::alloc(sizeof(DeleteStmt));
     stmt->table_name = intern_string(token.text, token.length);
 
-    // Parse WHERE clause
+    // WHERE clause
     stmt->where_clause = nullptr;
     if (consume_keyword(parser, "WHERE")) {
         stmt->where_clause = parse_expression(parser);
@@ -903,7 +892,6 @@ DeleteStmt* parse_delete(Parser* parser) {
     return stmt;
 }
 
-// Parse data type
 DataType parse_data_type(Parser* parser) {
     if (consume_keyword(parser, "INT")) {
         return TYPE_4;
@@ -912,32 +900,30 @@ DataType parse_data_type(Parser* parser) {
         return TYPE_8;
     }
     if (consume_keyword(parser, "VARCHAR")) {
-        // Could parse length in parens here
-        consume_token(parser, TOKEN_LPAREN);
-        Token token = lexer_peek_token(parser->lexer);
-        if (token.type == TOKEN_NUMBER) {
-            lexer_next_token(parser->lexer);
-            // Parse the number to determine size
-            char* num_str = (char*)Arena<ParserArena>::alloc(token.length + 1);
-            memcpy(num_str, token.text, token.length);
-            num_str[token.length] = '\0';
-            int len = atoi(num_str);
-            consume_token(parser, TOKEN_RPAREN);
+        if (consume_token(parser, TOKEN_LPAREN)) {
+            Token token = lexer_peek_token(parser->lexer);
+            if (token.type == TOKEN_NUMBER) {
+                lexer_next_token(parser->lexer);
+                char* num_str = (char*)Arena<ParserArena>::alloc(token.length + 1);
+                memcpy(num_str, token.text, token.length);
+                num_str[token.length] = '\0';
+                int len = atoi(num_str);
+                consume_token(parser, TOKEN_RPAREN);
 
-            if (len <= 32) return TYPE_32;
-            else return TYPE_256;
+                if (len <= 32) return TYPE_32;
+                else return TYPE_256;
+            }
+            consume_token(parser, TOKEN_RPAREN);
         }
-        consume_token(parser, TOKEN_RPAREN);
         return TYPE_256;
     }
     if (consume_keyword(parser, "TEXT")) {
         return TYPE_256;
     }
 
-    return TYPE_256;  // Default
+    return TYPE_256;
 }
 
-// Parse CREATE TABLE statement
 CreateTableStmt* parse_create_table(Parser* parser) {
     if (!consume_keyword(parser, "CREATE")) {
         return nullptr;
@@ -950,7 +936,7 @@ CreateTableStmt* parse_create_table(Parser* parser) {
     CreateTableStmt* stmt = (CreateTableStmt*)Arena<ParserArena>::alloc(sizeof(CreateTableStmt));
     stmt->if_not_exists = false;
 
-    // Check for IF NOT EXISTS
+    // IF NOT EXISTS
     if (consume_keyword(parser, "IF")) {
         if (consume_keyword(parser, "NOT") && consume_keyword(parser, "EXISTS")) {
             stmt->if_not_exists = true;
@@ -968,7 +954,7 @@ CreateTableStmt* parse_create_table(Parser* parser) {
         return nullptr;
     }
 
-    // Parse column definitions
+    // Column definitions
     stmt->columns = array_create<ColumnDef*, ParserArena>();
 
     do {
@@ -981,7 +967,7 @@ CreateTableStmt* parse_create_table(Parser* parser) {
         col->is_primary_key = false;
         col->is_not_null = false;
 
-        // Parse column constraints
+        // Column constraints
         while (true) {
             if (consume_keyword(parser, "PRIMARY")) {
                 if (consume_keyword(parser, "KEY")) {
@@ -1007,7 +993,6 @@ CreateTableStmt* parse_create_table(Parser* parser) {
     return stmt;
 }
 
-// Parse DROP TABLE statement
 DropTableStmt* parse_drop_table(Parser* parser) {
     if (!consume_keyword(parser, "DROP")) {
         return nullptr;
@@ -1020,7 +1005,7 @@ DropTableStmt* parse_drop_table(Parser* parser) {
     DropTableStmt* stmt = (DropTableStmt*)Arena<ParserArena>::alloc(sizeof(DropTableStmt));
     stmt->if_exists = false;
 
-    // Check for IF EXISTS
+    // IF EXISTS
     if (consume_keyword(parser, "IF")) {
         if (consume_keyword(parser, "EXISTS")) {
             stmt->if_exists = true;
@@ -1037,7 +1022,7 @@ DropTableStmt* parse_drop_table(Parser* parser) {
     return stmt;
 }
 
-// Parse transaction statements
+// Transaction statements
 BeginStmt* parse_begin(Parser* parser) {
     if (!consume_keyword(parser, "BEGIN")) {
         return nullptr;
