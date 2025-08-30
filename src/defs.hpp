@@ -107,7 +107,7 @@ struct MemoryContext {
 
 int cmp(DataType key_size, const uint8_t *key1, const uint8_t *key2) ;
 
-void print_ptr(uint8_t *data, DataType type);
+
 
 void debug_type(uint8_t *data, DataType type);
 #define NL '\n'

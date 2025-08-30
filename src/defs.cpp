@@ -1,29 +1,8 @@
 #include "defs.hpp"
+#include <cstdio>
+#include <iostream>
 #include <cstdint>
 
-
-
-
-
-
-
-void print_ptr(uint8_t *data, DataType type) {
-  switch (type) {
-  case TYPE_4:
-    std::cout << *reinterpret_cast<uint32_t *>(data) << ",";
-    break;
-  case TYPE_8:
-    std::cout << *reinterpret_cast<uint64_t *>(data) << ",";
-    break;
-  case TYPE_32:
-  case TYPE_256:
-    for (uint32_t i = 0; i < type; ++i) {
-      printf("%c", data[i]);
-    }
-    printf("%c", ',');
-    break;
-  }
-}
 
 void debug_type(uint8_t *data, DataType type) {
   // Print raw bytes first
@@ -63,8 +42,6 @@ void debug_type(uint8_t *data, DataType type) {
 }
 // type_ops.cpp
 
-#include <cstdio>
-#include <iostream>
 
 // Global dispatch table
 TypeOps type_ops[257];
