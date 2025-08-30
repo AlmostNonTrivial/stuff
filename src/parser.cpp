@@ -416,10 +416,25 @@ Expr* parse_primary_expr(Parser* parser) {
     }
 
     // Parenthesized expression
+    // In parse_primary_expr, modify the parentheses case:
     if (consume_token(parser, TOKEN_LPAREN)) {
+        // Peek ahead to see if this is a subquery
+        if (peek_keyword(parser, "SELECT")) {
+            Expr* expr = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
+            expr->type = EXPR_SUBQUERY;
+            expr->subquery = parse_select(parser);
+            if (!expr->subquery) return nullptr;
+
+            if (!consume_token(parser, TOKEN_RPAREN)) {
+                return nullptr; // Error: missing closing paren
+            }
+            return expr;
+        }
+
+        // Otherwise normal parenthesized expression
         Expr* expr = parse_expression(parser);
         if (!consume_token(parser, TOKEN_RPAREN)) {
-            return nullptr; // Error: missing closing paren
+            return nullptr;
         }
         return expr;
     }
@@ -553,26 +568,35 @@ Expr* parse_binary_expr(Parser* parser, Expr* left, int min_prec) {
         Expr* right = nullptr;
 
         // Special handling for IN - expect a parenthesized list
+        // In parse_binary_expr, modify the IN handling:
         if (op == OP_IN) {
             if (!consume_token(parser, TOKEN_LPAREN)) {
-                return nullptr;  // IN must be followed by (
+                return nullptr;
             }
 
-            // Create list expression
-            right = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
-            right->type = EXPR_LIST;
-            right->list_items = array_create<Expr*, ParserArena>();
+            // Check if it's a subquery
+            if (peek_keyword(parser, "SELECT")) {
+                right = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
+                right->type = EXPR_SUBQUERY;
+                right->subquery = parse_select(parser);
+                if (!right->subquery) return nullptr;
+            } else {
+                // Existing list handling
+                right = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
+                right->type = EXPR_LIST;
+                right->list_items = array_create<Expr*, ParserArena>();
 
-            // Parse list items
-            do {
-                Expr* item = parse_expression(parser);
-                if (!item) return nullptr;
-                array_push(right->list_items, item);
-            } while (consume_token(parser, TOKEN_COMMA));
+                do {
+                    Expr* item = parse_expression(parser);
+                    if (!item) return nullptr;
+                    array_push(right->list_items, item);
+                } while (consume_token(parser, TOKEN_COMMA));
+            }
 
             if (!consume_token(parser, TOKEN_RPAREN)) {
-                return nullptr;  // Missing closing paren
-            }
+                return nullptr;
+
+        }
         } else {
             // Normal binary operator handling
             right = parse_primary_expr(parser);

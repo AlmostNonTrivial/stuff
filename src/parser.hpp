@@ -63,6 +63,7 @@ enum ExprType : uint8_t {
     EXPR_FUNCTION,
     EXPR_STAR,
     EXPR_LIST,
+    EXPR_SUBQUERY,
     EXPR_NULL
 };
 
@@ -140,6 +141,9 @@ struct Expr {
                 double float_val;
                 const char* str_val;
             };
+        };
+        struct {
+            SelectStmt* subquery;
         };
 
         // EXPR_COLUMN

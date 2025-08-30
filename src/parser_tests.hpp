@@ -1,17 +1,18 @@
+#pragma once
 #include "parser.hpp"
 #include <cassert>
 #include <cstring>
 #include <cstdio>
 
 // Helper to compare strings
-static bool str_eq(const char* a, const char* b) {
+inline static   bool str_eq(const char* a, const char* b) {
     if (!a && !b) return true;
     if (!a || !b) return false;
     return strcmp(a, b) == 0;
 }
 
 
-static void test_in_operator() {
+inline static   void test_in_operator() {
     printf("Testing IN operator...\n");
 
     Parser parser;
@@ -91,7 +92,7 @@ static void test_in_operator() {
 }
 
 // Test basic SELECT
-static void test_select_basic() {
+inline static   void test_select_basic() {
     printf("Testing basic SELECT...\n");
 
     Parser parser;
@@ -115,7 +116,7 @@ static void test_select_basic() {
 }
 
 // Test SELECT with columns
-static void test_select_columns() {
+inline static   void test_select_columns() {
     printf("Testing SELECT with columns...\n");
 
     Parser parser;
@@ -142,7 +143,7 @@ static void test_select_columns() {
 }
 
 // Test SELECT with WHERE
-static void test_select_where() {
+inline static   void test_select_where() {
     printf("Testing SELECT with WHERE...\n");
 
     Parser parser;
@@ -179,7 +180,7 @@ static void test_select_where() {
 }
 
 // Test SELECT with complex WHERE
-static void test_select_complex_where() {
+inline static   void test_select_complex_where() {
     printf("Testing SELECT with complex WHERE...\n");
 
     Parser parser;
@@ -211,7 +212,7 @@ static void test_select_complex_where() {
 }
 
 // Test SELECT with JOIN
-static void test_select_join() {
+inline static   void test_select_join() {
     printf("Testing SELECT with JOIN...\n");
 
     Parser parser;
@@ -251,7 +252,7 @@ static void test_select_join() {
 }
 
 // Test SELECT with multiple JOINs
-static void test_select_multiple_joins() {
+inline static   void test_select_multiple_joins() {
     printf("Testing SELECT with multiple JOINs...\n");
 
     Parser parser;
@@ -273,7 +274,7 @@ static void test_select_multiple_joins() {
 }
 
 // Test SELECT with ORDER BY
-static void test_select_order_by() {
+inline static   void test_select_order_by() {
     printf("Testing SELECT with ORDER BY...\n");
 
     Parser parser;
@@ -299,7 +300,7 @@ static void test_select_order_by() {
 }
 
 // Test SELECT with GROUP BY and HAVING
-static void test_select_group_by() {
+inline static   void test_select_group_by() {
     printf("Testing SELECT with GROUP BY and HAVING...\n");
 
     Parser parser;
@@ -334,7 +335,7 @@ static void test_select_group_by() {
 }
 
 // Test SELECT with LIMIT and OFFSET
-static void test_select_limit_offset() {
+inline static   void test_select_limit_offset() {
     printf("Testing SELECT with LIMIT and OFFSET...\n");
 
     Parser parser;
@@ -352,7 +353,7 @@ static void test_select_limit_offset() {
 }
 
 // Test SELECT DISTINCT
-static void test_select_distinct() {
+inline static   void test_select_distinct() {
     printf("Testing SELECT DISTINCT...\n");
 
     Parser parser;
@@ -369,7 +370,7 @@ static void test_select_distinct() {
 }
 
 // Test INSERT basic
-static void test_insert_basic() {
+inline static   void test_insert_basic() {
     printf("Testing basic INSERT...\n");
 
     Parser parser;
@@ -400,7 +401,7 @@ static void test_insert_basic() {
 }
 
 // Test INSERT with columns
-static void test_insert_with_columns() {
+inline static   void test_insert_with_columns() {
     printf("Testing INSERT with columns...\n");
 
     Parser parser;
@@ -422,7 +423,7 @@ static void test_insert_with_columns() {
 }
 
 // Test INSERT with multiple rows
-static void test_insert_multiple_rows() {
+inline static   void test_insert_multiple_rows() {
     printf("Testing INSERT with multiple rows...\n");
 
     Parser parser;
@@ -452,7 +453,7 @@ static void test_insert_multiple_rows() {
 }
 
 // Test UPDATE basic
-static void test_update_basic() {
+inline static   void test_update_basic() {
     printf("Testing basic UPDATE...\n");
 
     Parser parser;
@@ -480,7 +481,7 @@ static void test_update_basic() {
 }
 
 // Test UPDATE multiple columns
-static void test_update_multiple_columns() {
+inline static   void test_update_multiple_columns() {
     printf("Testing UPDATE with multiple columns...\n");
 
     Parser parser;
@@ -506,7 +507,7 @@ static void test_update_multiple_columns() {
 }
 
 // Test DELETE basic
-static void test_delete_basic() {
+inline static   void test_delete_basic() {
     printf("Testing basic DELETE...\n");
 
     Parser parser;
@@ -527,7 +528,7 @@ static void test_delete_basic() {
 }
 
 // Test DELETE without WHERE
-static void test_delete_all() {
+inline static   void test_delete_all() {
     printf("Testing DELETE without WHERE...\n");
 
     Parser parser;
@@ -545,7 +546,7 @@ static void test_delete_all() {
 }
 
 // Test CREATE TABLE
-static void test_create_table() {
+inline static   void test_create_table() {
     printf("Testing CREATE TABLE...\n");
 
     Parser parser;
@@ -592,7 +593,7 @@ static void test_create_table() {
 }
 
 // Test CREATE TABLE IF NOT EXISTS
-static void test_create_table_if_not_exists() {
+inline static   void test_create_table_if_not_exists() {
     printf("Testing CREATE TABLE IF NOT EXISTS...\n");
 
     Parser parser;
@@ -610,7 +611,7 @@ static void test_create_table_if_not_exists() {
 }
 
 // Test DROP TABLE
-static void test_drop_table() {
+inline static   void test_drop_table() {
     printf("Testing DROP TABLE...\n");
 
     Parser parser;
@@ -629,7 +630,7 @@ static void test_drop_table() {
 }
 
 // Test DROP TABLE IF EXISTS
-static void test_drop_table_if_exists() {
+inline static   void test_drop_table_if_exists() {
     printf("Testing DROP TABLE IF EXISTS...\n");
 
     Parser parser;
@@ -647,7 +648,7 @@ static void test_drop_table_if_exists() {
 }
 
 // Test transaction statements
-static void test_transactions() {
+inline static   void test_transactions() {
     printf("Testing transaction statements...\n");
 
     Parser parser;
@@ -677,7 +678,7 @@ static void test_transactions() {
 }
 
 // Test expressions
-static void test_expressions() {
+inline static   void test_expressions() {
     printf("Testing complex expressions...\n");
 
     Parser parser;
@@ -724,7 +725,7 @@ static void test_expressions() {
 }
 
 // Test function calls
-static void test_functions() {
+inline static   void test_functions() {
     printf("Testing function calls...\n");
 
     Parser parser;
@@ -754,7 +755,7 @@ static void test_functions() {
 }
 
 // Test LIKE operator
-static void test_like_operator() {
+inline static   void test_like_operator() {
     printf("Testing LIKE operator...\n");
 
     Parser parser;
@@ -777,7 +778,7 @@ static void test_like_operator() {
 }
 
 // Test NULL handling
-static void test_null_handling() {
+inline static   void test_null_handling() {
     printf("Testing NULL handling...\n");
 
     Parser parser;
@@ -806,7 +807,7 @@ static void test_null_handling() {
 }
 
 // Test semicolon handling
-static void test_semicolon_handling() {
+inline static   void test_semicolon_handling() {
     printf("Testing semicolon handling...\n");
 
     Parser parser;
@@ -827,7 +828,7 @@ static void test_semicolon_handling() {
 }
 
 // Test case insensitivity
-static void test_case_insensitivity() {
+inline static   void test_case_insensitivity() {
     printf("Testing case insensitivity...\n");
 
     Parser parser;
@@ -847,7 +848,7 @@ static void test_case_insensitivity() {
 }
 
 // Test edge cases
-static void test_edge_cases() {
+inline static   void test_edge_cases() {
     printf("Testing edge cases...\n");
 
     Parser parser;
@@ -873,7 +874,7 @@ static void test_edge_cases() {
     printf("  ✓ Edge cases passed\n");
 }
 
-static void test_subqueries() {
+inline static   void test_subqueries() {
     printf("Testing subqueries...\n");
 
     Parser parser;
@@ -983,7 +984,7 @@ static void test_subqueries() {
 }
 
 // Main test runner
-int main() {
+inline void test_parser() {
     printf("\n========================================\n");
     printf("    PARSER TEST SUITE\n");
     printf("========================================\n\n");
@@ -1041,6 +1042,4 @@ int main() {
 
     // Clean up arena
     Arena<ParserArena>::shutdown();
-
-    return 0;
 }
