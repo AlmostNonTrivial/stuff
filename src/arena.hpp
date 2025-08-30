@@ -1185,3 +1185,274 @@ void hashset_clear(hash_set<K, Tag>* set)
 {
     hashmap_clear(set);
 }
+
+
+
+// String hashing and string_map implementation
+// Add this to your header file after the existing hash_map implementation
+
+// FNV-1a hash for strings
+inline uint32_t hash_string(const char* str) {
+    uint32_t hash = 2166136261u;
+    while (*str) {
+        hash ^= (uint8_t)*str++;
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+// Helper to allocate and copy string
+template <typename Tag>
+inline char* string_dup(const char* str) {
+    size_t len = strlen(str) + 1;
+    char* copy = (char*)Arena<Tag>::alloc(len);
+    memcpy(copy, str, len);
+    return copy;
+}
+
+// String map - similar structure to hash_map but with string keys
+template <typename V, typename Tag = global_arena>
+struct string_map {
+    struct Entry {
+        char* key;           // nullptr means empty
+        V value;
+        uint32_t hash;       // cached hash value
+        enum State : uint8_t { EMPTY = 0, OCCUPIED = 1, DELETED = 2 };
+        State state;
+    };
+
+    Entry* entries = nullptr;
+    uint32_t capacity = 0;
+    uint32_t size = 0;
+    uint32_t tombstones = 0;
+};
+
+template <typename V, typename Tag>
+static void stringmap_init(string_map<V, Tag>* m, uint32_t initial_capacity = 16) {
+    initial_capacity--;
+    initial_capacity |= initial_capacity >> 1;
+    initial_capacity |= initial_capacity >> 2;
+    initial_capacity |= initial_capacity >> 4;
+    initial_capacity |= initial_capacity >> 8;
+    initial_capacity |= initial_capacity >> 16;
+    initial_capacity++;
+
+    m->capacity = initial_capacity;
+    m->entries = (typename string_map<V, Tag>::Entry*)
+        Arena<Tag>::alloc(initial_capacity * sizeof(typename string_map<V, Tag>::Entry));
+    memset(m->entries, 0, initial_capacity * sizeof(typename string_map<V, Tag>::Entry));
+    m->size = 0;
+    m->tombstones = 0;
+}
+
+template <typename V, typename Tag>
+static V* stringmap_insert_internal(string_map<V, Tag>* m, const char* key, uint32_t hash, V value) {
+    uint32_t mask = m->capacity - 1;
+    uint32_t idx = hash & mask;
+
+    while (true) {
+        auto& entry = m->entries[idx];
+
+        if (entry.state != string_map<V, Tag>::Entry::OCCUPIED) {
+            // Found empty or deleted slot
+            if (entry.state == string_map<V, Tag>::Entry::DELETED) {
+                m->tombstones--;
+            }
+
+            // Reclaim old string if it exists (from deleted entry)
+            if (entry.key) {
+                size_t old_len = strlen(entry.key) + 1;
+                Arena<Tag>::reclaim(entry.key, old_len);
+            }
+
+            entry.key = string_dup<Tag>(key);
+            entry.hash = hash;
+            entry.value = value;
+            entry.state = string_map<V, Tag>::Entry::OCCUPIED;
+            m->size++;
+            return &entry.value;
+        }
+
+        // Check if key matches
+        if (entry.hash == hash && strcmp(entry.key, key) == 0) {
+            entry.value = value;
+            return &entry.value;
+        }
+
+        idx = (idx + 1) & mask;
+    }
+}
+
+template <typename V, typename Tag>
+static void stringmap_grow(string_map<V, Tag>* m) {
+    uint32_t old_capacity = m->capacity;
+    auto* old_entries = m->entries;
+
+    m->capacity = old_capacity * 2;
+    m->entries = (typename string_map<V, Tag>::Entry*)
+        Arena<Tag>::alloc(m->capacity * sizeof(typename string_map<V, Tag>::Entry));
+    memset(m->entries, 0, m->capacity * sizeof(typename string_map<V, Tag>::Entry));
+
+    uint32_t old_size = m->size;
+    m->size = 0;
+    m->tombstones = 0;
+
+    for (uint32_t i = 0; i < old_capacity; i++) {
+        if (old_entries[i].state == string_map<V, Tag>::Entry::OCCUPIED) {
+            // Reuse existing string allocation - no need to duplicate again
+            uint32_t mask = m->capacity - 1;
+            uint32_t idx = old_entries[i].hash & mask;
+
+            while (m->entries[idx].state == string_map<V, Tag>::Entry::OCCUPIED) {
+                idx = (idx + 1) & mask;
+            }
+
+            m->entries[idx] = old_entries[i];
+            m->size++;
+        } else if (old_entries[i].state == string_map<V, Tag>::Entry::DELETED && old_entries[i].key) {
+            // Reclaim deleted entry's string
+            size_t len = strlen(old_entries[i].key) + 1;
+            Arena<Tag>::reclaim(old_entries[i].key, len);
+        }
+    }
+
+    // Reclaim old backing array
+    Arena<Tag>::reclaim(old_entries, old_capacity * sizeof(typename string_map<V, Tag>::Entry));
+}
+
+template <typename V, typename Tag>
+V* stringmap_insert(string_map<V, Tag>* m, const char* key, V value) {
+    if (!m->entries) {
+        stringmap_init(m);
+    }
+
+    if ((m->size + m->tombstones) * 4 >= m->capacity * 3) {
+        stringmap_grow(m);
+    }
+
+    uint32_t hash = hash_string(key);
+    uint32_t mask = m->capacity - 1;
+    uint32_t idx = hash & mask;
+    uint32_t first_deleted = (uint32_t)-1;
+
+    while (true) {
+        auto& entry = m->entries[idx];
+
+        if (entry.state == string_map<V, Tag>::Entry::EMPTY) {
+            if (first_deleted != (uint32_t)-1) {
+                auto& deleted_entry = m->entries[first_deleted];
+
+                // Reclaim old string if exists
+                if (deleted_entry.key) {
+                    size_t old_len = strlen(deleted_entry.key) + 1;
+                    Arena<Tag>::reclaim(deleted_entry.key, old_len);
+                }
+
+                deleted_entry.key = string_dup<Tag>(key);
+                deleted_entry.hash = hash;
+                deleted_entry.value = value;
+                deleted_entry.state = string_map<V, Tag>::Entry::OCCUPIED;
+                m->tombstones--;
+                m->size++;
+                return &deleted_entry.value;
+            } else {
+                entry.key = string_dup<Tag>(key);
+                entry.hash = hash;
+                entry.value = value;
+                entry.state = string_map<V, Tag>::Entry::OCCUPIED;
+                m->size++;
+                return &entry.value;
+            }
+        }
+
+        if (entry.state == string_map<V, Tag>::Entry::DELETED) {
+            if (first_deleted == (uint32_t)-1) {
+                first_deleted = idx;
+            }
+        } else if (entry.hash == hash && strcmp(entry.key, key) == 0) {
+            entry.value = value;
+            return &entry.value;
+        }
+
+        idx = (idx + 1) & mask;
+    }
+}
+
+template <typename V, typename Tag>
+V* stringmap_get(string_map<V, Tag>* m, const char* key) {
+    if (!m->entries || m->size == 0) return nullptr;
+
+    uint32_t hash = hash_string(key);
+    uint32_t mask = m->capacity - 1;
+    uint32_t idx = hash & mask;
+
+    while (true) {
+        auto& entry = m->entries[idx];
+
+        if (entry.state == string_map<V, Tag>::Entry::EMPTY) {
+            return nullptr;
+        }
+
+        if (entry.state == string_map<V, Tag>::Entry::OCCUPIED &&
+            entry.hash == hash &&
+            strcmp(entry.key, key) == 0) {
+            return &entry.value;
+        }
+
+        idx = (idx + 1) & mask;
+    }
+}
+
+template <typename V, typename Tag>
+bool stringmap_delete(string_map<V, Tag>* m, const char* key) {
+    if (!m->entries || m->size == 0) return false;
+
+    uint32_t hash = hash_string(key);
+    uint32_t mask = m->capacity - 1;
+    uint32_t idx = hash & mask;
+
+    while (true) {
+        auto& entry = m->entries[idx];
+
+        if (entry.state == string_map<V, Tag>::Entry::EMPTY) {
+            return false;
+        }
+
+        if (entry.state == string_map<V, Tag>::Entry::OCCUPIED &&
+            entry.hash == hash &&
+            strcmp(entry.key, key) == 0) {
+            // Reclaim string memory
+            size_t len = strlen(entry.key) + 1;
+            Arena<Tag>::reclaim(entry.key, len);
+
+            entry.key = nullptr;
+            entry.state = string_map<V, Tag>::Entry::DELETED;
+            m->size--;
+            m->tombstones++;
+            return true;
+        }
+
+        idx = (idx + 1) & mask;
+    }
+}
+
+template <typename V, typename Tag>
+void stringmap_clear(string_map<V, Tag>* m) {
+    if (m->entries) {
+        // Reclaim all string memory
+        for (uint32_t i = 0; i < m->capacity; i++) {
+            if (m->entries[i].state == string_map<V, Tag>::Entry::OCCUPIED && m->entries[i].key) {
+                size_t len = strlen(m->entries[i].key) + 1;
+                Arena<Tag>::reclaim(m->entries[i].key, len);
+            } else if (m->entries[i].state == string_map<V, Tag>::Entry::DELETED && m->entries[i].key) {
+                // Also reclaim deleted entries that still have strings
+                size_t len = strlen(m->entries[i].key) + 1;
+                Arena<Tag>::reclaim(m->entries[i].key, len);
+            }
+        }
+
+        memset(m->entries, 0, m->capacity * sizeof(typename string_map<V, Tag>::Entry));
+    }
+    m->size = 0;
+    m->tombstones = 0;
+}
