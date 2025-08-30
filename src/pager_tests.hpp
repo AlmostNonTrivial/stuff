@@ -1,13 +1,41 @@
 #pragma once
 #include "arena.hpp"
 #include "pager.hpp"
-#include "test_utils.hpp"
+// #include "test_utils.hpp"
 #include <cassert>
+#include "os_layer.hpp"
 #include <cstdlib>
 #include <ctime>
 #include <iostream>
 
 #define DB "db"
+
+
+
+inline uint64_t
+hash_file(const char *filename)
+{
+	os_file_handle_t handle = os_file_open(filename, false, false);
+	if (handle == OS_INVALID_HANDLE)
+		return 0;
+
+	uint64_t	   hash = 0xcbf29ce484222325ULL;
+	const uint64_t prime = 0x100000001b3ULL;
+
+	uint8_t		   buffer[PAGE_SIZE];
+	os_file_size_t bytes_read;
+	while ((bytes_read = os_file_read(handle, buffer, sizeof(buffer))) > 0)
+	{
+		for (os_file_size_t i = 0; i < bytes_read; i++)
+		{
+			hash ^= buffer[i];
+			hash *= prime;
+		}
+	}
+
+	os_file_close(handle);
+	return hash;
+}
 
 inline void
 test_free_list()
