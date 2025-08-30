@@ -114,7 +114,9 @@ enum StmtType : uint8_t {
     STMT_UPDATE,
     STMT_DELETE,
     STMT_CREATE_TABLE,
+        STMT_CREATE_INDEX,
     STMT_DROP_TABLE,
+     STMT_DROP_INDEX,
     STMT_BEGIN,
     STMT_COMMIT,
     STMT_ROLLBACK
@@ -237,9 +239,23 @@ struct CreateTableStmt {
     bool if_not_exists;
 };
 
+
+struct CreateIndexStmt {
+    const char* index_name;
+    const char* table_name;
+    array<const char*, ParserArena>* columns;
+    bool is_unique;
+    bool if_not_exists;
+};
+
 // DROP TABLE statement
 struct DropTableStmt {
     const char* table_name;
+    bool if_exists;
+};
+struct DropIndexStmt {
+    const char* index_name;
+    const char* table_name;  // Optional - some SQL dialects support ON table_name
     bool if_exists;
 };
 
@@ -257,7 +273,9 @@ struct Statement {
         UpdateStmt* update_stmt;
         DeleteStmt* delete_stmt;
         CreateTableStmt* create_table_stmt;
+        CreateIndexStmt* create_index_stmt;
         DropTableStmt* drop_table_stmt;
+          DropIndexStmt* drop_index_stmt;
         BeginStmt* begin_stmt;
         CommitStmt* commit_stmt;
         RollbackStmt* rollback_stmt;
@@ -287,6 +305,7 @@ InsertStmt* parse_insert(Parser* parser);
 UpdateStmt* parse_update(Parser* parser);
 DeleteStmt* parse_delete(Parser* parser);
 CreateTableStmt* parse_create_table(Parser* parser);
+CreateIndexStmt* parse_create_index(Parser* parser);
 DropTableStmt* parse_drop_table(Parser* parser);
 BeginStmt* parse_begin(Parser* parser);
 CommitStmt* parse_commit(Parser* parser);
@@ -309,3 +328,4 @@ bool peek_keyword(Parser* parser, const char* keyword);
 const char* token_type_to_string(TokenType type);
 const char* intern_string(const char* str, uint32_t length);
 DataType parse_data_type(Parser* parser);
+array<Statement*, ParserArena>* parser_parse_statements(Parser* parser);

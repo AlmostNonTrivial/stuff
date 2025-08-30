@@ -12,6 +12,146 @@ inline static   bool str_eq(const char* a, const char* b) {
 }
 
 
+inline static void test_multiple_statements() {
+    printf("Testing multiple statements parsing...\n");
+
+    Parser parser;
+    parser_init(&parser,
+        "SELECT * FROM users WHERE id = 1; "
+        "INSERT INTO users (id, name) VALUES (2, 'Jane'); "
+        "UPDATE users SET name = 'John' WHERE id = 1; "
+        "DELETE FROM users WHERE id = 3; "
+        "CREATE TABLE test (id INT); "
+        "DROP TABLE test;"
+    );
+
+    array<Statement*, ParserArena>* statements = parser_parse_statements(&parser);
+    assert(statements != nullptr);
+    assert(statements->size == 6);
+
+    // Test 1: SELECT statement
+    Statement* stmt1 = statements->data[0];
+    assert(stmt1->type == STMT_SELECT);
+    SelectStmt* select = stmt1->select_stmt;
+    assert(select != nullptr);
+    assert(select->select_list->size == 1);
+    assert(select->select_list->data[0]->type == EXPR_STAR);
+    assert(str_eq(select->from_table->table_name, "users"));
+    assert(select->where_clause != nullptr);
+    assert(select->where_clause->op == OP_EQ);
+    assert(str_eq(select->where_clause->left->column_name, "id"));
+    assert(select->where_clause->right->int_val == 1);
+
+    // Test 2: INSERT statement
+    Statement* stmt2 = statements->data[1];
+    assert(stmt2->type == STMT_INSERT);
+    InsertStmt* insert = stmt2->insert_stmt;
+    assert(str_eq(insert->table_name, "users"));
+    assert(insert->columns != nullptr);
+    assert(insert->columns->size == 2);
+    assert(str_eq(insert->columns->data[0], "id"));
+    assert(str_eq(insert->columns->data[1], "name"));
+    assert(insert->values->size == 1);
+    assert(insert->values->data[0]->size == 2);
+    assert(insert->values->data[0]->data[0]->int_val == 2);
+    assert(str_eq(insert->values->data[0]->data[1]->str_val, "Jane"));
+
+    // Test 3: UPDATE statement
+    Statement* stmt3 = statements->data[2];
+    assert(stmt3->type == STMT_UPDATE);
+    UpdateStmt* update = stmt3->update_stmt;
+    assert(str_eq(update->table_name, "users"));
+    assert(update->columns->size == 1);
+    assert(str_eq(update->columns->data[0], "name"));
+    assert(str_eq(update->values->data[0]->str_val, "John"));
+    assert(update->where_clause != nullptr);
+    assert(update->where_clause->op == OP_EQ);
+    assert(str_eq(update->where_clause->left->column_name, "id"));
+    assert(update->where_clause->right->int_val == 1);
+
+    // Test 4: DELETE statement
+    Statement* stmt4 = statements->data[3];
+    assert(stmt4->type == STMT_DELETE);
+    DeleteStmt* del = stmt4->delete_stmt;
+    assert(str_eq(del->table_name, "users"));
+    assert(del->where_clause != nullptr);
+    assert(del->where_clause->op == OP_EQ);
+    assert(str_eq(del->where_clause->left->column_name, "id"));
+    assert(del->where_clause->right->int_val == 3);
+
+    // Test 5: CREATE TABLE statement
+    Statement* stmt5 = statements->data[4];
+    assert(stmt5->type == STMT_CREATE_TABLE);
+    CreateTableStmt* create = stmt5->create_table_stmt;
+    assert(str_eq(create->table_name, "test"));
+    assert(create->columns->size == 1);
+    assert(str_eq(create->columns->data[0]->name, "id"));
+    assert(create->columns->data[0]->type == TYPE_4);
+
+    // Test 6: DROP TABLE statement
+    Statement* stmt6 = statements->data[5];
+    assert(stmt6->type == STMT_DROP_TABLE);
+    DropTableStmt* drop = stmt6->drop_table_stmt;
+    assert(str_eq(drop->table_name, "test"));
+    assert(!drop->if_exists);
+
+    parser_reset(&parser);
+    printf("  ✓ Multiple statements parsing passed\n");
+
+    // Test with missing semicolons
+    parser_init(&parser,
+        "SELECT * FROM users "
+        "INSERT INTO users VALUES (1, 'Bob') "
+        "COMMIT"
+    );
+
+    statements = parser_parse_statements(&parser);
+    assert(statements != nullptr);
+    assert(statements->size == 3);
+
+    assert(statements->data[0]->type == STMT_SELECT);
+    assert(statements->data[1]->type == STMT_INSERT);
+    assert(statements->data[2]->type == STMT_COMMIT);
+
+    parser_reset(&parser);
+    printf("  ✓ Multiple statements without semicolons passed\n");
+
+    // Test empty input
+    parser_init(&parser, "");
+    statements = parser_parse_statements(&parser);
+    assert(statements != nullptr);
+    assert(statements->size == 0);
+
+    parser_reset(&parser);
+    printf("  ✓ Empty input handling passed\n");
+
+    // Test single statement
+    parser_init(&parser, "SELECT * FROM users");
+    statements = parser_parse_statements(&parser);
+    assert(statements != nullptr);
+    assert(statements->size == 1);
+    assert(statements->data[0]->type == STMT_SELECT);
+
+    parser_reset(&parser);
+    printf("  ✓ Single statement parsing passed\n");
+
+    // Test invalid statement in middle
+    parser_init(&parser,
+        "SELECT * FROM users; "
+        "INVALID SYNTAX HERE; "
+        "INSERT INTO users VALUES (1, 'Bob')"
+    );
+
+    statements = parser_parse_statements(&parser);
+    assert(statements != nullptr);
+    assert(statements->size == 1); // Should stop after first valid statement
+    assert(statements->data[0]->type == STMT_SELECT);
+
+    parser_reset(&parser);
+    printf("  ✓ Invalid statement handling passed\n");
+}
+
+
 inline static   void test_in_operator() {
     printf("Testing IN operator...\n");
 
@@ -983,6 +1123,94 @@ inline static   void test_subqueries() {
     printf("  ✓ Subqueries passed\n");
 }
 
+void test_drop_index() {
+    printf("Testing DROP INDEX...\n");
+
+    Parser parser;
+
+    // Basic drop
+    parser_init(&parser, "DROP INDEX idx_users_email");
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    assert(stmt->type == STMT_DROP_INDEX);
+
+    DropIndexStmt* drop = stmt->drop_index_stmt;
+    assert(str_eq(drop->index_name, "idx_users_email"));
+    assert(drop->table_name == nullptr);
+    assert(!drop->if_exists);
+
+    parser_reset(&parser);
+
+    // With ON table_name
+    parser_init(&parser, "DROP INDEX idx_test ON users");
+    stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    drop = stmt->drop_index_stmt;
+    assert(str_eq(drop->index_name, "idx_test"));
+    assert(str_eq(drop->table_name, "users"));
+
+    parser_reset(&parser);
+
+    // IF EXISTS
+    parser_init(&parser, "DROP INDEX IF EXISTS idx_old");
+    stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    drop = stmt->drop_index_stmt;
+    assert(drop->if_exists);
+
+    parser_reset(&parser);
+
+    printf("  ✓ DROP INDEX passed\n");
+}
+
+void test_create_index() {
+    printf("Testing CREATE INDEX...\n");
+
+    Parser parser;
+
+    // Basic index
+    parser_init(&parser, "CREATE INDEX idx_users_email ON users (email)");
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    assert(stmt->type == STMT_CREATE_INDEX);
+
+    CreateIndexStmt* create = stmt->create_index_stmt;
+    assert(str_eq(create->index_name, "idx_users_email"));
+    assert(str_eq(create->table_name, "users"));
+    assert(create->columns->size == 1);
+    assert(str_eq(create->columns->data[0], "email"));
+    assert(!create->is_unique);
+
+    parser_reset(&parser);
+
+    // Unique index with multiple columns
+    parser_init(&parser, "CREATE UNIQUE INDEX idx_composite ON orders (user_id, product_id)");
+    stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    create = stmt->create_index_stmt;
+    assert(create->is_unique);
+    assert(create->columns->size == 2);
+    assert(str_eq(create->columns->data[0], "user_id"));
+    assert(str_eq(create->columns->data[1], "product_id"));
+
+    parser_reset(&parser);
+
+    // IF NOT EXISTS
+    parser_init(&parser, "CREATE INDEX IF NOT EXISTS idx_test ON test (col1)");
+    stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    create = stmt->create_index_stmt;
+    assert(create->if_not_exists);
+
+    parser_reset(&parser);
+
+    printf("  ✓ CREATE INDEX passed\n");
+}
+
 // Main test runner
 inline void test_parser() {
     printf("\n========================================\n");
@@ -1001,6 +1229,8 @@ inline void test_parser() {
     test_select_group_by();
     test_select_limit_offset();
     test_select_distinct();
+    test_create_index();
+    test_drop_index();
 
     // INSERT tests
     test_insert_basic();
@@ -1035,6 +1265,9 @@ inline void test_parser() {
     test_semicolon_handling();
     test_case_insensitivity();
     test_edge_cases();
+
+    test_multiple_statements();
+
 
     printf("\n========================================\n");
     printf("    ALL TESTS PASSED! ✓\n");

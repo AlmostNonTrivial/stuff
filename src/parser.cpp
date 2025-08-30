@@ -1,4 +1,5 @@
 #include "parser.hpp"
+#include "arena.hpp"
 #include <cctype>
 #include <cstring>
 #include <cstdlib>
@@ -973,6 +974,72 @@ DataType parse_data_type(Parser* parser) {
 
     return TYPE_256;
 }
+CreateIndexStmt* parse_create_index(Parser* parser) {
+    if (!consume_keyword(parser, "CREATE")) {
+        return nullptr;
+    }
+
+    CreateIndexStmt* stmt = (CreateIndexStmt*)Arena<ParserArena>::alloc(sizeof(CreateIndexStmt));
+    stmt->is_unique = false;
+    stmt->if_not_exists = false;
+
+    // Check for UNIQUE
+    if (consume_keyword(parser, "UNIQUE")) {
+        stmt->is_unique = true;
+    }
+
+    if (!consume_keyword(parser, "INDEX")) {
+        return nullptr;
+    }
+
+    // Check for IF NOT EXISTS
+    if (consume_keyword(parser, "IF")) {
+        if (consume_keyword(parser, "NOT") && consume_keyword(parser, "EXISTS")) {
+            stmt->if_not_exists = true;
+        }
+    }
+
+    // Index name
+    Token token = lexer_next_token(parser->lexer);
+    if (token.type != TOKEN_IDENTIFIER) {
+        return nullptr;
+    }
+    stmt->index_name = intern_string(token.text, token.length);
+
+    // ON keyword
+    if (!consume_keyword(parser, "ON")) {
+        return nullptr;
+    }
+
+    // Table name
+    token = lexer_next_token(parser->lexer);
+    if (token.type != TOKEN_IDENTIFIER) {
+        return nullptr;
+    }
+    stmt->table_name = intern_string(token.text, token.length);
+
+    // Column list in parentheses
+    if (!consume_token(parser, TOKEN_LPAREN)) {
+        return nullptr;
+    }
+
+    stmt->columns = array_create<const char*, ParserArena>();
+    do {
+        token = lexer_next_token(parser->lexer);
+        if (token.type != TOKEN_IDENTIFIER) {
+            return nullptr;
+        }
+        array_push(stmt->columns, intern_string(token.text, token.length));
+    } while (consume_token(parser, TOKEN_COMMA));
+
+    if (!consume_token(parser, TOKEN_RPAREN)) {
+        return nullptr;
+    }
+
+    return stmt;
+}
+
+
 
 CreateTableStmt* parse_create_table(Parser* parser) {
     if (!consume_keyword(parser, "CREATE")) {
@@ -1042,6 +1109,47 @@ CreateTableStmt* parse_create_table(Parser* parser) {
 
     return stmt;
 }
+
+
+DropIndexStmt* parse_drop_index(Parser* parser) {
+    if (!consume_keyword(parser, "DROP")) {
+        return nullptr;
+    }
+
+    if (!consume_keyword(parser, "INDEX")) {
+        return nullptr;
+    }
+
+    DropIndexStmt* stmt = (DropIndexStmt*)Arena<ParserArena>::alloc(sizeof(DropIndexStmt));
+    stmt->if_exists = false;
+    stmt->table_name = nullptr;
+
+    // Check for IF EXISTS
+    if (consume_keyword(parser, "IF")) {
+        if (consume_keyword(parser, "EXISTS")) {
+            stmt->if_exists = true;
+        }
+    }
+
+    // Index name
+    Token token = lexer_next_token(parser->lexer);
+    if (token.type != TOKEN_IDENTIFIER) {
+        return nullptr;
+    }
+    stmt->index_name = intern_string(token.text, token.length);
+
+    // Optional ON table_name (some SQL dialects support this)
+    if (consume_keyword(parser, "ON")) {
+        token = lexer_next_token(parser->lexer);
+        if (token.type != TOKEN_IDENTIFIER) {
+            return nullptr;
+        }
+        stmt->table_name = intern_string(token.text, token.length);
+    }
+
+    return stmt;
+}
+
 
 DropTableStmt* parse_drop_table(Parser* parser) {
     if (!consume_keyword(parser, "DROP")) {
@@ -1115,14 +1223,105 @@ Statement* parser_parse_statement(Parser* parser) {
         stmt->type = STMT_DELETE;
         stmt->delete_stmt = parse_delete(parser);
         if (!stmt->delete_stmt) return nullptr;
-    } else if (peek_keyword(parser, "CREATE")) {
-        stmt->type = STMT_CREATE_TABLE;
-        stmt->create_table_stmt = parse_create_table(parser);
-        if (!stmt->create_table_stmt) return nullptr;
-    } else if (peek_keyword(parser, "DROP")) {
-        stmt->type = STMT_DROP_TABLE;
-        stmt->drop_table_stmt = parse_drop_table(parser);
-        if (!stmt->drop_table_stmt) return nullptr;
+    }  else if (peek_keyword(parser, "CREATE")) {
+           // Need to look ahead to see if it's TABLE or INDEX
+           Token saved_current = parser->lexer->current_token;
+           const char* saved_pos = parser->lexer->current;
+           uint32_t saved_line = parser->lexer->line;
+           uint32_t saved_col = parser->lexer->column;
+
+           consume_keyword(parser, "CREATE");
+
+           // Check for UNIQUE INDEX
+           bool is_index = false;
+           if (peek_keyword(parser, "UNIQUE")) {
+               consume_keyword(parser, "UNIQUE");
+               if (peek_keyword(parser, "INDEX")) {
+                   is_index = true;
+               }
+           } else if (peek_keyword(parser, "INDEX")) {
+               is_index = true;
+           }
+
+           // Restore position
+           parser->lexer->current_token = saved_current;
+           parser->lexer->current = saved_pos;
+           parser->lexer->line = saved_line;
+           parser->lexer->column = saved_col;
+
+           if (is_index) {
+               stmt->type = STMT_CREATE_INDEX;
+               stmt->create_index_stmt = parse_create_index(parser);
+               if (!stmt->create_index_stmt) return nullptr;
+           } else {
+               stmt->type = STMT_CREATE_TABLE;
+               stmt->create_table_stmt = parse_create_table(parser);
+               if (!stmt->create_table_stmt) return nullptr;
+           }
+       }  else if (peek_keyword(parser, "CREATE")) {
+              // Need to look ahead to see if it's TABLE or INDEX
+              Token saved_current = parser->lexer->current_token;
+              const char* saved_pos = parser->lexer->current;
+              uint32_t saved_line = parser->lexer->line;
+              uint32_t saved_col = parser->lexer->column;
+              
+              consume_keyword(parser, "CREATE");
+              
+              // Check for UNIQUE INDEX
+              bool is_index = false;
+              if (peek_keyword(parser, "UNIQUE")) {
+                  consume_keyword(parser, "UNIQUE");
+                  if (peek_keyword(parser, "INDEX")) {
+                      is_index = true;
+                  }
+              } else if (peek_keyword(parser, "INDEX")) {
+                  is_index = true;
+              }
+              
+              // Restore position
+              parser->lexer->current_token = saved_current;
+              parser->lexer->current = saved_pos;
+              parser->lexer->line = saved_line;
+              parser->lexer->column = saved_col;
+              
+              if (is_index) {
+                  stmt->type = STMT_CREATE_INDEX;
+                  stmt->create_index_stmt = parse_create_index(parser);
+                  if (!stmt->create_index_stmt) return nullptr;
+              } else {
+                  stmt->type = STMT_CREATE_TABLE;
+                  stmt->create_table_stmt = parse_create_table(parser);
+                  if (!stmt->create_table_stmt) return nullptr;
+              }
+          }    else if (peek_keyword(parser, "DROP")) {
+        // Look ahead to see if it's TABLE or INDEX
+        Token saved_current = parser->lexer->current_token;
+        const char* saved_pos = parser->lexer->current;
+        uint32_t saved_line = parser->lexer->line;
+        uint32_t saved_col = parser->lexer->column;
+
+        consume_keyword(parser, "DROP");
+
+        bool is_index = false;
+        if (peek_keyword(parser, "INDEX")) {
+            is_index = true;
+        }
+
+        // Restore position
+        parser->lexer->current_token = saved_current;
+        parser->lexer->current = saved_pos;
+        parser->lexer->line = saved_line;
+        parser->lexer->column = saved_col;
+
+        if (is_index) {
+            stmt->type = STMT_DROP_INDEX;
+            stmt->drop_index_stmt = parse_drop_index(parser);
+            if (!stmt->drop_index_stmt) return nullptr;
+        } else {
+            stmt->type = STMT_DROP_TABLE;
+            stmt->drop_table_stmt = parse_drop_table(parser);
+            if (!stmt->drop_table_stmt) return nullptr;
+        }
     } else if (peek_keyword(parser, "BEGIN")) {
         stmt->type = STMT_BEGIN;
         stmt->begin_stmt = parse_begin(parser);
@@ -1143,4 +1342,24 @@ Statement* parser_parse_statement(Parser* parser) {
     consume_token(parser, TOKEN_SEMICOLON);
 
     return stmt;
+}
+
+array<Statement*, ParserArena>* parser_parse_statements(Parser* parser) {
+    auto* statements = array_create<Statement*, ParserArena>();
+    while (true) {
+        // Skip whitespace and check for EOF
+        skip_whitespace(parser->lexer);
+        if (lexer_peek_token(parser->lexer).type == TOKEN_EOF) {
+            break;
+        }
+
+        Statement* stmt = parser_parse_statement(parser);
+        if (!stmt) {
+            // Optionally handle error (e.g., return nullptr or empty array)
+            array_clear(statements);
+            return statements;
+        }
+        array_push(statements, stmt);
+    }
+    return statements;
 }
