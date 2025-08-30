@@ -58,9 +58,7 @@ struct VMInstruction {
 
 enum PatternType : uint8_t {
 	PATTERN_LIKE = 0,
-	PATTERN_GLOB = 1,
-	PATTERN_REGEXP = 2,
-	PATTERN_CONTAINS = 3,
+	PATTERN_CONTAINS = 1,
 };
 // ============================================================================
 // Opcode Namespace

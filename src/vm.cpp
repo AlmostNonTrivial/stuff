@@ -8,7 +8,6 @@
 #include "defs.hpp"
 #include "memtree.hpp"
 #include "catalog.hpp"
-#include "pattern.hpp"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -32,22 +31,22 @@ struct VmCursor
 		BLOB		 // Blob storage cursor
 	};
 
-	Type type;
+	Type		 type;
 	RecordLayout layout; // Value type - no pointer needed!
 
 	// Storage backends (union since only one is active)
 	union {
-		BtCursor btree;	  // Regular B-tree cursor
-		BPtCursor bptree; // B+tree cursor
-		MemCursor mem;	  // Memory cursor
-		BlobCursor blob;  // Blob cursor
+		BtCursor   btree;  // Regular B-tree cursor
+		BPtCursor  bptree; // B+tree cursor
+		MemCursor  mem;	   // Memory cursor
+		BlobCursor blob;   // Blob cursor
 	} cursor;
 
 	// Storage trees
 	union {
-		BTree *btree_ptr;	   // For BTREE_TABLE/BTREE_INDEX
+		BTree	  *btree_ptr;  // For BTREE_TABLE/BTREE_INDEX
 		BPlusTree *bptree_ptr; // For BPLUS_TABLE/BTREE_INDEX
-		MemTree mem_tree;	   // For EPHEMERAL (owned by cursor)
+		MemTree	   mem_tree;   // For EPHEMERAL (owned by cursor)
 	} storage;
 
 	// ========================================================================
@@ -131,7 +130,6 @@ struct VmCursor
 		case BTREE_INDEX:
 			return forward ? btree_cursor_next(&cursor.btree) : btree_cursor_previous(&cursor.btree);
 		case BPLUS_TABLE:
-
 			return forward ? bplustree_cursor_next(&cursor.bptree) : bplustree_cursor_previous(&cursor.bptree);
 		case BLOB:
 		default:
@@ -241,10 +239,7 @@ struct VmCursor
 		}
 		uint8_t *record = get_record();
 
-		/* records and keys kept seperatly, so */
-		auto rec = record + layout.get_offset(col_index - 1);
-
-		return rec;
+		return record + layout.get_offset(col_index - 1);
 	}
 
 	DataType
@@ -354,11 +349,11 @@ static struct
 {
 	MemoryContext *ctx;
 	VMInstruction *program;
-	int program_size;
-	uint32_t pc;
-	bool halted;
-	VMValue registers[REGISTERS];
-	VmCursor cursors[CURSORS];
+	int			   program_size;
+	uint32_t	   pc;
+	bool		   halted;
+	VMValue		   registers[REGISTERS];
+	VmCursor	   cursors[CURSORS];
 } VM = {};
 // ============================================================================
 // Helper Functions
@@ -464,7 +459,7 @@ step()
 		return OK;
 	}
 	case OP_Load: {
-		int32_t dest_reg = Opcodes::Move::dest_reg(*inst);
+		int32_t	 dest_reg = Opcodes::Move::dest_reg(*inst);
 		uint8_t *data = Opcodes::Move::data(*inst);
 		DataType type = Opcodes::Move::type(*inst);
 		if (_debug)
@@ -480,7 +475,7 @@ step()
 	case OP_Move: {
 		int32_t dest_reg = Opcodes::Move::dest_reg(*inst);
 		int32_t src_reg = Opcodes::Move::src_reg(*inst);
-		auto *src = &VM.registers[src_reg];
+		auto   *src = &VM.registers[src_reg];
 		if (_debug)
 		{
 			printf("=> R[%d] = R[%d] = ", dest_reg, src_reg);
@@ -492,15 +487,15 @@ step()
 		return OK;
 	}
 	case OP_Test: {
-		int32_t dest = Opcodes::Test::dest_reg(*inst);
-		int32_t left = Opcodes::Test::left_reg(*inst);
-		int32_t right = Opcodes::Test::right_reg(*inst);
+		int32_t	  dest = Opcodes::Test::dest_reg(*inst);
+		int32_t	  left = Opcodes::Test::left_reg(*inst);
+		int32_t	  right = Opcodes::Test::right_reg(*inst);
 		CompareOp op = Opcodes::Test::op(*inst);
-		VMValue *a = &VM.registers[left];
-		VMValue *b = &VM.registers[right];
-		int cmp_result = cmp(a->type, a->data, b->data);
-		VMValue result = {.type = TYPE_4};
-		bool test_result = false;
+		VMValue	 *a = &VM.registers[left];
+		VMValue	 *b = &VM.registers[right];
+		int		  cmp_result = cmp(a->type, a->data, b->data);
+		VMValue	  result = {.type = TYPE_4};
+		bool	  test_result = false;
 		switch (op)
 		{
 		case EQ:
@@ -538,9 +533,9 @@ step()
 	}
 		// One opcode, multiple pattern types
 	case OP_Pattern: {
-		int32_t str_reg = Opcodes::Pattern::str_reg(*inst);
-		int32_t pattern_reg = Opcodes::Pattern::pattern_reg(*inst);
-		int32_t result_reg = Opcodes::Pattern::result_reg(*inst);
+		int32_t		str_reg = Opcodes::Pattern::str_reg(*inst);
+		int32_t		pattern_reg = Opcodes::Pattern::pattern_reg(*inst);
+		int32_t		result_reg = Opcodes::Pattern::result_reg(*inst);
 		PatternType type = Opcodes::Pattern::pattern_type(*inst);
 
 		VMValue *str = &VM.registers[str_reg];
@@ -552,19 +547,10 @@ step()
 		case PATTERN_LIKE:
 			matches = evaluate_like_pattern(str->data, pattern->data, str->type, pattern->type);
 			break;
-		case PATTERN_GLOB:
-			// matches = evaluate_glob_pattern(str->data,
-			// pattern->data,
-			//                                str->type,
-			//                                pattern->type);
-			break;
 		case PATTERN_CONTAINS:
-			// Simple substring search
 			matches = (strstr((char *)str->data, (char *)pattern->data) != nullptr);
 			break;
-		case PATTERN_REGEXP:
-			// Could add later, or just say "not implemented"
-			printf("REGEXP not implemented\n");
+		default:
 			return ERR;
 		}
 
@@ -575,12 +561,12 @@ step()
 		return OK;
 	}
 	case OP_JumpIf: {
-		int32_t test_reg = Opcodes::JumpIf::test_reg(*inst);
-		int32_t target = Opcodes::JumpIf::jump_target(*inst);
-		bool jump_on_true = Opcodes::JumpIf::jump_on_true(*inst);
+		int32_t	 test_reg = Opcodes::JumpIf::test_reg(*inst);
+		int32_t	 target = Opcodes::JumpIf::jump_target(*inst);
+		bool	 jump_on_true = Opcodes::JumpIf::jump_on_true(*inst);
 		VMValue *val = &VM.registers[test_reg];
-		bool is_true = (*(uint32_t *)val->data != 0);
-		bool will_jump = (is_true && jump_on_true) || (!is_true && !jump_on_true);
+		bool	 is_true = (*(uint32_t *)val->data != 0);
+		bool	 will_jump = (is_true && jump_on_true) || (!is_true && !jump_on_true);
 		if (_debug)
 		{
 			printf("=> R[%d]=", test_reg);
@@ -599,11 +585,11 @@ step()
 		return OK;
 	}
 	case OP_Logic: {
-		int32_t dest = Opcodes::Logic::dest_reg(*inst);
-		int32_t left = Opcodes::Logic::left_reg(*inst);
-		int32_t right = Opcodes::Logic::right_reg(*inst);
-		LogicOp op = Opcodes::Logic::op(*inst);
-		VMValue result{.type = TYPE_4};
+		int32_t	 dest = Opcodes::Logic::dest_reg(*inst);
+		int32_t	 left = Opcodes::Logic::left_reg(*inst);
+		int32_t	 right = Opcodes::Logic::right_reg(*inst);
+		LogicOp	 op = Opcodes::Logic::op(*inst);
+		VMValue	 result{.type = TYPE_4};
 		uint32_t a = *(uint32_t *)VM.registers[left].data;
 		uint32_t b = *(uint32_t *)VM.registers[right].data;
 		uint32_t res_val;
@@ -650,14 +636,14 @@ step()
 		return OK;
 	}
 	case OP_Arithmetic: {
-		int32_t dest = Opcodes::Arithmetic::dest_reg(*inst);
-		int32_t left = Opcodes::Arithmetic::left_reg(*inst);
-		int32_t right = Opcodes::Arithmetic::right_reg(*inst);
-		ArithOp op = Opcodes::Arithmetic::op(*inst);
+		int32_t	 dest = Opcodes::Arithmetic::dest_reg(*inst);
+		int32_t	 left = Opcodes::Arithmetic::left_reg(*inst);
+		int32_t	 right = Opcodes::Arithmetic::right_reg(*inst);
+		ArithOp	 op = Opcodes::Arithmetic::op(*inst);
 		VMValue *a = &VM.registers[left];
 		VMValue *b = &VM.registers[right];
-		VMValue result = {.type = (a->type > b->type) ? a->type : b->type};
-		bool success = do_arithmetic(op, result.type, result.data, a->data, b->data);
+		VMValue	 result = {.type = (a->type > b->type) ? a->type : b->type};
+		bool	 success = do_arithmetic(op, result.type, result.data, a->data, b->data);
 		if (_debug)
 		{
 			const char *op_names[] = {"+", "-", "*", "/", "%"};
@@ -684,8 +670,8 @@ step()
 		return OK;
 	}
 	case OP_Open: {
-		int32_t cursor_id = Opcodes::Open::cursor_id(*inst);
-		bool is_ephemeral = Opcodes::Open::is_ephemeral(*inst);
+		int32_t	  cursor_id = Opcodes::Open::cursor_id(*inst);
+		bool	  is_ephemeral = Opcodes::Open::is_ephemeral(*inst);
 		VmCursor &cursor = VM.cursors[cursor_id];
 		if (is_ephemeral)
 		{
@@ -699,7 +685,7 @@ step()
 		else
 		{
 			const char *table_name = Opcodes::Open::table_name(*inst);
-			int32_t index_column = Opcodes::Open::index_col(*inst);
+			int32_t		index_column = Opcodes::Open::index_col(*inst);
 			if (index_column != 0)
 			{
 				Index *index = get_index(table_name, index_column);
@@ -736,11 +722,11 @@ step()
 		return OK;
 	}
 	case OP_Rewind: {
-		int32_t cursor_id = Opcodes::Rewind::cursor_id(*inst);
-		int32_t jump_if_empty = Opcodes::Rewind::jump_if_empty(*inst);
-		bool to_end = Opcodes::Rewind::to_end(*inst);
+		int32_t	  cursor_id = Opcodes::Rewind::cursor_id(*inst);
+		int32_t	  jump_if_empty = Opcodes::Rewind::jump_if_empty(*inst);
+		bool	  to_end = Opcodes::Rewind::to_end(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
-		bool valid = cursor->rewind(to_end);
+		bool	  valid = cursor->rewind(to_end);
 		if (_debug)
 		{
 			printf("=> Cursor %d rewound to %s, valid=%d", cursor_id, to_end ? "end" : "start", valid);
@@ -760,11 +746,11 @@ step()
 		return OK;
 	}
 	case OP_Step: {
-		int32_t cursor_id = Opcodes::Step::cursor_id(*inst);
-		int32_t jump_if_done = Opcodes::Step::jump_if_done(*inst);
-		bool forward = Opcodes::Step::forward(*inst);
+		int32_t	  cursor_id = Opcodes::Step::cursor_id(*inst);
+		int32_t	  jump_if_done = Opcodes::Step::jump_if_done(*inst);
+		bool	  forward = Opcodes::Step::forward(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
-		bool has_more = cursor->step(forward);
+		bool	  has_more = cursor->step(forward);
 		if (_debug)
 		{
 			printf("=> Cursor %d stepped %s, has_more=%d", cursor_id, forward ? "forward" : "backward", has_more);
@@ -784,13 +770,13 @@ step()
 		return OK;
 	}
 	case OP_Seek: {
-		int32_t cursor_id = Opcodes::Seek::cursor_id(*inst);
-		int32_t key_reg = Opcodes::Seek::key_reg(*inst);
-		int32_t jump_if_not = Opcodes::Seek::jump_if_not(*inst);
+		int32_t	  cursor_id = Opcodes::Seek::cursor_id(*inst);
+		int32_t	  key_reg = Opcodes::Seek::key_reg(*inst);
+		int32_t	  jump_if_not = Opcodes::Seek::jump_if_not(*inst);
 		CompareOp op = Opcodes::Seek::op(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
-		VMValue *key = &VM.registers[key_reg];
-		bool found;
+		VMValue	 *key = &VM.registers[key_reg];
+		bool	  found;
 
 		/* Is there a better way to do this?? */
 		if (op == EXACT)
@@ -825,12 +811,12 @@ step()
 		return OK;
 	}
 	case OP_Column: {
-		int32_t cursor_id = Opcodes::Column::cursor_id(*inst);
-		int32_t col_index = Opcodes::Column::column_index(*inst);
-		int32_t dest_reg = Opcodes::Column::dest_reg(*inst);
+		int32_t	  cursor_id = Opcodes::Column::cursor_id(*inst);
+		int32_t	  col_index = Opcodes::Column::column_index(*inst);
+		int32_t	  dest_reg = Opcodes::Column::dest_reg(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
-		uint8_t *data = cursor->column(col_index);
-		DataType type = cursor->column_type(col_index);
+		uint8_t	 *data = cursor->column(col_index);
+		DataType  type = cursor->column_type(col_index);
 		if (_debug)
 		{
 			printf("=> R[%d] = cursor[%d].col[%d] = ", dest_reg, cursor_id, col_index);
@@ -849,12 +835,12 @@ step()
 		return OK;
 	}
 	case OP_Delete: {
-		int32_t cursor_id = Opcodes::Delete::cursor_id(*inst);
-		int32_t delete_occured = Opcodes::Delete::delete_occured_reg(*inst);
-		int32_t cursor_valid = Opcodes::Delete::cursor_valid_reg(*inst);
+		int32_t	  cursor_id = Opcodes::Delete::cursor_id(*inst);
+		int32_t	  delete_occured = Opcodes::Delete::delete_occured_reg(*inst);
+		int32_t	  cursor_valid = Opcodes::Delete::cursor_valid_reg(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
-		int32_t success = cursor->remove() ? 1 : 0;
-		int32_t valid = cursor->is_valid() ? 1 : 0;
+		int32_t	  success = cursor->remove() ? 1 : 0;
+		int32_t	  valid = cursor->is_valid() ? 1 : 0;
 		set_register(&VM.registers[delete_occured], (uint8_t *)&success, TYPE_4);
 		set_register(&VM.registers[cursor_valid], (uint8_t *)&valid, TYPE_4);
 
@@ -866,12 +852,12 @@ step()
 		return OK;
 	}
 	case OP_Insert: {
-		int32_t cursor_id = Opcodes::Insert::cursor_id(*inst);
-		int32_t key_reg = Opcodes::Insert::key_reg(*inst);
+		int32_t	  cursor_id = Opcodes::Insert::cursor_id(*inst);
+		int32_t	  key_reg = Opcodes::Insert::key_reg(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
-		VMValue *key = &VM.registers[key_reg];
+		VMValue	 *key = &VM.registers[key_reg];
 
-		bool success;
+		bool	success;
 		int32_t count;
 		if (Opcodes::Insert::is_variable_length(*inst))
 		{
@@ -901,10 +887,10 @@ step()
 		return OK;
 	}
 	case OP_Update: {
-		int32_t cursor_id = Opcodes::Update::cursor_id(*inst);
-		int32_t record_reg = Opcodes::Update::record_reg(*inst);
+		int32_t	  cursor_id = Opcodes::Update::cursor_id(*inst);
+		int32_t	  record_reg = Opcodes::Update::record_reg(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
-		uint8_t data[cursor->record_size()];
+		uint8_t	  data[cursor->record_size()];
 		build_record(data, record_reg, cursor->layout.column_count() - 1);
 		bool success = cursor->update(data);
 		if (_debug)
