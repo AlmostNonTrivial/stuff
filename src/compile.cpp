@@ -59,7 +59,7 @@ struct ProgramBuilder
 	array<VMInstruction, QueryArena> instructions;
 
 
-	std::unordered_map<const char*,int> labels;
+	string_map<uint32_t> labels;
 	RegisterAllocator regs;
 
 	// Fluent interface
@@ -74,7 +74,7 @@ struct ProgramBuilder
 	ProgramBuilder &
 	label(const char *name)
 	{
-		labels[name] = instructions.size;
+		stringmap_insert(&labels, name, instructions.size);
 		return *this;
 	}
 
@@ -98,16 +98,18 @@ struct ProgramBuilder
 			char *label = (char *)inst.p4;
 
 
-
-			if (!labels.contains(label))
+			auto entry = stringmap_get(&labels,label);
+			if (entry == nullptr)
 			{
 				continue;
 			}
 			if(inst.p2 == -1) {
-				inst.p2 = labels[label];
+				inst.p2 = *entry;
+
+
 			}
 			if(inst.p3 == -1) {
-				inst.p3 = labels[label];
+				inst.p3 = *entry ;
 			}
 			inst.p4 = nullptr;
 		}
@@ -345,7 +347,7 @@ struct ProgramBuilder
 // }
 
 
-// void build_delete(ProgramBuilder &prog, DeleteNode *node)
+// void build_delete(ProgramBuilder &prog, DeleteStmt *node)
 // {
 //     // Get table info to validate it exists
 //     Table *table = get_table(node->table);
@@ -422,42 +424,40 @@ struct ProgramBuilder
 //     // Resolve all labels
 //     prog.resolve_labels();
 // }
+
+
 // Also update build_from_ast to handle UPDATE:
 array<VMInstruction, QueryArena>
 build_from_ast(Statement *ast)
 {
 	ProgramBuilder builder;
 
-	// switch (ast->type)
-	// {
-	// case AST_INSERT: {
-	// 	build_insert(builder, (InsertNode *)ast);
+	switch (ast->type)
+	{
+	// case STMT_INSERT: {
+	// 	build_insert(builder, (InsertStmt *)ast);
 	// 	break;
 	// }
 
-	// case AST_SELECT: {
-	// 	build_select(builder, (SelectNode *)ast);
+	// case STMT_SELECT: {
+	// 	build_select(builder, (SelectStmt *)ast);
 	// 	break;
 	// }
 
-	// case AST_UPDATE: {
-	// 	build_update(builder, (UpdateNode *)ast);
+	// case STMT_UPDATE: {
+	// 	build_update(builder, (UpdateStmt *)ast);
 	// 	break;
 	// }
 
-	// case AST_DELETE: {
-	// build_delete(builder, (DeleteNode*) ast);
+	// case STMT_DELETE: {
+	// build_delete(builder, (DeleteStmt*) ast);
 	// break;
 	// }
 
-	// these done internally
-	// case AST_CREATE_INDEX:
-	// case AST_CREATE_TABLE:
-	// case AST_DROP_TABLE:
-	// case AST_DROP_INDEX:
-	// default:
-	// 	break;
-	// }
+
+	default:
+		break;
+	}
 
 	return builder.instructions;
 }
