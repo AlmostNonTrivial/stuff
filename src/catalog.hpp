@@ -1,6 +1,5 @@
 #pragma once
 #include "arena.hpp"
-#include "btree.hpp"
 #include "bplustree.hpp"
 #include "defs.hpp"
 #include "parser.hpp"
@@ -30,7 +29,7 @@ struct Index {
     string<SchemaArena> index_name;
     string<SchemaArena> table_name;
     uint32_t column_index;
-    BTree btree;
+    BPlusTree btree;
 
     RecordLayout to_layout() const;
 };

@@ -4,7 +4,6 @@
 #include "arena.hpp"
 #include "blob.hpp"
 #include "bplustree.hpp"
-#include "btree.hpp"
 #include "defs.hpp"
 #include "memtree.hpp"
 #include "catalog.hpp"
@@ -26,7 +25,7 @@ struct VmCursor
 	{
 
 		BPLUS_TABLE, // B+Tree for primary table
-		BTREE_INDEX, // BTree for secondary index
+		BPLUS_INDEX, // BTree for secondary index
 		EPHEMERAL,	 // Memory-only temporary cursor
 		BLOB		 // Blob storage cursor
 	};
@@ -36,7 +35,6 @@ struct VmCursor
 
 	// Storage backends (union since only one is active)
 	union {
-		BtCursor   btree;  // Regular B-tree cursor
 		BPtCursor  bptree; // B+tree cursor
 		MemCursor  mem;	   // Memory cursor
 		BlobCursor blob;   // Blob cursor
@@ -44,7 +42,6 @@ struct VmCursor
 
 	// Storage trees
 	union {
-		BTree	  *btree_ptr;  // For BTREE_TABLE/BTREE_INDEX
 		BPlusTree *bptree_ptr; // For BPLUS_TABLE/BTREE_INDEX
 		MemTree	   mem_tree;   // For EPHEMERAL (owned by cursor)
 	} storage;
@@ -68,13 +65,13 @@ struct VmCursor
 	}
 
 	void
-	open_index(const RecordLayout &index_layout, BTree *tree)
+	open_index(const RecordLayout &index_layout, BPlusTree *tree)
 	{
-		type = BTREE_INDEX;
+		type = BPLUS_INDEX;
 		layout = index_layout;
-		storage.btree_ptr = tree;
-		cursor.btree.tree = storage.btree_ptr;
-		cursor.btree.state = CURSOR_INVALID;
+		storage.bptree_ptr = tree;
+		cursor.bptree.tree = storage.bptree_ptr;
+		cursor.bptree.state = BPT_CURSOR_INVALID;
 	}
 
 	void
@@ -107,8 +104,7 @@ struct VmCursor
 		{
 		case EPHEMERAL:
 			return to_end ? memcursor_last(&cursor.mem) : memcursor_first(&cursor.mem);
-		case BTREE_INDEX:
-			return to_end ? btree_cursor_last(&cursor.btree) : btree_cursor_first(&cursor.btree);
+		case BPLUS_INDEX:
 		case BPLUS_TABLE:
 			return to_end ? bplustree_cursor_last(&cursor.bptree) : bplustree_cursor_first(&cursor.bptree);
 		case BLOB:
@@ -125,8 +121,7 @@ struct VmCursor
 		case EPHEMERAL:
 			return forward ? memcursor_next(&cursor.mem) : memcursor_previous(&cursor.mem);
 
-		case BTREE_INDEX:
-			return forward ? btree_cursor_next(&cursor.btree) : btree_cursor_previous(&cursor.btree);
+		case BPLUS_INDEX:
 		case BPLUS_TABLE:
 			return forward ? bplustree_cursor_next(&cursor.bptree) : bplustree_cursor_previous(&cursor.bptree);
 		case BLOB:
@@ -143,10 +138,8 @@ struct VmCursor
 		case EPHEMERAL:
 			return memcursor_seek_cmp(&cursor.mem, key, op);
 
-		case BTREE_INDEX:
-			return btree_cursor_seek_cmp(&cursor.btree, key, op);
+		case BPLUS_INDEX:
 		case BPLUS_TABLE:
-
 			return bplustree_cursor_seek_cmp(&cursor.bptree, key, op);
 		case BLOB:
 			return blob_cursor_seek(&cursor.blob, key);
@@ -162,8 +155,7 @@ struct VmCursor
 		{
 		case EPHEMERAL:
 			return memcursor_seek_exact(&cursor.mem, key, record);
-		case BTREE_INDEX:
-			return btree_cursor_seek_exact(&cursor.btree, key, record);
+		case BPLUS_INDEX:
 		case BPLUS_TABLE:
 			return bplustree_cursor_seek_exact(&cursor.bptree, key, record);
 		case BLOB:
@@ -179,8 +171,7 @@ struct VmCursor
 		{
 		case EPHEMERAL:
 			return memcursor_is_valid(&cursor.mem);
-		case BTREE_INDEX:
-			return btree_cursor_is_valid(&cursor.btree);
+		case BPLUS_INDEX:
 		case BPLUS_TABLE:
 			return bplustree_cursor_is_valid(&cursor.bptree);
 		case BLOB:
@@ -200,8 +191,7 @@ struct VmCursor
 		{
 		case EPHEMERAL:
 			return memcursor_key(&cursor.mem);
-		case BTREE_INDEX:
-			return btree_cursor_key(&cursor.btree);
+		case BPLUS_INDEX:
 		case BPLUS_TABLE:
 			return bplustree_cursor_key(&cursor.bptree);
 		case BLOB:
@@ -217,10 +207,10 @@ struct VmCursor
 		{
 		case EPHEMERAL:
 			return memcursor_record(&cursor.mem);
+		case BPLUS_INDEX:
 		case BPLUS_TABLE:
 			return bplustree_cursor_record(&cursor.bptree);
-		case BTREE_INDEX:
-			return btree_cursor_record(&cursor.btree);
+
 		case BLOB:
 			return blob_cursor_record(&cursor.blob);
 		default:
@@ -257,9 +247,10 @@ struct VmCursor
 		case EPHEMERAL:
 			return memcursor_insert(&cursor.mem, key, record);
 		case BPLUS_TABLE:
+				case BPLUS_INDEX:
 			return bplustree_cursor_insert(&cursor.bptree, key, record);
-		case BTREE_INDEX:
-			return btree_cursor_insert(&cursor.btree, key, record);
+
+
 		case BLOB:
 			return blob_cursor_insert(&cursor.blob, key, record, size);
 		default:
@@ -274,8 +265,7 @@ struct VmCursor
 		{
 		case EPHEMERAL:
 			return memcursor_update(&cursor.mem, record);
-		case BTREE_INDEX:
-			return btree_cursor_update(&cursor.btree, record);
+		case BPLUS_INDEX:
 		case BPLUS_TABLE:
 			return bplustree_cursor_update(&cursor.bptree, record);
 		case BLOB:
@@ -291,8 +281,7 @@ struct VmCursor
 		{
 		case EPHEMERAL:
 			return memcursor_delete(&cursor.mem);
-		case BTREE_INDEX:
-			return btree_cursor_delete(&cursor.btree);
+		case BPLUS_INDEX:
 		case BPLUS_TABLE:
 			return bplustree_cursor_delete(&cursor.bptree);
 		case BLOB:
@@ -309,7 +298,7 @@ struct VmCursor
 		{
 		case EPHEMERAL:
 			return "MEMTREE";
-		case BTREE_INDEX:
+		case BPLUS_INDEX:
 			return "BTREE_INDEX";
 		case BPLUS_TABLE:
 			return "BPLUS_TABLE";

@@ -39,7 +39,7 @@ void schema_clear() {
                     if (idx_entry.state == hash_map<uint32_t, Index*, SchemaArena>::Entry::OCCUPIED) {
                         Index* index = idx_entry.value;
                         if (index) {
-                            btree_clear(&index->btree);
+                            bplustree_clear(&index->btree);
                         }
                     }
                 }
@@ -128,7 +128,7 @@ void remove_table(const char* table_name)
         if (entry.state == hash_map<uint32_t, Index*, SchemaArena>::Entry::OCCUPIED) {
             Index* index = entry.value;
             if (index) {
-                btree_clear(&index->btree);
+                bplustree_clear(&index->btree);
             }
         }
     }
@@ -201,7 +201,7 @@ void remove_index(const char* table_name, uint32_t column_index)
     assert(result != nullptr && *result != nullptr);
 
     Index* index = *result;
-    btree_clear(&index->btree);
+    bplustree_clear(&index->btree);
 
     hashmap_delete(&table->indexes, column_index);
 }
@@ -320,7 +320,7 @@ Index* create_index(CreateIndexStmt* node, int root_page)
 
     DataType index_key_type = table->columns.data[col_idx].type;
     DataType rowid_type = table->columns.data[0].type;
-    index->btree = btree_create(index_key_type, rowid_type, root_page == 0);
+    index->btree = bplustree_create(index_key_type, rowid_type, root_page == 0);
     if (root_page != 0) {
         index->btree.root_page_index = root_page;
     }

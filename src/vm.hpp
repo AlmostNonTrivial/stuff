@@ -4,7 +4,6 @@
 #include "arena.hpp"
 #include "blob.hpp"
 #include "memtree.hpp"
-#include "btree.hpp"
 #include "defs.hpp"
 #include "catalog.hpp"
 

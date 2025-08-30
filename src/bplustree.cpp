@@ -538,7 +538,7 @@ insert(BPlusTree &tree, BTreeNode *node, uint8_t *key, const uint8_t *data)
 		uint8_t *record_data = get_leaf_record_data(tree, node);
 		uint32_t insert_index = binary_search(tree, node, key);
 
-		if (insert_index < node->num_keys && is_match(tree, node, insert_index, key))
+		if (!tree.allow_duplicates && insert_index < node->num_keys && is_match(tree, node, insert_index, key))
 		{
 			mark_dirty(node);
 			memcpy(record_data + insert_index * tree.record_size, data, tree.record_size);

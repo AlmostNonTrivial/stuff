@@ -186,7 +186,7 @@ void test_ephemeral_with_builder() {
     set_capture_mode(false);
     CompiledProgram programs[] = { program };
     execute_programs(programs, 1);
-return;
+
     // Verify results - should be in sorted order by key
     assert(get_row_count() == 7);
 

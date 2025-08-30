@@ -50,30 +50,31 @@ inline bool test_select_where_() {
     printf("Testing SELECT with WHERE...\n");
 
     // Use the users table from previous test
-    set_capture_mode(true);
+    set_capture_mode(false);
+
 
     // Test equality
-    execute("SELECT * FROM users WHERE id = 2");
-    TEST_ASSERT(get_row_count() == 1, "Should have 1 row with id=2");
-    TEST_ASSERT(check_int_value(0, 0, 2), "ID should be 2");
-    TEST_ASSERT(check_string_value(0, 1, "Bob"), "Name should be Bob");
+    // execute("SELECT * FROM users WHERE id = 2");
+    // TEST_ASSERT(get_row_count() == 1, "Should have 1 row with id=2");
+    // TEST_ASSERT(check_int_value(0, 0, 2), "ID should be 2");
+    // TEST_ASSERT(check_string_value(0, 1, "Bob"), "Name should be Bob");
     clear_results();
 
     // Test greater than
-    execute("SELECT * FROM users WHERE age > 25");
-    TEST_ASSERT(get_row_count() == 2, "Should have 2 rows with age > 25");
+    // execute("SELECT * FROM users WHERE age > 25");
+    // TEST_ASSERT(get_row_count() == 2, "Should have 2 rows with age > 25");
     clear_results();
 
     // Test less than
-    execute("SELECT * FROM users WHERE age < 30");
-    TEST_ASSERT(get_row_count() == 1, "Should have 1 row with age < 30");
-    TEST_ASSERT(check_string_value(0, 1, "Bob"), "Should be Bob");
+    // execute("SELECT * FROM users WHERE age < 30");
+    // TEST_ASSERT(get_row_count() == 1, "Should have 1 row with age < 30");
+    // TEST_ASSERT(check_string_value(0, 1, "Bob"), "Should be Bob");
     clear_results();
-
+    _debug = true;
     // Test string comparison
     execute("SELECT * FROM users WHERE name = 'Charlie'");
-    TEST_ASSERT(get_row_count() == 1, "Should have 1 row with name='Charlie'");
-    TEST_ASSERT(check_int_value(0, 0, 3), "ID should be 3");
+    // TEST_ASSERT(get_row_count() == 1, "Should have 1 row with name='Charlie'");
+    // TEST_ASSERT(check_int_value(0, 0, 3), "ID should be 3");
     clear_results();
 
     set_capture_mode(false);
@@ -242,7 +243,7 @@ void run_integration_tests() {
     bool all_passed = true;
 
     all_passed &= test_create_and_insert();
-    // all_passed &= test_select_where_();
+    all_passed &= test_select_where_();
     // all_passed &= test_update();
     // all_passed &= test_delete();
     // all_passed &= test_mixed_operations();

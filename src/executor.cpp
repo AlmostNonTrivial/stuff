@@ -3,7 +3,6 @@
 
 #include "arena.hpp"
 #include "bplustree.hpp"
-#include "btree.hpp"
 #include "defs.hpp"
 #include "pager.hpp"
 #include "parser.hpp"
@@ -458,6 +457,9 @@ execute_tcl_command(Statement*stmt)
 void
 execute(const char *sql)
 {
+
+    arena::reset_and_decommit<QueryArena>();
+	arena::reset_and_decommit<ParserArena>();
 	auto statements = parse_sql(sql);
 
 	assert(0 !=statements->size);
@@ -540,8 +542,6 @@ execute(const char *sql)
 		}
 	}
 
-	arena::reset_and_decommit<QueryArena>();
-	arena::reset_and_decommit<ParserArena>();
 
 }
 
@@ -611,6 +611,9 @@ static VM_RESULT execute_compiled_tcl(CompiledProgram* prog) {
 }
 
 void execute_programs(CompiledProgram* programs, size_t program_count) {
+
+    arena::reset_and_decommit<QueryArena>();
+	arena::reset_and_decommit<ParserArena>();
     if (!executor_state.initialized) {
         printf("Error: Executor not initialized\n");
         return;

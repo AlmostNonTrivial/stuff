@@ -19,6 +19,7 @@ struct BPlusTree {
 	uint32_t leaf_split_index;
 	uint32_t record_size; // Total size of each record
 	DataType node_key_size;
+	bool allow_duplicates;
 };
 
 // B+Tree management functions
