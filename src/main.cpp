@@ -1,8 +1,16 @@
 
+#include "defs.hpp"
+#include "pager_tests.hpp"
 #include "parser_tests.hpp"
+#include "intergration_tests.hpp"
 
 
 int main()
 {
-    test_parser();
+    init_type_ops();
+
+
+    // test_parser();
+    // test_pager();
+    test_integration();
 }

@@ -52,11 +52,6 @@ struct VmCursor
 	// ========================================================================
 	// Helper functions
 	// ========================================================================
-	uint32_t
-	record_size() const
-	{
-		return layout.record_size;
-	}
 
 	// ========================================================================
 	// Initialization
@@ -869,7 +864,7 @@ step()
 		else
 		{
 			count = Opcodes::Insert::reg_count(*inst);
-			uint8_t data[cursor->record_size()];
+			uint8_t data[cursor->layout.record_size];
 			build_record(data, key_reg + 1, count - 1);
 			success = cursor->insert(key->data, data);
 		}
@@ -891,7 +886,7 @@ step()
 		int32_t	  cursor_id = Opcodes::Update::cursor_id(*inst);
 		int32_t	  record_reg = Opcodes::Update::record_reg(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
-		uint8_t	  data[cursor->record_size()];
+		uint8_t	  data[cursor->layout.record_size];
 		build_record(data, record_reg, cursor->layout.layout.size - 1);
 		bool success = cursor->update(data);
 		if (_debug)
