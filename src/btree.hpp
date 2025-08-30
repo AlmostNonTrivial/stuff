@@ -11,13 +11,29 @@ struct MemoryContext;
 // B-Tree control structure (stores data in all nodes)
 struct BTree {
 	uint32_t root_page_index;
-	uint32_t internal_max_keys;
-	uint32_t internal_min_keys;
-	uint32_t internal_split_index;
+	uint32_t max_keys;
+	uint32_t min_keys;
+	uint32_t split_index;
 	uint32_t record_size; // Total size of each record
 	DataType node_key_size;
 };
 
+#define NODE_HEADER_SIZE 16
+#define NODE_DATA_SIZE	 PAGE_SIZE - NODE_HEADER_SIZE
+struct BTreeNode
+{
+	// Node header (24 bytes)
+	uint32_t index;	 // Page index
+	uint32_t parent; // Parent page
+	uint32_t num_keys;	// Number of
+
+
+	uint8_t is_leaf;	// 1 if leaf, 0
+						// if internal
+	uint8_t padding[3]; // Alignment
+	uint8_t data[NODE_DATA_SIZE]; // Rest
+
+};
 // B-Tree management functions
 BTree
 btree_create(DataType key, uint32_t record_size, bool init);
