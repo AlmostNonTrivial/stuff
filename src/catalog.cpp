@@ -248,8 +248,7 @@ static const char* intern_string(const char* str) {
 Table* create_table(CreateTableStmt* node, int root_page)
 {
 
-    auto x=* (CreateTableStmt*)node;
-    print_ast((Statement*)node);
+
     assert(node != nullptr);
     assert(node->columns != 0);
 

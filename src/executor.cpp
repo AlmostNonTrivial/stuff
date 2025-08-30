@@ -252,7 +252,7 @@ static VM_RESULT
 execute_create_table(CreateTableStmt*node)
 {
 
-    print_ast((Statement*)node);
+
 	Table *table = create_table(node, 0);
 	assert(table != nullptr);
 
@@ -400,13 +400,13 @@ execute_ddl_command(Statement*stmt)
 	switch (stmt->type)
 	{
 	case STMT_CREATE_TABLE:
-		return execute_create_table((CreateTableStmt*)stmt);
+		return execute_create_table((CreateTableStmt*)stmt->create_table_stmt);
 	case STMT_CREATE_INDEX:
-		return execute_create_index((CreateIndexStmt*)stmt);
+		return execute_create_index((CreateIndexStmt*)stmt->create_index_stmt);
 	case STMT_DROP_TABLE:
-		return execute_drop_table((DropTableStmt*)stmt);
+		return execute_drop_table((DropTableStmt*)stmt->drop_table_stmt);
 	case STMT_DROP_INDEX:
-		return execute_drop_index((DropIndexStmt*)stmt);
+		return execute_drop_index((DropIndexStmt*)stmt->drop_index_stmt);
 
 	default:
 		printf("Error: Unimplemented DDL command: %s\n", stmt->type);
@@ -455,9 +455,6 @@ execute_tcl_command(Statement*stmt)
 void
 execute(const char *sql)
 {
-	arena::reset_and_decommit<QueryArena>();
-	arena::reset_and_decommit<ParserArena>();
-
 	auto statements = parse_sql(sql);
 
 	assert(0 !=statements->size);
@@ -500,6 +497,7 @@ execute(const char *sql)
 		case CMD_DML:
 			// DML commands go through VM compilation
 			result = execute_dml_command(stmt);
+
 			break;
 
 		case CMD_TCL:
@@ -538,6 +536,10 @@ execute(const char *sql)
 			break; // Stop processing remaining statements
 		}
 	}
+
+	arena::reset_and_decommit<QueryArena>();
+	arena::reset_and_decommit<ParserArena>();
+
 }
 
 
