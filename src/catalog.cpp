@@ -1,5 +1,6 @@
-// schema.cpp - STL container version
+// schema.cpp - Custom container version
 #include "catalog.hpp"
+#include "arena.hpp"
 #include "parser.hpp"
 #include "bplustree.hpp"
 #include "defs.hpp"
@@ -9,31 +10,62 @@
 #include <cstring>
 #include <algorithm>
 
+#define MAX_RECORD_LAYOUT 32
+
 // ============================================================================
 // Registry Storage
 // ============================================================================
 
-static std::unordered_map<std::string, std::unique_ptr<Table>> tables;
+static string_map<Table*, SchemaArena> tables;
+
+void schema_init() {
+    // Initialize the schema arena with a reasonable size
+    Arena<SchemaArena>::init(1024 * 1024, 16 * 1024 * 1024); // 1MB initial, 16MB max
+
+    // Initialize the tables map
+    stringmap_init(&tables);
+}
 
 void schema_clear() {
-    tables.clear();
+    // Clean up all tables
+    for (uint32_t i = 0; i < tables.capacity; i++) {
+        auto& entry = tables.entries[i];
+        if (entry.state == string_map<Table*, SchemaArena>::Entry::OCCUPIED) {
+            Table* table = entry.value;
+            if (table) {
+                // Clean up indexes
+                for (uint32_t j = 0; j < table->indexes.capacity; j++) {
+                    auto& idx_entry = table->indexes.entries[j];
+                    if (idx_entry.state == hash_map<uint32_t, Index*, SchemaArena>::Entry::OCCUPIED) {
+                        Index* index = idx_entry.value;
+                        if (index) {
+                            btree_clear(&index->btree);
+                        }
+                    }
+                }
+                bplustree_clear(&table->bplustree);
+            }
+        }
+    }
+
+    stringmap_clear(&tables);
 }
 
 // ============================================================================
 // RecordLayout Implementation
 // ============================================================================
 
-RecordLayout RecordLayout::create(std::vector<DataType>& column_types)
+RecordLayout RecordLayout::create(array<DataType, SchemaArena>& column_types)
 {
     RecordLayout layout;
-    layout.layout = column_types;
+    array_set(&layout.layout, column_types);
     layout.record_size = 0;
 
     // don't include key, as it's kept in a different position than record
-    for (size_t i = 1; i < column_types.size(); i++)
+    for (size_t i = 1; i < column_types.size; i++)
     {
-        layout.offsets.push_back(layout.record_size);
-        layout.record_size += column_types[i];
+        array_push(&layout.offsets, layout.record_size);
+        layout.record_size += column_types.data[i];
     }
 
     return layout;
@@ -41,9 +73,9 @@ RecordLayout RecordLayout::create(std::vector<DataType>& column_types)
 
 RecordLayout RecordLayout::create(DataType key, DataType rec)
 {
-    std::vector<DataType> types;
-    types.push_back(key);
-    types.push_back(rec);
+    array<DataType, SchemaArena> types;
+    array_push(&types, key);
+    array_push(&types, rec);
 
     return create(types);
 }
@@ -54,9 +86,9 @@ RecordLayout RecordLayout::create(DataType key, DataType rec)
 
 RecordLayout Index::to_layout() const
 {
-    DataType key = get_column_type(table_name.c_str(), column_index);
+    DataType key = get_column_type(table_name.data, column_index);
     assert(column_index != 0);
-    DataType rowid = get_column_type(table_name.c_str(), 0);
+    DataType rowid = get_column_type(table_name.data, 0);
     return RecordLayout::create(key, rowid);
 }
 
@@ -66,10 +98,10 @@ RecordLayout Index::to_layout() const
 
 RecordLayout Table::to_layout() const
 {
-    std::vector<DataType> types;
-    for (size_t i = 0; i < columns.size(); i++)
+    array<DataType, SchemaArena> types;
+    for (size_t i = 0; i < columns.size; i++)
     {
-        types.push_back(columns[i].type);
+        array_push(&types, columns.data[i].type);
     }
     return RecordLayout::create(types);
 }
@@ -80,11 +112,8 @@ RecordLayout Table::to_layout() const
 
 Table* get_table(const char* table_name)
 {
-    auto it = tables.find(table_name);
-    if (it != tables.end()) {
-        return it->second.get();
-    }
-    return nullptr;
+    Table** result = stringmap_get(&tables, table_name);
+    return result ? *result : nullptr;
 }
 
 void remove_table(const char* table_name)
@@ -93,17 +122,20 @@ void remove_table(const char* table_name)
     assert(table != nullptr);
 
     // Clean up all indexes
-    for (auto& [col_idx, index] : table->indexes)
+    for (uint32_t i = 0; i < table->indexes.capacity; i++)
     {
-        if (index) {
-            btree_clear(&index->btree);
-            delete index;
+        auto& entry = table->indexes.entries[i];
+        if (entry.state == hash_map<uint32_t, Index*, SchemaArena>::Entry::OCCUPIED) {
+            Index* index = entry.value;
+            if (index) {
+                btree_clear(&index->btree);
+            }
         }
     }
-    table->indexes.clear();
+    hashmap_clear(&table->indexes);
 
     bplustree_clear(&table->bplustree);
-    tables.erase(table_name);
+    stringmap_delete(&tables, table_name);
 }
 
 // ============================================================================
@@ -115,11 +147,8 @@ Index* get_index(const char* table_name, uint32_t column_index)
     Table* table = get_table(table_name);
     assert(table != nullptr);
 
-    auto it = table->indexes.find(column_index);
-    if (it != table->indexes.end()) {
-        return it->second;
-    }
-    return nullptr;
+    Index** result = hashmap_get(&table->indexes, column_index);
+    return result ? *result : nullptr;
 }
 
 Index* get_index(const char* table_name, const char* index_name)
@@ -127,10 +156,14 @@ Index* get_index(const char* table_name, const char* index_name)
     Table* table = get_table(table_name);
     assert(table != nullptr);
 
-    for (auto& [col_idx, index] : table->indexes)
+    for (uint32_t i = 0; i < table->indexes.capacity; i++)
     {
-        if (index && index->index_name == index_name) {
-            return index;
+        auto& entry = table->indexes.entries[i];
+        if (entry.state == hash_map<uint32_t, Index*, SchemaArena>::Entry::OCCUPIED) {
+            Index* index = entry.value;
+            if (index && strcmp(index->index_name.data, index_name) == 0) {
+                return index;
+            }
         }
     }
     return nullptr;
@@ -138,12 +171,21 @@ Index* get_index(const char* table_name, const char* index_name)
 
 Index* get_index(const char* index_name)
 {
-    for (auto& [table_name, table] : tables)
+    for (uint32_t i = 0; i < tables.capacity; i++)
     {
-        for (auto& [col_idx, index] : table->indexes)
-        {
-            if (index && index->index_name == index_name) {
-                return index;
+        auto& entry = tables.entries[i];
+        if (entry.state == string_map<Table*, SchemaArena>::Entry::OCCUPIED) {
+            Table* table = entry.value;
+
+            for (uint32_t j = 0; j < table->indexes.capacity; j++)
+            {
+                auto& idx_entry = table->indexes.entries[j];
+                if (idx_entry.state == hash_map<uint32_t, Index*, SchemaArena>::Entry::OCCUPIED) {
+                    Index* index = idx_entry.value;
+                    if (index && strcmp(index->index_name.data, index_name) == 0) {
+                        return index;
+                    }
+                }
             }
         }
     }
@@ -155,16 +197,13 @@ void remove_index(const char* table_name, uint32_t column_index)
     Table* table = get_table(table_name);
     assert(table != nullptr);
 
-    auto it = table->indexes.find(column_index);
-    assert(it != table->indexes.end());
+    Index** result = hashmap_get(&table->indexes, column_index);
+    assert(result != nullptr && *result != nullptr);
 
-    Index* index = it->second;
-    assert(index != nullptr);
-
+    Index* index = *result;
     btree_clear(&index->btree);
-    delete index;
 
-    table->indexes.erase(it);
+    hashmap_delete(&table->indexes, column_index);
 }
 
 // ============================================================================
@@ -176,8 +215,8 @@ uint32_t get_column_index(const char* table_name, const char* col_name)
     Table* table = get_table(table_name);
     assert(table != nullptr);
 
-    for (uint32_t i = 0; i < table->columns.size(); i++) {
-        if (table->columns[i].name == col_name) {
+    for (uint32_t i = 0; i < table->columns.size; i++) {
+        if (strcmp(table->columns.data[i].name, col_name) == 0) {
             return i;
         }
     }
@@ -190,64 +229,75 @@ DataType get_column_type(const char* table_name, uint32_t col_index)
 {
     Table* table = get_table(table_name);
     assert(table != nullptr);
-    assert(col_index < table->columns.size());
-    return table->columns[col_index].type;
+    assert(col_index < table->columns.size);
+    return table->columns.data[col_index].type;
 }
 
 // ============================================================================
 // Factory Functions
 // ============================================================================
 
-Table* create_table(CreateTableNode* node, int root_page)
+// Helper function to intern strings
+static const char* intern_string(const char* str) {
+    size_t len = strlen(str) + 1;
+    char* interned = (char*)Arena<SchemaArena>::alloc(len);
+    memcpy(interned, str, len);
+    return interned;
+}
+
+Table* create_table(CreateTableStmt* node, int root_page)
 {
     assert(node != nullptr);
-    assert(!node->columns.empty());
+    assert(node->columns != 0);
 
-    const char* table_name = node->table;
+    const char* table_name = node->table_name;
 
     // Don't allow creating master_catalog or duplicates
     assert(strcmp(table_name, "master_catalog") != 0);
     assert(get_table(table_name) == nullptr);
 
-    auto table = std::make_unique<Table>();
+    // Allocate table from arena
+    Table* table = (Table*)Arena<SchemaArena>::alloc(sizeof(Table));
 
-    table->table_name = table_name;
+    // Initialize table name
+    string_set(&table->table_name, table_name);
 
-    for (size_t i = 0; i < node->columns.size(); i++)
+    // Initialize columns array
+    for (size_t i = 0; i < node->columns->size; i++)
     {
-        table->columns.push_back({
-            std::string(node->columns[i].name),
-            node->columns[i].type
-        });
+        Column col;
+        col.name = intern_string(node->columns->data[i]->name);
+        col.type = node->columns->data[i]->type;
+        array_push(&table->columns, col);
     }
 
     // Calculate record layout
     RecordLayout layout = table->to_layout();
-    DataType key_type = table->columns[0].type;
+    DataType key_type = table->columns.data[0].type;
     uint32_t record_size = layout.record_size;
 
-
     // Create BPlusTree
-    table->bplustree = bplustree_create(key_type, record_size, 0 == root_page);
-    if(0 != root_page) {
-     table->bplustree.root_page_index = root_page;
+    table->bplustree = bplustree_create(key_type, record_size, root_page == 0);
+    if (root_page != 0) {
+        table->bplustree.root_page_index = root_page;
     }
 
     assert(table != nullptr);
-    assert(!table->columns.empty());
-    assert(table->columns.size() <= MAX_RECORD_LAYOUT);
+    assert(table->columns.size > 0);
+    assert(table->columns.size <= MAX_RECORD_LAYOUT);
 
-    Table* raw_ptr = table.get();
-    tables[table_name] = std::move(table);
-    return raw_ptr;
+    // Add to registry
+    stringmap_insert(&tables, table_name, table);
+
+    return table;
 }
 
-Index* create_index(CreateIndexNode* node, int root_page)
+Index* create_index(CreateIndexStmt* node, int root_page)
 {
     assert(node != nullptr);
 
-    const char* table_name = node->table;
-    const char* col_name = node->column;
+    const char* table_name = node->table_name;
+    const char* col_name = node->index_name;
     const char* index_name = node->index_name;
 
     Table* table = get_table(table_name);
@@ -258,57 +308,68 @@ Index* create_index(CreateIndexNode* node, int root_page)
     assert(col_idx != 0); // Cannot index primary key
     assert(get_index(table_name, col_idx) == nullptr); // No duplicate index
 
-    Index* index = new Index();
-    index->index_name = index_name;
-    index->table_name = table_name;
+    // Allocate index from arena
+    Index* index = (Index*)Arena<SchemaArena>::alloc(sizeof(Index));
+
+    // Set string fields
+    string_set(&index->index_name, index_name ? index_name : "");
+    string_set(&index->table_name, table_name);
     index->column_index = col_idx;
 
-
-    DataType index_key_type = table->columns[col_idx].type;
-    DataType rowid_type = table->columns[0].type;
-    index->btree = btree_create(index_key_type, rowid_type, 0 == root_page);
-    if(0 != root_page) {
+    DataType index_key_type = table->columns.data[col_idx].type;
+    DataType rowid_type = table->columns.data[0].type;
+    index->btree = btree_create(index_key_type, rowid_type, root_page == 0);
+    if (root_page != 0) {
         index->btree.root_page_index = root_page;
     }
 
     assert(index != nullptr);
-    assert(index->column_index < table->columns.size());
+    assert(index->column_index < table->columns.size);
 
     // Generate index name if not provided
-    if (index->index_name.empty())
+    if (index->index_name.size == 0 || index->index_name.data[0] == '\0')
     {
         char name_buf[256];
         snprintf(name_buf, sizeof(name_buf), "%s_%s_idx",
-                table_name, table->columns[index->column_index].name.c_str());
-        index->index_name = name_buf;
+                table_name, table->columns.data[index->column_index].name);
+        string_set(&index->index_name, name_buf);
     }
 
-    table->indexes[index->column_index] = index;
+    hashmap_insert(&table->indexes, index->column_index, index);
     return index;
 }
 
 void create_master(bool existed)
 {
-    auto master = std::make_unique<Table>();
-    master->table_name = "master_catalog";
+    // Allocate table from arena
+    Table* master = (Table*)Arena<SchemaArena>::alloc(sizeof(Table));
+
+    string_set(&master->table_name, "master_catalog");
 
     // Columns: id (key), type, name, tbl_name, rootpage, sql
-    master->columns.push_back({"id", TYPE_4});
-    master->columns.push_back({"type", TYPE_32});
-    master->columns.push_back({"name", TYPE_32});
-    master->columns.push_back({"tbl_name", TYPE_32});
-    master->columns.push_back({"rootpage", TYPE_4});
-    master->columns.push_back({"sql", TYPE_256});
+    Column cols[] = {
+        {intern_string("id"), TYPE_4},
+        {intern_string("type"), TYPE_32},
+        {intern_string("name"), TYPE_32},
+        {intern_string("tbl_name"), TYPE_32},
+        {intern_string("rootpage"), TYPE_4},
+        {intern_string("sql"), TYPE_256}
+    };
+
+    for (int i = 0; i < 6; i++) {
+        array_push(&master->columns, cols[i]);
+    }
 
     RecordLayout layout = master->to_layout();
     uint32_t record_size = layout.record_size;
 
     master->bplustree = bplustree_create(TYPE_4, record_size, !existed);
-	master->bplustree.root_page_index = 1;
-    assert(master != nullptr);
-    assert(!master->columns.empty());
-    assert(master->columns.size() <= MAX_RECORD_LAYOUT);
-    assert(get_table(master->table_name.c_str()) == nullptr); // No duplicates
+    master->bplustree.root_page_index = 1;
 
-    tables[master->table_name] = std::move(master);
+    assert(master != nullptr);
+    assert(master->columns.size > 0);
+    assert(master->columns.size <= MAX_RECORD_LAYOUT);
+    assert(get_table(master->table_name.data) == nullptr); // No duplicates
+
+    stringmap_insert(&tables, master->table_name.data, master);
 }

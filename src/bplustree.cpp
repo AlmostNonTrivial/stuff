@@ -3,7 +3,7 @@
 #include "arena.hpp"
 #include "defs.hpp"
 #include "pager.hpp"
-#include "vec.hpp"
+
 #include <algorithm>
 #include <cassert>
 #include <cstdint>

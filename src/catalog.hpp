@@ -1,116 +1,75 @@
-// schema.hpp - STL container version
 #pragma once
+#include "arena.hpp"
 #include "btree.hpp"
 #include "bplustree.hpp"
 #include "defs.hpp"
 #include "parser.hpp"
-#include <cassert>
 #include <cstdint>
-#include <string>
-#include <vector>
-#include <unordered_map>
-#include <memory>
 
-#define MAX_RECORD_LAYOUT 32
+// Arena tag for schema storage
+struct SchemaArena {};
 
-// ============================================================================
-// Core Types
-// ============================================================================
-
-
-
-// RecordLayout - Pure record interpretation
-struct RecordLayout
-{
-    std::vector<DataType> layout;
-    std::vector<uint32_t> offsets;
-    uint32_t record_size;
-
-    DataType key_type() const
-    {
-        return layout[0];
-    }
-
-    uint32_t column_count() const
-    {
-        return layout.size();
-    }
-
-    uint32_t get_offset(uint32_t col_index) const
-    {
-        return offsets[col_index];
-    }
-
-    static RecordLayout create(std::vector<DataType>& column_types);
-    static RecordLayout create(DataType key, DataType rec = TYPE_NULL);
-};
-
-// Column metadata
-struct ColumnInfo
-{
-    std::string name;
+// Column in a table schema
+struct Column {
+    const char* name;  // Interned string
     DataType type;
 };
 
-// Index - Secondary index metadata
-struct Index
-{
-    std::string index_name;
-    std::string table_name;
+// Record layout information
+struct RecordLayout {
+    array<DataType, SchemaArena> layout;
+    array<uint32_t, SchemaArena> offsets;
+    uint32_t record_size;
 
+    static RecordLayout create(array<DataType, SchemaArena>& column_types);
+    static RecordLayout create(DataType key, DataType rec);
+};
 
+// Index metadata
+struct Index {
+    string<SchemaArena> index_name;
+    string<SchemaArena> table_name;
+    uint32_t column_index;
     BTree btree;
 
-    uint32_t column_index;
-
     RecordLayout to_layout() const;
 };
 
-// Table - Complete table metadata
-struct Table
-{
-    std::string table_name;
-    std::vector<ColumnInfo> columns;
-    std::unordered_map<uint32_t, Index*> indexes;
-
-
-
+// Table metadata
+struct Table {
+    string<SchemaArena> table_name;
+    array<Column, SchemaArena> columns;
+    hash_map<uint32_t, Index*, SchemaArena> indexes;  // column_index -> Index
     BPlusTree bplustree;
 
-
     RecordLayout to_layout() const;
 };
 
-// Schema snapshot for transaction support
-
 // ============================================================================
-// Registry Operations (Used by VM and Executor)
+// Schema Operations
 // ============================================================================
 
+// Initialize schema system
+void schema_init();
+
+// Clear all schema data
+void schema_clear();
+
+// Table operations
 Table* get_table(const char* table_name);
+void remove_table(const char* table_name);
+
+// Index operations
 Index* get_index(const char* table_name, uint32_t column_index);
 Index* get_index(const char* table_name, const char* index_name);
 Index* get_index(const char* index_name);
 void remove_index(const char* table_name, uint32_t column_index);
-void remove_table(const char* table_name);
 
-// ============================================================================
-// Schema Queries (Used by VM and Compiler)
-// ============================================================================
-
+// Schema queries
 uint32_t get_column_index(const char* table_name, const char* col_name);
 DataType get_column_type(const char* table_name, uint32_t col_index);
 
-// ============================================================================
-// Factory Functions (Used by Executor)
-// ============================================================================
-
-Table* create_table(CreateTableNode* node, int root_page);
-Index* create_index(CreateIndexNode* node, int root_page);
+// Factory functions
+Table* create_table(CreateTableStmt* node, int root_page = 0);
+Index* create_index(CreateIndexStmt* node, int root_page = 0);
 void create_master(bool existed);
-// ============================================================================
-// Transaction Support (Used by Executor)
-// ============================================================================
-
-
-void schema_clear();

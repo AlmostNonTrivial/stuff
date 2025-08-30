@@ -9,7 +9,7 @@
 #include "parser.hpp"
 #include "compile.hpp"
 #include "catalog.hpp"
-#include "vec.hpp"
+
 #include "vm.hpp"
 #include <cassert>
 #include <compare>
@@ -18,6 +18,36 @@
 #include <cstring>
 #include <cstdio>
 #include <utility>
+
+enum CommandCategory {
+    CMD_DDL,  // Data Definition Language (CREATE, DROP, ALTER)
+    CMD_DML,  // Data Manipulation Language (SELECT, INSERT, UPDATE, DELETE)
+    CMD_TCL,  // Transaction Control Language (BEGIN, COMMIT, ROLLBACK)
+};
+CommandCategory get_cmd_category(const Statement* stmt) {
+    if (!stmt) {
+        return CMD_DDL; // Default to DDL for invalid input, adjust as needed
+    }
+
+    switch (stmt->type) {
+        case STMT_CREATE_TABLE:
+        case STMT_CREATE_INDEX:
+        case STMT_DROP_TABLE:
+        case STMT_DROP_INDEX:
+            return CMD_DDL; // Data Definition Language
+        case STMT_SELECT:
+        case STMT_INSERT:
+        case STMT_UPDATE:
+        case STMT_DELETE:
+            return CMD_DML; // Data Manipulation Language
+        case STMT_BEGIN:
+        case STMT_COMMIT:
+        case STMT_ROLLBACK:
+            return CMD_TCL; // Transaction Control Language
+        default:
+            return CMD_DDL; // Default to DDL for unrecognized types, adjust as needed
+    }
+}
 
 void
 print_result_callback(TypedValue *result, size_t count)
@@ -35,24 +65,24 @@ print_result_callback(TypedValue *result, size_t count)
 
 
 MemoryContext ctx = {.alloc = arena::alloc<QueryArena>, .emit_row = print_result_callback};
-static Vec<Vec<TypedValue, QueryArena>, QueryArena> last_results;
+static array<array<TypedValue, QueryArena>, QueryArena> last_results;
 
 
 void print_results() {
-    int count = last_results.size();
+    int count = last_results.size;
    	for (int i = 0; i < count; i++)
 	{
-	    print_result_callback(last_results[i].get_data(), last_results[i].size());
+	    print_result_callback(last_results.data[i].data, last_results.data[i].size);
 	}
 
 }
 
 static void capture_result_callback(TypedValue* result, size_t count) {
-    auto row = Vec<TypedValue, QueryArena>::create();
+    auto row = array_create<TypedValue, QueryArena>();
     for (size_t i = 0; i < count; i++) {
-        row->push_back(result[i]);
+        array_push(row, result[i]);
     }
-    last_results.push_back(*row);
+    array_push(&last_results, *row);
 }
 
 // Add a mode flag
@@ -62,7 +92,7 @@ void set_capture_mode(bool capture) {
     capture_mode = capture;
     if (capture) {
         ctx.emit_row = capture_result_callback;
-        last_results.clear();
+        array_clear(&last_results);
     } else {
         ctx.emit_row = print_result_callback;
     }
@@ -70,29 +100,29 @@ void set_capture_mode(bool capture) {
 
 // Simple accessors
 size_t get_row_count() {
-    return last_results.size();
+    return last_results.size;
 }
 
 bool check_int_value(size_t row, size_t col, int expected) {
-    if (row >= last_results.size()) return false;
-    if (col >= last_results[row].size()) return false;
+    if (row >= last_results.size) return false;
+    if (col >= last_results.data[row].size) return false;
 
-    TypedValue& val = last_results[row][col];
+    TypedValue& val = last_results.data[row].data[col];
     if (val.type != TYPE_4) return false;
 
     return *(uint32_t*)val.data == expected;
 }
 
 bool check_string_value(size_t row, size_t col, const char* expected) {
-    if (row >= last_results.size()) return false;
-    if (col >= last_results[row].size()) return false;
+    if (row >= last_results.size) return false;
+    if (col >= last_results.data[row].size) return false;
 
-    TypedValue& val = last_results[row][col];
+    TypedValue& val = last_results.data[row].data[col];
     return strcmp((char*)val.data, expected) == 0;
 }
 
 void clear_results() {
-    last_results.clear();
+    array_clear(&last_results);
 }
 
 
@@ -117,11 +147,11 @@ insert_master_entry(const char *type, const char *name, const char *tbl_name, ui
 			 executor_state.next_master_id++, type, name, tbl_name, rootpage, sql ? sql : "");
 
 	// Parse and execute (without triggering recursive catalog updates)
-	Vec<ASTNode *, QueryArena> stmts = parse_sql(buffer);
-	assert(!stmts.empty());
+	auto stmts = parse_sql(buffer);
+	assert(0!=stmts->size);
 
-	Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
-	vm_execute(program.get_data(), program.size(), &ctx);
+	array<VMInstruction, QueryArena> program = build_from_ast(stmts->data[0]);
+	vm_execute(program.data, program.size, &ctx);
 }
 
 static void
@@ -130,12 +160,12 @@ delete_master_entry(const char *name)
 	char buffer[256];
 	snprintf(buffer, sizeof(buffer), "DELETE FROM master_catalog WHERE name = '%s';", name);
 
-	Vec<ASTNode *, QueryArena> stmts = parse_sql(buffer);
+	auto stmts = parse_sql(buffer);
 
-	assert(!stmts.empty());
+	assert(stmts->size != 0);
 
-	Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
-	vm_execute(program.get_data(), program.size(), &ctx);
+	array<VMInstruction, QueryArena> program = build_from_ast(stmts->data[0]);
+	vm_execute(program.data, program.size, &ctx);
 }
 
 
@@ -155,26 +185,26 @@ load_schema_from_master()
 
 	set_capture_mode(true);
 
-	Vec<ASTNode *, QueryArena> stmts = parse_sql(query);
-	assert(!stmts.empty());
-	Vec<VMInstruction, QueryArena> program = build_from_ast(stmts[0]);
-	vm_execute(program.get_data(), program.size(), &ctx);
+	auto stmts = parse_sql(query);
+	assert(0 != stmts->size);
+	array<VMInstruction, QueryArena> program = build_from_ast(stmts->data[0]);
+	vm_execute(program.data, program.size, &ctx);
 
 	set_capture_mode(false);
 
 	// Process results to rebuild schema
-	for (size_t i = 0; i < last_results.size(); i++)
+	for (size_t i = 0; i < last_results.size; i++)
 	{
-		auto &row = last_results[i];
-		if (row.size() < 6)
+		auto &row = last_results.data[i];
+		if (row.size < 6)
 			continue;
 
-		uint32_t id = *(uint32_t *)row[0].data;
-		const char *type = (const char *)row[1].data;
-		const char *name = (const char *)row[2].data;
-		const char *tbl_name = (const char *)row[3].data;
-		uint32_t rootpage = *(uint32_t *)row[4].data;
-		const char *sql = (const char *)row[5].data;
+		uint32_t id = *(uint32_t *)row.data[0].data;
+		const char *type = (const char *)row.data[1].data;
+		const char *name = (const char *)row.data[2].data;
+		const char *tbl_name = (const char *)row.data[3].data;
+		uint32_t rootpage = *(uint32_t *)row.data[4].data;
+		const char *sql = (const char *)row.data[5].data;
 
 		// Update ID counter
 		if (id >= executor_state.next_master_id)
@@ -185,10 +215,11 @@ load_schema_from_master()
 		if (strcmp(type, "table") == 0)
 		{
 			// Parse CREATE TABLE to rebuild schema
-			Vec<ASTNode *, QueryArena> create_stmts = parse_sql(sql);
-			if (!create_stmts.empty() && create_stmts[0]->type == AST_CREATE_TABLE)
+
+			auto create_stmts = *parse_sql(sql);
+			if (0 != create_stmts.size && create_stmts.data[0]->type == STMT_CREATE_TABLE)
 			{
-				CreateTableNode *node = (CreateTableNode *)create_stmts[0];
+				CreateTableStmt *node = (CreateTableStmt*)create_stmts.data[0];
 				create_table(node, rootpage);
 
 			}
@@ -199,10 +230,10 @@ load_schema_from_master()
 			Table *table = get_table(tbl_name);
 			if (table)
 			{
-				Vec<ASTNode *, QueryArena> create_stmts = parse_sql(sql);
-				if (!create_stmts.empty() && create_stmts[0]->type == AST_CREATE_INDEX)
+				auto create_stmts = *parse_sql(sql);
+				if (0!=create_stmts.size && create_stmts.data[0]->type == STMT_CREATE_INDEX)
 				{
-					CreateIndexNode *node = (CreateIndexNode *)create_stmts[0];
+					CreateIndexStmt*node = (CreateIndexStmt*)create_stmts.data[0];
 					create_index(node, rootpage);
 
 				}
@@ -222,7 +253,7 @@ load_schema_from_master()
 // ============================================================================
 
 static VM_RESULT
-execute_create_table(CreateTableNode *node)
+execute_create_table(CreateTableStmt*node)
 {
 	Table *table = create_table(node, 0);
 	assert(table != nullptr);
@@ -230,46 +261,46 @@ execute_create_table(CreateTableNode *node)
 	// Add to master catalog
 
 	char buffer[1024];
-	int offset = snprintf(buffer, 1024, "CREATE TABLE %s (", table->table_name.c_str());
+	int offset = snprintf(buffer, 1024, "CREATE TABLE %s (", table->table_name.data);
 
-	for (size_t i = 0; i < table->columns.size(); i++)
+	for (size_t i = 0; i < table->columns.size; i++)
 	{
 		if (i > 0)
 		{
 			offset += snprintf(buffer + offset, 1024 - offset, ", ");
 		}
-		offset += snprintf(buffer + offset, 1024 - offset, "%s %s", type_to_string(table->columns[i].type),
-						   table->columns[i].name.c_str());
+		offset += snprintf(buffer + offset, 1024 - offset, "%s %s", type_to_string(table->columns.data[i].type),
+						   table->columns.data[i].name);
 	}
 
 	snprintf(buffer + offset, 1024 - offset, ")");
-	insert_master_entry("table", node->table, node->table, table->bplustree.root_page_index, buffer);
+	insert_master_entry("table", node->table_name, node->table_name, table->bplustree.root_page_index, buffer);
 
 	return OK;
 }
 
 static VM_RESULT
-execute_create_index(CreateIndexNode *node)
+execute_create_index(CreateIndexStmt*node)
 {
 	// Create index structure
 	Index *index = create_index(node, 0);
 
 	char buffer[512];
-	snprintf(buffer, 512, "CREATE INDEX %s ON %s (%s)", node->index_name, node->table, node->column);
-	insert_master_entry("index", node->index_name, node->table, index->btree.root_page_index, buffer);
+	snprintf(buffer, 512, "CREATE INDEX %s ON %s (%s)", node->index_name, node->table_name, node->index_name);
+	insert_master_entry("index", node->index_name, node->table_name, index->btree.root_page_index, buffer);
 
 	return OK;
 }
 
 static VM_RESULT
-execute_drop_index(DropIndexNode *node)
+execute_drop_index(DropIndexStmt*node)
 {
 
 	Index *index = get_index(node->index_name);
 
 	assert(index != nullptr);
 
-	remove_index(index->table_name.c_str(), index->column_index);
+	remove_index(index->table_name.data, index->column_index);
 
 	delete_master_entry(node->index_name);
 
@@ -277,21 +308,21 @@ execute_drop_index(DropIndexNode *node)
 }
 
 static VM_RESULT
-execute_drop_table(DropTableNode *node)
+execute_drop_table(DropTableStmt*node)
 {
 
-	if (strcmp(node->table, "master_catalog") == 0)
+	if (strcmp(node->table_name, "master_catalog") == 0)
 	{
 		printf("Error: Cannot drop master_catalog table\n");
 		return ERR;
 	}
 
-	Table *table = get_table(node->table);
+	Table *table = get_table(node->table_name);
 	assert(table != nullptr);
-	remove_table(table->table_name.c_str());
+	remove_table(table->table_name.data);
 
 	// Remove from master catalog
-	delete_master_entry(node->table);
+	delete_master_entry(node->table_name);
 
 	return OK;
 }
@@ -365,54 +396,54 @@ executor_init(bool existed)
 // ============================================================================
 
 static VM_RESULT
-execute_ddl_command(ASTNode *stmt)
+execute_ddl_command(Statement*stmt)
 {
 
 	switch (stmt->type)
 	{
-	case AST_CREATE_TABLE:
-		return execute_create_table((CreateTableNode *)stmt);
-	case AST_CREATE_INDEX:
-		return execute_create_index((CreateIndexNode *)stmt);
-	case AST_DROP_TABLE:
-		return execute_drop_table((DropTableNode *)stmt);
-	case AST_DROP_INDEX:
-		return execute_drop_index((DropIndexNode *)stmt);
+	case STMT_CREATE_TABLE:
+		return execute_create_table((CreateTableStmt*)stmt);
+	case STMT_CREATE_INDEX:
+		return execute_create_index((CreateIndexStmt*)stmt);
+	case STMT_DROP_TABLE:
+		return execute_drop_table((DropTableStmt*)stmt);
+	case STMT_DROP_INDEX:
+		return execute_drop_index((DropIndexStmt*)stmt);
 
 	default:
-		printf("Error: Unimplemented DDL command: %s\n", stmt->type_name());
+		printf("Error: Unimplemented DDL command: %s\n", stmt->type);
 		return ERR;
 	}
 }
 
 static VM_RESULT
-execute_dml_command(ASTNode *stmt)
+execute_dml_command(Statement *stmt)
 {
 
 	// DML commands go through the VM
-	Vec<VMInstruction, QueryArena> program = build_from_ast(stmt);
+	array<VMInstruction, QueryArena> program = build_from_ast(stmt);
 
-	VM_RESULT result = vm_execute(program.get_data(), program.size(), &ctx);
+	VM_RESULT result = vm_execute(program.data, program.size, &ctx);
 
 	return result;
 }
 
 static VM_RESULT
-execute_tcl_command(ASTNode *stmt)
+execute_tcl_command(Statement*stmt)
 {
 
 	switch (stmt->type)
 	{
-	case AST_BEGIN:
+	case STMT_BEGIN:
 		return execute_begin();
 
-	case AST_COMMIT:
+	case STMT_COMMIT:
 		return execute_commit();
-	case AST_ROLLBACK:
+	case STMT_ROLLBACK:
 		return execute_rollback();
 
 	default:
-		printf("Error: Unknown TCL command: %s\n", stmt->type_name());
+		printf("Error: Unknown TCL command: %s\n", stmt->type);
 		return ERR;
 	}
 }
@@ -428,23 +459,22 @@ execute_internal(const char *sql)
 {
 	arena::reset<QueryArena>();
 
-	Vec<ASTNode *, QueryArena> statements = parse_sql(sql);
+	auto statements = parse_sql(sql);
 
-	assert(!statements.empty());
+	assert(0 !=statements->size);
 
-	for (size_t i = 0; i < statements.size(); i++)
+	for (size_t i = 0; i < statements->size; i++)
 	{
-		ASTNode *stmt = statements[i];
+		Statement*stmt = statements->data[i];
 
-		stmt->statement_index = i; // Track statement position
 
 		VM_RESULT result = OK;
 
-		CommandCategory category = stmt->category();
+		CommandCategory category = get_cmd_category(stmt);
 
 		// Handle auto-transaction for DML commands
 		bool auto_transaction = false;
-		if (category == CMD_DML && stmt->type != AST_SELECT && !executor_state.in_transaction)
+		if (category == CMD_DML && stmt->type != STMT_SELECT&& !executor_state.in_transaction)
 		{
 			execute_begin();
 			auto_transaction = true;

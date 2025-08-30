@@ -19,7 +19,7 @@ struct Buffer {
     uint32_t size;
 };
 
-bool evaluate_like_pattern(const uint8_t* str, const uint8_t* pattern,
+inline bool evaluate_like_pattern(const uint8_t* str, const uint8_t* pattern,
                                   uint32_t str_len, uint32_t pattern_len) {
     uint32_t s = 0, p = 0;
     uint32_t star_s = UINT32_MAX, star_p = UINT32_MAX;

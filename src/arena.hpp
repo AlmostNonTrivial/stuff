@@ -428,6 +428,24 @@ struct array {
   uint32_t capacity = 0;
 };
 
+
+// Set array contents from another array (potentially from a different arena)
+template <typename T, typename Tag, uint32_t InitSize, typename OtherTag>
+void array_set(array<T, Tag, InitSize>* arr, const array<T, OtherTag>& other) {
+    // Clear existing contents
+    array_clear(arr);
+
+    // Reserve space for the new contents
+    array_reserve(arr, other.size);
+
+    // Copy the data
+    if (other.size > 0) {
+        memcpy(arr->data, other.data, other.size * sizeof(T));
+        arr->size = other.size;
+    }
+}
+
+
 // Ensure array has at least 'min_capacity' slots
 template <typename T, typename Tag, uint32_t InitSize>
 inline void array_reserve(array<T, Tag, InitSize> *arr, uint32_t min_capacity) {
@@ -482,10 +500,10 @@ void array_clear(array<T, Tag, InitSize> *arr) {
   arr->size = 0;
 }
 
-template <typename T, typename Tag = global_arena, uint32_t InitSize = 0>
-array<T, Tag, InitSize> *array_create() {
-  auto *arr = (array<T, Tag, InitSize> *)Arena<Tag>::alloc(
-      sizeof(array<T, Tag, InitSize>));
+template <typename T, typename Tag = global_arena>
+array<T, Tag> *array_create() {
+  auto *arr = (array<T, Tag> *)Arena<Tag>::alloc(
+      sizeof(array<T, Tag>));
   arr->data = nullptr;
   arr->size = 0;
   arr->capacity = 0;
@@ -1184,6 +1202,76 @@ template <typename K, typename Tag>
 void hashset_clear(hash_set<K, Tag>* set)
 {
     hashmap_clear(set);
+}
+
+
+
+
+// String is just an array of chars
+template <typename Tag = global_arena, uint32_t InitSize = 0>
+using string = array<char, Tag, InitSize>;
+
+// Copy a C string
+template <typename Tag, uint32_t InitSize>
+void string_set(string<Tag, InitSize> *s, const char *cstr) {
+  int length = strlen(cstr) + 1;
+  if(length > s->capacity) {
+     array_reserve(s, length);
+  }
+  strcpy(s->data, cstr);
+  s->size= length;
+  s->capacity = length;
+}
+
+template <typename Tag = global_arena, uint32_t InitSize = 0>
+void string_split(const char * str, char delimiter, array<string<Tag>, Tag>* result) {
+    // Clear the result array
+    array_clear(result);
+
+
+
+    const char* start = str;
+    const char* end = str;
+
+    while (*end) {
+        if (*end == delimiter) {
+            // Create substring from start to current position
+            string<Tag> substr;
+            size_t len = end - start + 1;
+            array_reserve(&substr, len);
+            memcpy(substr.data, start, len - 1);
+            substr.data[len - 1] = '\0';
+            substr.size = len;
+            array_push(result, substr);
+            start = end + 1;
+        }
+        end++;
+    }
+
+    // Add the last substring (if any)
+    if (start < end) {
+        string<Tag> substr;
+        size_t len = end - start + 1;
+        array_reserve(&substr, len);
+        memcpy(substr.data, start, len - 1);
+        substr.data[len - 1] = '\0';
+        substr.size = len;
+        array_push(result, substr);
+    }
+}
+
+
+
+// Append to string
+template <typename Tag, uint32_t InitSize>
+void string_append(string<Tag, InitSize> *s, const char *cstr) {
+  if (s->size > 0 && s->data[s->size - 1] == '\0') {
+    s->size--; // Remove old null terminator
+  }
+  while (*cstr) {
+    array_push(s, *cstr++);
+  }
+  array_push(s, '\0');
 }
 
 

@@ -87,7 +87,8 @@ struct VmCursor
 	{
 		type = EPHEMERAL;
 		layout = ephemeral_layout;
-		storage.mem_tree = memtree_create(layout.key_type(), layout.record_size);
+		DataType key_type = layout.layout.data[0];
+		storage.mem_tree = memtree_create( key_type, layout.record_size);
 		cursor.mem.tree = &storage.mem_tree;
 		cursor.mem.state = MemCursor::INVALID;
 	}
@@ -239,13 +240,13 @@ struct VmCursor
 		}
 		uint8_t *record = get_record();
 
-		return record + layout.get_offset(col_index - 1);
+		return record + layout.offsets.data[col_index - 1];
 	}
 
 	DataType
 	column_type(uint32_t col_index)
 	{
-		return layout.layout[col_index];
+		return layout.layout.data[col_index];
 	}
 
 	// ========================================================================
@@ -332,7 +333,7 @@ struct VmCursor
 			if (key)
 			{
 				printf(", key=");
-				print_value(layout.key_type(), key);
+				print_value(layout.layout.data[0], key);
 			}
 		}
 		printf("\n");
@@ -891,7 +892,7 @@ step()
 		int32_t	  record_reg = Opcodes::Update::record_reg(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
 		uint8_t	  data[cursor->record_size()];
-		build_record(data, record_reg, cursor->layout.column_count() - 1);
+		build_record(data, record_reg, cursor->layout.layout.size - 1);
 		bool success = cursor->update(data);
 		if (_debug)
 		{

@@ -7,7 +7,7 @@
 #include "btree.hpp"
 #include "defs.hpp"
 #include "catalog.hpp"
-#include "vec.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -18,7 +18,7 @@ struct VMValue {
 };
 
 
-typedef void (*ResultCallback)(Vec<TypedValue, QueryArena> result);
+typedef void (*ResultCallback)(array<TypedValue, QueryArena> result);
 extern bool _debug;
 enum OpCode : uint32_t {
 	// Control flow
