@@ -62,6 +62,7 @@ enum ExprType : uint8_t {
     EXPR_UNARY_OP,
     EXPR_FUNCTION,
     EXPR_STAR,
+    EXPR_LIST,
     EXPR_NULL
 };
 
@@ -81,6 +82,8 @@ enum BinaryOp : uint8_t {
     OP_AND,
     OP_OR,
     OP_LIKE
+    ,OP_IN
+
 };
 
 // Unary operators
@@ -162,6 +165,9 @@ struct Expr {
         struct {
             const char* func_name;
             array<Expr*, ParserArena>* args;
+        };
+        struct {
+            array<Expr*, ParserArena>* list_items;
         };
     };
 };

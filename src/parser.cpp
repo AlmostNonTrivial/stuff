@@ -312,7 +312,8 @@ static int get_precedence(BinaryOp op) {
         case OP_OR:  return 1;
         case OP_AND: return 2;
         case OP_EQ: case OP_NE: case OP_LT:
-        case OP_LE: case OP_GT: case OP_GE: case OP_LIKE: return 3;
+        case OP_LE: case OP_GT: case OP_GE:
+        case OP_LIKE: case OP_IN: return 3;
         case OP_ADD: case OP_SUB: return 4;
         case OP_MUL: case OP_DIV: case OP_MOD: return 5;
         default: return 0;
@@ -328,6 +329,7 @@ static BinaryOp peek_binary_op(Parser* parser) {
         if (str_eq_ci(token.text, token.length, "AND")) return OP_AND;
         if (str_eq_ci(token.text, token.length, "OR")) return OP_OR;
         if (str_eq_ci(token.text, token.length, "LIKE")) return OP_LIKE;
+        if (str_eq_ci(token.text, token.length, "IN")) return OP_IN;
         return (BinaryOp)-1;
     }
 
@@ -361,7 +363,8 @@ static void consume_binary_op(Parser* parser, BinaryOp op) {
     if (token.type == TOKEN_KEYWORD) {
         if ((op == OP_AND && str_eq_ci(token.text, token.length, "AND")) ||
             (op == OP_OR && str_eq_ci(token.text, token.length, "OR")) ||
-            (op == OP_LIKE && str_eq_ci(token.text, token.length, "LIKE"))) {
+            (op == OP_LIKE && str_eq_ci(token.text, token.length, "LIKE")) ||
+            (op == OP_IN && str_eq_ci(token.text, token.length, "IN"))) {
             lexer_next_token(parser->lexer);
         }
     } else if (token.type == TOKEN_OPERATOR) {
@@ -547,24 +550,47 @@ Expr* parse_binary_expr(Parser* parser, Expr* left, int min_prec) {
         // Consume the operator
         consume_binary_op(parser, op);
 
-        // Parse right side - start with primary
-        Expr* right = parse_primary_expr(parser);
-        if (!right) return nullptr;
+        Expr* right = nullptr;
 
-        // While next operator has higher precedence, accumulate it into right side
-        while (true) {
-            BinaryOp next_op = peek_binary_op(parser);
-            if (next_op == (BinaryOp)-1) break;
+        // Special handling for IN - expect a parenthesized list
+        if (op == OP_IN) {
+            if (!consume_token(parser, TOKEN_LPAREN)) {
+                return nullptr;  // IN must be followed by (
+            }
 
-            int next_prec = get_precedence(next_op);
+            // Create list expression
+            right = (Expr*)Arena<ParserArena>::alloc(sizeof(Expr));
+            right->type = EXPR_LIST;
+            right->list_items = array_create<Expr*, ParserArena>();
 
-            // Higher precedence means tighter binding - recurse with higher min_prec
-            // For right-associative operators, use >= instead of >
-            if (next_prec > prec) {
-                right = parse_binary_expr(parser, right, next_prec);
-                if (!right) return nullptr;
-            } else {
-                break;
+            // Parse list items
+            do {
+                Expr* item = parse_expression(parser);
+                if (!item) return nullptr;
+                array_push(right->list_items, item);
+            } while (consume_token(parser, TOKEN_COMMA));
+
+            if (!consume_token(parser, TOKEN_RPAREN)) {
+                return nullptr;  // Missing closing paren
+            }
+        } else {
+            // Normal binary operator handling
+            right = parse_primary_expr(parser);
+            if (!right) return nullptr;
+
+            // While next operator has higher precedence, accumulate it into right side
+            while (true) {
+                BinaryOp next_op = peek_binary_op(parser);
+                if (next_op == (BinaryOp)-1) break;
+
+                int next_prec = get_precedence(next_op);
+
+                if (next_prec > prec) {
+                    right = parse_binary_expr(parser, right, next_prec);
+                    if (!right) return nullptr;
+                } else {
+                    break;
+                }
             }
         }
 

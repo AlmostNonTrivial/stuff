@@ -10,6 +10,86 @@ static bool str_eq(const char* a, const char* b) {
     return strcmp(a, b) == 0;
 }
 
+
+static void test_in_operator() {
+    printf("Testing IN operator...\n");
+
+    Parser parser;
+
+    // Test basic IN with numbers
+    parser_init(&parser, "SELECT * FROM users WHERE id IN (1, 2, 3)");
+    Statement* stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+    assert(stmt->type == STMT_SELECT);
+
+    SelectStmt* select = stmt->select_stmt;
+    assert(select->where_clause != nullptr);
+    assert(select->where_clause->type == EXPR_BINARY_OP);
+    assert(select->where_clause->op == OP_IN);
+
+    // Check left side is column
+    assert(select->where_clause->left->type == EXPR_COLUMN);
+    assert(str_eq(select->where_clause->left->column_name, "id"));
+
+    // Check right side is list
+    assert(select->where_clause->right->type == EXPR_LIST);
+    assert(select->where_clause->right->list_items->size == 3);
+    assert(select->where_clause->right->list_items->data[0]->type == EXPR_LITERAL);
+    assert(select->where_clause->right->list_items->data[0]->int_val == 1);
+    assert(select->where_clause->right->list_items->data[1]->int_val == 2);
+    assert(select->where_clause->right->list_items->data[2]->int_val == 3);
+
+    parser_reset(&parser);
+
+    // Test IN with strings
+    parser_init(&parser, "SELECT * FROM users WHERE status IN ('active', 'pending', 'blocked')");
+    stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    select = stmt->select_stmt;
+    assert(select->where_clause->type == EXPR_BINARY_OP);
+    assert(select->where_clause->op == OP_IN);
+    assert(select->where_clause->right->type == EXPR_LIST);
+    assert(select->where_clause->right->list_items->size == 3);
+    assert(str_eq(select->where_clause->right->list_items->data[0]->str_val, "active"));
+    assert(str_eq(select->where_clause->right->list_items->data[1]->str_val, "pending"));
+    assert(str_eq(select->where_clause->right->list_items->data[2]->str_val, "blocked"));
+
+    parser_reset(&parser);
+
+    // Test IN with single value
+    parser_init(&parser, "SELECT * FROM orders WHERE product_id IN (42)");
+    stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    select = stmt->select_stmt;
+    assert(select->where_clause->op == OP_IN);
+    assert(select->where_clause->right->list_items->size == 1);
+    assert(select->where_clause->right->list_items->data[0]->int_val == 42);
+
+    parser_reset(&parser);
+
+    // Test IN combined with other operators
+    parser_init(&parser, "SELECT * FROM users WHERE active = 1 AND id IN (10, 20, 30)");
+    stmt = parser_parse_statement(&parser);
+    assert(stmt != nullptr);
+
+    select = stmt->select_stmt;
+    assert(select->where_clause->type == EXPR_BINARY_OP);
+    assert(select->where_clause->op == OP_AND);
+
+    // Right side should be the IN expression
+    Expr* in_expr = select->where_clause->right;
+    assert(in_expr->type == EXPR_BINARY_OP);
+    assert(in_expr->op == OP_IN);
+    assert(in_expr->right->type == EXPR_LIST);
+    assert(in_expr->right->list_items->size == 3);
+
+    parser_reset(&parser);
+
+    printf("  ✓ IN operator passed\n");
+}
+
 // Test basic SELECT
 static void test_select_basic() {
     printf("Testing basic SELECT...\n");
@@ -837,6 +917,7 @@ int main() {
     test_expressions();
     test_functions();
     test_like_operator();
+    test_in_operator();
     test_null_handling();
 
     // Misc tests
