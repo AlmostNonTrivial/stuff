@@ -12,7 +12,8 @@ static const char *sql_keywords[] = {
 	"DROP",	  "BEGIN",	 "COMMIT", "ROLLBACK", "JOIN",	  "INNER",	"LEFT",	  "RIGHT",	"CROSS",   "ON",	 "AND",
 	"OR",	  "NOT",	 "NULL",   "DISTINCT", "AS",	  "ORDER",	"BY",	  "GROUP",	"HAVING",  "LIMIT",	 "OFFSET",
 	"ASC",	  "DESC",	 "IF",	   "EXISTS",   "PRIMARY", "KEY",	"INT",	  "BIGINT", "VARCHAR", "TEXT",	 "LIKE",
-	"IN",	  "BETWEEN", "IS",	   "TRUE",	   "FALSE",	  "COUNT",	"SUM",	  "AVG",	"MIN",	   "MAX",	 "NOT"};
+	"IN",	  "BETWEEN", "IS",	   "TRUE",	   "FALSE",	  "COUNT",	"SUM",	  "AVG",	"MIN",	   "MAX",	 "NOT",
+	"INDEX",  "UNIQUE"};
 
 // String interning
 const char *
@@ -1259,6 +1260,7 @@ parse_data_type(Parser *parser)
 
 	return TYPE_256;
 }
+
 CreateIndexStmt *
 parse_create_index(Parser *parser)
 {
@@ -1622,52 +1624,6 @@ parser_parse_statement(Parser *parser)
 				return nullptr;
 		}
 	}
-	else if (peek_keyword(parser, "CREATE"))
-	{
-		// Need to look ahead to see if it's TABLE or INDEX
-		Token		saved_current = parser->lexer->current_token;
-		const char *saved_pos = parser->lexer->current;
-		uint32_t	saved_line = parser->lexer->line;
-		uint32_t	saved_col = parser->lexer->column;
-
-		consume_keyword(parser, "CREATE");
-
-		// Check for UNIQUE INDEX
-		bool is_index = false;
-		if (peek_keyword(parser, "UNIQUE"))
-		{
-			consume_keyword(parser, "UNIQUE");
-			if (peek_keyword(parser, "INDEX"))
-			{
-				is_index = true;
-			}
-		}
-		else if (peek_keyword(parser, "INDEX"))
-		{
-			is_index = true;
-		}
-
-		// Restore position
-		parser->lexer->current_token = saved_current;
-		parser->lexer->current = saved_pos;
-		parser->lexer->line = saved_line;
-		parser->lexer->column = saved_col;
-
-		if (is_index)
-		{
-			stmt->type = STMT_CREATE_INDEX;
-			stmt->create_index_stmt = parse_create_index(parser);
-			if (!stmt->create_index_stmt)
-				return nullptr;
-		}
-		else
-		{
-			stmt->type = STMT_CREATE_TABLE;
-			stmt->create_table_stmt = parse_create_table(parser);
-			if (!stmt->create_table_stmt)
-				return nullptr;
-		}
-	}
 	else if (peek_keyword(parser, "DROP"))
 	{
 		// Look ahead to see if it's TABLE or INDEX
@@ -1753,9 +1709,9 @@ parser_parse_statements(Parser *parser)
 		Statement *stmt = parser_parse_statement(parser);
 		if (!stmt)
 		{
-			// Optionally handle error (e.g., return nullptr or empty array)
-			array_clear(statements);
-			return statements;
+			// Return what we've parsed so far instead of clearing
+			// This allows partial parsing when encountering errors
+			break;
 		}
 		array_push(statements, stmt);
 	}

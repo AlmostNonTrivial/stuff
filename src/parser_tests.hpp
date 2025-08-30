@@ -1228,8 +1228,8 @@ int test_parser() {
     test_select_group_by();
     test_select_limit_offset();
     test_select_distinct();
-    // test_create_index();
-    // test_drop_index();
+    test_create_index();
+    test_drop_index();
 
     // INSERT tests
     test_insert_basic();
