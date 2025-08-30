@@ -12,12 +12,12 @@
 
 BlobNode* get_blob(uint32_t index) {
     if (index == 0) return nullptr;
-    return static_cast<BlobNode*>(pager_get(index));
+    return reinterpret_cast<BlobNode*>(pager_get(index));
 }
 
 BlobNode* allocate_blob_page() {
     uint32_t page_index = pager_new();
-    BlobNode* node = static_cast<BlobNode*>(pager_get(page_index));
+    BlobNode* node = reinterpret_cast<BlobNode*>(pager_get(page_index));
 
     node->index = page_index;
     node->next = 0;
