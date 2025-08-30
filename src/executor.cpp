@@ -34,8 +34,6 @@ print_result_callback(TypedValue *result, size_t count)
 }
 
 
-
-
 MemoryContext ctx = {.alloc = arena::alloc<QueryArena>, .emit_row = print_result_callback};
 static Vec<Vec<TypedValue, QueryArena>, QueryArena> last_results;
 
@@ -115,7 +113,7 @@ insert_master_entry(const char *type, const char *name, const char *tbl_name, ui
 {
 	// Build INSERT statement for master table
 	char buffer[2048];
-	snprintf(buffer, sizeof(buffer), "INSERT INTO sqlite_master VALUES (%u, '%s', '%s', '%s', %u, '%s')",
+	snprintf(buffer, sizeof(buffer), "INSERT INTO master_catalog VALUES (%u, '%s', '%s', '%s', %u, '%s')",
 			 executor_state.next_master_id++, type, name, tbl_name, rootpage, sql ? sql : "");
 
 	// Parse and execute (without triggering recursive catalog updates)
@@ -130,7 +128,7 @@ static void
 delete_master_entry(const char *name)
 {
 	char buffer[256];
-	snprintf(buffer, sizeof(buffer), "DELETE FROM sqlite_master WHERE name = '%s';", name);
+	snprintf(buffer, sizeof(buffer), "DELETE FROM master_catalog WHERE name = '%s';", name);
 
 	Vec<ASTNode *, QueryArena> stmts = parse_sql(buffer);
 
@@ -147,11 +145,11 @@ load_schema_from_master()
 {
 
 	// Save and clear current schema (except master table)
-	Table *master = get_table("sqlite_master");
+	Table *master = get_table("master_catalog");
 	assert(master != nullptr);
 
 	// Query master table to rebuild schema
-	const char *query = "SELECT * FROM sqlite_master;";
+	const char *query = "SELECT * FROM master_catalog;";
 
 	// Set up result callback to capture rows
 
@@ -282,9 +280,9 @@ static VM_RESULT
 execute_drop_table(DropTableNode *node)
 {
 
-	if (strcmp(node->table, "sqlite_master") == 0)
+	if (strcmp(node->table, "master_catalog") == 0)
 	{
-		printf("Error: Cannot drop sqlite_master table\n");
+		printf("Error: Cannot drop master_catalog table\n");
 		return ERR;
 	}
 
@@ -340,7 +338,7 @@ void
 executor_init(bool existed)
 {
 	init_type_ops();
-	pager_init("db");
+	pager_open("db");
 
 	arena::init<QueryArena>(PAGE_SIZE * 30);
 	// arena::init<RegistryArena>(PAGE_SIZE * 14);
@@ -423,8 +421,10 @@ execute_tcl_command(ASTNode *stmt)
 // Main Execute Function
 // ============================================================================
 
+
+
 void
-execute(const char *sql)
+execute_internal(const char *sql)
 {
 	arena::reset<QueryArena>();
 
@@ -506,6 +506,7 @@ execute(const char *sql)
 		}
 	}
 }
+
 
 void
 executor_shutdown()

@@ -3,7 +3,7 @@
 #include <iostream>
 
 
-#define PAGE_SIZE 64
+#define PAGE_SIZE 4096
 #include <cstdint>
 
 

@@ -205,8 +205,8 @@ Table* create_table(CreateTableNode* node, int root_page)
 
     const char* table_name = node->table;
 
-    // Don't allow creating sqlite_master or duplicates
-    assert(strcmp(table_name, "sqlite_master") != 0);
+    // Don't allow creating master_catalog or duplicates
+    assert(strcmp(table_name, "master_catalog") != 0);
     assert(get_table(table_name) == nullptr);
 
     auto table = std::make_unique<Table>();
@@ -290,7 +290,7 @@ Index* create_index(CreateIndexNode* node, int root_page)
 void create_master(bool existed)
 {
     auto master = std::make_unique<Table>();
-    master->table_name = "sqlite_master";
+    master->table_name = "master_catalog";
 
     // Columns: id (key), type, name, tbl_name, rootpage, sql
     master->columns.push_back({"id", TYPE_4});
