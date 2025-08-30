@@ -153,7 +153,6 @@ test_lru()
 	os_file_delete(DB);
 }
 
-
 // Helper function to generate weighted random operation
 inline uint32_t
 weighted_rand_op()
@@ -178,9 +177,8 @@ test_pager_stress()
 	os_file_delete(DB);
 	pager_open(DB);
 
-
-	Array<uint32_t> committed_pages;
-	Array<uint32_t> transaction_pages;
+	array<uint32_t> committed_pages;
+	array<uint32_t> transaction_pages;
 	const int		iterations = 100;
 	const char		chars[] = "abcdefghijklmnopqrstuvwxyz";
 	const int		char_count = sizeof(chars) - 1;
@@ -322,7 +320,6 @@ test_pager_stress()
 			before_hash = after_hash;
 		}
 	}
-
 
 	if (in_transaction)
 	{

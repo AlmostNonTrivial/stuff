@@ -2,7 +2,8 @@
 
 #include <iostream>
 
-#define PAGE_SIZE 2048
+
+#define PAGE_SIZE 64
 #include <cstdint>
 
 
