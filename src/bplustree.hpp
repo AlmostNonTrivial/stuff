@@ -25,7 +25,7 @@ struct BPlusTree
 
 // B+Tree management functions
 BPlusTree
-bplustree_create(DataType key, uint32_t record_size, bool init);
+bplustree_create(DataType key, uint32_t record_size, bool init, bool allow_duplicate);
 
 bool
 bplustree_clear(BPlusTree *tree);
