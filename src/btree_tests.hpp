@@ -3,6 +3,7 @@
 #include "defs.hpp"
 #include "pager.hpp"
 #include "test_utils.hpp"
+#include "vm.hpp"
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -42,18 +43,19 @@ test_btree()
 	for (int i = 0; i < count; i++)
 	{
 		bplustree_cursor_seek(&cursor, &i);
-		if (i == 15 || i == 16)
+		if (i == 16)
 		{
-			print = true;
+			_debug = true;
+			bplustree_print(&bptree);
 		}
 		else
 		{
-			print = false;
+			_debug = false;
+
 		}
 		bplustree_cursor_delete(&cursor);
 		if (print)
 		{
-			bplustree_print(&bptree);
 		}
 		bplustree_validate(&bptree);
 	}

@@ -11,6 +11,8 @@
 #include <iterator>
 #include <sys/types.h>
 
+
+
 // Constants
 #define NODE_HEADER_SIZE 24
 #define NODE_DATA_SIZE	 PAGE_SIZE - NODE_HEADER_SIZE
@@ -352,6 +354,9 @@ static void
 swap_with_root(BPlusTree &tree, BTreeNode *root, BTreeNode *other)
 {
 
+    // Fix parent for other node (it's no longer root)
+	// The caller will set the correct parent if needed
+
     mark_dirty(root);
 	mark_dirty(other);
 	// Verify root is actually the root
@@ -385,10 +390,6 @@ swap_with_root(BPlusTree &tree, BTreeNode *root, BTreeNode *other)
 			}
 		}
 	}
-
-	// Fix parent for other node (it's no longer root)
-	// The caller will set the correct parent if needed
-
 }
 
 static void
@@ -841,9 +842,9 @@ merge_right(BPlusTree &tree, BTreeNode *node)
 	{
 		if (parent->parent == 0 && parent->num_keys == 0)
 		{
-
 		    swap_with_root(tree, parent, node);
-			destroy_node(parent);
+			// parent = node after swap, so delete node
+			destroy_node(node);
 			return node;
 		}
 		else
@@ -918,7 +919,8 @@ repair_after_delete(BPlusTree &tree, BTreeNode *node)
 			if (only_child)
 			{
 				swap_with_root(tree, node, only_child);
-				destroy_node(node);
+				// after swap, destroy this one
+				destroy_node(only_child);
 			}
 		}
 		return;
