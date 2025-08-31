@@ -20,12 +20,11 @@ struct BPlusTree
 	uint32_t leaf_split_index;
 	uint32_t record_size; // Total size of each record
 	DataType node_key_size;
-	bool	 allow_duplicates;
 };
 
 // B+Tree management functions
 BPlusTree
-bplustree_create(DataType key, uint32_t record_size, bool init, bool allow_duplicate);
+bplustree_create(DataType key, uint32_t record_size, bool init);
 
 bool
 bplustree_clear(BPlusTree *tree);
