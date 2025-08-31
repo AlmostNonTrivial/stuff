@@ -9,7 +9,8 @@
 struct MemoryContext;
 
 // B+Tree control structure (stores data only in leaves)
-struct BPlusTree {
+struct BPlusTree
+{
 	uint32_t root_page_index;
 	uint32_t internal_max_keys;
 	uint32_t leaf_max_keys;
@@ -19,7 +20,7 @@ struct BPlusTree {
 	uint32_t leaf_split_index;
 	uint32_t record_size; // Total size of each record
 	DataType node_key_size;
-	bool allow_duplicates;
+	bool	 allow_duplicates;
 };
 
 // B+Tree management functions
@@ -30,7 +31,8 @@ bool
 bplustree_clear(BPlusTree *tree);
 
 // B+Tree cursor state enumeration
-enum BPtCursorState : uint32_t {
+enum BPtCursorState : uint32_t
+{
 	BPT_CURSOR_INVALID = 0,
 	BPT_CURSOR_VALID = 1,
 	BPT_CURSOR_REQUIRESEEK = 2,
@@ -42,14 +44,16 @@ enum BPtCursorState : uint32_t {
 // Path tracking for B+Tree cursor (simplified for leaf-level operations)
 
 // B+Tree cursor structure
-struct BPtCursor {
-	BPlusTree *tree;
+struct BPtCursor
+{
+	BPlusTree	  *tree;
 	MemoryContext *ctx;
-	struct {
+	struct
+	{
 		uint32_t current_page;	// Current leaf page
 		uint32_t current_index; // Current position in leaf
 	} path,
-	    saved; // For save/restore operations
+		saved; // For save/restore operations
 	BPtCursorState state;
 };
 
@@ -73,8 +77,7 @@ bplustree_cursor_is_start(BPtCursor *cursor);
 bool
 bplustree_cursor_update(BPtCursor *cursor, const uint8_t *record);
 bool
-bplustree_cursor_insert(BPtCursor *cursor, const void *key,
-			const uint8_t *record);
+bplustree_cursor_insert(BPtCursor *cursor, const void *key, const uint8_t *record);
 bool
 bplustree_cursor_delete(BPtCursor *cursor);
 
@@ -106,5 +109,10 @@ bplustree_cursor_has_previous(BPtCursor *cursor);
 bool
 bplustree_cursor_seek_cmp(BPtCursor *cursor, const void *key, CompareOp op);
 bool
-bplustree_cursor_seek_exact(BPtCursor *cursor, const void *key,
-			    const uint8_t *record);
+bplustree_cursor_seek_exact(BPtCursor *cursor, const void *key, const uint8_t *record);
+
+void
+bplustree_validate(BPlusTree *tree);
+
+void
+bplustree_print(BPlusTree *tree);

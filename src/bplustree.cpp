@@ -351,6 +351,9 @@ set_child(BPlusTree &tree, BTreeNode *node, uint32_t child_index, uint32_t node_
 static void
 swap_with_root(BPlusTree &tree, BTreeNode *root, BTreeNode *other)
 {
+
+    mark_dirty(root);
+	mark_dirty(other);
 	// Verify root is actually the root
 	assert(root->index == tree.root_page_index);
 
@@ -386,8 +389,6 @@ swap_with_root(BPlusTree &tree, BTreeNode *root, BTreeNode *other)
 	// Fix parent for other node (it's no longer root)
 	// The caller will set the correct parent if needed
 
-	mark_dirty(root);
-	mark_dirty(other);
 }
 
 static void
@@ -1397,3 +1398,468 @@ find_containing_node(BPlusTree &tree, BTreeNode *node, const uint8_t *key, BPtCu
 		// no-op
 		return false;
 	}
+
+
+
+
+	// Add this to bplustree.cpp
+
+#include <cassert>
+#include <unordered_set>
+
+// Validation result structure to pass information up the recursion
+struct ValidationResult {
+    uint32_t depth;
+    uint8_t* min_key;
+    uint8_t* max_key;
+    BTreeNode* leftmost_leaf;
+    BTreeNode* rightmost_leaf;
+};
+
+// Forward declaration
+static ValidationResult validate_node_recursive(
+    BPlusTree& tree,
+    BTreeNode* node,
+    uint32_t expected_parent,
+    uint8_t* parent_min_bound,
+    uint8_t* parent_max_bound,
+    std::unordered_set<uint32_t>& visited
+);
+
+// Main validation function
+void bplustree_validate(BPlusTree* tree) {
+    assert(tree != nullptr);
+
+    // Empty tree is valid
+    if (tree->root_page_index == 0) {
+        return;
+    }
+
+    BTreeNode* root = get_root(*tree);
+    assert(root != nullptr);
+
+    // Root specific checks
+    assert(root->parent == 0); // Root has no parent
+    assert(root->index == tree->root_page_index);
+
+    // Track visited nodes to detect cycles
+    std::unordered_set<uint32_t> visited;
+
+    // Validate tree recursively
+    ValidationResult result = validate_node_recursive(*tree, root, 0, nullptr, nullptr, visited);
+
+    // If tree has data, verify leaf chain integrity
+    if (root->is_leaf && root->num_keys > 0) {
+        // Single leaf root should have no siblings
+        assert(root->next == 0);
+        assert(root->previous == 0);
+    } else if (!root->is_leaf) {
+        // Verify complete leaf chain by walking it
+        BTreeNode* first_leaf = result.leftmost_leaf;
+        BTreeNode* current = first_leaf;
+        std::unordered_set<uint32_t> leaf_visited;
+
+        assert(current->previous == 0); // First leaf has no previous
+
+        while (current) {
+            assert(current->is_leaf);
+            assert(leaf_visited.find(current->index) == leaf_visited.end()); // No cycles in leaf chain
+            leaf_visited.insert(current->index);
+
+            if (current->next != 0) {
+                BTreeNode* next = get_next(current);
+                assert(next != nullptr);
+                assert(next->previous == current->index); // Bidirectional link integrity
+                current = next;
+            } else {
+                assert(current == result.rightmost_leaf); // Last leaf matches rightmost
+                break;
+            }
+        }
+    }
+}
+
+static ValidationResult validate_node_recursive(
+    BPlusTree& tree,
+    BTreeNode* node,
+    uint32_t expected_parent,
+    uint8_t* parent_min_bound,
+    uint8_t* parent_max_bound,
+    std::unordered_set<uint32_t>& visited
+) {
+    assert(node != nullptr);
+
+    // Check for cycles
+    assert(visited.find(node->index) == visited.end());
+    visited.insert(node->index);
+
+    // Verify parent pointer
+    assert(node->parent == expected_parent);
+
+    // Check key count constraints
+    uint32_t max_keys = get_max_keys(tree, node);
+    uint32_t min_keys = get_min_keys(tree, node);
+
+    assert(node->num_keys <= max_keys);
+
+    // Non-root nodes must meet minimum
+    if (expected_parent != 0) {
+        assert(node->num_keys >= min_keys);
+    } else {
+        // Root can have fewer, but not zero (unless tree is being cleared)
+        if (node->num_keys == 0) {
+            assert(node->is_leaf); // Only leaf root can be empty during deletion
+        }
+    }
+
+    // Validate key ordering and bounds
+    uint8_t* prev_key = nullptr;
+    uint8_t* first_key = nullptr;
+    uint8_t* last_key = nullptr;
+
+    for (uint32_t i = 0; i < node->num_keys; i++) {
+        uint8_t* current_key = get_key_at(tree, node, i);
+
+        if (i == 0) {
+            first_key = current_key;
+        }
+        if (i == node->num_keys - 1) {
+            last_key = current_key;
+        }
+
+        // Keys must be sorted (allowing duplicates if tree allows them)
+        if (prev_key) {
+            int cmp_result = cmp(tree.node_key_size, prev_key, current_key);
+            if (tree.allow_duplicates) {
+                assert(cmp_result <= 0); // prev <= current
+            } else {
+                assert(cmp_result < 0);  // prev < current
+            }
+        }
+
+        // Check bounds from parent
+        if (parent_min_bound) {
+            assert(cmp(tree.node_key_size, current_key, parent_min_bound) >= 0);
+        }
+        if (parent_max_bound) {
+            assert(cmp(tree.node_key_size, current_key, parent_max_bound) < 0);
+        }
+
+        prev_key = current_key;
+    }
+
+    ValidationResult result;
+    result.min_key = first_key;
+    result.max_key = last_key;
+
+    if (node->is_leaf) {
+        result.depth = 0;
+        result.leftmost_leaf = node;
+        result.rightmost_leaf = node;
+
+        // Validate leaf data exists
+        uint8_t* records = get_leaf_record_data(tree, node);
+        assert(records != nullptr);
+
+        // Verify leaf chain pointers are valid page indices or 0
+        if (node->next != 0) {
+            assert(node->next != node->index); // No self-reference
+            BTreeNode* next = get_next(node);
+            assert(next != nullptr);
+            assert(next->is_leaf);
+        }
+        if (node->previous != 0) {
+            assert(node->previous != node->index); // No self-reference
+            BTreeNode* prev = get_prev(node);
+            assert(prev != nullptr);
+            assert(prev->is_leaf);
+        }
+    } else {
+        // Internal node validation
+        uint32_t* children = get_children(tree, node);
+        assert(children != nullptr);
+
+        uint32_t child_depth = UINT32_MAX;
+        BTreeNode* leftmost_leaf = nullptr;
+        BTreeNode* rightmost_leaf = nullptr;
+
+        // Internal nodes have num_keys + 1 children
+        for (uint32_t i = 0; i <= node->num_keys; i++) {
+            assert(children[i] != 0); // No null children
+            assert(children[i] != node->index); // No self-reference
+
+            BTreeNode* child = get_child(tree, node, i);
+            assert(child != nullptr);
+
+            // Determine bounds for this child
+            uint8_t* child_min = (i == 0) ? parent_min_bound : get_key_at(tree, node, i - 1);
+            uint8_t* child_max = (i == node->num_keys) ? parent_max_bound : get_key_at(tree, node, i);
+
+            ValidationResult child_result = validate_node_recursive(
+                tree, child, node->index, child_min, child_max, visited
+            );
+
+            // All children must have same depth
+            if (child_depth == UINT32_MAX) {
+                child_depth = child_result.depth;
+                leftmost_leaf = child_result.leftmost_leaf;
+            } else {
+                assert(child_depth == child_result.depth);
+            }
+
+            // Track rightmost leaf
+            rightmost_leaf = child_result.rightmost_leaf;
+
+            // Verify key bounds match child contents
+            if (child_result.min_key && i > 0) {
+                // First key in child >= separator key before it
+                uint8_t* separator = get_key_at(tree, node, i - 1);
+                assert(cmp(tree.node_key_size, child_result.min_key, separator) >= 0);
+            }
+            if (child_result.max_key && i < node->num_keys) {
+                // Last key in child < separator key after it
+                uint8_t* separator = get_key_at(tree, node, i);
+                assert(cmp(tree.node_key_size, child_result.max_key, separator) <= 0);
+            }
+        }
+
+        result.depth = child_depth + 1;
+        result.leftmost_leaf = leftmost_leaf;
+        result.rightmost_leaf = rightmost_leaf;
+
+        // Internal nodes should not have leaf chain pointers
+        assert(node->next == 0);
+        assert(node->previous == 0);
+    }
+
+    return result;
+}
+
+
+
+// Add this to bplustree.cpp
+
+#include <queue>
+#include <iomanip>
+
+// Helper to print a single key based on type
+static void print_key(BPlusTree& tree, uint8_t* key) {
+    if (!key) {
+        printf("NULL");
+        return;
+    }
+
+    switch (tree.node_key_size) {
+        case TYPE_4: {
+            uint32_t val;
+            memcpy(&val, key, 4);
+            printf("%u", val);
+            break;
+        }
+        case TYPE_8: {
+            uint64_t val;
+            memcpy(&val, key, 8);
+            printf("%lu", val);
+            break;
+        }
+        case TYPE_32:
+        case TYPE_256: {
+            // Print as string, but limit length for readability
+            uint32_t max_len = (tree.node_key_size == TYPE_32) ? 32 : 256;
+            printf("\"");
+            for (uint32_t i = 0; i < max_len && key[i]; i++) {
+                if (key[i] >= 32 && key[i] < 127) {
+                    printf("%c", key[i]);
+                } else {
+                    printf("\\x%02x", key[i]);
+                }
+                if (i > 10) { // Truncate long strings
+                    printf("...");
+                    break;
+                }
+            }
+            printf("\"");
+            break;
+        }
+        default:
+            printf("?");
+    }
+}
+
+// Main B+Tree print function
+void bplustree_print(BPlusTree* tree) {
+    if (!tree || tree->root_page_index == 0) {
+        printf("B+Tree: EMPTY\n");
+        return;
+    }
+
+    printf("====================================\n");
+    printf("B+Tree Structure (BFS)\n");
+    printf("====================================\n");
+    printf("Root: page_%u\n", tree->root_page_index);
+    printf("Key type: %s, Record size: %u bytes\n",
+           type_to_string(tree->node_key_size), tree->record_size);
+    printf("Internal: max_keys=%u, min_keys=%u\n",
+           tree->internal_max_keys, tree->internal_min_keys);
+    printf("Leaf: max_keys=%u, min_keys=%u\n",
+           tree->leaf_max_keys, tree->leaf_min_keys);
+    printf("Duplicates: %s\n", tree->allow_duplicates ? "YES" : "NO");
+    printf("------------------------------------\n\n");
+
+    // BFS traversal using two queues (current level and next level)
+    std::queue<uint32_t> current_level;
+    std::queue<uint32_t> next_level;
+
+    current_level.push(tree->root_page_index);
+    uint32_t depth = 0;
+
+    while (!current_level.empty()) {
+        printf("LEVEL %u:\n", depth);
+        printf("--------\n");
+
+        while (!current_level.empty()) {
+            uint32_t page_index = current_level.front();
+            current_level.pop();
+
+            BTreeNode* node = reinterpret_cast<BTreeNode*>(pager_get(page_index));
+            if (!node) {
+                printf("  ERROR: Cannot read page %u\n", page_index);
+                continue;
+            }
+
+            // Print node header
+            printf("  Node[page_%u]:\n", node->index);
+            printf("    Type: %s\n", node->is_leaf ? "LEAF" : "INTERNAL");
+            printf("    Parent: %s\n",
+                   node->parent == 0 ? "ROOT" : ("page_" + std::to_string(node->parent)).c_str());
+            printf("    Keys(%u): [", node->num_keys);
+
+            // Print keys
+            for (uint32_t i = 0; i < node->num_keys; i++) {
+                if (i > 0) printf(", ");
+                print_key(*tree, get_key_at(*tree, node, i));
+            }
+            printf("]\n");
+
+            // Print children for internal nodes
+            if (!node->is_leaf) {
+                uint32_t* children = get_children(*tree, node);
+                printf("    Children(%u): [", node->num_keys + 1);
+                for (uint32_t i = 0; i <= node->num_keys; i++) {
+                    if (i > 0) printf(", ");
+                    printf("page_%u", children[i]);
+
+                    // Add children to next level queue
+                    next_level.push(children[i]);
+                }
+                printf("]\n");
+            } else {
+                // Print leaf chain info
+                printf("    Leaf chain: ");
+                if (node->previous != 0) {
+                    printf("prev=page_%u", node->previous);
+                } else {
+                    printf("prev=NULL");
+                }
+                printf(", ");
+                if (node->next != 0) {
+                    printf("next=page_%u", node->next);
+                } else {
+                    printf("next=NULL");
+                }
+                printf("\n");
+            }
+
+            printf("\n");
+        }
+
+        // Move to next level
+        if (!next_level.empty()) {
+            std::swap(current_level, next_level);
+            depth++;
+        }
+    }
+
+    // Print leaf chain traversal for verification
+    printf("====================================\n");
+    printf("Leaf Chain Traversal:\n");
+    printf("------------------------------------\n");
+
+    // Find leftmost leaf
+    BTreeNode* current = get_root(*tree);
+    while (!current->is_leaf) {
+        current = get_child(*tree, current, 0);
+        if (!current) {
+            printf("ERROR: Cannot find leftmost leaf\n");
+            return;
+        }
+    }
+
+    printf("  ");
+    uint32_t leaf_count = 0;
+    while (current) {
+        if (leaf_count > 0) printf(" -> ");
+        printf("page_%u", current->index);
+
+        // Safety check for cycles
+        if (++leaf_count > 1000) {
+            printf("\n  ERROR: Possible cycle detected in leaf chain!\n");
+            break;
+        }
+
+        current = get_next(current);
+    }
+    printf("\n");
+    printf("  Total leaves: %u\n", leaf_count);
+    printf("====================================\n\n");
+}
+
+// Compact tree printer (single line per node)
+void bplustree_print_compact(BPlusTree* tree) {
+    if (!tree || tree->root_page_index == 0) {
+        printf("B+Tree: EMPTY\n");
+        return;
+    }
+
+    printf("B+Tree (page:type:keys:parent):\n");
+
+    std::queue<uint32_t> queue;
+    std::queue<uint32_t> levels;
+
+    queue.push(tree->root_page_index);
+    levels.push(0);
+
+    uint32_t current_level = 0;
+
+    while (!queue.empty()) {
+        uint32_t page_index = queue.front();
+        uint32_t level = levels.front();
+        queue.pop();
+        levels.pop();
+
+        if (level != current_level) {
+            printf("\n");
+            current_level = level;
+        }
+
+        BTreeNode* node = reinterpret_cast<BTreeNode*>(pager_get(page_index));
+        if (!node) continue;
+
+        // Print: page_index:type:num_keys:parent
+        printf("[%u:%c:%u:%u] ",
+               node->index,
+               node->is_leaf ? 'L' : 'I',
+               node->num_keys,
+               node->parent);
+
+        // Add children to queue
+        if (!node->is_leaf) {
+            uint32_t* children = get_children(*tree, node);
+            for (uint32_t i = 0; i <= node->num_keys; i++) {
+                queue.push(children[i]);
+                levels.push(level + 1);
+            }
+        }
+    }
+    printf("\n");
+}
