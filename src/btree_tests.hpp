@@ -1,10 +1,13 @@
 #pragma once
 #include "bplustree.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <future>
 #include <iostream>
 #include <iterator>
 #include <random>
+#include <thread>
 #include <vector>
 #include <algorithm>
 #include "defs.hpp"
@@ -143,6 +146,7 @@ test_btree_random_ops()
 		uint64_t *val = (uint64_t *)bplustree_cursor_record(&cursor);
 		assert(*val == value);
 	}
+
 
 
 	// Create list of keys for deletion
@@ -358,10 +362,295 @@ test_btree_stress()
 	std::cout << "\n========== All B+Tree stress tests passed! ==========\n";
 }
 
+// Test composite keys
+inline void test_btree_composite_keys() {
+    std::cout << "\n=== Composite Key Tests ===\n";
+
+    pager_open(TEST_DB);
+    pager_begin_transaction();
+
+    // Composite key: 8 bytes (user_id:4, timestamp:4)
+    struct CompositeKey {
+        uint32_t timestamp;
+        uint32_t user_id;
+
+        bool operator<(const CompositeKey& other) const {
+            if (user_id != other.user_id) return user_id < other.user_id;
+            return timestamp < other.timestamp;
+        }
+    };
+
+    static_assert(sizeof(CompositeKey) == 8);
+
+    // Tree with composite key, no value data (just key existence)
+    BPlusTree tree = bplustree_create(TYPE_8, 0, true);  // 0-byte records
+    BPtCursor cursor = {.tree = &tree};
+
+    // Insert composite keys
+    for (uint32_t user = 1; user <= 10; user++) {
+        for (uint32_t time = 100; time <= 110; time++) {
+            CompositeKey key = {time, user};
+            uint8_t empty_value = 0;
+            assert(bplustree_cursor_insert(&cursor, &key, &empty_value));
+        }
+    }
+
+    // Test range queries on composite key
+ CompositeKey seek_key = {0, 5};
+	// uint64_t z = *reinterpret_cast<uint64_t*>(&seek_key);
+ //    assert(bplustree_cursor_seek(&cursor, &seek_key));
+	// bplustree_print(cursor.tree);
+
+    // Find all entries for user 5
+    assert(bplustree_cursor_seek_ge(&cursor, &seek_key));
+
+	int count = 0;
+    do {
+        CompositeKey* found = (CompositeKey*)bplustree_cursor_key(&cursor);
+        if (!found || found->user_id != 5) break;
+        count++;
+    } while (bplustree_cursor_next(&cursor));
+
+    assert(count == 11);  // Should find 11 timestamps for user 5
+
+    std::cout << "Composite keys OK\n";
+
+    pager_rollback();
+    pager_close();
+    os_file_delete(TEST_DB);
+}
+
+// Test with maximum-size records
+inline void test_btree_large_records() {
+    std::cout << "\n=== Large Record Tests ===\n";
+
+    pager_open(TEST_DB);
+    pager_begin_transaction();
+
+    // Create tree with very large records (forces MIN_ENTRY_COUNT)
+    const uint32_t LARGE_RECORD = PAGE_SIZE / 4;  // Close to page size limit
+    BPlusTree tree = bplustree_create(TYPE_4, LARGE_RECORD, true);
+    BPtCursor cursor = {.tree = &tree};
+
+    // Should have minimum keys per node
+    assert(tree.leaf_max_keys == MIN_ENTRY_COUNT);
+
+    uint8_t large_data[LARGE_RECORD];
+
+    // Insert enough to force multiple levels
+    for (uint32_t i = 0; i < 30; i++) {
+        memset(large_data, i, LARGE_RECORD);
+        assert(bplustree_cursor_insert(&cursor, &i, large_data));
+        bplustree_validate(&tree);
+    }
+
+    // Verify data integrity
+    for (uint32_t i = 0; i < 30; i++) {
+        assert(bplustree_cursor_seek(&cursor, &i));
+        uint8_t* data = bplustree_cursor_record(&cursor);
+        assert(data[0] == i && data[LARGE_RECORD-1] == i);
+    }
+
+    std::cout << "Large records OK\n";
+
+    pager_rollback();
+    pager_close();
+    os_file_delete(TEST_DB);
+}
+
+// Test multiple cursors on same tree
+inline void test_btree_multiple_cursors() {
+    std::cout << "\n=== Multiple Cursor Tests ===\n";
+
+    pager_open(TEST_DB);
+    pager_begin_transaction();
+
+    BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+    BPtCursor cursor1 = {.tree = &tree};
+    BPtCursor cursor2 = {.tree = &tree};
+    BPtCursor cursor3 = {.tree = &tree};
+
+    // Insert data
+    for (uint32_t i = 0; i < 100; i++) {
+        uint32_t value = i * 100;
+        assert(bplustree_cursor_insert(&cursor1, &i, (uint8_t*)&value));
+    }
+
+    // Position cursors at different locations
+    assert(bplustree_cursor_first(&cursor1));
+
+    uint32_t key = 50;
+    assert(bplustree_cursor_seek(&cursor2, &key));
+
+    assert(bplustree_cursor_last(&cursor3));
+
+    // Verify each cursor maintains independent position
+    uint32_t* key1 = (uint32_t*)bplustree_cursor_key(&cursor1);
+    uint32_t* key2 = (uint32_t*)bplustree_cursor_key(&cursor2);
+    uint32_t* key3 = (uint32_t*)bplustree_cursor_key(&cursor3);
+
+    assert(*key1 == 0);
+    assert(*key2 == 50);
+    assert(*key3 == 99);
+
+    // Navigate cursors independently
+    assert(bplustree_cursor_next(&cursor1));
+    assert(bplustree_cursor_previous(&cursor3));
+
+    key1 = (uint32_t*)bplustree_cursor_key(&cursor1);
+    key3 = (uint32_t*)bplustree_cursor_key(&cursor3);
+
+    assert(*key1 == 1);
+    assert(*key3 == 98);
+
+    std::cout << "Multiple cursors OK\n";
+
+    pager_rollback();
+    pager_close();
+    os_file_delete(TEST_DB);
+}
+
+// Test page eviction scenarios (requires small cache)
+inline void test_btree_page_eviction() {
+    std::cout << "\n=== Page Eviction Tests ===\n";
+
+    if (MAX_CACHE_ENTRIES > 10) {
+        std::cout << "Skipping (cache too large)\n";
+        return;
+    }
+
+    pager_open(TEST_DB);
+    pager_begin_transaction();
+
+    BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+    BPtCursor cursor = {.tree = &tree};
+
+    // Insert enough data to create many pages
+    for (uint32_t i = 0; i < 1000; i++) {
+        uint32_t value = i;
+        assert(bplustree_cursor_insert(&cursor, &i, (uint8_t*)&value));
+    }
+
+    // Force cache thrashing by accessing in pattern
+    for (int iter = 0; iter < 3; iter++) {
+        // Forward scan
+        assert(bplustree_cursor_first(&cursor));
+        int count = 0;
+        do {
+            count++;
+        } while (bplustree_cursor_next(&cursor) && count < 100);
+
+        // Backward scan
+        assert(bplustree_cursor_last(&cursor));
+        count = 0;
+        do {
+            count++;
+        } while (bplustree_cursor_previous(&cursor) && count < 100);
+
+        // Random access
+        for (int i = 0; i < 50; i++) {
+            uint32_t key = (i * 37) % 1000;
+            assert(bplustree_cursor_seek(&cursor, &key));
+        }
+    }
+
+    bplustree_validate(&tree);
+    std::cout << "Page eviction OK\n";
+
+    pager_rollback();
+    pager_close();
+    os_file_delete(TEST_DB);
+}
+
+// Test VARCHAR keys with collation-like behavior
+inline void test_btree_varchar_collation() {
+    std::cout << "\n=== VARCHAR Collation Tests ===\n";
+
+    pager_open(TEST_DB);
+    pager_begin_transaction();
+
+    BPlusTree tree = bplustree_create(TYPE_32, sizeof(uint32_t), true);
+    BPtCursor cursor = {.tree = &tree};
+
+    // Test strings that expose comparison edge cases
+    const char* test_strings[] = {
+        "",           // Empty
+        " ",          // Space
+        "  ",         // Multiple spaces
+        "A",          // Upper
+        "a",          // Lower
+        "AA",         // Double upper
+        "Aa",         // Mixed case
+        "aA",         // Mixed case reverse
+        "aa",         // Double lower
+        "a b",        // With space
+        "a  b",       // Double space
+        "a\tb",       // With tab
+        "1",          // Digit
+        "10",         // Multi-digit
+        "2",          // Another digit
+        "abc",        // Lowercase word
+        "ABC",        // Uppercase word
+        "aBc",        // Mixed case word
+        "\x01",       // Control char
+        "\xFF",       // High byte
+    };
+
+    // Insert all strings
+    for (int i = 0; i < sizeof(test_strings)/sizeof(test_strings[0]); i++) {
+        char key[32] = {0};
+        strncpy(key, test_strings[i], 31);
+        uint32_t value = i;
+        bplustree_cursor_insert(&cursor, key, (uint8_t*)&value);
+    }
+
+    // Collect sorted order from tree
+    std::vector<std::string> tree_order;
+    if (bplustree_cursor_first(&cursor)) {
+        do {
+            char* key = (char*)bplustree_cursor_key(&cursor);
+            tree_order.push_back(std::string(key, strnlen(key, 32)));
+        } while (bplustree_cursor_next(&cursor));
+    }
+
+    // Verify ordering is consistent
+    for (size_t i = 1; i < tree_order.size(); i++) {
+        assert(memcmp(tree_order[i-1].c_str(), tree_order[i].c_str(), 32) < 0);
+    }
+
+    std::cout << "VARCHAR collation OK (" << tree_order.size() << " unique keys)\n";
+
+    pager_rollback();
+    pager_close();
+    os_file_delete(TEST_DB);
+}
+
+// Add to test_btree()
+inline void test_btree_extended() {
+    std::cout << "\n========== Extended B+Tree Tests ==========\n";
+
+    test_btree_large_records();
+    test_btree_composite_keys();
+    test_btree_multiple_cursors();
+    test_btree_page_eviction();
+    test_btree_varchar_collation();
+
+
+    std::cout << "\n========== All extended tests passed! ==========\n";
+}
+
+// Add arena stats printing to see memory growth
+inline void print_memory_diagnostics(const char* test_name) {
+    std::cout << "\nMemory after " << test_name << ":\n";
+
+    Arena<global_arena>::print_stats();
+}
+
 // Update the main test_btree function to call stress test
 inline void
 test_btree()
 {
-	// Run comprehensive stress test
 	test_btree_stress();
+	std::this_thread::sleep_for(std::chrono::seconds(2));
+    test_btree_extended();
 }
