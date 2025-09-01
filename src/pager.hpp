@@ -3,7 +3,7 @@
 #include "defs.hpp"
 
 #define PAGE_INVALID 0
-#define MAX_CACHE_ENTRIES	 64
+#define MAX_CACHE_ENTRIES	200
 
 /*
 ** BASE PAGE STRUCTURE

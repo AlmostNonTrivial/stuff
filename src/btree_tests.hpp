@@ -101,6 +101,8 @@ test_btree_sequential_ops()
 	// Tree should be empty
 	assert(!bplustree_cursor_first(&cursor));
 
+
+
 	pager_rollback();
 	pager_close();
 	os_file_delete(TEST_DB);
