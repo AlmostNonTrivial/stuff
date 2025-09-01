@@ -31,12 +31,13 @@ BlobNode* allocate_blob_page() {
     uint32_t page_index = pager_new();
     BlobNode* node = get_blob(page_index);
 
-    pager_mark_dirty(node->index);
-
+    // Initialize the node FIRST, then mark dirty
     node->index = page_index;
     node->next = 0;
     node->size = 0;
     node->flags = 0;
+
+    pager_mark_dirty(page_index);  // FIX: Use page_index directly
 
     return node;
 }
@@ -96,12 +97,6 @@ bool blob_cursor_seek(BlobCursor* cursor, uint32_t blob_id) {
         return false;
     }
 
-
-    if (blob_id == 0) {
-        cursor->blob_id = 0;
-        return false;
-    }
-
     BlobNode* node = get_blob(blob_id);
     if (!node) {
         cursor->blob_id = 0;
@@ -116,21 +111,21 @@ bool blob_cursor_seek(BlobCursor* cursor, uint32_t blob_id) {
 
 
 Buffer blob_cursor_record(BlobCursor* cursor) {
-        auto stream = arena::stream_begin<QueryArena>(BLOB_DATA_SIZE);
+    auto stream = arena::stream_begin<QueryArena>(BLOB_DATA_SIZE);
 
-        uint32_t current = cursor->blob_id;
-        while (current) {
-            BlobNode* node = get_blob(current);
-            if (!node) {
-                arena::stream_abandon(&stream);
-                return {nullptr, 0};
-            }
-            arena::stream_write(&stream, node->data, node->size);
-            current = node->next;
+    uint32_t current = cursor->blob_id;
+    while (current) {
+        BlobNode* node = get_blob(current);
+        if (!node) {
+            arena::stream_abandon(&stream);
+            return {nullptr, 0};
         }
-
-        return {arena::stream_finish(&stream), arena::stream_size<QueryArena>(&stream)};
+        arena::stream_write(&stream, node->data, node->size);
+        current = node->next;
     }
+
+    return {arena::stream_finish(&stream), arena::stream_size<QueryArena>(&stream)};
+}
 
 
 
@@ -140,18 +135,18 @@ Buffer blob_cursor_record(BlobCursor* cursor) {
 
 uint32_t blob_cursor_insert(BlobCursor* cursor, const uint8_t* record, const uint32_t size) {
     if (size == 0) {
-        return false;
+        return 0;  // FIX: Changed from false to 0
     }
 
     // Store the blob and update cursor
     uint32_t blob_id = blob_store((uint8_t*)record, size);
     if (blob_id == 0) {
-        return false;
+        return 0;  // FIX: Changed from false to 0
     }
 
     cursor->blob_id = blob_id;
 
-    return blob_id;;
+    return blob_id;
 }
 
 
