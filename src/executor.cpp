@@ -18,30 +18,34 @@
 #include <cstdio>
 #include <utility>
 
-enum CommandCategory {
-    CMD_DDL,  // Data Definition Language (CREATE, DROP, ALTER)
-    CMD_DML,  // Data Manipulation Language (SELECT, INSERT, UPDATE, DELETE)
-    CMD_TCL,  // Transaction Control Language (BEGIN, COMMIT, ROLLBACK)
+enum CommandCategory
+{
+	CMD_DDL, // Data Definition Language (CREATE, DROP, ALTER)
+	CMD_DML, // Data Manipulation Language (SELECT, INSERT, UPDATE, DELETE)
+	CMD_TCL, // Transaction Control Language (BEGIN, COMMIT, ROLLBACK)
 };
-CommandCategory get_cmd_category(const Statement* stmt) {
-    switch (stmt->type) {
-        case STMT_CREATE_TABLE:
-        case STMT_CREATE_INDEX:
-        case STMT_DROP_TABLE:
-        case STMT_DROP_INDEX:
-            return CMD_DDL; // Data Definition Language
-        case STMT_SELECT:
-        case STMT_INSERT:
-        case STMT_UPDATE:
-        case STMT_DELETE:
-            return CMD_DML; // Data Manipulation Language
-        case STMT_BEGIN:
-        case STMT_COMMIT:
-        case STMT_ROLLBACK:
-            return CMD_TCL; // Transaction Control Language
-        default:
-            return CMD_DDL; // Default to DDL for unrecognized types, adjust as needed
-    }
+CommandCategory
+get_cmd_category(const Statement *stmt)
+{
+	switch (stmt->type)
+	{
+	case STMT_CREATE_TABLE:
+	case STMT_CREATE_INDEX:
+	case STMT_DROP_TABLE:
+	case STMT_DROP_INDEX:
+		return CMD_DDL; // Data Definition Language
+	case STMT_SELECT:
+	case STMT_INSERT:
+	case STMT_UPDATE:
+	case STMT_DELETE:
+		return CMD_DML; // Data Manipulation Language
+	case STMT_BEGIN:
+	case STMT_COMMIT:
+	case STMT_ROLLBACK:
+		return CMD_TCL; // Transaction Control Language
+	default:
+		return CMD_DDL; // Default to DDL for unrecognized types, adjust as needed
+	}
 }
 
 void
@@ -58,69 +62,87 @@ print_result_callback(TypedValue *result, size_t count)
 	std::cout << "\n";
 }
 
-
 MemoryContext ctx = {.alloc = arena::alloc<QueryArena>, .emit_row = print_result_callback};
 static array<array<TypedValue, QueryArena>, QueryArena> last_results;
 
-
-void print_results() {
-    int count = last_results.size;
-   	for (int i = 0; i < count; i++)
+void
+print_results()
+{
+	int count = last_results.size;
+	for (int i = 0; i < count; i++)
 	{
-	    print_result_callback(last_results.data[i].data, last_results.data[i].size);
+		print_result_callback(last_results.data[i].data, last_results.data[i].size);
 	}
-
 }
 
-static void capture_result_callback(TypedValue* result, size_t count) {
-    auto row = array_create<TypedValue, QueryArena>();
-    for (size_t i = 0; i < count; i++) {
-        array_push(row, result[i]);
-    }
-    array_push(&last_results, *row);
+static void
+capture_result_callback(TypedValue *result, size_t count)
+{
+	auto row = array_create<TypedValue, QueryArena>();
+	for (size_t i = 0; i < count; i++)
+	{
+		array_push(row, result[i]);
+	}
+	array_push(&last_results, *row);
 }
 
 // Add a mode flag
 static bool capture_mode = false;
 
-void set_capture_mode(bool capture) {
-    capture_mode = capture;
-    if (capture) {
-        ctx.emit_row = capture_result_callback;
-        array_clear(&last_results);
-    } else {
-        ctx.emit_row = print_result_callback;
-    }
+void
+set_capture_mode(bool capture)
+{
+	capture_mode = capture;
+	if (capture)
+	{
+		ctx.emit_row = capture_result_callback;
+		array_clear(&last_results);
+	}
+	else
+	{
+		ctx.emit_row = print_result_callback;
+	}
 }
 
 // Simple accessors
-size_t get_row_count() {
-    return last_results.size;
+size_t
+get_row_count()
+{
+	return last_results.size;
 }
 
-bool check_int_value(size_t row, size_t col, int expected) {
-    if (row >= last_results.size) return false;
-    if (col >= last_results.data[row].size) return false;
+bool
+check_int_value(size_t row, size_t col, int expected)
+{
+	if (row >= last_results.size)
+		return false;
+	if (col >= last_results.data[row].size)
+		return false;
 
-    TypedValue& val = last_results.data[row].data[col];
-    if (val.type != TYPE_4) return false;
+	TypedValue &val = last_results.data[row].data[col];
+	if (val.type != TYPE_4)
+		return false;
 
-    return *(uint32_t*)val.data == expected;
+	return *(uint32_t *)val.data == expected;
 }
 
-bool check_string_value(size_t row, size_t col, const char* expected) {
-    if (row >= last_results.size) return false;
-    if (col >= last_results.data[row].size) return false;
+bool
+check_string_value(size_t row, size_t col, const char *expected)
+{
+	if (row >= last_results.size)
+		return false;
+	if (col >= last_results.data[row].size)
+		return false;
 
-    TypedValue& val = last_results.data[row].data[col];
-    return strcmp((char*)val.data, expected) == 0;
+	TypedValue &val = last_results.data[row].data[col];
+	return strcmp((char *)val.data, expected) == 0;
 }
 
-void clear_results() {
-    array_clear(&last_results);
+void
+clear_results()
+{
+	array_clear(&last_results);
 }
-
-
 
 // ============================================================================
 // Executor State
@@ -128,8 +150,8 @@ void clear_results() {
 
 static struct ExecutorState
 {
-	bool initialized;
-	bool in_transaction;
+	bool	 initialized;
+	bool	 in_transaction;
 	uint32_t next_master_id;
 } executor_state = {};
 
@@ -144,9 +166,7 @@ insert_master_entry(const char *type, const char *name, const char *tbl_name, ui
 	// Parse and execute (without triggering recursive catalog updates)
 	auto stmts = parse_sql(buffer);
 
-	assert(0!=stmts->size);
-		print_ast(stmts->data[0]);
-
+	assert(0 != stmts->size);
 
 	array<VMInstruction, QueryArena> program = build_from_ast(stmts->data[0]);
 	vm_execute(program.data, program.size, &ctx);
@@ -165,8 +185,6 @@ delete_master_entry(const char *name)
 	array<VMInstruction, QueryArena> program = build_from_ast(stmts->data[0]);
 	vm_execute(program.data, program.size, &ctx);
 }
-
-
 
 static void
 load_schema_from_master()
@@ -197,11 +215,11 @@ load_schema_from_master()
 		if (row.size < 6)
 			continue;
 
-		uint32_t id = *(uint32_t *)row.data[0].data;
+		uint32_t	id = *(uint32_t *)row.data[0].data;
 		const char *type = (const char *)row.data[1].data;
 		const char *name = (const char *)row.data[2].data;
 		const char *tbl_name = (const char *)row.data[3].data;
-		uint32_t rootpage = *(uint32_t *)row.data[4].data;
+		uint32_t	rootpage = *(uint32_t *)row.data[4].data;
 		const char *sql = (const char *)row.data[5].data;
 
 		// Update ID counter
@@ -217,9 +235,8 @@ load_schema_from_master()
 			auto create_stmts = *parse_sql(sql);
 			if (0 != create_stmts.size && create_stmts.data[0]->type == STMT_CREATE_TABLE)
 			{
-				CreateTableStmt *node = (CreateTableStmt*)create_stmts.data[0];
+				CreateTableStmt *node = (CreateTableStmt *)create_stmts.data[0];
 				create_table(node, rootpage);
-
 			}
 		}
 		else if (strcmp(type, "index") == 0)
@@ -229,11 +246,10 @@ load_schema_from_master()
 			if (table)
 			{
 				auto create_stmts = *parse_sql(sql);
-				if (0!=create_stmts.size && create_stmts.data[0]->type == STMT_CREATE_INDEX)
+				if (0 != create_stmts.size && create_stmts.data[0]->type == STMT_CREATE_INDEX)
 				{
-					CreateIndexStmt*node = (CreateIndexStmt*)create_stmts.data[0];
+					CreateIndexStmt *node = (CreateIndexStmt *)create_stmts.data[0];
 					create_index(node, rootpage);
-
 				}
 			}
 		}
@@ -251,9 +267,8 @@ load_schema_from_master()
 // ============================================================================
 
 static VM_RESULT
-execute_create_table(CreateTableStmt*node)
+execute_create_table(CreateTableStmt *node)
 {
-
 
 	Table *table = create_table(node, 0);
 	assert(table != nullptr);
@@ -261,7 +276,7 @@ execute_create_table(CreateTableStmt*node)
 	// Add to master catalog
 
 	char buffer[1024];
-	int offset = snprintf(buffer, 1024, "CREATE TABLE %s (", table->table_name.data);
+	int	 offset = snprintf(buffer, 1024, "CREATE TABLE %s (", table->table_name.data);
 
 	for (size_t i = 0; i < table->columns.size; i++)
 	{
@@ -280,7 +295,7 @@ execute_create_table(CreateTableStmt*node)
 }
 
 static VM_RESULT
-execute_create_index(CreateIndexStmt*node)
+execute_create_index(CreateIndexStmt *node)
 {
 	// Create index structure
 	Index *index = create_index(node, 0);
@@ -293,7 +308,7 @@ execute_create_index(CreateIndexStmt*node)
 }
 
 static VM_RESULT
-execute_drop_index(DropIndexStmt*node)
+execute_drop_index(DropIndexStmt *node)
 {
 
 	Index *index = get_index(node->index_name);
@@ -308,7 +323,7 @@ execute_drop_index(DropIndexStmt*node)
 }
 
 static VM_RESULT
-execute_drop_table(DropTableStmt*node)
+execute_drop_table(DropTableStmt *node)
 {
 
 	if (strcmp(node->table_name, "master_catalog") == 0)
@@ -396,19 +411,19 @@ executor_init(bool existed)
 // ============================================================================
 
 static VM_RESULT
-execute_ddl_command(Statement*stmt)
+execute_ddl_command(Statement *stmt)
 {
-    print_ast(stmt);
+
 	switch (stmt->type)
 	{
 	case STMT_CREATE_TABLE:
-		return execute_create_table((CreateTableStmt*)stmt->create_table_stmt);
+		return execute_create_table((CreateTableStmt *)stmt->create_table_stmt);
 	case STMT_CREATE_INDEX:
-		return execute_create_index((CreateIndexStmt*)stmt->create_index_stmt);
+		return execute_create_index((CreateIndexStmt *)stmt->create_index_stmt);
 	case STMT_DROP_TABLE:
-		return execute_drop_table((DropTableStmt*)stmt->drop_table_stmt);
+		return execute_drop_table((DropTableStmt *)stmt->drop_table_stmt);
 	case STMT_DROP_INDEX:
-		return execute_drop_index((DropIndexStmt*)stmt->drop_index_stmt);
+		return execute_drop_index((DropIndexStmt *)stmt->drop_index_stmt);
 
 	default:
 		printf("Error: Unimplemented DDL command: %s\n", stmt->type);
@@ -429,7 +444,7 @@ execute_dml_command(Statement *stmt)
 }
 
 static VM_RESULT
-execute_tcl_command(Statement*stmt)
+execute_tcl_command(Statement *stmt)
 {
 
 	switch (stmt->type)
@@ -452,26 +467,24 @@ execute_tcl_command(Statement*stmt)
 // Main Execute Function
 // ============================================================================
 
-
-
 void
 execute(const char *sql)
 {
 
-    arena::reset_and_decommit<QueryArena>();
+	arena::reset_and_decommit<QueryArena>();
 	arena::reset_and_decommit<ParserArena>();
 	auto statements = parse_sql(sql);
 
-	assert(0 !=statements->size);
+	assert(0 != statements->size);
 
 	for (size_t i = 0; i < statements->size; i++)
 	{
-		Statement*stmt = statements->data[i];
+		Statement *stmt = statements->data[i];
 
-		if(_debug) {
-		    print_ast(stmt);
+		if (_debug)
+		{
+			print_ast(stmt);
 		}
-
 
 		VM_RESULT result = OK;
 
@@ -541,150 +554,168 @@ execute(const char *sql)
 			break; // Stop processing remaining statements
 		}
 	}
-
-
 }
 
+static CommandCategory
+get_program_category(ProgramType type)
+{
+	switch (type)
+	{
+	case PROG_DDL_CREATE_TABLE:
+	case PROG_DDL_CREATE_INDEX:
+	case PROG_DDL_DROP_TABLE:
+	case PROG_DDL_DROP_INDEX:
+		return CMD_DDL;
 
+	case PROG_DML_SELECT:
+	case PROG_DML_INSERT:
+	case PROG_DML_UPDATE:
+	case PROG_DML_DELETE:
+		return CMD_DML;
 
+	case PROG_TCL_BEGIN:
+	case PROG_TCL_COMMIT:
+	case PROG_TCL_ROLLBACK:
+		return CMD_TCL;
 
-
-static CommandCategory get_program_category(ProgramType type) {
-    switch (type) {
-        case PROG_DDL_CREATE_TABLE:
-        case PROG_DDL_CREATE_INDEX:
-        case PROG_DDL_DROP_TABLE:
-        case PROG_DDL_DROP_INDEX:
-            return CMD_DDL;
-
-        case PROG_DML_SELECT:
-        case PROG_DML_INSERT:
-        case PROG_DML_UPDATE:
-        case PROG_DML_DELETE:
-            return CMD_DML;
-
-        case PROG_TCL_BEGIN:
-        case PROG_TCL_COMMIT:
-        case PROG_TCL_ROLLBACK:
-            return CMD_TCL;
-
-        default:
-            return CMD_DML;
-    }
+	default:
+		return CMD_DML;
+	}
 }
 
-static VM_RESULT execute_compiled_ddl(CompiledProgram* prog) {
-    // DDL needs special handling - use the AST node if provided
-    if (prog->ast_node) {
-        switch (prog->type) {
-            case PROG_DDL_CREATE_TABLE:
-                return execute_create_table((CreateTableStmt*)prog->ast_node);
-            case PROG_DDL_CREATE_INDEX:
-                return execute_create_index((CreateIndexStmt*)prog->ast_node);
-            case PROG_DDL_DROP_TABLE:
-                return execute_drop_table((DropTableStmt*)prog->ast_node);
-            case PROG_DDL_DROP_INDEX:
-                return execute_drop_index((DropIndexStmt*)prog->ast_node);
-            default:
-                break;
-        }
-    }
-    // Fallback to VM execution if no AST node
-    return vm_execute(prog->instructions.data, prog->instructions.size, &ctx);
+static VM_RESULT
+execute_compiled_ddl(CompiledProgram *prog)
+{
+	// DDL needs special handling - use the AST node if provided
+	if (prog->ast_node)
+	{
+		switch (prog->type)
+		{
+		case PROG_DDL_CREATE_TABLE:
+			return execute_create_table((CreateTableStmt *)prog->ast_node);
+		case PROG_DDL_CREATE_INDEX:
+			return execute_create_index((CreateIndexStmt *)prog->ast_node);
+		case PROG_DDL_DROP_TABLE:
+			return execute_drop_table((DropTableStmt *)prog->ast_node);
+		case PROG_DDL_DROP_INDEX:
+			return execute_drop_index((DropIndexStmt *)prog->ast_node);
+		default:
+			break;
+		}
+	}
+	// Fallback to VM execution if no AST node
+	return vm_execute(prog->instructions.data, prog->instructions.size, &ctx);
 }
 
-static VM_RESULT execute_compiled_dml(CompiledProgram* prog) {
-    return vm_execute(prog->instructions.data, prog->instructions.size, &ctx);
+static VM_RESULT
+execute_compiled_dml(CompiledProgram *prog)
+{
+	return vm_execute(prog->instructions.data, prog->instructions.size, &ctx);
 }
 
-static VM_RESULT execute_compiled_tcl(CompiledProgram* prog) {
-    switch (prog->type) {
-        case PROG_TCL_BEGIN:
-            return execute_begin();
-        case PROG_TCL_COMMIT:
-            return execute_commit();
-        case PROG_TCL_ROLLBACK:
-            return execute_rollback();
-        default:
-            return ERR;
-    }
+static VM_RESULT
+execute_compiled_tcl(CompiledProgram *prog)
+{
+	switch (prog->type)
+	{
+	case PROG_TCL_BEGIN:
+		return execute_begin();
+	case PROG_TCL_COMMIT:
+		return execute_commit();
+	case PROG_TCL_ROLLBACK:
+		return execute_rollback();
+	default:
+		return ERR;
+	}
 }
 
-void execute_programs(CompiledProgram* programs, size_t program_count) {
+void
+execute_programs(CompiledProgram *programs, size_t program_count)
+{
 
-    arena::reset_and_decommit<QueryArena>();
+	arena::reset_and_decommit<QueryArena>();
 	arena::reset_and_decommit<ParserArena>();
-    if (!executor_state.initialized) {
-        printf("Error: Executor not initialized\n");
-        return;
-    }
+	if (!executor_state.initialized)
+	{
+		printf("Error: Executor not initialized\n");
+		return;
+	}
 
-    for (size_t i = 0; i < program_count; i++) {
-        CompiledProgram* prog = &programs[i];
+	for (size_t i = 0; i < program_count; i++)
+	{
+		CompiledProgram *prog = &programs[i];
 
-        if (_debug) {
-            printf("Executing pre-compiled program %zu (type=%d)\n", i, prog->type);
-        }
+		if (_debug)
+		{
+			printf("Executing pre-compiled program %zu (type=%d)\n", i, prog->type);
+		}
 
-        VM_RESULT result = OK;
-        CommandCategory category = get_program_category(prog->type);
+		VM_RESULT		result = OK;
+		CommandCategory category = get_program_category(prog->type);
 
-        // Handle auto-transaction for DML commands (except SELECT)
-        bool auto_transaction = false;
-        if (category == CMD_DML &&
-            prog->type != PROG_DML_SELECT &&
-            !executor_state.in_transaction) {
-            execute_begin();
-            auto_transaction = true;
-        }
+		// Handle auto-transaction for DML commands (except SELECT)
+		bool auto_transaction = false;
+		if (category == CMD_DML && prog->type != PROG_DML_SELECT && !executor_state.in_transaction)
+		{
+			execute_begin();
+			auto_transaction = true;
+		}
 
-        // DDL commands also need a transaction
-        if (category == CMD_DDL && !executor_state.in_transaction) {
-            execute_begin();
-            auto_transaction = true;
-        }
+		// DDL commands also need a transaction
+		if (category == CMD_DDL && !executor_state.in_transaction)
+		{
+			execute_begin();
+			auto_transaction = true;
+		}
 
-        // Dispatch based on category
-        switch (category) {
-            case CMD_DDL:
-                result = execute_compiled_ddl(prog);
-                break;
+		// Dispatch based on category
+		switch (category)
+		{
+		case CMD_DDL:
+			result = execute_compiled_ddl(prog);
+			break;
 
-            case CMD_DML:
-                result = execute_compiled_dml(prog);
-                break;
+		case CMD_DML:
+			result = execute_compiled_dml(prog);
+			break;
 
-            case CMD_TCL:
-                result = execute_compiled_tcl(prog);
-                break;
+		case CMD_TCL:
+			result = execute_compiled_tcl(prog);
+			break;
 
-            default:
-                printf("Error: Unknown command category\n");
-                result = ERR;
-        }
+		default:
+			printf("Error: Unknown command category\n");
+			result = ERR;
+		}
 
-        // Handle auto-transaction completion
-        if (auto_transaction) {
-            if (result == OK) {
-                execute_commit();
-            } else {
-                execute_rollback();
-            }
-        }
+		// Handle auto-transaction completion
+		if (auto_transaction)
+		{
+			if (result == OK)
+			{
+				execute_commit();
+			}
+			else
+			{
+				execute_rollback();
+			}
+		}
 
-        // Handle errors
-        if (result != OK) {
-            if (executor_state.in_transaction && !auto_transaction) {
-                printf("Error occurred in transaction, rolling back\n");
-                execute_rollback();
-            }
-            break; // Stop processing remaining programs
-        }
-    }
+		// Handle errors
+		if (result != OK)
+		{
+			if (executor_state.in_transaction && !auto_transaction)
+			{
+				printf("Error occurred in transaction, rolling back\n");
+				execute_rollback();
+			}
+			break; // Stop processing remaining programs
+		}
+	}
 
-    // Clean up arenas just like execute() does
-    arena::reset_and_decommit<QueryArena>();
-    arena::reset_and_decommit<ParserArena>();
+	// Clean up arenas just like execute() does
+	arena::reset_and_decommit<QueryArena>();
+	arena::reset_and_decommit<ParserArena>();
 }
 
 void

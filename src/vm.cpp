@@ -75,17 +75,16 @@ struct VmCursor
 	}
 
 	void
-	open_ephemeral(const RecordLayout &ephemeral_layout, MemoryContext*ctx)
+	open_ephemeral(const RecordLayout &ephemeral_layout, MemoryContext *ctx)
 	{
 		type = EPHEMERAL;
 		layout = ephemeral_layout;
 		DataType key_type = layout.layout.data[0];
-		storage.mem_tree = memtree_create( key_type, layout.record_size);
+		storage.mem_tree = memtree_create(key_type, layout.record_size);
 		cursor.mem.tree = &storage.mem_tree;
 		cursor.mem.state = MemCursor::INVALID;
 		cursor.mem.ctx = ctx;
 	}
-
 
 	void
 	open_blob(MemoryContext *ctx)
@@ -143,22 +142,6 @@ struct VmCursor
 			return bplustree_cursor_seek_cmp(&cursor.bptree, key, op);
 		case BLOB:
 			return blob_cursor_seek(&cursor.blob, key);
-		default:
-			return false;
-		}
-	}
-
-	bool
-	seek_exact(uint8_t *key, const uint8_t *record)
-	{
-		switch (type)
-		{
-		case EPHEMERAL:
-			return memcursor_seek_exact(&cursor.mem, key, record);
-		case BPLUS_INDEX:
-		case BPLUS_TABLE:
-			return bplustree_cursor_seek_exact(&cursor.bptree, key, record);
-		case BLOB:
 		default:
 			return false;
 		}
@@ -247,9 +230,8 @@ struct VmCursor
 		case EPHEMERAL:
 			return memcursor_insert(&cursor.mem, key, record);
 		case BPLUS_TABLE:
-				case BPLUS_INDEX:
+		case BPLUS_INDEX:
 			return bplustree_cursor_insert(&cursor.bptree, key, record);
-
 
 		case BLOB:
 			return blob_cursor_insert(&cursor.blob, key, record, size);
@@ -501,7 +483,7 @@ step()
 			test_result = (cmp_result > 0);
 			break;
 		case GE:
-			test_result = (cmp_result > 0);
+			test_result = (cmp_result >= 0);
 			break;
 		}
 		*(uint32_t *)result.data = test_result ? 1 : 0;
@@ -704,7 +686,7 @@ step()
 			printf("=> Closed cursor %d", cursor_id);
 		}
 		// if(VM.cursors[cursor_id] == 0)
-		// Note: cursor destructor handles cleanup
+
 		VM.pc++;
 		return OK;
 	}
@@ -765,16 +747,9 @@ step()
 		VMValue	 *key = &VM.registers[key_reg];
 		bool	  found;
 
-		/* Is there a better way to do this?? */
-		if (op == EXACT)
-		{
-			VMValue *record = &VM.registers[key_reg + 1];
-			found = cursor->seek_exact(key->data, record->data);
-		}
-		else
-		{
-			found = cursor->seek(op, key->data);
-		}
+
+
+		found = cursor->seek(op, key->data);
 
 		if (_debug)
 		{
