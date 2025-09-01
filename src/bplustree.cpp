@@ -56,8 +56,6 @@ struct BTreeNode
 static_assert(sizeof(BTreeNode) == PAGE_SIZE, "BTreeNode must be "
 											  "exactly PAGE_SIZE");
 
-
-
 // Internal function
 // declarations
 static void
@@ -191,14 +189,7 @@ bplustree_create(DataType key, uint32_t record_size, bool init = false)
 
 	constexpr uint32_t USABLE_SPACE = PAGE_SIZE - NODE_HEADER_SIZE;
 
-	// if ((record_size * MIN_ENTRY_COUNT) > USABLE_SPACE)
-	// {
-	//
-	// 	std::cout << "btree record to "
-	// 				 "big\n";
-	// 	exit(1);
-	// 	return tree;
-	// }
+	assert(!((record_size * MIN_ENTRY_COUNT) > USABLE_SPACE));
 
 	uint32_t leaf_entry_size = tree.node_key_size + record_size;
 	uint32_t leaf_max_entries = USABLE_SPACE / leaf_entry_size;
@@ -376,11 +367,6 @@ destroy_node(BTreeNode *node)
 	pager_delete(node->index);
 }
 
-static bool
-is_match(BPlusTree &tree, BTreeNode *node, uint32_t index, const uint8_t *key)
-{
-	return cmp(tree.node_key_size, get_key_at(tree, node, index), key) == 0;
-}
 static BTreeNode *
 split(BPlusTree &tree, BTreeNode *node)
 {
@@ -609,31 +595,6 @@ update_parent_keys(BPlusTree &tree, BTreeNode *node, const uint8_t *deleted_key)
 }
 
 static void
-do_delete_bplus(BPlusTree &tree, BTreeNode *node, const uint8_t *key, uint32_t i)
-{
-	if (node->is_leaf)
-	{
-		mark_dirty(node);
-
-		uint8_t *record_data = get_record_data(tree, node);
-		uint32_t shift_count = node->num_keys - i - 1;
-
-		memcpy(get_key_at(tree, node, i), get_key_at(tree, node, i + 1), tree.node_key_size * shift_count);
-		memcpy(record_data + i * tree.record_size, record_data + (i + 1) * tree.record_size,
-			   tree.record_size * shift_count);
-
-		node->num_keys--;
-
-		if (i == 0 && node->parent != 0)
-		{
-			update_parent_keys(tree, node, key);
-		}
-
-		repair_after_delete(tree, node);
-	}
-}
-
-static void
 do_delete(BPlusTree &tree, BTreeNode *node, const uint8_t *key, uint32_t index)
 {
 	if (node->parent == 0 && node->num_keys <= 1 && node->is_leaf)
@@ -643,7 +604,25 @@ do_delete(BPlusTree &tree, BTreeNode *node, const uint8_t *key, uint32_t index)
 		return;
 	}
 
-	do_delete_bplus(tree, node, key, index);
+	assert(node->is_leaf);
+
+	mark_dirty(node);
+
+	uint8_t *record_data = get_record_data(tree, node);
+	uint32_t shift_count = node->num_keys - index - 1;
+
+	memcpy(get_key_at(tree, node, index), get_key_at(tree, node, index + 1), tree.node_key_size * shift_count);
+	memcpy(record_data + index * tree.record_size, record_data + (index + 1) * tree.record_size,
+		   tree.record_size * shift_count);
+
+	node->num_keys--;
+
+	if (index == 0 && node->parent != 0)
+	{
+		update_parent_keys(tree, node, key);
+	}
+
+	repair_after_delete(tree, node);
 }
 
 static BTreeNode *
@@ -716,11 +695,7 @@ merge_right(BPlusTree &tree, BTreeNode *node)
 	}
 
 	BTreeNode *right_sibling = get_child(tree, parent, node_index + 1);
-	// if (!right_sibling)
-	// {
-	//
-	// 	return node;
-	// }
+	assert(right_sibling);
 
 	mark_dirty(node);
 	mark_dirty(parent);
@@ -1339,21 +1314,6 @@ bplustree_cursor_has_previous(BPtCursor *cursor)
 		return true;
 	}
 	return false;
-}
-
-// wrap pager
-
-bool
-bplustree_cursor_seek_exact(BPtCursor *cursor, const void *key, const uint8_t *record)
-{
-
-	// First seek to key
-	if (!bplustree_cursor_seek(cursor, key))
-	{
-		return false;
-	}
-
-	return true;
 }
 
 // Add this to bplustree.cpp
