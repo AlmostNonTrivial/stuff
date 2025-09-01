@@ -1,3 +1,6 @@
+
+
+
 // memtree.cpp
 #include "memtree.hpp"
 
@@ -504,16 +507,25 @@ static MemTreeNode* tree_predecessor(MemTreeNode* node) {
 // ============================================================================
 // Cursor Operations
 // ============================================================================
+/*NOCOVER_START*/
+// Replace the existing memcursor_seek function with this:
 
 bool memcursor_seek(MemCursor* cursor, const void* key) {
     MemTreeNode* current = cursor->tree->root;
+    MemTreeNode* found = nullptr;
 
+    // Standard BST search, but keep searching left when duplicates are allowed
     while (current) {
         int cmp_result = memtree_compare(cursor->tree, (const uint8_t*)key, node_key(current));
         if (cmp_result == 0) {
-            cursor->current = current;
-            cursor->state = MemCursor::VALID;
-            return true;
+            found = current;
+            // If duplicates allowed, keep searching left for the first occurrence
+            if (cursor->tree->allow_duplicates) {
+                current = current->left;
+            } else {
+                // No duplicates, this is the only instance
+                break;
+            }
         } else if (cmp_result < 0) {
             current = current->left;
         } else {
@@ -521,8 +533,37 @@ bool memcursor_seek(MemCursor* cursor, const void* key) {
         }
     }
 
+    if (found) {
+        cursor->current = found;
+        cursor->state = MemCursor::VALID;
+        return true;
+    }
+
     cursor->state = MemCursor::INVALID;
     return false;
+}
+
+// Also update memcursor_count_duplicates to be more efficient:
+
+uint32_t memcursor_count_duplicates(MemCursor* cursor, const void* key) {
+    if (!cursor->tree->allow_duplicates) {
+        return memcursor_seek(cursor, key) ? 1 : 0;
+    }
+
+    uint32_t count = 0;
+
+    // memcursor_seek now positions at the first duplicate
+    if (memcursor_seek(cursor, key)) {
+        do {
+            uint8_t* curr_key = memcursor_key(cursor);
+            if (memtree_compare(cursor->tree, (const uint8_t*)key, curr_key) != 0) {
+                break;
+            }
+            count++;
+        } while (memcursor_next(cursor));
+    }
+
+    return count;
 }
 
 bool memcursor_seek_exact(MemCursor* cursor, const void* key, const void* record) {
@@ -816,22 +857,326 @@ bool memcursor_has_duplicates(MemCursor* cursor) {
     return has_dup;
 }
 
-uint32_t memcursor_count_duplicates(MemCursor* cursor, const void* key) {
-    if (!cursor->tree->allow_duplicates) {
-        return memcursor_seek(cursor, key) ? 1 : 0;
+// Add these functions to memtree.cpp
+
+#include <queue>
+#include <unordered_set>
+#include <iomanip>
+#include <cassert>
+
+// ============================================================================
+// Tree Validation
+// ============================================================================
+
+// Forward declaration for recursive validation
+static int validate_node_recursive(const MemTree* tree, MemTreeNode* node,
+                                   MemTreeNode* expected_parent,
+                                   const uint8_t* min_bound,
+                                   const uint8_t* max_bound,
+                                   std::unordered_set<MemTreeNode*>& visited);
+
+void memtree_validate(const MemTree* tree) {
+    assert(tree != nullptr);
+
+    // Empty tree is valid
+    if (!tree->root) {
+        assert(tree->node_count == 0);
+        return;
     }
 
-    uint32_t count = 0;
+    // Root must be black
+    assert(tree->root->color == BLACK);
+    assert(tree->root->parent == nullptr);
 
-    if (memcursor_seek(cursor, key)) {
-        do {
-            uint8_t* curr_key = memcursor_key(cursor);
-            if (memtree_compare(cursor->tree, (const uint8_t*)key, curr_key) != 0) {
-                break;
-            }
-            count++;
-        } while (memcursor_next(cursor));
-    }
+    // Track visited nodes to detect cycles
+    std::unordered_set<MemTreeNode*> visited;
 
-    return count;
+    // Validate recursively and get black height
+    int black_height = validate_node_recursive(tree, tree->root, nullptr,
+                                               nullptr, nullptr, visited);
+
+    // Verify node count matches
+    assert(visited.size() == tree->node_count);
 }
+
+static int validate_node_recursive(const MemTree* tree, MemTreeNode* node,
+                                   MemTreeNode* expected_parent,
+                                   const uint8_t* min_bound,
+                                   const uint8_t* max_bound,
+                                   std::unordered_set<MemTreeNode*>& visited) {
+    if (!node) {
+        return 0; // NIL nodes are black by definition
+    }
+
+    // Check for cycles
+    assert(visited.find(node) == visited.end());
+    visited.insert(node);
+
+    // Verify parent pointer
+    assert(node->parent == expected_parent);
+
+    // Get node's key
+    uint8_t* key = node_key(node);
+
+    // Check bounds
+    if (min_bound) {
+        assert(memtree_compare(tree, key, min_bound) > 0);
+    }
+    if (max_bound) {
+        assert(memtree_compare(tree, key, max_bound) < 0);
+    }
+
+    // Red-Black property: Red nodes have black children
+    if (node->color == RED) {
+        assert(!node->left || node->left->color == BLACK);
+        assert(!node->right || node->right->color == BLACK);
+        // Red nodes must have a parent (root is black)
+        assert(node->parent != nullptr);
+    }
+
+    // Recursively validate children
+    int left_black_height = validate_node_recursive(tree, node->left, node,
+                                                    min_bound, key, visited);
+    int right_black_height = validate_node_recursive(tree, node->right, node,
+                                                     key, max_bound, visited);
+
+    // Red-Black property: All paths have same black height
+    assert(left_black_height == right_black_height);
+
+    // Return black height including this node
+    return left_black_height + (node->color == BLACK ? 1 : 0);
+}
+
+// ============================================================================
+// Tree Printing
+// ============================================================================
+
+// Forward declaration
+static void print_inorder(const MemTree* tree, MemTreeNode* node);
+
+static void print_key_value(const MemTree* tree, uint8_t* key, uint8_t* record) {
+    // Print key
+    switch (tree->key_type) {
+        case TYPE_4: {
+            uint32_t val;
+            memcpy(&val, key, 4);
+            printf("%u", val);
+            break;
+        }
+        case TYPE_8: {
+            uint64_t val;
+            memcpy(&val, key, 8);
+            printf("%lu", val);
+            break;
+        }
+        case TYPE_32:
+        case TYPE_256: {
+            printf("\"");
+            for (uint32_t i = 0; i < tree->key_type && key[i]; i++) {
+                if (key[i] >= 32 && key[i] < 127) {
+                    printf("%c", key[i]);
+                } else {
+                    printf("\\x%02x", key[i]);
+                }
+                if (i > 10) {
+                    printf("...");
+                    break;
+                }
+            }
+            printf("\"");
+            break;
+        }
+        default:
+            printf("?");
+    }
+
+    // Print record if exists
+    if (tree->record_size > 0 && record) {
+        printf(":");
+        if (tree->record_size == sizeof(uint32_t)) {
+            uint32_t val;
+            memcpy(&val, record, sizeof(uint32_t));
+            printf("%u", val);
+        } else if (tree->record_size == sizeof(uint64_t)) {
+            uint64_t val;
+            memcpy(&val, record, sizeof(uint64_t));
+            printf("%lu", val);
+        } else {
+            printf("<%u bytes>", tree->record_size);
+        }
+    }
+}
+
+void memtree_print(const MemTree* tree) {
+    if (!tree || !tree->root) {
+        printf("MemTree: EMPTY\n");
+        return;
+    }
+
+    printf("====================================\n");
+    printf("MemTree Structure (Red-Black Tree)\n");
+    printf("====================================\n");
+    printf("Key type: %s, Record size: %u bytes\n",
+           type_to_string(tree->key_type), tree->record_size);
+    printf("Allow duplicates: %s\n", tree->allow_duplicates ? "YES" : "NO");
+    printf("Node count: %u\n", tree->node_count);
+    printf("------------------------------------\n\n");
+
+    // BFS traversal with level tracking
+    struct NodeLevel {
+        MemTreeNode* node;
+        int level;
+        bool is_left;  // Is this a left child of its parent?
+    };
+
+    std::queue<NodeLevel> queue;
+    queue.push({tree->root, 0, false});
+
+    int current_level = -1;
+
+    while (!queue.empty()) {
+        NodeLevel nl = queue.front();
+        queue.pop();
+
+        if (nl.level != current_level) {
+            if (current_level >= 0) printf("\n");
+            printf("LEVEL %d:\n", nl.level);
+            current_level = nl.level;
+        }
+
+        // Print node info
+        printf("  [");
+        print_key_value(tree, node_key(nl.node),
+                       node_record(nl.node, tree->key_type));
+        printf("]");
+
+        // Print color
+        printf(" %s", nl.node->color == RED ? "RED" : "BLK");
+
+        // Print parent info
+        if (nl.node->parent) {
+            printf(" (parent: ");
+            print_key_value(tree, node_key(nl.node->parent), nullptr);
+            printf(", %s child)", nl.is_left ? "L" : "R");
+        } else {
+            printf(" (ROOT)");
+        }
+
+        printf("\n");
+
+        // Add children to queue
+        if (nl.node->left) {
+            queue.push({nl.node->left, nl.level + 1, true});
+        }
+        if (nl.node->right) {
+            queue.push({nl.node->right, nl.level + 1, false});
+        }
+    }
+
+    printf("\n====================================\n");
+
+    // Print in-order traversal for verification
+    printf("In-order traversal: ");
+    print_inorder(tree, tree->root);
+    printf("\n====================================\n\n");
+}
+
+// Helper for in-order traversal
+static void print_inorder(const MemTree* tree, MemTreeNode* node) {
+    if (!node) return;
+
+    print_inorder(tree, node->left);
+
+    print_key_value(tree, node_key(node),
+                   node_record(node, tree->key_type));
+    printf(" ");
+
+    print_inorder(tree, node->right);
+}
+
+// Compact tree printer
+void memtree_print_compact(const MemTree* tree) {
+    if (!tree || !tree->root) {
+        printf("MemTree: EMPTY\n");
+        return;
+    }
+
+    printf("MemTree (key:color:parent): ");
+
+    std::queue<MemTreeNode*> queue;
+    std::queue<int> levels;
+
+    queue.push(tree->root);
+    levels.push(0);
+
+    int current_level = 0;
+
+    while (!queue.empty()) {
+        MemTreeNode* node = queue.front();
+        int level = levels.front();
+        queue.pop();
+        levels.pop();
+
+        if (level != current_level) {
+            printf("\n");
+            current_level = level;
+        }
+
+        printf("[");
+        print_key_value(tree, node_key(node), nullptr);
+        printf(":%c", node->color == RED ? 'R' : 'B');
+        if (node->parent) {
+            printf(":");
+            print_key_value(tree, node_key(node->parent), nullptr);
+        }
+        printf("] ");
+
+        if (node->left) {
+            queue.push(node->left);
+            levels.push(level + 1);
+        }
+        if (node->right) {
+            queue.push(node->right);
+            levels.push(level + 1);
+        }
+    }
+    printf("\n");
+}
+
+// Visual tree printer (shows tree structure)
+static void print_tree_visual_helper(const MemTree* tree, MemTreeNode* node,
+                                     const std::string& prefix, bool is_tail) {
+    if (!node) return;
+
+    printf("%s", prefix.c_str());
+    printf("%s", is_tail ? "└── " : "├── ");
+
+    // Print node
+    print_key_value(tree, node_key(node), nullptr);
+    printf(" %s\n", node->color == RED ? "(R)" : "(B)");
+
+    // Print children
+    std::string child_prefix = prefix + (is_tail ? "    " : "│   ");
+
+    if (node->left || node->right) {
+        if (node->right) {
+            print_tree_visual_helper(tree, node->right, child_prefix, false);
+        }
+        if (node->left) {
+            print_tree_visual_helper(tree, node->left, child_prefix, true);
+        }
+    }
+}
+
+void memtree_print_visual(const MemTree* tree) {
+    if (!tree || !tree->root) {
+        printf("MemTree: EMPTY\n");
+        return;
+    }
+
+    printf("MemTree Visual:\n");
+    print_tree_visual_helper(tree, tree->root, "", true);
+}
+
+
+/*NOCOVER_END*/

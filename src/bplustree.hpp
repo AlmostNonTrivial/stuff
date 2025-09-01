@@ -34,11 +34,10 @@ enum BPtCursorState : uint32_t
 {
 	BPT_CURSOR_INVALID = 0,
 	BPT_CURSOR_VALID = 1,
-	BPT_CURSOR_REQUIRESEEK = 2,
-	BPT_CURSOR_FAULT = 3
+	BPT_CURSOR_FAULT = 2
 };
 
-#define MAX_BTREE_DEPTH 16
+
 
 // Path tracking for B+Tree cursor (simplified for leaf-level operations)
 
@@ -47,8 +46,8 @@ struct BPtCursor
 {
 	BPlusTree	  *tree;
 	MemoryContext *ctx;
-	uint32_t leaf_page;
-	uint32_t leaf_index;
+	uint32_t	   leaf_page;
+	uint32_t	   leaf_index;
 	BPtCursorState state;
 };
 
@@ -63,10 +62,8 @@ bool
 bplustree_cursor_last(BPtCursor *cursor);
 bool
 bplustree_cursor_first(BPtCursor *cursor);
-bool
-bplustree_cursor_is_end(BPtCursor *cursor);
-bool
-bplustree_cursor_is_start(BPtCursor *cursor);
+
+
 
 // B+Tree cursor data modification functions
 bool
@@ -82,9 +79,6 @@ bplustree_cursor_key(BPtCursor *cursor);
 uint8_t *
 bplustree_cursor_record(BPtCursor *cursor);
 
-
-
-
 // B+Tree cursor state query functions
 bool
 bplustree_cursor_is_valid(BPtCursor *cursor);
@@ -96,8 +90,6 @@ bplustree_cursor_has_previous(BPtCursor *cursor);
 // B+Tree cursor advanced operations
 bool
 bplustree_cursor_seek_cmp(BPtCursor *cursor, const void *key, CompareOp op);
-bool
-bplustree_cursor_seek_exact(BPtCursor *cursor, const void *key, const uint8_t *record);
 
 void
 bplustree_validate(BPlusTree *tree);

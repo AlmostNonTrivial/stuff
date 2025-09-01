@@ -3,7 +3,8 @@
 #include "defs.hpp"
 
 #define PAGE_INVALID 0
-#define MAX_CACHE_ENTRIES	200
+
+#define MAX_CACHE_ENTRIES 200
 
 /*
 ** BASE PAGE STRUCTURE
@@ -17,7 +18,7 @@
 */
 struct base_page
 {
-	uint32_t index;           /* Page's position in the file (self-identifying) */
+	uint32_t index; /* Page's position in the file (self-identifying) */
 	char	 data[PAGE_SIZE - sizeof(uint32_t)];
 };
 

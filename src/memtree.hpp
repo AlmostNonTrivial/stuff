@@ -102,3 +102,9 @@ bool memtree_is_empty(const MemTree* tree);
 bool memcursor_seek_cmp(MemCursor* cursor, const uint8_t* key, CompareOp op);
 bool memcursor_has_duplicates(MemCursor* cursor);
 uint32_t memcursor_count_duplicates(MemCursor* cursor, const void* key);
+
+
+
+
+void memtree_validate(const MemTree* tree);
+void memtree_print(const MemTree* tree);
