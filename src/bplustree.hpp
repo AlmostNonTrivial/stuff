@@ -86,15 +86,8 @@ bplustree_cursor_key(BPtCursor *cursor);
 uint8_t *
 bplustree_cursor_record(BPtCursor *cursor);
 
-// B+Tree cursor comparison seek functions
-bool
-bplustree_cursor_seek_ge(BPtCursor *cursor, const void *key);
-bool
-bplustree_cursor_seek_gt(BPtCursor *cursor, const void *key);
-bool
-bplustree_cursor_seek_le(BPtCursor *cursor, const void *key);
-bool
-bplustree_cursor_seek_lt(BPtCursor *cursor, const void *key);
+
+
 
 // B+Tree cursor state query functions
 bool

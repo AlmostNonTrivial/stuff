@@ -409,7 +409,7 @@ test_btree_composite_keys()
 	// bplustree_print(cursor.tree);
 
 	// Find all entries for user 5
-	assert(bplustree_cursor_seek_ge(&cursor, &seek_key));
+	assert(bplustree_cursor_seek_cmp(&cursor, &seek_key, GE));
 
 	int count = 0;
 	do
