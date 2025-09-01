@@ -7,7 +7,6 @@ Inserts COVER() calls after opening braces in functions, if/else blocks, and swi
 import sys
 import re
 import argparse
-import shutil
 import os
 
 class SimpleCoverageInstrumenter:
@@ -34,14 +33,34 @@ class SimpleCoverageInstrumenter:
         instrumented_lines = []
         i = 0
         skip_until = -1  # Skip lines until this index when we've already processed them
+        in_nocover_section = False  # Track if we're in a NOCOVER section
 
         while i < len(self.lines):
+            line = self.lines[i]
+
+            # Check for NOCOVER markers
+            if '/*NOCOVER_START*/' in line:
+                in_nocover_section = True
+                instrumented_lines.append(line)
+                i += 1
+                continue
+
+            if '/*NOCOVER_END*/' in line:
+                in_nocover_section = False
+                instrumented_lines.append(line)
+                i += 1
+                continue
+
+            # Skip instrumentation if in NOCOVER section
+            if in_nocover_section:
+                instrumented_lines.append(line)
+                i += 1
+                continue
+
             if i < skip_until:
                 instrumented_lines.append(self.lines[i])
                 i += 1
                 continue
-
-            line = self.lines[i]
 
             # Skip coverage header sections
             if '===== COVERAGE TRACKING CODE =====' in line:
@@ -335,12 +354,6 @@ def main():
         else:
             output_file = args.input_file  # Overwrite input file
 
-        # Create backup before overwriting
-        if output_file == args.input_file:
-            backup_file = args.input_file + '.bak'
-            shutil.copy2(args.input_file, backup_file)
-            print(f"Backup created: {backup_file}")
-
         with open(output_file, 'w') as f:
             f.write(output)
 
@@ -364,12 +377,6 @@ def main():
             output_file = args.output
         else:
             output_file = args.input_file  # Overwrite input file
-
-        # Create backup before overwriting
-        if output_file == args.input_file:
-            backup_file = args.input_file + '.bak'
-            shutil.copy2(args.input_file, backup_file)
-            print(f"Backup created: {backup_file}")
 
         with open(output_file, 'w') as f:
             f.write(output)

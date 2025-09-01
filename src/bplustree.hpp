@@ -47,12 +47,8 @@ struct BPtCursor
 {
 	BPlusTree	  *tree;
 	MemoryContext *ctx;
-	struct
-	{
-		uint32_t current_page;	// Current leaf page
-		uint32_t current_index; // Current position in leaf
-	} path,
-		saved; // For save/restore operations
+	uint32_t leaf_page;
+	uint32_t leaf_index;
 	BPtCursorState state;
 };
 
