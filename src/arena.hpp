@@ -311,6 +311,7 @@ template <typename Tag> struct Arena {
     return aligned;
   }
 
+  // Add to arena.hpp after the Arena struct definition
   // Reset arena (keep memory committed)
   static void reset() {
     current = base;
@@ -413,6 +414,107 @@ template <typename Tag> size_t committed() { return Arena<Tag>::committed(); }
 template <typename Tag> size_t reclaimed() { return Arena<Tag>::reclaimed(); }
 template <typename Tag> size_t reused() { return Arena<Tag>::reused(); }
 template <typename Tag> void print_stats() { Arena<Tag>::print_stats(); }
+
+// Streaming allocation support
+template <typename Tag>
+struct StreamAlloc {
+    uint8_t* start;      // Where this allocation began
+    uint8_t* write_pos;  // Current write position
+    size_t reserved;     // How much we've reserved so far
+};
+
+template <typename Tag>
+StreamAlloc<Tag> stream_begin(size_t initial_reserve = 1024) {
+    if (!Arena<Tag>::base) {
+        Arena<Tag>::init();
+    }
+
+    // Ensure we have space for initial reservation
+    uint8_t* start = Arena<Tag>::current;
+    size_t available = Arena<Tag>::committed_capacity - (Arena<Tag>::current - Arena<Tag>::base);
+
+    if (initial_reserve > available) {
+        // Need to commit more memory
+        size_t needed = (Arena<Tag>::current - Arena<Tag>::base) + initial_reserve;
+        if (needed > Arena<Tag>::reserved_capacity) {
+            fprintf(stderr, "Stream allocation too large\n");
+            exit(1);
+        }
+
+        size_t new_committed = VirtualMemory::round_to_pages(needed);
+        if (!VirtualMemory::commit(Arena<Tag>::base + Arena<Tag>::committed_capacity,
+                                  new_committed - Arena<Tag>::committed_capacity)) {
+            fprintf(stderr, "Failed to commit memory for stream\n");
+            exit(1);
+        }
+        Arena<Tag>::committed_capacity = new_committed;
+    }
+
+    // Reserve initial space by moving current
+    Arena<Tag>::current = start + initial_reserve;
+
+    return StreamAlloc<Tag>{start, start, initial_reserve};
+}
+
+template <typename Tag>
+void stream_write(StreamAlloc<Tag>* stream, const void* data, size_t size) {
+    size_t used = stream->write_pos - stream->start;
+    size_t remaining = stream->reserved - used;
+
+    if (size > remaining) {
+        // Need to grow the reservation
+        size_t new_reserved = stream->reserved * 2;
+        while (new_reserved - used < size) {
+            new_reserved *= 2;
+        }
+
+        // Ensure we have space
+        size_t available = Arena<Tag>::committed_capacity - (stream->start - Arena<Tag>::base);
+        if (new_reserved > available) {
+            size_t needed = (stream->start - Arena<Tag>::base) + new_reserved;
+            if (needed > Arena<Tag>::reserved_capacity) {
+                fprintf(stderr, "Stream allocation too large\n");
+                exit(1);
+            }
+
+            size_t new_committed = VirtualMemory::round_to_pages(needed);
+            if (!VirtualMemory::commit(Arena<Tag>::base + Arena<Tag>::committed_capacity,
+                                      new_committed - Arena<Tag>::committed_capacity)) {
+                fprintf(stderr, "Failed to commit memory for stream\n");
+                exit(1);
+            }
+            Arena<Tag>::committed_capacity = new_committed;
+        }
+
+        // Update arena's current pointer to new end
+        Arena<Tag>::current = stream->start + new_reserved;
+        stream->reserved = new_reserved;
+    }
+
+    // Copy the data
+    memcpy(stream->write_pos, data, size);
+    stream->write_pos += size;
+}
+
+template <typename Tag>
+uint8_t* stream_finish(StreamAlloc<Tag>* stream) {
+    // Shrink allocation to actual size (give back unused reservation)
+    Arena<Tag>::current = stream->write_pos;
+    return stream->start;
+}
+
+template <typename Tag>
+void stream_abandon(StreamAlloc<Tag>* stream) {
+    // Reset current to where we started
+    Arena<Tag>::current = stream->start;
+}
+
+template <typename Tag>
+size_t stream_size(const StreamAlloc<Tag>* stream) {
+    return stream->write_pos - stream->start;
+}
+
+
 } // namespace arena
 
 

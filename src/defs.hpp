@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <iostream>
 
 #define PAGE_SIZE 512
@@ -16,7 +17,7 @@ thr(char *err)
 struct Buffer
 {
 	void	*ptr;
-	uint32_t size;
+	size_t size;
 };
 
 inline bool

@@ -141,7 +141,7 @@ struct VmCursor
 		case BPLUS_TABLE:
 			return bplustree_cursor_seek_cmp(&cursor.bptree, key, op);
 		case BLOB:
-			return blob_cursor_seek(&cursor.blob, key);
+			return blob_cursor_seek(&cursor.blob, *(uint32_t*)key);
 		default:
 			return false;
 		}
@@ -158,7 +158,6 @@ struct VmCursor
 		case BPLUS_TABLE:
 			return bplustree_cursor_is_valid(&cursor.bptree);
 		case BLOB:
-			return blob_cursor_is_valid(&cursor.blob);
 		default:
 			return false;
 		}
@@ -195,7 +194,7 @@ struct VmCursor
 			return bplustree_cursor_record(&cursor.bptree);
 
 		case BLOB:
-			return blob_cursor_record(&cursor.blob);
+			return (uint8_t*)blob_cursor_record(&cursor.blob).ptr;
 		default:
 			return nullptr;
 		}
@@ -232,9 +231,8 @@ struct VmCursor
 		case BPLUS_TABLE:
 		case BPLUS_INDEX:
 			return bplustree_cursor_insert(&cursor.bptree, key, record);
-
 		case BLOB:
-			return blob_cursor_insert(&cursor.blob, key, record, size);
+			return blob_cursor_insert(&cursor.blob, record, size);
 		default:
 			return false;
 		}

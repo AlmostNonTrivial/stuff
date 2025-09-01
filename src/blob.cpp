@@ -6,6 +6,18 @@
 #include <cstdint>
 #include <cstring>
 
+
+#define BLOB_HEADER_SIZE 12
+#define BLOB_DATA_SIZE (PAGE_SIZE - BLOB_HEADER_SIZE)
+
+struct BlobNode {
+    uint32_t index;      // Page index of this node
+    uint32_t next;       // Next page in chain (0 if last)
+    uint16_t size;       // Size of data in this node
+    uint16_t flags;      // Reserved for future use
+    uint8_t data[BLOB_DATA_SIZE];
+};
+
 // ============================================================================
 // Internal Blob Storage Functions
 // ============================================================================
@@ -17,14 +29,15 @@ BlobNode* get_blob(uint32_t index) {
 
 BlobNode* allocate_blob_page() {
     uint32_t page_index = pager_new();
-    BlobNode* node = reinterpret_cast<BlobNode*>(pager_get(page_index));
+    BlobNode* node = get_blob(page_index);
+
+    pager_mark_dirty(node->index);
 
     node->index = page_index;
     node->next = 0;
     node->size = 0;
     node->flags = 0;
 
-    pager_mark_dirty(node->index);
     return node;
 }
 
@@ -49,8 +62,8 @@ uint32_t blob_store(uint8_t* data, uint32_t size) {
             first_page = node->index;
         } else {
             BlobNode* prev = get_blob(prev_page);
-            prev->next = node->index;
             pager_mark_dirty(prev_page);
+            prev->next = node->index;
         }
 
         current_data += node->size;
@@ -76,141 +89,56 @@ void blob_delete_chain(uint32_t index) {
     pager_delete(index);
 }
 
-// ============================================================================
-// Cursor Navigation (mostly no-ops for unordered blobs)
-// ============================================================================
 
-bool blob_cursor_first(BlobCursor* cursor) {
-    return cursor->valid;
-}
-
-bool blob_cursor_last(BlobCursor* cursor) {
-    return cursor->valid;
-}
-
-bool blob_cursor_next(BlobCursor* cursor) {
-    return false;
-}
-
-bool blob_cursor_previous(BlobCursor* cursor) {
-    return false;
-}
-
-// ============================================================================
-// Cursor Seeking
-// ============================================================================
-
-bool blob_cursor_seek(BlobCursor* cursor, const void* key) {
-    if (!key) {
-        cursor->valid = false;
+bool blob_cursor_seek(BlobCursor* cursor, uint32_t blob_id) {
+    if (!blob_id) {
         cursor->blob_id = 0;
         return false;
     }
 
-    // Key is the blob_id (uint32_t)
-    uint32_t blob_id = *(const uint32_t*)key;
 
     if (blob_id == 0) {
-        cursor->valid = false;
         cursor->blob_id = 0;
         return false;
     }
 
-    // Lazy: just verify the blob exists
     BlobNode* node = get_blob(blob_id);
     if (!node) {
-        cursor->valid = false;
         cursor->blob_id = 0;
         return false;
     }
 
     cursor->blob_id = blob_id;
-    cursor->valid = true;
 
     return true;
 }
 
-bool blob_cursor_seek_cmp(BlobCursor* cursor, const void* key, CompareOp op) {
-    if (op == EQ) {
-        return blob_cursor_seek(cursor, key);
-    }
-    return false;
-}
 
-bool blob_cursor_seek_exact(BlobCursor* cursor, const void* key, const uint8_t* record) {
-    return blob_cursor_seek(cursor, key);
-}
 
-// ============================================================================
-// Data Access
-// ============================================================================
+Buffer blob_cursor_record(BlobCursor* cursor) {
+        auto stream = arena::stream_begin<QueryArena>(BLOB_DATA_SIZE);
 
-uint8_t* blob_cursor_key(BlobCursor* cursor) {
-    if (!cursor->valid) {
-        return nullptr;
-    }
+        uint32_t current = cursor->blob_id;
+        while (current) {
+            BlobNode* node = get_blob(current);
+            if (!node) {
+                arena::stream_abandon(&stream);
+                return {nullptr, 0};
+            }
+            arena::stream_write(&stream, node->data, node->size);
+            current = node->next;
+        }
 
-    // Allocate space for the key and return it
-    uint32_t* key_storage = (uint32_t*)cursor->ctx->alloc(sizeof(uint32_t));
-    *key_storage = cursor->blob_id;
-    return (uint8_t*)key_storage;
-}
-
-uint8_t* blob_cursor_record(BlobCursor* cursor) {
-    if (!cursor->valid || cursor->blob_id == 0) {
-        return nullptr;
+        return {arena::stream_finish(&stream), arena::stream_size<QueryArena>(&stream)};
     }
 
-    // First pass: calculate total size
-    uint32_t total_size = 0;
-    uint32_t current = cursor->blob_id;
 
-    while (current) {
-        BlobNode* node = get_blob(current);
-        if (!node) return nullptr;
-
-        total_size += node->size;
-        current = node->next;
-    }
-
-    if (total_size == 0) {
-        return nullptr;
-    }
-
-    // Allocate from context
-    uint8_t* data = (uint8_t*)cursor->ctx->alloc(total_size);
-
-    // Second pass: copy data
-    uint32_t offset = 0;
-    current = cursor->blob_id;
-
-    while (current) {
-        BlobNode* node = get_blob(current);
-        memcpy(data + offset, node->data, node->size);
-        offset += node->size;
-        current = node->next;
-    }
-
-    return data;
-}
-
-bool blob_cursor_is_valid(BlobCursor* cursor) {
-    return cursor->valid && cursor->blob_id != 0;
-}
 
 // ============================================================================
 // Modification Operations
 // ============================================================================
 
-bool blob_cursor_insert(BlobCursor* cursor, const void* key, const uint8_t* record, const uint32_t size) {
-    // For blob insertion through the standard cursor interface:
-    // - key: contains the size as uint32_t
-    // - record: points to the actual data
-
-    if (!key || !record) {
-        return false;
-    }
-
+uint32_t blob_cursor_insert(BlobCursor* cursor, const uint8_t* record, const uint32_t size) {
     if (size == 0) {
         return false;
     }
@@ -222,23 +150,18 @@ bool blob_cursor_insert(BlobCursor* cursor, const void* key, const uint8_t* reco
     }
 
     cursor->blob_id = blob_id;
-    cursor->valid = true;
 
-    return true;
+    return blob_id;;
 }
 
-bool blob_cursor_update(BlobCursor* cursor, const uint8_t* record) {
-    // Blobs are immutable - cannot update in place
-    return false;
-}
+
 
 bool blob_cursor_delete(BlobCursor* cursor) {
-    if (!cursor->valid || cursor->blob_id == 0) {
+    if (cursor->blob_id == 0) {
         return false;
     }
 
     blob_delete_chain(cursor->blob_id);
-    cursor->valid = false;
     cursor->blob_id = 0;
     return true;
 }
