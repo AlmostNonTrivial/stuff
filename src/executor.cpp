@@ -1,6 +1,6 @@
 // executor.cpp - Refactored with command categorization
 #include "executor.hpp"
-
+#include "validation.hpp"
 #include "arena.hpp"
 #include "bplustree.hpp"
 #include "defs.hpp"
@@ -53,7 +53,7 @@ print_result_callback(TypedValue *result, size_t count)
 {
 	for (int i = 0; i < count; i++)
 	{
-		print_value(result[i].type, result[i].data);
+		// print_value(result[i].type, result[i].data);
 		if (i != count - 1)
 		{
 			std::cout << ", ";
@@ -62,7 +62,8 @@ print_result_callback(TypedValue *result, size_t count)
 	std::cout << "\n";
 }
 
-MemoryContext ctx = {.alloc = arena::alloc<QueryArena>, .emit_row = print_result_callback};
+MemoryContext ctx = {
+	.alloc = arena::alloc<QueryArena>, .free = arena::reclaim<QueryArena>, .emit_row = print_result_callback};
 static array<array<TypedValue, QueryArena>, QueryArena> last_results;
 
 void
@@ -120,7 +121,7 @@ check_int_value(size_t row, size_t col, int expected)
 		return false;
 
 	TypedValue &val = last_results.data[row].data[col];
-	if (val.type != TYPE_4)
+	if (val.type != TYPE_U32)
 		return false;
 
 	return *(uint32_t *)val.data == expected;
@@ -213,7 +214,9 @@ load_schema_from_master()
 	{
 		auto &row = last_results.data[i];
 		if (row.size < 6)
+		{
 			continue;
+		}
 
 		uint32_t	id = *(uint32_t *)row.data[0].data;
 		const char *type = (const char *)row.data[1].data;
@@ -256,6 +259,9 @@ load_schema_from_master()
 	}
 
 	clear_results();
+
+	auto prog = load_table_ids_program();
+	vm_execute(prog.data, prog.size, &ctx);
 }
 
 // ============================================================================
@@ -284,7 +290,7 @@ execute_create_table(CreateTableStmt *node)
 		{
 			offset += snprintf(buffer + offset, 1024 - offset, ", ");
 		}
-		offset += snprintf(buffer + offset, 1024 - offset, "%s %s", type_to_string(table->columns.data[i].type),
+		offset += snprintf(buffer + offset, 1024 - offset, "%s %s", type_name(table->columns.data[i].type),
 						   table->columns.data[i].name);
 	}
 
@@ -383,7 +389,7 @@ execute_rollback()
 void
 executor_init(bool existed)
 {
-	init_type_ops();
+
 	pager_open("db");
 	arena::init<QueryArena>(PAGE_SIZE * 30);
 	arena::init<ParserArena>(PAGE_SIZE * 30);
@@ -397,6 +403,7 @@ executor_init(bool existed)
 		pager_begin_transaction();
 		create_master(false);
 		pager_commit();
+		get_table("master_catalog");
 		executor_state.next_master_id = 1;
 	}
 	else
@@ -484,6 +491,27 @@ execute(const char *sql)
 		if (_debug)
 		{
 			print_ast(stmt);
+		}
+
+		ValidationResult validation = validate_statement(stmt);
+
+		if (!validation.valid)
+		{
+			// Print all validation errors
+			printf("Validation failed with %zu errors:\n", validation.errors.size);
+			for (size_t j = 0; j < validation.errors.size; j++)
+			{
+				ValidationError &err = validation.errors.data[j];
+				printf("  - %s", err.message);
+				if (err.context)
+				{
+					printf(" (context: %s)", err.context);
+				}
+				printf("\n");
+			}
+
+
+			continue;
 		}
 
 		VM_RESULT result = OK;
