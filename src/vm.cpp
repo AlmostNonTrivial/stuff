@@ -1,5 +1,6 @@
 // vm.cpp
 #include "vm.hpp"
+#include "pager.hpp"
 #include "types.hpp"
 #include "blob.hpp"
 #include "arena.hpp"
@@ -14,36 +15,37 @@
 #include <ios>
 
 bool _debug = false;
+// POD struct - data only
+struct VmCursor
+{
+
+	CursorType	 type;
+	Layout layout;
+
+	union {
+		BPtCursor  bptree;
+		MemCursor  mem;
+		BlobCursor blob;
+	} cursor;
+};
 
 // Initialization functions
 void
-vmcursor_open_table(VmCursor *cur, const RecordLayout &table_layout, BPlusTree *tree)
+vmcursor_open_bplus(VmCursor *cur, const Layout &table_layout, BPlusTree *tree)
 {
-	cur->type = VmCursor::BPLUS_TABLE;
+	cur->type = CursorType::BPLUS;
 	cur->layout = table_layout;
-	cur->storage.bptree_ptr = tree;
-	cur->cursor.bptree.tree = cur->storage.bptree_ptr;
+	cur->cursor.bptree.tree = tree;
 	cur->cursor.bptree.state = BPT_CURSOR_INVALID;
 }
 
 void
-vmcursor_open_index(VmCursor *cur, const RecordLayout &index_layout, BPlusTree *tree)
+vmcursor_open_red_black(VmCursor *cur, const Layout &ephemeral_layout, MemoryContext *ctx)
 {
-	cur->type = VmCursor::BPLUS_INDEX;
-	cur->layout = index_layout;
-	cur->storage.bptree_ptr = tree;
-	cur->cursor.bptree.tree = cur->storage.bptree_ptr;
-	cur->cursor.bptree.state = BPT_CURSOR_INVALID;
-}
-
-void
-vmcursor_open_ephemeral(VmCursor *cur, const RecordLayout &ephemeral_layout, MemoryContext *ctx)
-{
-	cur->type = VmCursor::EPHEMERAL;
+	cur->type = CursorType::RED_BLACK;
 	cur->layout = ephemeral_layout;
 	DataType key_type = cur->layout.layout.data[0];
-	cur->storage.mem_tree = memtree_create(key_type, cur->layout.record_size);
-	cur->cursor.mem.tree = &cur->storage.mem_tree;
+	cur->cursor.mem.tree = memtree_create(key_type, cur->layout.record_size);
 	cur->cursor.mem.state = MemCursor::INVALID;
 	cur->cursor.mem.ctx = ctx;
 }
@@ -51,7 +53,7 @@ vmcursor_open_ephemeral(VmCursor *cur, const RecordLayout &ephemeral_layout, Mem
 void
 vmcursor_open_blob(VmCursor *cur, MemoryContext *ctx)
 {
-	cur->type = VmCursor::BLOB;
+	cur->type = CursorType::BLOB;
 	cur->cursor.blob.ctx = ctx;
 }
 
@@ -61,12 +63,11 @@ vmcursor_rewind(VmCursor *cur, bool to_end)
 {
 	switch (cur->type)
 	{
-	case VmCursor::EPHEMERAL:
+	case CursorType::RED_BLACK:
 		return to_end ? memcursor_last(&cur->cursor.mem) : memcursor_first(&cur->cursor.mem);
-	case VmCursor::BPLUS_INDEX:
-	case VmCursor::BPLUS_TABLE:
+	case CursorType::BPLUS:
 		return to_end ? bplustree_cursor_last(&cur->cursor.bptree) : bplustree_cursor_first(&cur->cursor.bptree);
-	case VmCursor::BLOB:
+	case CursorType::BLOB:
 	default:
 		return false;
 	}
@@ -77,14 +78,30 @@ vmcursor_step(VmCursor *cur, bool forward)
 {
 	switch (cur->type)
 	{
-	case VmCursor::EPHEMERAL:
+	case CursorType::RED_BLACK:
 		return forward ? memcursor_next(&cur->cursor.mem) : memcursor_previous(&cur->cursor.mem);
-	case VmCursor::BPLUS_INDEX:
-	case VmCursor::BPLUS_TABLE:
+	case CursorType::BPLUS:
 		return forward ? bplustree_cursor_next(&cur->cursor.bptree) : bplustree_cursor_previous(&cur->cursor.bptree);
-	case VmCursor::BLOB:
+	case CursorType::BLOB:
 	default:
 		return false;
+	}
+}
+
+void
+vmcursor_clear(VmCursor *cursor)
+{
+	switch (cursor->type)
+	{
+	case CursorType::BPLUS: {
+
+		bplustree_clear(cursor->cursor.bptree.tree);
+		break;
+	}
+	case CursorType::BLOB: {
+		blob_cursor_delete(&cursor->cursor.blob);
+		break;
+	}
 	}
 }
 
@@ -93,12 +110,12 @@ vmcursor_seek(VmCursor *cur, CompareOp op, uint8_t *key)
 {
 	switch (cur->type)
 	{
-	case VmCursor::EPHEMERAL:
+	case CursorType::RED_BLACK:
 		return memcursor_seek_cmp(&cur->cursor.mem, key, op);
-	case VmCursor::BPLUS_INDEX:
-	case VmCursor::BPLUS_TABLE:
+
+	case CursorType::BPLUS:
 		return bplustree_cursor_seek_cmp(&cur->cursor.bptree, key, op);
-	case VmCursor::BLOB:
+	case CursorType::BLOB:
 		return blob_cursor_seek(&cur->cursor.blob, *(uint32_t *)key);
 	default:
 		return false;
@@ -110,12 +127,12 @@ vmcursor_is_valid(VmCursor *cur)
 {
 	switch (cur->type)
 	{
-	case VmCursor::EPHEMERAL:
+	case CursorType::RED_BLACK:
 		return memcursor_is_valid(&cur->cursor.mem);
-	case VmCursor::BPLUS_INDEX:
-	case VmCursor::BPLUS_TABLE:
+
+	case CursorType::BPLUS:
 		return bplustree_cursor_is_valid(&cur->cursor.bptree);
-	case VmCursor::BLOB:
+	case CursorType::BLOB:
 	default:
 		return false;
 	}
@@ -127,12 +144,11 @@ vmcursor_get_key(VmCursor *cur)
 {
 	switch (cur->type)
 	{
-	case VmCursor::EPHEMERAL:
+	case CursorType::RED_BLACK:
 		return memcursor_key(&cur->cursor.mem);
-	case VmCursor::BPLUS_INDEX:
-	case VmCursor::BPLUS_TABLE:
+	case CursorType::BPLUS:
 		return bplustree_cursor_key(&cur->cursor.bptree);
-	case VmCursor::BLOB:
+	case CursorType::BLOB:
 	default:
 		return nullptr;
 	}
@@ -143,12 +159,11 @@ vmcursor_get_record(VmCursor *cur)
 {
 	switch (cur->type)
 	{
-	case VmCursor::EPHEMERAL:
+	case CursorType::RED_BLACK:
 		return memcursor_record(&cur->cursor.mem);
-	case VmCursor::BPLUS_INDEX:
-	case VmCursor::BPLUS_TABLE:
+	case CursorType::BPLUS:
 		return bplustree_cursor_record(&cur->cursor.bptree);
-	case VmCursor::BLOB:
+	case CursorType::BLOB:
 		return (uint8_t *)blob_cursor_record(&cur->cursor.blob).ptr;
 	default:
 		return nullptr;
@@ -178,12 +193,11 @@ vmcursor_insert(VmCursor *cur, uint8_t *key, uint8_t *record, uint32_t size)
 {
 	switch (cur->type)
 	{
-	case VmCursor::EPHEMERAL:
+	case CursorType::RED_BLACK:
 		return memcursor_insert(&cur->cursor.mem, key, record);
-	case VmCursor::BPLUS_TABLE:
-	case VmCursor::BPLUS_INDEX:
+	case CursorType::BPLUS:
 		return bplustree_cursor_insert(&cur->cursor.bptree, key, record);
-	case VmCursor::BLOB:
+	case CursorType::BLOB:
 		return blob_cursor_insert(&cur->cursor.blob, record, size);
 	default:
 		return false;
@@ -195,12 +209,11 @@ vmcursor_update(VmCursor *cur, uint8_t *record)
 {
 	switch (cur->type)
 	{
-	case VmCursor::EPHEMERAL:
+	case CursorType::RED_BLACK:
 		return memcursor_update(&cur->cursor.mem, record);
-	case VmCursor::BPLUS_INDEX:
-	case VmCursor::BPLUS_TABLE:
+	case CursorType::BPLUS:
 		return bplustree_cursor_update(&cur->cursor.bptree, record);
-	case VmCursor::BLOB:
+	case CursorType::BLOB:
 	default:
 		return false;
 	}
@@ -211,12 +224,11 @@ vmcursor_remove(VmCursor *cur)
 {
 	switch (cur->type)
 	{
-	case VmCursor::EPHEMERAL:
+	case CursorType::RED_BLACK:
 		return memcursor_delete(&cur->cursor.mem);
-	case VmCursor::BPLUS_INDEX:
-	case VmCursor::BPLUS_TABLE:
+	case CursorType::BPLUS:
 		return bplustree_cursor_delete(&cur->cursor.bptree);
-	case VmCursor::BLOB:
+	case CursorType::BLOB:
 		return blob_cursor_delete(&cur->cursor.blob);
 	default:
 		return false;
@@ -229,13 +241,11 @@ vmcursor_type_name(VmCursor *cur)
 {
 	switch (cur->type)
 	{
-	case VmCursor::EPHEMERAL:
-		return "MEMTREE";
-	case VmCursor::BPLUS_INDEX:
-		return "BTREE_INDEX";
-	case VmCursor::BPLUS_TABLE:
-		return "BPLUS_TABLE";
-	case VmCursor::BLOB:
+	case CursorType::RED_BLACK:
+		return "RED_BLACK";
+	case CursorType::BPLUS:
+		return "BPLUS";
+	case CursorType::BLOB:
 		return "BLOB";
 	}
 	return "UNKNOWN";
@@ -274,7 +284,7 @@ static struct
 // Helper Functions
 // ============================================================================
 static void
-set_register(TypedValue *dest, uint8_t*src, DataType type)
+set_register(TypedValue *dest, uint8_t *src, DataType type)
 {
 	if (dest->get_size() < type_size(type))
 	{
@@ -293,7 +303,7 @@ set_register(TypedValue *dest, uint8_t*src, DataType type)
 static void
 set_register(TypedValue *dest, TypedValue *src)
 {
-    set_register(dest, src->data, src->type);
+	set_register(dest, src->data, src->type);
 }
 
 static void
@@ -418,7 +428,7 @@ step()
 		TypedValue *a = &VM.registers[left];
 		TypedValue *b = &VM.registers[right];
 		int			cmp_result = type_compare(a->type, a->data, b->data);
-		uint32_t test_result = false;
+		uint32_t	test_result = false;
 
 		switch (op)
 		{
@@ -452,7 +462,7 @@ step()
 			printf(") = %s", test_result ? "TRUE" : "FALSE");
 		}
 
-		set_register(&VM.registers[dest], (uint8_t*)&test_result, TYPE_U32);
+		set_register(&VM.registers[dest], (uint8_t *)&test_result, TYPE_U32);
 		VM.pc++;
 		return OK;
 	}
@@ -586,43 +596,14 @@ step()
 		return OK;
 	}
 	case OP_Open: {
-		int32_t	  cursor_id = Opcodes::Open::cursor_id(*inst);
-		bool	  is_ephemeral = Opcodes::Open::is_ephemeral(*inst);
-		VmCursor &cursor = VM.cursors[cursor_id];
-		if (is_ephemeral)
-		{
-			RecordLayout *layout = Opcodes::Open::ephemeral_schema(*inst);
-			vmcursor_open_ephemeral(&cursor, *layout, VM.ctx);
-			if (_debug)
-			{
-				printf("=> Opened ephemeral cursor %d", cursor_id);
-			}
-		}
-		else
-		{
-			const char *table_name = Opcodes::Open::table_name(*inst);
-			int32_t		index_column = Opcodes::Open::index_col(*inst);
-			if (index_column != 0)
-			{
-				Index *index = get_index(table_name, index_column);
-				vmcursor_open_index(&cursor, index->to_layout(), &index->btree);
-				if (_debug)
-				{
-					printf("=> Opened index cursor %d on "
-						   "%s.%d",
-						   cursor_id, table_name, index_column);
-				}
-			}
-			else
-			{
-				Table *table = get_table(table_name);
-				vmcursor_open_table(&cursor, table->to_layout(), &table->bplustree);
-				if (_debug)
-				{
-					printf("=> Opened table cursor %d on %s", cursor_id, table_name);
-				}
-			}
-		}
+		int32_t		  cursor_id = Opcodes::Open::cursor_id(*inst);
+		CursorType	  cursor = Opcodes::Open::cursor_type(*inst);
+		VmCursor	 &cursor = VM.cursors[cursor_id];
+		Layout *schema = Opcodes::Open::schema(*inst);
+
+
+		// open
+
 		VM.pc++;
 		return OK;
 	}
@@ -819,6 +800,38 @@ step()
 		VM.pc++;
 		return OK;
 	}
+
+	case OP_Create: {
+
+ CursorType type = (CursorType)inst->p5;
+
+
+
+		VM.pc++;
+		break;
+	}
+
+	case OP_Clear: {
+
+		VM.pc++;
+		break;
+	}
+
+	case OP_Begin: {
+		pager_begin_transaction();
+		VM.pc++;
+		break;
+	}
+	case OP_Commit: {
+		pager_commit();
+		VM.pc++;
+		break;
+	}
+	case OP_Rollback: {
+		pager_rollback();
+		return ABORT;
+	}
+
 	default:
 		printf("Unknown opcode: %d\n", inst->opcode);
 		return ERR;

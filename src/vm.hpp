@@ -20,55 +20,11 @@ typedef bool (*VMFunction)(
     MemoryContext* ctx       // For allocation if needed
 );
 
-
-// POD struct - data only
-struct VmCursor
-{
-    enum Type
-    {
-        BPLUS_TABLE,
-        BPLUS_INDEX,
-        EPHEMERAL,
-        BLOB
-    };
-
-    Type type;
-    RecordLayout layout;
-
-    union {
-        BPtCursor bptree;
-        MemCursor mem;
-        BlobCursor blob;
-    } cursor;
-
-    union {
-        BPlusTree* bptree_ptr;
-        MemTree mem_tree;
-    } storage;
+enum class CursorType : uint8_t {
+    BPLUS,
+    RED_BLACK,
+    BLOB
 };
-
-// Function declarations
-void vmcursor_open_table(VmCursor* cur, const RecordLayout& table_layout, BPlusTree* tree);
-void vmcursor_open_index(VmCursor* cur, const RecordLayout& index_layout, BPlusTree* tree);
-void vmcursor_open_ephemeral(VmCursor* cur, const RecordLayout& ephemeral_layout, MemoryContext* ctx);
-void vmcursor_open_blob(VmCursor* cur, MemoryContext* ctx);
-
-bool vmcursor_rewind(VmCursor* cur, bool to_end = false);
-bool vmcursor_step(VmCursor* cur, bool forward = true);
-bool vmcursor_seek(VmCursor* cur, CompareOp op, uint8_t* key);
-bool vmcursor_is_valid(VmCursor* cur);
-
-uint8_t* vmcursor_get_key(VmCursor* cur);
-uint8_t* vmcursor_get_record(VmCursor* cur);
-uint8_t* vmcursor_column(VmCursor* cur, uint32_t col_index);
-DataType vmcursor_column_type(VmCursor* cur, uint32_t col_index);
-
-bool vmcursor_insert(VmCursor* cur, uint8_t* key, uint8_t* record, uint32_t size = 0);
-bool vmcursor_update(VmCursor* cur, uint8_t* record);
-bool vmcursor_remove(VmCursor* cur);
-
-const char* vmcursor_type_name(VmCursor* cur);
-void vmcursor_print_current(VmCursor* cur);
 
 typedef void (*ResultCallback)(array<TypedValue, QueryArena> result);
 extern bool _debug;
@@ -99,6 +55,14 @@ enum OpCode : uint32_t
 	OP_Logic = 53,
 	OP_Result = 54,
 	OP_Function= 61,
+
+	OP_Begin = 62,
+	OP_Commit = 63,
+	OP_Rollback = 64,
+
+
+	OP_Create = 65,
+	OP_Clear = 66
 };
 struct VMInstruction
 {
@@ -110,11 +74,7 @@ struct VMInstruction
 	uint8_t p5;
 };
 
-enum PatternType : uint8_t
-{
-	PATTERN_LIKE = 0,
-	PATTERN_CONTAINS = 1,
-};
+
 // ============================================================================
 // Opcode Namespace
 // ============================================================================
@@ -167,7 +127,7 @@ create_btree(int32_t cursor_id, const char *table_name, int32_t index_col = 0, b
 	return {OP_Open, cursor_id, index_col, 0, (void *)table_name, flags};
 }
 inline VMInstruction
-create_ephemeral(int32_t cursor_id, RecordLayout *layout)
+create_ephemeral(int32_t cursor_id, Layout *layout)
 {
 	uint8_t flags = (0x01) | (0x02);
 	return {OP_Open, cursor_id, 0, 0, layout, flags};
@@ -177,10 +137,10 @@ cursor_id(const VMInstruction &inst)
 {
 	return inst.p1;
 }
-inline RecordLayout *
+inline Layout *
 ephemeral_schema(const VMInstruction &inst)
 {
-	return (RecordLayout *)inst.p4;
+	return (Layout *)inst.p4;
 }
 inline int32_t
 index_col(const VMInstruction &inst)

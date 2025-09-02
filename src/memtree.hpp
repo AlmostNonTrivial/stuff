@@ -74,7 +74,7 @@ struct NodeStack
 // Cursor for traversing the memory tree
 struct MemCursor
 {
-	MemTree		  *tree;
+	MemTree		  tree;
 	MemTreeNode	  *current;
 	NodeStack	   stack; // Only used for algorithms that need it
 	MemoryContext *ctx;	  // Context for allocations

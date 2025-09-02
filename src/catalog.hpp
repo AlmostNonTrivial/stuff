@@ -5,97 +5,34 @@
 #include "parser.hpp"
 #include <cstdint>
 
-// Arena tag for schema storage
-struct SchemaArena
-{
-};
-
-// Column in a table schema
 struct Column
 {
-	const char *name; // Interned string
+	const char *name;
 	DataType	type;
 };
 
-// Record layout information
-struct RecordLayout
+struct Layout
 {
-	array<DataType, SchemaArena> layout;
-	array<uint32_t, SchemaArena> offsets;
-	uint32_t					 record_size;
+	std::vector<DataType> layout;
+	std::vector<uint32_t> offsets;
 
-	static RecordLayout
-	create(array<DataType, SchemaArena> &column_types);
-	static RecordLayout
-	create(DataType key, DataType rec);
+	uint32_t record_size;
+
+	static Layout
+	create(std::vector<DataType> &column_types);
+	static Layout
+	create(DataType key, DataType record);
 };
 
-// Index metadata
-struct Index
+struct Structure
 {
-	string<SchemaArena> index_name;
-	string<SchemaArena> table_name;
-	uint32_t			column_index;
-	BPlusTree			btree;
+	const char *name;
+	union {
+		BPlusTree btree;
+	} storage;
+	std::vector<Column> columns;
 
-	RecordLayout
-	to_layout() const;
+	Layout to_layout();
 };
 
-// Table metadata
-struct Table
-{
-	TypedValue								 next_id;
-	string<SchemaArena>						 table_name;
-	array<Column, SchemaArena>				 columns;
-	hash_map<uint32_t, Index *, SchemaArena> indexes; // column_index -> Index
-	BPlusTree								 bplustree;
-
-	RecordLayout
-	to_layout() const;
-};
-
-// ============================================================================
-// Schema Operations
-// ============================================================================
-
-// Initialize schema system
-void
-schema_init();
-
-// Clear all schema data
-void
-schema_clear();
-
-// Table operations
-Table *
-get_table(const char *table_name);
-void
-remove_table(const char *table_name);
-
-// Index operations
-Index *
-get_index(const char *table_name, uint32_t column_index);
-Index *
-get_index(const char *table_name, const char *index_name);
-Index *
-get_index(const char *index_name);
-void
-remove_index(const char *table_name, uint32_t column_index);
-
-// Schema queries
-uint32_t
-get_column_index(const char *table_name, const char *col_name);
-DataType
-get_column_type(const char *table_name, uint32_t col_index);
-
-// Factory functions
-Table *
-create_table(CreateTableStmt *node, int root_page = 0);
-Index *
-create_index(CreateIndexStmt *node, int root_page = 0);
-void
-create_master(bool existed);
-bool
-load_id(TypedValue *result_reg, TypedValue *args, uint32_t arg_count, MemoryContext *ctx);
-extern string_map<Table *, SchemaArena> tables;
+extern std::unordered_map<const char *, Structure> catalog;
