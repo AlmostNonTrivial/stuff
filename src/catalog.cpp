@@ -318,7 +318,7 @@ create_index(CreateIndexStmt *node, int root_page)
 	assert(node != nullptr);
 
 	const char *table_name = node->table_name;
-	const char *col_name = node->index_name;
+	const char *col_name = node->columns->data[0];
 	const char *index_name = node->index_name;
 
 	Table *table = get_table(table_name);
@@ -339,7 +339,7 @@ create_index(CreateIndexStmt *node, int root_page)
 
 	DataType index_key_type = table->columns.data[col_idx].type;
 	DataType rowid_type = table->columns.data[0].type;
-	index->btree = bplustree_create(index_key_type, rowid_type, root_page == 0);
+	index->btree = bplustree_create(type_size(index_key_type), type_size(rowid_type), root_page == 0);
 	if (root_page != 0)
 	{
 		index->btree.root_page_index = root_page;

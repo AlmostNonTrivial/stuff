@@ -370,6 +370,7 @@ static VM_RESULT
 execute_rollback()
 {
 	pager_rollback();
+	assert(false);
 	executor_state.in_transaction = false;
 	schema_clear();
 	create_master(true);

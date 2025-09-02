@@ -1,3 +1,5 @@
+#include "executor.hpp"
+#include "tests_programs.hpp"
 #include "tests_types.hpp"
 #include "tests_parser.hpp"
 #include "tests_pager.hpp"
@@ -19,6 +21,9 @@ main()
 	// test_memtree();
 	// test_parser();
 	// test_pager();
-	test_integration();
+	// test_integration();
+	test_programs();
+
+
 	return 0;
 }
