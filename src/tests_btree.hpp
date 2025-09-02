@@ -37,7 +37,7 @@ test_btree_sequential_ops()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+	BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 	BPtCursor cursor = {.tree = &tree};
 
 	const int COUNT = 5000;
@@ -114,7 +114,7 @@ test_btree_random_ops()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint64_t), true);
+	BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint64_t), true);
 	BPtCursor cursor = {.tree = &tree};
 
 	const int COUNT = 5000;
@@ -216,7 +216,7 @@ test_btree_mixed_ops()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	BPlusTree tree = bplustree_create(TYPE_8, sizeof(uint32_t), true);
+	BPlusTree tree = bplustree_create(TYPE_U64, sizeof(uint32_t), true);
 	BPtCursor cursor = {.tree = &tree};
 
 	std::set<uint64_t> keys_in_tree;
@@ -291,7 +291,7 @@ test_btree_edge_cases()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+	BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 	BPtCursor cursor = {.tree = &tree};
 
 	// Delete from empty tree
@@ -386,7 +386,7 @@ test_btree_composite_keys()
 	static_assert(sizeof(CompositeKey) == 8);
 
 	// Tree with composite key, no value data (just key existence)
-	BPlusTree tree = bplustree_create(TYPE_8, 0, true); // 0-byte records
+	BPlusTree tree = bplustree_create(TYPE_U64, 0, true); // 0-byte records
 	BPtCursor cursor = {.tree = &tree};
 
 	// Insert composite keys
@@ -438,7 +438,7 @@ test_btree_large_records()
 
 	// Create tree with very large records (forces MIN_ENTRY_COUNT)
 	const uint32_t LARGE_RECORD = PAGE_SIZE / 4; // Close to page size limit
-	BPlusTree	   tree = bplustree_create(TYPE_4, LARGE_RECORD, true);
+	BPlusTree	   tree = bplustree_create(TYPE_U32, LARGE_RECORD, true);
 	BPtCursor	   cursor = {.tree = &tree};
 
 	// Should have minimum keys per node
@@ -478,7 +478,7 @@ test_btree_multiple_cursors()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+	BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 	BPtCursor cursor1 = {.tree = &tree};
 	BPtCursor cursor2 = {.tree = &tree};
 	BPtCursor cursor3 = {.tree = &tree};
@@ -539,7 +539,7 @@ test_btree_page_eviction()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+	BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 	BPtCursor cursor = {.tree = &tree};
 
 	// Insert enough data to create many pages
@@ -593,7 +593,7 @@ test_btree_varchar_collation()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	BPlusTree tree = bplustree_create(TYPE_32, sizeof(uint32_t), true);
+	BPlusTree tree = bplustree_create(TYPE_CHAR32, sizeof(uint32_t), true);
 	BPtCursor cursor = {.tree = &tree};
 
 	// Test strings that expose comparison edge cases
@@ -676,7 +676,7 @@ test_update_parent_keys_condition()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+	BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 	BPtCursor cursor = {.tree = &tree};
 
 	const int COUNT = tree.leaf_max_keys * 3;
@@ -713,7 +713,7 @@ test_merge_empty_root()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+	BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 	BPtCursor cursor = {.tree = &tree};
 
 	const int COUNT = tree.leaf_max_keys + 1;
@@ -753,7 +753,7 @@ test_btree_single_key_leaf_delete()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+	BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 	BPtCursor cursor = {.tree = &tree};
 
 	// Insert enough keys to create internal nodes and multiple leaves
@@ -804,7 +804,7 @@ test_btree_collapse_root()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+	BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 	BPtCursor cursor = {.tree = &tree};
 
 	// Insert just enough to create a 2-level tree
@@ -836,7 +836,7 @@ test_btree_deep_tree_coverage()
 
 	// Create tree with 64-byte records to force smaller node capacity
 	const uint32_t RECORD_SIZE = 64;
-	BPlusTree	   tree = bplustree_create(TYPE_4, RECORD_SIZE, true);
+	BPlusTree	   tree = bplustree_create(TYPE_U32, RECORD_SIZE, true);
 	BPtCursor	   cursor = {.tree = &tree};
 
 	std::cout << "Tree config: leaf_max=" << tree.leaf_max_keys << ", internal_max=" << tree.internal_max_keys << "\n";
@@ -902,7 +902,7 @@ test_btree_deep_tree_coverage()
 
 	// Test cursor on empty tree (if_79)
 	std::cout << "Testing empty tree seek..." << std::flush;
-	BPlusTree empty_tree = bplustree_create(TYPE_4, sizeof(uint32_t), false); // Don't init
+	BPlusTree empty_tree = bplustree_create(TYPE_U32, sizeof(uint32_t), false); // Don't init
 	BPtCursor empty_cursor = {.tree = &empty_tree};
 	uint32_t  test_key = 42;
 	assert(!bplustree_cursor_seek(&empty_cursor, &test_key)); // if_79
@@ -943,7 +943,7 @@ test_btree_deep_tree_coverage()
 	// This is tricky - need to delete such that the node itself changes
 	// Usually happens during merges where the node gets deallocated
 	// Set up a scenario with minimal keys
-	BPlusTree small_tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+	BPlusTree small_tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 	BPtCursor small_cursor = {.tree = &small_tree};
 
 	// Insert just enough to split once
@@ -985,7 +985,7 @@ test_btree_remaining_coverage()
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
-		BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+		BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 		BPtCursor cursor = {.tree = &tree};
 
 		// Build a 3-level tree
@@ -1018,7 +1018,7 @@ test_btree_remaining_coverage()
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
-		BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+		BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 		BPtCursor cursor = {.tree = &tree};
 
 		// Insert enough to create internal nodes
@@ -1047,7 +1047,7 @@ test_btree_remaining_coverage()
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
-		BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+		BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 		BPtCursor cursor = {.tree = &tree};
 
 		// Insert enough for multiple leaves
@@ -1083,7 +1083,7 @@ test_btree_remaining_coverage()
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
-		BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+		BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 		BPtCursor cursor = {.tree = &tree};
 
 		// Insert sparse keys
@@ -1115,7 +1115,7 @@ test_btree_remaining_coverage()
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
-		BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+		BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 
 		// Create a tree with internal nodes
 		BPtCursor cursor = {.tree = &tree};
@@ -1134,7 +1134,7 @@ test_btree_remaining_coverage()
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
-		BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+		BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 		BPtCursor cursor = {.tree = &tree};
 
 		// Create minimal tree that will merge on delete
@@ -1179,7 +1179,7 @@ test_if_37_parent_separator_update()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	BPlusTree tree = bplustree_create(TYPE_4, sizeof(uint32_t), true);
+	BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
 	BPtCursor cursor = {.tree = &tree};
 
 	// Insert enough keys to create exactly 2 leaves

@@ -3,6 +3,7 @@
 
 // memtree.cpp
 #include "memtree.hpp"
+#include "defs.hpp"
 
 // ============================================================================
 // Internal Helper Functions
@@ -17,13 +18,14 @@ static inline uint8_t* node_record(MemTreeNode* node, uint32_t key_size) {
 }
 
 static int memtree_compare(const MemTree* tree, const uint8_t* a, const uint8_t* b) {
-    return cmp(tree->key_type, a, b);
+    return type_compare(tree->key_type, a, b);
 }
 
 static int memtree_compare_full(const MemTree* tree, const uint8_t* a_key, const uint8_t* a_rec,
                                 const uint8_t* b_key, const uint8_t* b_rec) {
     // First compare keys
-    int key_cmp = cmp(tree->key_type, a_key, b_key);
+    int key_cmp =  type_compare(tree->key_type, a_key, b_key);
+
     if (key_cmp != 0 || !tree->allow_duplicates) {
         return key_cmp;
     }
@@ -44,14 +46,14 @@ static MemTreeNode* memtree_create_node(MemTree* tree, const uint8_t* key,
     node->data = (uint8_t*)ctx->alloc(tree->data_size);
 
     // Copy key at offset 0
-    memcpy(node->data, key, tree->key_type);
+    memcpy(node->data, key, tree->key_size);
 
     // Copy record at offset key_type (if provided)
     if (record && tree->record_size > 0) {
-        memcpy(node->data + tree->key_type, record, tree->record_size);
+        memcpy(node->data + tree->key_size, record, tree->record_size);
     } else if (tree->record_size > 0) {
         // Zero out record portion if no record provided
-        memset(node->data + tree->key_type, 0, tree->record_size);
+        memset(node->data + tree->key_size, 0, tree->record_size);
     }
 
     node->left = nullptr;
@@ -253,9 +255,10 @@ MemTree memtree_create(DataType key_type, uint32_t record_size, bool allow_dupli
     MemTree tree;
     tree.root = nullptr;
     tree.key_type = key_type;
+    tree.key_size = type_size(key_type);
     tree.record_size = record_size;
     tree.node_count = 0;
-    tree.data_size = key_type + record_size;
+    tree.data_size = tree.key_size + record_size;
     tree.allow_duplicates = allow_duplicates;
     return tree;
 }
@@ -288,14 +291,14 @@ bool memtree_insert(MemTree* tree, const uint8_t* key, const uint8_t* record, Me
             if (!tree->allow_duplicates) {
                 // No duplicates mode - update in place
                 if (record && tree->record_size > 0) {
-                    memcpy(node_record(current, tree->key_type), record, tree->record_size);
+                    memcpy(node_record(current, tree->key_size), record, tree->record_size);
                 }
                 tree->node_count--;  // Compensate for increment in create_node
                 return true;
             } else {
                 // Duplicates allowed - use record as secondary sort key
                 if (tree->record_size > 0 && record) {
-                    uint8_t* curr_rec = node_record(current, tree->key_type);
+                    uint8_t* curr_rec = node_record(current, tree->key_size);
                     int rec_cmp = memcmp(record, curr_rec, tree->record_size);
 
                     if (rec_cmp == 0) {
@@ -331,7 +334,7 @@ bool memtree_insert(MemTree* tree, const uint8_t* key, const uint8_t* record, Me
 
         if (cmp_result == 0 && tree->allow_duplicates && tree->record_size > 0) {
             // Compare records for duplicate keys
-            uint8_t* parent_rec = node_record(parent, tree->key_type);
+            uint8_t* parent_rec = node_record(parent, tree->key_size);
             int rec_cmp = memcmp(record, parent_rec, tree->record_size);
             if (rec_cmp < 0) {
                 parent->left = new_node;
@@ -416,7 +419,7 @@ bool memtree_delete_exact(MemTree* tree, const uint8_t* key, const uint8_t* reco
     // Find exact node to delete
     while (z) {
         uint8_t* curr_key = node_key(z);
-        uint8_t* curr_rec = node_record(z, tree->key_type);
+        uint8_t* curr_rec = node_record(z, tree->key_size);
 
         int cmp_result = memtree_compare_full(tree, key, record, curr_key, curr_rec);
 
@@ -571,7 +574,7 @@ bool memcursor_seek_exact(MemCursor* cursor, const void* key, const void* record
 
     while (current) {
         uint8_t* curr_key = node_key(current);
-        uint8_t* curr_rec = node_record(current, cursor->tree->key_type);
+        uint8_t* curr_rec = node_record(current, cursor->tree->key_size);
 
         int cmp_result = memtree_compare_full(cursor->tree,
                                               (const uint8_t*)key, (const uint8_t*)record,
@@ -769,7 +772,7 @@ uint8_t* memcursor_record(MemCursor* cursor) {
     if (cursor->state != MemCursor::VALID) {
         return nullptr;
     }
-    return node_record(cursor->current, cursor->tree->key_type);
+    return node_record(cursor->current, cursor->tree->key_size);
 }
 
 bool memcursor_is_valid(MemCursor* cursor) {
@@ -795,7 +798,7 @@ bool memcursor_delete(MemCursor* cursor) {
     if (cursor->tree->allow_duplicates) {
         // Delete exact match
         return memtree_delete_exact(cursor->tree, data_copy,
-                                   data_copy + cursor->tree->key_type);
+                                   data_copy + cursor->tree->key_size);
     } else {
         // Delete by key only
         return memtree_delete(cursor->tree, data_copy);
@@ -807,7 +810,7 @@ bool memcursor_update(MemCursor* cursor, const uint8_t* record) {
         return false;
     }
 
-    memcpy(node_record(cursor->current, cursor->tree->key_type), record, cursor->tree->record_size);
+    memcpy(node_record(cursor->current, cursor->tree->key_size), record, cursor->tree->record_size);
     return true;
 }
 
@@ -954,58 +957,7 @@ static int validate_node_recursive(const MemTree* tree, MemTreeNode* node,
 // Forward declaration
 static void print_inorder(const MemTree* tree, MemTreeNode* node);
 
-static void print_key_value(const MemTree* tree, uint8_t* key, uint8_t* record) {
-    // Print key
-    switch (tree->key_type) {
-        case TYPE_4: {
-            uint32_t val;
-            memcpy(&val, key, 4);
-            printf("%u", val);
-            break;
-        }
-        case TYPE_8: {
-            uint64_t val;
-            memcpy(&val, key, 8);
-            printf("%lu", val);
-            break;
-        }
-        case TYPE_32:
-        case TYPE_256: {
-            printf("\"");
-            for (uint32_t i = 0; i < tree->key_type && key[i]; i++) {
-                if (key[i] >= 32 && key[i] < 127) {
-                    printf("%c", key[i]);
-                } else {
-                    printf("\\x%02x", key[i]);
-                }
-                if (i > 10) {
-                    printf("...");
-                    break;
-                }
-            }
-            printf("\"");
-            break;
-        }
-        default:
-            printf("?");
-    }
 
-    // Print record if exists
-    if (tree->record_size > 0 && record) {
-        printf(":");
-        if (tree->record_size == sizeof(uint32_t)) {
-            uint32_t val;
-            memcpy(&val, record, sizeof(uint32_t));
-            printf("%u", val);
-        } else if (tree->record_size == sizeof(uint64_t)) {
-            uint64_t val;
-            memcpy(&val, record, sizeof(uint64_t));
-            printf("%lu", val);
-        } else {
-            printf("<%u bytes>", tree->record_size);
-        }
-    }
-}
 
 void memtree_print(const MemTree* tree) {
     if (!tree || !tree->root) {
@@ -1016,8 +968,8 @@ void memtree_print(const MemTree* tree) {
     printf("====================================\n");
     printf("MemTree Structure (Red-Black Tree)\n");
     printf("====================================\n");
-    printf("Key type: %s, Record size: %u bytes\n",
-           type_to_string(tree->key_type), tree->record_size);
+    // printf("Key type: %s, Record size: %u bytes\n",
+           // type_to_string(tree->key_size), tree->record_size);
     printf("Allow duplicates: %s\n", tree->allow_duplicates ? "YES" : "NO");
     printf("Node count: %u\n", tree->node_count);
     printf("------------------------------------\n\n");
@@ -1046,8 +998,8 @@ void memtree_print(const MemTree* tree) {
 
         // Print node info
         printf("  [");
-        print_key_value(tree, node_key(nl.node),
-                       node_record(nl.node, tree->key_type));
+        // print_key_value(tree, node_key(nl.node),
+        //                node_record(nl.node, tree->key_size));
         printf("]");
 
         // Print color
@@ -1056,7 +1008,7 @@ void memtree_print(const MemTree* tree) {
         // Print parent info
         if (nl.node->parent) {
             printf(" (parent: ");
-            print_key_value(tree, node_key(nl.node->parent), nullptr);
+            // print_key_value(tree, node_key(nl.node->parent), nullptr);
             printf(", %s child)", nl.is_left ? "L" : "R");
         } else {
             printf(" (ROOT)");
@@ -1087,8 +1039,8 @@ static void print_inorder(const MemTree* tree, MemTreeNode* node) {
 
     print_inorder(tree, node->left);
 
-    print_key_value(tree, node_key(node),
-                   node_record(node, tree->key_type));
+    // print_key_value(tree, node_key(node),
+    //                node_record(node, tree->key_size));
     printf(" ");
 
     print_inorder(tree, node->right);
@@ -1123,11 +1075,11 @@ void memtree_print_compact(const MemTree* tree) {
         }
 
         printf("[");
-        print_key_value(tree, node_key(node), nullptr);
+        // print_key_value(tree, node_key(node), nullptr);
         printf(":%c", node->color == RED ? 'R' : 'B');
         if (node->parent) {
             printf(":");
-            print_key_value(tree, node_key(node->parent), nullptr);
+            // print_key_value(tree, node_key(node->parent), nullptr);
         }
         printf("] ");
 
@@ -1152,7 +1104,7 @@ static void print_tree_visual_helper(const MemTree* tree, MemTreeNode* node,
     printf("%s", is_tail ? "└── " : "├── ");
 
     // Print node
-    print_key_value(tree, node_key(node), nullptr);
+    // print_key_value(tree, node_key(node), nullptr);
     printf(" %s\n", node->color == RED ? "(R)" : "(B)");
 
     // Print children

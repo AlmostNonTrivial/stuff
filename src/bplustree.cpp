@@ -3,6 +3,7 @@
 #include "bplustree.hpp"
 #include "arena.hpp"
 #include "defs.hpp"
+#include "types.hpp"
 #include "pager.hpp"
 
 #include <algorithm>
@@ -142,13 +143,13 @@ binary_search(BPlusTree &tree, BTreeNode *node, const uint8_t *key)
 	while (left < right)
 	{
 		uint32_t mid = left + (right - left) / 2;
-		int		 cmp_result = cmp(tree.node_key_size, get_key_at(tree, node, mid), key);
+		uint8_t *mid_key = get_key_at(tree, node, mid);
 
-		if (cmp_result < 0)
+		if (type_less_than(tree.node_key_type, mid_key, key))
 		{
 			left = mid + 1;
 		}
-		else if (cmp_result == 0)
+		else if (type_equals(tree.node_key_type, mid_key, key))
 		{
 			if (node->is_leaf)
 			{
@@ -188,7 +189,9 @@ BPlusTree
 bplustree_create(DataType key, uint32_t record_size, bool init = false)
 {
 	BPlusTree tree = {0};
-	tree.node_key_size = key;
+
+	tree.node_key_type = key;
+	tree.node_key_size = type_size(key);
 
 	tree.record_size = record_size;
 
@@ -203,7 +206,7 @@ bplustree_create(DataType key, uint32_t record_size, bool init = false)
 	tree.leaf_min_keys = tree.leaf_max_keys / 2;
 	tree.leaf_split_index = tree.leaf_max_keys / 2;
 
-	uint32_t child_ptr_size = TYPE_4;
+	uint32_t child_ptr_size = sizeof(uint32_t);
 	uint32_t internal_max_entries = (USABLE_SPACE - child_ptr_size) / (tree.node_key_size + child_ptr_size);
 
 	if (internal_max_entries % 2 == 0)
@@ -422,7 +425,7 @@ split(BPlusTree &tree, BTreeNode *node)
 			parent_index++;
 
 		memcpy(parent_children + parent_index + 2, parent_children + parent_index + 1,
-			   (parent->num_keys - parent_index) * TYPE_4);
+			   (parent->num_keys - parent_index) * sizeof(uint32_t));
 
 		memcpy(get_key_at(tree, parent, parent_index + 1), get_key_at(tree, parent, parent_index),
 			   (parent->num_keys - parent_index) * tree.node_key_size);
@@ -980,7 +983,6 @@ cursor_move_end(BPtCursor *cursor, bool first)
 
 	return cursor_move_in_subtree(cursor, root, first);
 }
-
 bool
 bplustree_cursor_seek_cmp(BPtCursor *cursor, const void *key, CompareOp op)
 {
@@ -999,10 +1001,12 @@ bplustree_cursor_seek_cmp(BPtCursor *cursor, const void *key, CompareOp op)
 			continue;
 		}
 
-		int cmp_result = cmp(cursor->tree->node_key_size, current_key, reinterpret_cast<const uint8_t *>(key));
+		const uint8_t *key_bytes = reinterpret_cast<const uint8_t *>(key);
 
-		bool satisfied = (op == GE && cmp_result >= 0) || (op == GT && cmp_result > 0) ||
-						 (op == LE && cmp_result <= 0) || (op == LT && cmp_result < 0);
+		bool satisfied = (op == GE && type_greater_equal(cursor->tree->node_key_type, current_key, key_bytes)) ||
+						 (op == GT && type_greater_than(cursor->tree->node_key_type, current_key, key_bytes)) ||
+						 (op == LE && type_less_equal(cursor->tree->node_key_type, current_key, key_bytes)) ||
+						 (op == LT && type_less_than(cursor->tree->node_key_type, current_key, key_bytes));
 		if (satisfied)
 		{
 			return true;
@@ -1057,7 +1061,6 @@ bplustree_cursor_record(BPtCursor *cursor)
 bool
 bplustree_cursor_seek(BPtCursor *cursor, const void *key)
 {
-
 	cursor_clear(cursor);
 
 	if (!cursor->tree->root_page_index)
@@ -1074,7 +1077,7 @@ bplustree_cursor_seek(BPtCursor *cursor, const void *key)
 
 	// Check for exact match
 	bool found = index < leaf->num_keys &&
-				 cmp(cursor->tree->node_key_size, get_key_at(*cursor->tree, leaf, index), (uint8_t *)key) == 0;
+				 type_equals(cursor->tree->node_key_type, get_key_at(*cursor->tree, leaf, index), (uint8_t *)key);
 
 	// Clamp index to valid range for iteration
 	if (index >= leaf->num_keys)
@@ -1340,7 +1343,6 @@ bplustree_validate(BPlusTree *tree)
 		}
 	}
 }
-
 static ValidationResult
 validate_node_recursive(BPlusTree &tree, BTreeNode *node, uint32_t expected_parent, uint8_t *parent_min_bound,
 						uint8_t *parent_max_bound, std::unordered_set<uint32_t> &visited)
@@ -1394,19 +1396,17 @@ validate_node_recursive(BPlusTree &tree, BTreeNode *node, uint32_t expected_pare
 
 		if (prev_key)
 		{
-			int cmp_result = cmp(tree.node_key_size, prev_key, current_key);
-			ASSERT_PRINT(cmp_result < 0, &tree); // prev < current
+			ASSERT_PRINT(type_less_than(tree.node_key_type, prev_key, current_key), &tree); // prev < current
 		}
 
 		// Check bounds from parent
 		if (parent_min_bound)
 		{
-			ASSERT_PRINT(cmp(tree.node_key_size, current_key, parent_min_bound) >= 0, &tree);
+			ASSERT_PRINT(type_greater_equal(tree.node_key_type, current_key, parent_min_bound), &tree);
 		}
 		if (parent_max_bound)
 		{
-
-			ASSERT_PRINT(cmp(tree.node_key_size, current_key, parent_max_bound) < 0, &tree);
+			ASSERT_PRINT(type_less_than(tree.node_key_type, current_key, parent_max_bound), &tree);
 		}
 		prev_key = current_key;
 	}
@@ -1486,13 +1486,13 @@ validate_node_recursive(BPlusTree &tree, BTreeNode *node, uint32_t expected_pare
 			{
 				// First key in child >= separator key before it
 				uint8_t *separator = get_key_at(tree, node, i - 1);
-				ASSERT_PRINT(cmp(tree.node_key_size, child_result.min_key, separator) >= 0, &tree);
+				ASSERT_PRINT(type_greater_equal(tree.node_key_type, child_result.min_key, separator), &tree);
 			}
 			if (child_result.max_key && i < node->num_keys)
 			{
 				// Last key in child < separator key after it
 				uint8_t *separator = get_key_at(tree, node, i);
-				ASSERT_PRINT(cmp(tree.node_key_size, child_result.max_key, separator) <= 0, &tree);
+				ASSERT_PRINT(type_less_equal(tree.node_key_type, child_result.max_key, separator), &tree);
 			}
 		}
 
@@ -1523,47 +1523,11 @@ print_key(BPlusTree &tree, uint8_t *key)
 		return;
 	}
 
-	switch (tree.node_key_size)
-	{
-	case TYPE_4: {
-		uint32_t val;
-		memcpy(&val, key, 4);
-		printf("%u", val);
-		break;
-	}
-	case TYPE_8: {
-		uint64_t val;
-		memcpy(&val, key, 8);
-		printf("%lu", val);
-		break;
-	}
-	case TYPE_32:
-	case TYPE_256: {
-		// Print as string, but limit length for readability
-		uint32_t max_len = (tree.node_key_size == TYPE_32) ? 32 : 256;
-		printf("\"");
-		for (uint32_t i = 0; i < max_len && key[i]; i++)
-		{
-			if (key[i] >= 32 && key[i] < 127)
-			{
-				printf("%c", key[i]);
-			}
-			else
-			{
-				printf("\\x%02x", key[i]);
-			}
-			if (i > 10)
-			{ // Truncate long strings
-				printf("...");
-				break;
-			}
-		}
-		printf("\"");
-		break;
-	}
-	default:
+
+
+	// default:
 		printf("?");
-	}
+	// }
 }
 
 // Main B+Tree print function
@@ -1580,7 +1544,7 @@ bplustree_print(BPlusTree *tree)
 	printf("B+Tree Structure (BFS)\n");
 	printf("====================================\n");
 	printf("Root: page_%u\n", tree->root_page_index);
-	printf("Key type: %s, Record size: %u bytes\n", type_to_string(tree->node_key_size), tree->record_size);
+	printf("Key type: %s, Record size: %u bytes\n", type_name(tree->node_key_size), tree->record_size);
 	printf("Internal: max_keys=%u, min_keys=%u\n", tree->internal_max_keys, tree->internal_min_keys);
 	printf("Leaf: max_keys=%u, min_keys=%u\n", tree->leaf_max_keys, tree->leaf_min_keys);
 	printf("------------------------------------\n\n");

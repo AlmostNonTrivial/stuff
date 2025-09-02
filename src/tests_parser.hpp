@@ -85,7 +85,7 @@ inline static void test_multiple_statements() {
     assert(str_eq(create->table_name, "test"));
     assert(create->columns->size == 1);
     assert(str_eq(create->columns->data[0]->name, "id"));
-    assert(create->columns->data[0]->type == TYPE_4);
+    assert(create->columns->data[0]->type == TYPE_U32);
 
     // Test 6: DROP TABLE statement
     Statement* stmt6 = statements->data[5];
@@ -707,25 +707,25 @@ inline static void test_create_table() {
 
     // Check id column
     assert(str_eq(create->columns->data[0]->name, "id"));
-    assert(create->columns->data[0]->type == TYPE_8);
+    assert(create->columns->data[0]->type == TYPE_U64);
     assert(create->columns->data[0]->is_primary_key);
     assert(create->columns->data[0]->is_not_null);
 
     // Check name column
     assert(str_eq(create->columns->data[1]->name, "name"));
-    assert(create->columns->data[1]->type == TYPE_256);
+    assert(create->columns->data[1]->type == TYPE_CHAR256);
     assert(!create->columns->data[1]->is_primary_key);
     assert(create->columns->data[1]->is_not_null);
 
     // Check email column
     assert(str_eq(create->columns->data[2]->name, "email"));
-    assert(create->columns->data[2]->type == TYPE_256);
+    assert(create->columns->data[2]->type == TYPE_CHAR256);
     assert(!create->columns->data[2]->is_primary_key);
     assert(!create->columns->data[2]->is_not_null);
 
     // Check age column
     assert(str_eq(create->columns->data[3]->name, "age"));
-    assert(create->columns->data[3]->type == TYPE_4);
+    assert(create->columns->data[3]->type == TYPE_U32);
 
     parser_reset(&parser);
     printf("  ✓ CREATE TABLE passed\n");

@@ -25,7 +25,7 @@ inline void test_memtree_sequential_ops() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    MemTree tree = memtree_create(TYPE_4, sizeof(uint32_t), false);
+    MemTree tree = memtree_create(TYPE_U32, sizeof(uint32_t), false);
     MemCursor cursor = {.tree = &tree, .ctx = &ctx};
 
     const int COUNT = 1000;
@@ -87,7 +87,7 @@ inline void test_memtree_random_ops() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    MemTree tree = memtree_create(TYPE_4, sizeof(uint64_t), false);
+    MemTree tree = memtree_create(TYPE_U32, sizeof(uint64_t), false);
     MemCursor cursor = {.tree = &tree, .ctx = &ctx};
 
     const int COUNT = 1000;
@@ -157,7 +157,7 @@ inline void test_memtree_duplicates() {
     TestContext ctx;
 
     // Create tree that allows duplicates
-    MemTree tree = memtree_create(TYPE_4, sizeof(uint32_t), true);
+    MemTree tree = memtree_create(TYPE_U32, sizeof(uint32_t), true);
     MemCursor cursor = {.tree = &tree, .ctx = &ctx};
 
     // Insert multiple records with same key
@@ -212,7 +212,7 @@ inline void test_memtree_composite_keys() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    // For TYPE_8 comparison to work correctly with composite keys,
+    // For TYPE_U64 comparison to work correctly with composite keys,
     // we need to pack them into a uint64_t with the primary sort field
     // in the most significant bits
 
@@ -229,7 +229,7 @@ inline void test_memtree_composite_keys() {
         return (uint32_t)(key & 0xFFFFFFFF);
     };
 
-    MemTree tree = memtree_create(TYPE_8, sizeof(uint64_t), false);
+    MemTree tree = memtree_create(TYPE_U64, sizeof(uint64_t), false);
     MemCursor cursor = {.tree = &tree, .ctx = &ctx};
 
     // Insert composite keys
@@ -273,7 +273,7 @@ inline void test_memtree_cursor_operations() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    MemTree tree = memtree_create(TYPE_4, sizeof(uint32_t), false);
+    MemTree tree = memtree_create(TYPE_U32, sizeof(uint32_t), false);
     MemCursor cursor = {.tree = &tree, .ctx = &ctx};
 
     // Insert test data
@@ -347,7 +347,7 @@ inline void test_memtree_edge_cases() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    MemTree tree = memtree_create(TYPE_4, sizeof(uint32_t), false);
+    MemTree tree = memtree_create(TYPE_U32, sizeof(uint32_t), false);
     MemCursor cursor = {.tree = &tree, .ctx = &ctx};
 
     // Empty tree operations
@@ -402,7 +402,7 @@ inline void test_memtree_varchar_keys() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    MemTree tree = memtree_create(TYPE_32, sizeof(uint32_t), false);
+    MemTree tree = memtree_create(TYPE_CHAR32, sizeof(uint32_t), false);
     MemCursor cursor = {.tree = &tree, .ctx = &ctx};
 
     const char* test_strings[] = {

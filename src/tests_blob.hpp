@@ -281,7 +281,7 @@ test_blob()
 	arena::init<QueryArena>(16 * 1024 * 1024);
 
 	pager_open("test_blob.db");
-	init_type_ops();
+
 
 	printf("=== BLOB STORAGE TESTS ===\n");
 

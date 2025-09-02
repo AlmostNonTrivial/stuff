@@ -529,7 +529,7 @@ parse_primary_expr(Parser *parser)
 		lexer_next_token(parser->lexer);
 		Expr *expr = (Expr *)Arena<ParserArena>::alloc(sizeof(Expr));
 		expr->type = EXPR_LITERAL;
-		expr->lit_type = TYPE_4;
+		expr->lit_type = TYPE_U32;
 
 		char *num_str = (char *)Arena<ParserArena>::alloc(token.length + 1);
 		memcpy(num_str, token.text, token.length);
@@ -554,7 +554,7 @@ parse_primary_expr(Parser *parser)
 		lexer_next_token(parser->lexer);
 		Expr *expr = (Expr *)Arena<ParserArena>::alloc(sizeof(Expr));
 		expr->type = EXPR_LITERAL;
-		expr->lit_type = TYPE_32;
+		expr->lit_type = TYPE_CHAR32;
 		expr->str_val = intern_string(token.text, token.length);
 		return expr;
 	}
@@ -1225,11 +1225,11 @@ parse_data_type(Parser *parser)
 {
 	if (consume_keyword(parser, "INT"))
 	{
-		return TYPE_4;
+		return TYPE_U32;
 	}
 	if (consume_keyword(parser, "BIGINT"))
 	{
-		return TYPE_8;
+		return TYPE_U64;
 	}
 	if (consume_keyword(parser, "VARCHAR"))
 	{
@@ -1246,20 +1246,20 @@ parse_data_type(Parser *parser)
 				consume_token(parser, TOKEN_RPAREN);
 
 				if (len <= 32)
-					return TYPE_32;
+					return TYPE_CHAR32;
 				else
-					return TYPE_256;  // Only TYPE_256 for explicitly large sizes
+					return TYPE_CHAR256;  // Only TYPE_CHAR256 for explicitly large sizes
 			}
 			consume_token(parser, TOKEN_RPAREN);
 		}
-		return TYPE_32;  // Default VARCHAR to TYPE_32
+		return TYPE_CHAR32;  // Default VARCHAR to TYPE_CHAR32
 	}
 	if (consume_keyword(parser, "TEXT"))
 	{
-		return TYPE_32;  // Change TEXT default to TYPE_32
+		return TYPE_CHAR32;  // Change TEXT default to TYPE_CHAR32
 	}
 
-	return TYPE_32;  // Default to TYPE_32 instead of TYPE_256
+	return TYPE_CHAR32;  // Default to TYPE_CHAR32 instead of TYPE_CHAR256
 }
 
 CreateIndexStmt *
@@ -1779,10 +1779,10 @@ static const char* unary_op_to_string(UnaryOp op)
 static const char* data_type_to_string(DataType type)
 {
     switch (type) {
-    case TYPE_4: return "INT";
-    case TYPE_8: return "LONG";
-    case TYPE_32:case TYPE_256: return "TEXT";
-    case TYPE_BLOB: return "BLOB";
+    case TYPE_U32: return "INT";
+    case TYPE_U64: return "LONG";
+    case TYPE_CHAR32:case TYPE_CHAR256: return "TEXT";
+    case TYPE_VARCHAR(0): return "BLOB";
     default: return "UNKNOWN";
     }
 }
@@ -1814,11 +1814,11 @@ static void print_expr(Expr* expr, int depth)
     case EXPR_LITERAL:
         printf("Literal[%s]: ", data_type_to_string(expr->lit_type));
         switch (expr->lit_type) {
-        case TYPE_4:
+        case TYPE_U32:
             printf("%lld\n", expr->int_val);
             break;
-        case TYPE_32:
-        case TYPE_256:
+        case TYPE_CHAR32:
+        case TYPE_CHAR256:
             printf("'%s'\n", expr->str_val);
             break;
         default:

@@ -2,48 +2,21 @@
 
 #include <cstddef>
 #include <iostream>
+#include <cstdint>
+#include "types.hpp"
 
 #define PAGE_SIZE 512
-#include <cstdint>
-
-inline void
-thr(char *err)
-{
-
-	std::cout << '\n' << err << '\n';
-	exit(1);
-}
 
 struct Buffer
 {
-	void	*ptr;
+	void  *ptr;
 	size_t size;
 };
-
-
 
 struct QueryArena
 {
 };
 // #define FAIL(msg) ((std::cout << msg << std::endl; exit(1)))
-
-enum DataType : uint32_t
-{
-	TYPE_NULL = 0, //
-	TYPE_2 = 2,
-	TYPE_4 = 4,		// 4-byte integer
-	TYPE_8 = 8,		// 8-byte integer
-	TYPE_32 = 32,	// Variable char up to 32 bytes
-	TYPE_256 = 256, // Variable char up to 256 bytes
-	TYPE_BLOB = 257
-};
-
-// VM value - uses arena allocation for data
-struct TypedValue
-{
-	DataType type;
-	uint8_t *data; // Points to arena-allocated memory
-};
 
 enum ArithOp : uint8_t
 {
@@ -60,7 +33,7 @@ enum LogicOp : uint8_t
 	LOGIC_OR = 1,
 };
 
-enum CompareOp
+enum CompareOp : uint8_t
 {
 	EQ = 0,
 	NE = 1,
@@ -73,97 +46,29 @@ enum CompareOp
 struct MemoryContext
 {
 	void *(*alloc)(size_t size);						// Function pointer for allocation
+	void (*free)(void *ptr, size_t size);				// Function pointer for allocation
 	void (*emit_row)(TypedValue *values, size_t count); // Result callback
 };
 
-int
-cmp(DataType key_size, const uint8_t *key1, const uint8_t *key2);
-
-void
-debug_type(uint8_t *data, DataType type);
-#define NL	  '\n'
-#define END	  << '\n'
-#define PRINT std::cout <<
-#define COMMA << ", " <<
-
-// Function type definitions
-typedef int (*CmpFn)(const uint8_t *, const uint8_t *);
-typedef void (*CopyFn)(uint8_t *dst, const uint8_t *src);
-typedef uint64_t (*ToU64Fn)(const uint8_t *);
-typedef void (*FromU64Fn)(uint8_t *dst, uint64_t val);
-typedef void (*PrintFn)(const uint8_t *);
-typedef size_t (*SizeFn)();
-
-// Arithmetic operations return success/failure for div-by-zero
-typedef bool (*ArithFn)(uint8_t *dst, const uint8_t *a, const uint8_t *b);
-
-// Type operations dispatch table
-struct TypeOps
-{
-	CmpFn	  cmp;
-	CopyFn	  copy;
-	ToU64Fn	  to_u64;	// Convert to u64 for arithmetic
-	FromU64Fn from_u64; // Convert from u64 back
-	PrintFn	  print;
-	SizeFn	  size;
-
-	// Arithmetic ops
-	ArithFn add;
-	ArithFn sub;
-	ArithFn mul;
-	ArithFn div;
-	ArithFn mod;
-};
-
-// Global dispatch table indexed by DataType
-extern TypeOps type_ops[257];
-
-// Initialize dispatch tables (call once at startup)
-void
-init_type_ops();
-
-// Convenience functions that use dispatch tables
-inline int
-cmp(DataType type, const uint8_t *a, const uint8_t *b)
-{
-	return type_ops[type].cmp(a, b);
-}
-
 inline void
-copy_value(DataType type, uint8_t *dst, const uint8_t *src)
+arithmetic(ArithOp op, DataType type, uint8_t *dst, uint8_t *a, uint8_t *b)
 {
-	type_ops[type].copy(dst, src);
-}
-
-inline size_t
-type_size(DataType type)
-{
-	return type_ops[type].size();
-}
-
-inline void
-print_value(DataType type, const uint8_t *data)
-{
-	type_ops[type].print(data);
-}
-
-// Arithmetic with type promotion
-bool
-do_arithmetic(ArithOp op, DataType type, uint8_t *dst, const uint8_t *a, const uint8_t *b);
-inline const char *
-type_to_string(DataType type)
-{
-	switch (type)
+	switch (op)
 	{
-	case TYPE_4:
-		return "INT32";
-	case TYPE_8:
-		return "INT64";
-	case TYPE_32:
-		return "VARCHAR32";
-	case TYPE_256:
-		return "VARCHAR256";
-	default:
-		return "VARCHAR32";
+	case ARITH_ADD:
+		type_add(type, dst, a, b);
+		break;
+	case ARITH_SUB:
+		type_sub(type, dst, a, b);
+		break;
+	case ARITH_MUL:
+		type_mul(type, dst, a, b);
+		break;
+	case ARITH_DIV:
+		type_div(type, dst, a, b);
+		break;
+	case ARITH_MOD:
+		type_mod(type, dst, a, b);
+		break;
 	}
 }
