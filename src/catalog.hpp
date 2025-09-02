@@ -36,6 +36,7 @@ struct Index {
 
 // Table metadata
 struct Table {
+    TypedValue next_id;
     string<SchemaArena> table_name;
     array<Column, SchemaArena> columns;
     hash_map<uint32_t, Index*, SchemaArena> indexes;  // column_index -> Index

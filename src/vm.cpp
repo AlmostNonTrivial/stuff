@@ -12,302 +12,250 @@
 #include <cstdlib>
 #include <cstring>
 #include <ios>
+
 bool _debug = false;
 
-// ============================================================================
-// VmCursor - Unified cursor abstraction
-// ============================================================================
-
-struct VmCursor
+// Initialization functions
+void
+vmcursor_open_table(VmCursor *cur, const RecordLayout &table_layout, BPlusTree *tree)
 {
-	// Cursor type explicitly enumerated
-	enum Type
+	cur->type = VmCursor::BPLUS_TABLE;
+	cur->layout = table_layout;
+	cur->storage.bptree_ptr = tree;
+	cur->cursor.bptree.tree = cur->storage.bptree_ptr;
+	cur->cursor.bptree.state = BPT_CURSOR_INVALID;
+}
+
+void
+vmcursor_open_index(VmCursor *cur, const RecordLayout &index_layout, BPlusTree *tree)
+{
+	cur->type = VmCursor::BPLUS_INDEX;
+	cur->layout = index_layout;
+	cur->storage.bptree_ptr = tree;
+	cur->cursor.bptree.tree = cur->storage.bptree_ptr;
+	cur->cursor.bptree.state = BPT_CURSOR_INVALID;
+}
+
+void
+vmcursor_open_ephemeral(VmCursor *cur, const RecordLayout &ephemeral_layout, MemoryContext *ctx)
+{
+	cur->type = VmCursor::EPHEMERAL;
+	cur->layout = ephemeral_layout;
+	DataType key_type = cur->layout.layout.data[0];
+	cur->storage.mem_tree = memtree_create(key_type, cur->layout.record_size);
+	cur->cursor.mem.tree = &cur->storage.mem_tree;
+	cur->cursor.mem.state = MemCursor::INVALID;
+	cur->cursor.mem.ctx = ctx;
+}
+
+void
+vmcursor_open_blob(VmCursor *cur, MemoryContext *ctx)
+{
+	cur->type = VmCursor::BLOB;
+	cur->cursor.blob.ctx = ctx;
+}
+
+// Navigation functions
+bool
+vmcursor_rewind(VmCursor *cur, bool to_end)
+{
+	switch (cur->type)
 	{
-
-		BPLUS_TABLE, // B+Tree for primary table
-		BPLUS_INDEX, // BTree for secondary index
-		EPHEMERAL,	 // Memory-only temporary cursor
-		BLOB		 // Blob storage cursor
-	};
-
-	Type		 type;
-	RecordLayout layout; // Value type - no pointer needed!
-
-	// Storage backends (union since only one is active)
-	union {
-		BPtCursor  bptree; // B+tree cursor
-		MemCursor  mem;	   // Memory cursor
-		BlobCursor blob;   // Blob cursor
-	} cursor;
-
-	// Storage trees
-	union {
-		BPlusTree *bptree_ptr; // For BPLUS_TABLE/BTREE_INDEX
-		MemTree	   mem_tree;   // For EPHEMERAL (owned by cursor)
-	} storage;
-
-	// ========================================================================
-	// Helper functions
-	// ========================================================================
-
-	// ========================================================================
-	// Initialization
-	// ========================================================================
-	// Legacy compatibility functions
-	void
-	open_table(const RecordLayout &table_layout, BPlusTree *tree)
-	{
-		type = BPLUS_TABLE;
-		layout = table_layout;
-		storage.bptree_ptr = tree;
-		cursor.bptree.tree = storage.bptree_ptr;
-		cursor.bptree.state = BPT_CURSOR_INVALID;
+	case VmCursor::EPHEMERAL:
+		return to_end ? memcursor_last(&cur->cursor.mem) : memcursor_first(&cur->cursor.mem);
+	case VmCursor::BPLUS_INDEX:
+	case VmCursor::BPLUS_TABLE:
+		return to_end ? bplustree_cursor_last(&cur->cursor.bptree) : bplustree_cursor_first(&cur->cursor.bptree);
+	case VmCursor::BLOB:
+	default:
+		return false;
 	}
+}
 
-	void
-	open_index(const RecordLayout &index_layout, BPlusTree *tree)
+bool
+vmcursor_step(VmCursor *cur, bool forward)
+{
+	switch (cur->type)
 	{
-		type = BPLUS_INDEX;
-		layout = index_layout;
-		storage.bptree_ptr = tree;
-		cursor.bptree.tree = storage.bptree_ptr;
-		cursor.bptree.state = BPT_CURSOR_INVALID;
+	case VmCursor::EPHEMERAL:
+		return forward ? memcursor_next(&cur->cursor.mem) : memcursor_previous(&cur->cursor.mem);
+	case VmCursor::BPLUS_INDEX:
+	case VmCursor::BPLUS_TABLE:
+		return forward ? bplustree_cursor_next(&cur->cursor.bptree) : bplustree_cursor_previous(&cur->cursor.bptree);
+	case VmCursor::BLOB:
+	default:
+		return false;
 	}
+}
 
-	void
-	open_ephemeral(const RecordLayout &ephemeral_layout, MemoryContext *ctx)
+bool
+vmcursor_seek(VmCursor *cur, CompareOp op, uint8_t *key)
+{
+	switch (cur->type)
 	{
-		type = EPHEMERAL;
-		layout = ephemeral_layout;
-		DataType key_type = layout.layout.data[0];
-		storage.mem_tree = memtree_create(key_type, layout.record_size);
-		cursor.mem.tree = &storage.mem_tree;
-		cursor.mem.state = MemCursor::INVALID;
-		cursor.mem.ctx = ctx;
+	case VmCursor::EPHEMERAL:
+		return memcursor_seek_cmp(&cur->cursor.mem, key, op);
+	case VmCursor::BPLUS_INDEX:
+	case VmCursor::BPLUS_TABLE:
+		return bplustree_cursor_seek_cmp(&cur->cursor.bptree, key, op);
+	case VmCursor::BLOB:
+		return blob_cursor_seek(&cur->cursor.blob, *(uint32_t *)key);
+	default:
+		return false;
 	}
+}
 
-	void
-	open_blob(MemoryContext *ctx)
+bool
+vmcursor_is_valid(VmCursor *cur)
+{
+	switch (cur->type)
 	{
-		type = BLOB;
-		cursor.blob.ctx = ctx;
+	case VmCursor::EPHEMERAL:
+		return memcursor_is_valid(&cur->cursor.mem);
+	case VmCursor::BPLUS_INDEX:
+	case VmCursor::BPLUS_TABLE:
+		return bplustree_cursor_is_valid(&cur->cursor.bptree);
+	case VmCursor::BLOB:
+	default:
+		return false;
 	}
+}
 
-	// ========================================================================
-	// Unified Navigation
-	// ========================================================================
-	bool
-	rewind(bool to_end = false)
+// Data access functions
+uint8_t *
+vmcursor_get_key(VmCursor *cur)
+{
+	switch (cur->type)
 	{
-		switch (type)
+	case VmCursor::EPHEMERAL:
+		return memcursor_key(&cur->cursor.mem);
+	case VmCursor::BPLUS_INDEX:
+	case VmCursor::BPLUS_TABLE:
+		return bplustree_cursor_key(&cur->cursor.bptree);
+	case VmCursor::BLOB:
+	default:
+		return nullptr;
+	}
+}
+
+uint8_t *
+vmcursor_get_record(VmCursor *cur)
+{
+	switch (cur->type)
+	{
+	case VmCursor::EPHEMERAL:
+		return memcursor_record(&cur->cursor.mem);
+	case VmCursor::BPLUS_INDEX:
+	case VmCursor::BPLUS_TABLE:
+		return bplustree_cursor_record(&cur->cursor.bptree);
+	case VmCursor::BLOB:
+		return (uint8_t *)blob_cursor_record(&cur->cursor.blob).ptr;
+	default:
+		return nullptr;
+	}
+}
+
+uint8_t *
+vmcursor_column(VmCursor *cur, uint32_t col_index)
+{
+	if (col_index == 0)
+	{
+		return vmcursor_get_key(cur);
+	}
+	uint8_t *record = vmcursor_get_record(cur);
+	return record + cur->layout.offsets.data[col_index - 1];
+}
+
+DataType
+vmcursor_column_type(VmCursor *cur, uint32_t col_index)
+{
+	return cur->layout.layout.data[col_index];
+}
+
+// Modification functions
+bool
+vmcursor_insert(VmCursor *cur, uint8_t *key, uint8_t *record, uint32_t size)
+{
+	switch (cur->type)
+	{
+	case VmCursor::EPHEMERAL:
+		return memcursor_insert(&cur->cursor.mem, key, record);
+	case VmCursor::BPLUS_TABLE:
+	case VmCursor::BPLUS_INDEX:
+		return bplustree_cursor_insert(&cur->cursor.bptree, key, record);
+	case VmCursor::BLOB:
+		return blob_cursor_insert(&cur->cursor.blob, record, size);
+	default:
+		return false;
+	}
+}
+
+bool
+vmcursor_update(VmCursor *cur, uint8_t *record)
+{
+	switch (cur->type)
+	{
+	case VmCursor::EPHEMERAL:
+		return memcursor_update(&cur->cursor.mem, record);
+	case VmCursor::BPLUS_INDEX:
+	case VmCursor::BPLUS_TABLE:
+		return bplustree_cursor_update(&cur->cursor.bptree, record);
+	case VmCursor::BLOB:
+	default:
+		return false;
+	}
+}
+
+bool
+vmcursor_remove(VmCursor *cur)
+{
+	switch (cur->type)
+	{
+	case VmCursor::EPHEMERAL:
+		return memcursor_delete(&cur->cursor.mem);
+	case VmCursor::BPLUS_INDEX:
+	case VmCursor::BPLUS_TABLE:
+		return bplustree_cursor_delete(&cur->cursor.bptree);
+	case VmCursor::BLOB:
+		return blob_cursor_delete(&cur->cursor.blob);
+	default:
+		return false;
+	}
+}
+
+// Utility functions
+const char *
+vmcursor_type_name(VmCursor *cur)
+{
+	switch (cur->type)
+	{
+	case VmCursor::EPHEMERAL:
+		return "MEMTREE";
+	case VmCursor::BPLUS_INDEX:
+		return "BTREE_INDEX";
+	case VmCursor::BPLUS_TABLE:
+		return "BPLUS_TABLE";
+	case VmCursor::BLOB:
+		return "BLOB";
+	}
+	return "UNKNOWN";
+}
+
+void
+vmcursor_print_current(VmCursor *cur)
+{
+	printf("Cursor type=%s, valid=%d", vmcursor_type_name(cur), vmcursor_is_valid(cur));
+	if (vmcursor_is_valid(cur))
+	{
+		uint8_t *key = vmcursor_get_key(cur);
+		if (key)
 		{
-		case EPHEMERAL:
-			return to_end ? memcursor_last(&cursor.mem) : memcursor_first(&cursor.mem);
-		case BPLUS_INDEX:
-		case BPLUS_TABLE:
-			return to_end ? bplustree_cursor_last(&cursor.bptree) : bplustree_cursor_first(&cursor.bptree);
-		case BLOB:
-		default:
-			return false;
+			printf(", key=");
+			print_value(cur->layout.layout.data[0], key);
 		}
 	}
-
-	bool
-	step(bool forward = true)
-	{
-		switch (type)
-		{
-		case EPHEMERAL:
-			return forward ? memcursor_next(&cursor.mem) : memcursor_previous(&cursor.mem);
-
-		case BPLUS_INDEX:
-		case BPLUS_TABLE:
-			return forward ? bplustree_cursor_next(&cursor.bptree) : bplustree_cursor_previous(&cursor.bptree);
-		case BLOB:
-		default:
-			return false;
-		}
-	}
-
-	bool
-	seek(CompareOp op, uint8_t *key)
-	{
-		switch (type)
-		{
-		case EPHEMERAL:
-			return memcursor_seek_cmp(&cursor.mem, key, op);
-
-		case BPLUS_INDEX:
-		case BPLUS_TABLE:
-			return bplustree_cursor_seek_cmp(&cursor.bptree, key, op);
-		case BLOB:
-			return blob_cursor_seek(&cursor.blob, *(uint32_t*)key);
-		default:
-			return false;
-		}
-	}
-
-	bool
-	is_valid()
-	{
-		switch (type)
-		{
-		case EPHEMERAL:
-			return memcursor_is_valid(&cursor.mem);
-		case BPLUS_INDEX:
-		case BPLUS_TABLE:
-			return bplustree_cursor_is_valid(&cursor.bptree);
-		case BLOB:
-		default:
-			return false;
-		}
-	}
-
-	// ========================================================================
-	// Data Access
-	// ========================================================================
-	uint8_t *
-	get_key()
-	{
-		switch (type)
-		{
-		case EPHEMERAL:
-			return memcursor_key(&cursor.mem);
-		case BPLUS_INDEX:
-		case BPLUS_TABLE:
-			return bplustree_cursor_key(&cursor.bptree);
-		case BLOB:
-		default:
-			return nullptr;
-		}
-	}
-
-	uint8_t *
-	get_record()
-	{
-		switch (type)
-		{
-		case EPHEMERAL:
-			return memcursor_record(&cursor.mem);
-		case BPLUS_INDEX:
-		case BPLUS_TABLE:
-			return bplustree_cursor_record(&cursor.bptree);
-
-		case BLOB:
-			return (uint8_t*)blob_cursor_record(&cursor.blob).ptr;
-		default:
-			return nullptr;
-		}
-	}
-
-	uint8_t *
-	column(uint32_t col_index)
-	{
-		if (col_index == 0)
-		{
-			return get_key();
-		}
-		uint8_t *record = get_record();
-
-		return record + layout.offsets.data[col_index - 1];
-	}
-
-	DataType
-	column_type(uint32_t col_index)
-	{
-		return layout.layout.data[col_index];
-	}
-
-	// ========================================================================
-	// Modification Operations
-	// ========================================================================
-	bool
-	insert(uint8_t *key, uint8_t *record, uint32_t size = 0)
-	{
-		switch (type)
-		{
-		case EPHEMERAL:
-			return memcursor_insert(&cursor.mem, key, record);
-		case BPLUS_TABLE:
-		case BPLUS_INDEX:
-			return bplustree_cursor_insert(&cursor.bptree, key, record);
-		case BLOB:
-			return blob_cursor_insert(&cursor.blob, record, size);
-		default:
-			return false;
-		}
-	}
-
-	bool
-	update(uint8_t *record)
-	{
-		switch (type)
-		{
-		case EPHEMERAL:
-			return memcursor_update(&cursor.mem, record);
-		case BPLUS_INDEX:
-		case BPLUS_TABLE:
-			return bplustree_cursor_update(&cursor.bptree, record);
-		case BLOB:
-		default:
-			return false;
-		}
-	}
-
-	bool
-	remove()
-	{
-		switch (type)
-		{
-		case EPHEMERAL:
-			return memcursor_delete(&cursor.mem);
-		case BPLUS_INDEX:
-		case BPLUS_TABLE:
-			return bplustree_cursor_delete(&cursor.bptree);
-		case BLOB:
-			return blob_cursor_delete(&cursor.blob);
-		default:
-			return false;
-		}
-	}
-
-	const char *
-	type_name()
-	{
-		switch (type)
-		{
-		case EPHEMERAL:
-			return "MEMTREE";
-		case BPLUS_INDEX:
-			return "BTREE_INDEX";
-		case BPLUS_TABLE:
-			return "BPLUS_TABLE";
-		case BLOB:
-			return "BLOB";
-		}
-		return "UNKNOWN";
-	}
-
-	// Debug helper
-	void
-	print_current()
-	{
-		printf("Cursor type=%s, valid=%d", type_name(), is_valid());
-		if (is_valid())
-		{
-			uint8_t *key = get_key();
-			if (key)
-			{
-				printf(", key=");
-				print_value(layout.layout.data[0], key);
-			}
-		}
-		printf("\n");
-	}
-};
-// ============================================================================
-// VmCursor - Unified cursor abstraction
-// ============================================================================
+	printf("\n");
+}
 
 // ============================================================================
 // VM State
@@ -345,12 +293,18 @@ set_register(VMValue *dest, uint8_t *data, DataType type)
 	}
 }
 static void
-build_record(uint8_t *data, int32_t first_reg, int32_t count)
+build_record(uint8_t *data, int32_t first_reg)
 {
 	int32_t offset = 0;
-	for (int i = 0; i < count; i++)
+	int		i = 0;
+	while (true)
 	{
-		VMValue *val = &VM.registers[first_reg + i];
+		VMValue *val = &VM.registers[first_reg + i++];
+		if (TYPE_NULL == val->type)
+		{
+			break;
+		}
+
 		uint32_t size = val->type;
 		memcpy(data + offset, val->data, size);
 		offset += size;
@@ -391,7 +345,7 @@ vm_debug_print_cursor(int cursor_id)
 	if (cursor_id >= 0 && cursor_id < CURSORS)
 	{
 		printf("===== CURSOR %d =====\n", cursor_id);
-		VM.cursors[cursor_id].print_current();
+		vmcursor_print_current(&VM.cursors[cursor_id]);
 		printf("====================\n");
 	}
 }
@@ -498,31 +452,19 @@ step()
 		VM.pc++;
 		return OK;
 	}
-		// One opcode, multiple pattern types
-	case OP_Pattern: {
-		int32_t		str_reg = Opcodes::Pattern::str_reg(*inst);
-		int32_t		pattern_reg = Opcodes::Pattern::pattern_reg(*inst);
-		int32_t		result_reg = Opcodes::Pattern::result_reg(*inst);
-		PatternType type = Opcodes::Pattern::pattern_type(*inst);
+	// One opcode, multiple pattern types
+	case OP_Function: {
+		int32_t	   dest = inst->p1;
+		int32_t	   first_arg = inst->p2;
+		int32_t	   count = inst->p3;
+		VMFunction fn = (VMFunction)inst->p4;
 
-		VMValue *str = &VM.registers[str_reg];
-		VMValue *pattern = &VM.registers[pattern_reg];
+		// Pass registers directly as array
+		bool success = fn(&VM.registers[dest], &VM.registers[first_arg], count, VM.ctx);
 
-		bool matches = false;
-		switch (type)
-		{
-		case PATTERN_LIKE:
-			matches = evaluate_like_pattern(str->data, pattern->data, str->type, pattern->type);
-			break;
-		case PATTERN_CONTAINS:
-			matches = (strstr((char *)str->data, (char *)pattern->data) != nullptr);
-			break;
-		default:
-			return ERR;
+		if (!success) {
+				return ERR;
 		}
-
-		VM.registers[result_reg].type = TYPE_4;
-		*(uint32_t *)VM.registers[result_reg].data = matches ? 1 : 0;
 
 		VM.pc++;
 		return OK;
@@ -643,7 +585,7 @@ step()
 		if (is_ephemeral)
 		{
 			RecordLayout *layout = Opcodes::Open::ephemeral_schema(*inst);
-			cursor.open_ephemeral(*layout, VM.ctx);
+			vmcursor_open_ephemeral(&cursor, *layout, VM.ctx);
 			if (_debug)
 			{
 				printf("=> Opened ephemeral cursor %d", cursor_id);
@@ -656,7 +598,7 @@ step()
 			if (index_column != 0)
 			{
 				Index *index = get_index(table_name, index_column);
-				cursor.open_index(index->to_layout(), &index->btree);
+				vmcursor_open_index(&cursor, index->to_layout(), &index->btree);
 				if (_debug)
 				{
 					printf("=> Opened index cursor %d on "
@@ -667,7 +609,7 @@ step()
 			else
 			{
 				Table *table = get_table(table_name);
-				cursor.open_table(table->to_layout(), &table->bplustree);
+				vmcursor_open_table(&cursor, table->to_layout(), &table->bplustree);
 				if (_debug)
 				{
 					printf("=> Opened table cursor %d on %s", cursor_id, table_name);
@@ -693,7 +635,7 @@ step()
 		int32_t	  jump_if_empty = Opcodes::Rewind::jump_if_empty(*inst);
 		bool	  to_end = Opcodes::Rewind::to_end(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
-		bool	  valid = cursor->rewind(to_end);
+		bool	  valid = vmcursor_rewind(cursor, to_end);
 		if (_debug)
 		{
 			printf("=> Cursor %d rewound to %s, valid=%d", cursor_id, to_end ? "end" : "start", valid);
@@ -717,7 +659,7 @@ step()
 		int32_t	  jump_if_done = Opcodes::Step::jump_if_done(*inst);
 		bool	  forward = Opcodes::Step::forward(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
-		bool	  has_more = cursor->step(forward);
+		bool	  has_more = vmcursor_step(cursor, forward);
 		if (_debug)
 		{
 			printf("=> Cursor %d stepped %s, has_more=%d", cursor_id, forward ? "forward" : "backward", has_more);
@@ -745,9 +687,7 @@ step()
 		VMValue	 *key = &VM.registers[key_reg];
 		bool	  found;
 
-
-
-		found = cursor->seek(op, key->data);
+		found = vmcursor_seek(cursor, op, key->data);
 
 		if (_debug)
 		{
@@ -775,8 +715,8 @@ step()
 		int32_t	  col_index = Opcodes::Column::column_index(*inst);
 		int32_t	  dest_reg = Opcodes::Column::dest_reg(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
-		uint8_t	 *data = cursor->column(col_index);
-		DataType  type = cursor->column_type(col_index);
+		uint8_t	 *data = vmcursor_column(cursor, col_index);
+		DataType  type = vmcursor_column_type(cursor, col_index);
 		if (_debug)
 		{
 			printf("=> R[%d] = cursor[%d].col[%d] = ", dest_reg, cursor_id, col_index);
@@ -799,8 +739,8 @@ step()
 		int32_t	  delete_occured = Opcodes::Delete::delete_occured_reg(*inst);
 		int32_t	  cursor_valid = Opcodes::Delete::cursor_valid_reg(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
-		int32_t	  success = cursor->remove() ? 1 : 0;
-		int32_t	  valid = cursor->is_valid() ? 1 : 0;
+		int32_t	  success = vmcursor_remove(cursor) ? 1 : 0;
+		int32_t	  valid = vmcursor_is_valid(cursor) ? 1 : 0;
 		set_register(&VM.registers[delete_occured], (uint8_t *)&success, TYPE_4);
 		set_register(&VM.registers[cursor_valid], (uint8_t *)&valid, TYPE_4);
 
@@ -812,31 +752,35 @@ step()
 		return OK;
 	}
 	case OP_Insert: {
-		int32_t	  cursor_id = Opcodes::Insert::cursor_id(*inst);
-		int32_t	  key_reg = Opcodes::Insert::key_reg(*inst);
-		VmCursor *cursor = &VM.cursors[cursor_id];
-		VMValue	 *key = &VM.registers[key_reg];
+		int32_t cursor_id = Opcodes::Insert::cursor_id(*inst);
+		int32_t key_reg = Opcodes::Insert::key_reg(*inst);
+		int32_t count = Opcodes::Insert::reg_count(*inst);
 
-		bool	success;
-		int32_t count;
-		if (Opcodes::Insert::is_variable_length(*inst))
+		VmCursor *cursor = &VM.cursors[cursor_id];
+		VMValue	 *first = &VM.registers[key_reg];
+
+		bool success;
+		if (1 > count)
 		{
-			uint32_t size = Opcodes::Insert::size(*inst);
-			success = cursor->insert(key->data, key->data, size);
-			count = 2;
+		/*
+		    If we have a single register record it's either a signle VMValue, hence doensn't need to be
+			built, or b) is a pointer to a blob
+	    */
+			VMValue *value = &VM.registers[key_reg + 1];
+			success = vmcursor_insert(cursor, first->data, value->data, value->type);
 		}
 		else
 		{
-			count = Opcodes::Insert::reg_count(*inst);
 			uint8_t data[cursor->layout.record_size];
-			build_record(data, key_reg + 1, count - 1);
-			success = cursor->insert(key->data, data);
+			build_record(data, key_reg + 1);
+
+			success = vmcursor_insert(cursor, first->data, data, cursor->layout.record_size);
 		}
 
 		if (_debug)
 		{
 			printf("=> Cursor %d insert key=", cursor_id);
-			print_value(key->type, key->data);
+			print_value(first->type, first->data);
 			printf(" with %d values, success=%d", count - 1, success);
 		}
 		if (!success)
@@ -851,8 +795,8 @@ step()
 		int32_t	  record_reg = Opcodes::Update::record_reg(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
 		uint8_t	  data[cursor->layout.record_size];
-		build_record(data, record_reg, cursor->layout.layout.size - 1);
-		bool success = cursor->update(data);
+		build_record(data, record_reg);
+		bool success = vmcursor_update(cursor, data);
 		if (_debug)
 		{
 			printf("=> Cursor %d update with data from R[%d], "

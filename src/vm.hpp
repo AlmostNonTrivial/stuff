@@ -11,15 +11,73 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-struct VMValue {
+struct VMValue
+{
 	DataType type;
-	uint8_t data[TYPE_256];
+	uint8_t	 data[TYPE_256];
 };
 
+typedef bool (*VMFunction)(
+    VMValue* result,           // Output register
+    VMValue* args,            // Input registers array
+    uint32_t arg_count,       // Number of arguments
+    MemoryContext* ctx       // For allocation if needed
+);
+
+
+// POD struct - data only
+struct VmCursor
+{
+    enum Type
+    {
+        BPLUS_TABLE,
+        BPLUS_INDEX,
+        EPHEMERAL,
+        BLOB
+    };
+
+    Type type;
+    RecordLayout layout;
+
+    union {
+        BPtCursor bptree;
+        MemCursor mem;
+        BlobCursor blob;
+    } cursor;
+
+    union {
+        BPlusTree* bptree_ptr;
+        MemTree mem_tree;
+    } storage;
+};
+
+// Function declarations
+void vmcursor_open_table(VmCursor* cur, const RecordLayout& table_layout, BPlusTree* tree);
+void vmcursor_open_index(VmCursor* cur, const RecordLayout& index_layout, BPlusTree* tree);
+void vmcursor_open_ephemeral(VmCursor* cur, const RecordLayout& ephemeral_layout, MemoryContext* ctx);
+void vmcursor_open_blob(VmCursor* cur, MemoryContext* ctx);
+
+bool vmcursor_rewind(VmCursor* cur, bool to_end = false);
+bool vmcursor_step(VmCursor* cur, bool forward = true);
+bool vmcursor_seek(VmCursor* cur, CompareOp op, uint8_t* key);
+bool vmcursor_is_valid(VmCursor* cur);
+
+uint8_t* vmcursor_get_key(VmCursor* cur);
+uint8_t* vmcursor_get_record(VmCursor* cur);
+uint8_t* vmcursor_column(VmCursor* cur, uint32_t col_index);
+DataType vmcursor_column_type(VmCursor* cur, uint32_t col_index);
+
+bool vmcursor_insert(VmCursor* cur, uint8_t* key, uint8_t* record, uint32_t size = 0);
+bool vmcursor_update(VmCursor* cur, uint8_t* record);
+bool vmcursor_remove(VmCursor* cur);
+
+const char* vmcursor_type_name(VmCursor* cur);
+void vmcursor_print_current(VmCursor* cur);
 
 typedef void (*ResultCallback)(array<TypedValue, QueryArena> result);
 extern bool _debug;
-enum OpCode : uint32_t {
+enum OpCode : uint32_t
+{
 	// Control flow
 	OP_Goto = 1,
 	OP_Halt = 2,
@@ -44,18 +102,20 @@ enum OpCode : uint32_t {
 	OP_JumpIf = 52,
 	OP_Logic = 53,
 	OP_Result = 54,
-	OP_Pattern = 61,
+	OP_Function= 61,
 };
-struct VMInstruction {
-	OpCode opcode;
+struct VMInstruction
+{
+	OpCode	opcode;
 	int32_t p1;
 	int32_t p2;
 	int32_t p3;
-	void *p4;
+	void   *p4;
 	uint8_t p5;
 };
 
-enum PatternType : uint8_t {
+enum PatternType : uint8_t
+{
 	PATTERN_LIKE = 0,
 	PATTERN_CONTAINS = 1,
 };
@@ -68,7 +128,7 @@ namespace Opcodes
 namespace Goto
 {
 inline VMInstruction
-create(char*label)
+create(char *label)
 {
 	return {OP_Goto, 0, -1, 0, label, 0};
 }
@@ -105,8 +165,7 @@ print(const VMInstruction &inst)
 namespace Open
 {
 inline VMInstruction
-create_btree(int32_t cursor_id, const char *table_name, int32_t index_col = 0,
-	     bool is_write = false)
+create_btree(int32_t cursor_id, const char *table_name, int32_t index_col = 0, bool is_write = false)
 {
 	uint8_t flags = (is_write ? 0x01 : 0);
 	return {OP_Open, cursor_id, index_col, 0, (void *)table_name, flags};
@@ -150,12 +209,13 @@ is_ephemeral(const VMInstruction &inst)
 inline void
 print(const VMInstruction &inst)
 {
-	if (is_ephemeral(inst)) {
-		printf("Open cursor=%d ephemeral write=%d", inst.p1,
-		       is_write(inst));
-	} else {
-		printf("Open cursor=%d table=%s index_col=%d write=%d", inst.p1,
-		       table_name(inst), inst.p2, is_write(inst));
+	if (is_ephemeral(inst))
+	{
+		printf("Open cursor=%d ephemeral write=%d", inst.p1, is_write(inst));
+	}
+	else
+	{
+		printf("Open cursor=%d table=%s index_col=%d write=%d", inst.p1, table_name(inst), inst.p2, is_write(inst));
 	}
 }
 } // namespace Open
@@ -180,10 +240,9 @@ print(const VMInstruction &inst)
 namespace Rewind
 {
 inline VMInstruction
-create(int32_t cursor_id, char*label, bool to_end = false)
+create(int32_t cursor_id, char *label, bool to_end = false)
 {
-	return {OP_Rewind, cursor_id, -1,
-		0,	   label,   (uint8_t)to_end};
+	return {OP_Rewind, cursor_id, -1, 0, label, (uint8_t)to_end};
 }
 inline int32_t
 cursor_id(const VMInstruction &inst)
@@ -203,14 +262,13 @@ to_end(const VMInstruction &inst)
 inline void
 print(const VMInstruction &inst)
 {
-	printf("Rewind cursor=%d jump_if_empty=%d to_end=%d", inst.p1, inst.p2,
-	       inst.p5);
+	printf("Rewind cursor=%d jump_if_empty=%d to_end=%d", inst.p1, inst.p2, inst.p5);
 }
 } // namespace Rewind
 namespace Step
 {
 inline VMInstruction
-create(int32_t cursor_id, char* jump_label = nullptr, bool forward = true)
+create(int32_t cursor_id, char *jump_label = nullptr, bool forward = true)
 {
 	return {OP_Step, cursor_id, -1, 0, jump_label, (uint8_t)forward};
 }
@@ -232,8 +290,7 @@ forward(const VMInstruction &inst)
 inline void
 print(const VMInstruction &inst)
 {
-	printf("Step cursor=%d jump_if_done=%d forward=%d", inst.p1, inst.p2,
-	       inst.p5);
+	printf("Step cursor=%d jump_if_done=%d forward=%d", inst.p1, inst.p2, inst.p5);
 }
 } // namespace Step
 namespace Seek
@@ -267,8 +324,7 @@ inline void
 print(const VMInstruction &inst)
 {
 	const char *op_names[] = {"EQ", "NE", "LT", "LE", "GT", "GE"};
-	printf("Seek cursor=%d key_reg=%d jump_if_not=%d op=%s", inst.p1,
-	       inst.p2, inst.p3, op_names[inst.p5]);
+	printf("Seek cursor=%d key_reg=%d jump_if_not=%d op=%s", inst.p1, inst.p2, inst.p3, op_names[inst.p5]);
 }
 } // namespace Seek
 // Data Operations
@@ -297,8 +353,7 @@ dest_reg(const VMInstruction &inst)
 inline void
 print(const VMInstruction &inst)
 {
-	printf("Column cursor=%d col=%d dest_reg=%d", inst.p1, inst.p2,
-	       inst.p3);
+	printf("Column cursor=%d col=%d dest_reg=%d", inst.p1, inst.p2, inst.p3);
 }
 } // namespace Column
 namespace Insert
@@ -306,14 +361,9 @@ namespace Insert
 inline VMInstruction
 create(int32_t cursor_id, int32_t start_reg, int32_t reg_count)
 {
-	return {OP_Insert, cursor_id, start_reg,
-		reg_count, nullptr,   (uint8_t)false};
+	return {OP_Insert, cursor_id, start_reg, reg_count, nullptr, 0};
 }
-inline VMInstruction
-create_variable(int32_t cursor_id, int32_t src_reg, int32_t size)
-{
-	return {OP_Insert, cursor_id, src_reg, size, nullptr, (uint8_t)true};
-}
+
 inline int32_t
 cursor_id(const VMInstruction &inst)
 {
@@ -334,16 +384,10 @@ uint32_t inline size(const VMInstruction &inst)
 	return inst.p3;
 }
 
-inline bool
-is_variable_length(const VMInstruction &inst)
-{
-	return (bool)inst.p5;
-}
 inline void
 print(const VMInstruction &inst)
 {
-	printf("Insert cursor=%d key_reg=%d reg_count=%d", inst.p1, inst.p2,
-	       inst.p3);
+	printf("Insert cursor=%d key_reg=%d reg_count=%d", inst.p1, inst.p2, inst.p3);
 }
 } // namespace Insert
 namespace Delete
@@ -368,7 +412,6 @@ cursor_valid_reg(const VMInstruction &inst)
 {
 	return inst.p2;
 }
-
 
 inline void
 print(const VMInstruction &inst)
@@ -440,13 +483,17 @@ type(const VMInstruction &inst)
 inline void
 print(const VMInstruction &inst)
 {
-	if (inst.opcode == OP_Load) {
+	if (inst.opcode == OP_Load)
+	{
 		printf("Load reg=%d type=%d", inst.p1, inst.p2);
-		if (inst.p4) {
+		if (inst.p4)
+		{
 			printf(" value=");
 			print_value((DataType)inst.p2, (uint8_t *)inst.p4);
 		}
-	} else {
+	}
+	else
+	{
 		printf("Move dest=%d src=%d", inst.p1, inst.p3);
 	}
 }
@@ -483,8 +530,7 @@ inline void
 print(const VMInstruction &inst)
 {
 	const char *op_names[] = {"EQ", "NE", "LT", "LE", "GT", "GE"};
-	printf("Test dest=%d left=%d right=%d op=%s", inst.p1, inst.p2, inst.p3,
-	       op_names[inst.p5]);
+	printf("Test dest=%d left=%d right=%d op=%s", inst.p1, inst.p2, inst.p3, op_names[inst.p5]);
 }
 } // namespace Test
 namespace Arithmetic
@@ -492,8 +538,7 @@ namespace Arithmetic
 inline VMInstruction
 create(int32_t dest_reg, int32_t left_reg, int32_t right_reg, ArithOp op)
 {
-	return {OP_Arithmetic, dest_reg, left_reg,
-		right_reg,     nullptr,	 (uint8_t)op};
+	return {OP_Arithmetic, dest_reg, left_reg, right_reg, nullptr, (uint8_t)op};
 }
 inline int32_t
 dest_reg(const VMInstruction &inst)
@@ -519,17 +564,15 @@ inline void
 print(const VMInstruction &inst)
 {
 	const char *op_names[] = {"ADD", "SUB", "MUL", "DIV", "MOD"};
-	printf("Arithmetic dest=%d left=%d right=%d op=%s", inst.p1, inst.p2,
-	       inst.p3, op_names[inst.p5]);
+	printf("Arithmetic dest=%d left=%d right=%d op=%s", inst.p1, inst.p2, inst.p3, op_names[inst.p5]);
 }
 } // namespace Arithmetic
 namespace JumpIf
 {
 inline VMInstruction
-create(int32_t test_reg, char* jump_label, bool jump_on_true = true)
+create(int32_t test_reg, char *jump_label, bool jump_on_true = true)
 {
-	return {OP_JumpIf, test_reg, -1,
-		0,	   jump_label,  (uint8_t)jump_on_true};
+	return {OP_JumpIf, test_reg, -1, 0, jump_label, (uint8_t)jump_on_true};
 }
 inline int32_t
 test_reg(const VMInstruction &inst)
@@ -549,8 +592,7 @@ jump_on_true(const VMInstruction &inst)
 inline void
 print(const VMInstruction &inst)
 {
-	printf("JumpIf test_reg=%d target=%d on_true=%d", inst.p1, inst.p2,
-	       inst.p5);
+	printf("JumpIf test_reg=%d target=%d on_true=%d", inst.p1, inst.p2, inst.p5);
 }
 } // namespace JumpIf
 namespace Logic
@@ -584,8 +626,7 @@ inline void
 print(const VMInstruction &inst)
 {
 	const char *op_names[] = {"AND", "OR"};
-	printf("Logic dest=%d left=%d right=%d op=%s", inst.p1, inst.p2,
-	       inst.p3, op_names[inst.p5]);
+	printf("Logic dest=%d left=%d right=%d op=%s", inst.p1, inst.p2, inst.p3, op_names[inst.p5]);
 }
 } // namespace Logic
 namespace Result
@@ -611,46 +652,27 @@ print(const VMInstruction &inst)
 	printf("Result first_reg=%d count=%d", inst.p1, inst.p2);
 }
 } // namespace Result
-namespace Pattern
-{
-inline VMInstruction
-create(int32_t str_reg, int32_t pattern_reg, int32_t result_reg,
-       PatternType type)
-{
-	return {OP_Pattern,   str_reg, pattern_reg, result_reg, nullptr,
 
-		(uint8_t)type};
-}
+namespace Function {
+    inline VMInstruction create(
+        int32_t dest_reg,      // Where to put result
+        int32_t first_arg_reg, // First argument register
+        int32_t arg_count,     // Number of arguments
+        VMFunction *fn_ptr      // Function pointer
+    ) {
+        return {OP_Function, dest_reg, first_arg_reg, arg_count, fn_ptr, 0};
+    }
 
-inline int32_t
-str_reg(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline int32_t
-pattern_reg(const VMInstruction &inst)
-{
+    inline int32_t
+    reg_count(const VMInstruction &inst)
+    {
 	return inst.p2;
-}
-inline int32_t
-result_reg(const VMInstruction &inst)
-{
-	return inst.p3;
-}
-inline PatternType
-pattern_type(const VMInstruction &inst)
-{
-	return (PatternType)inst.p5;
+    }
+
 }
 
-inline void
-print(const VMInstruction &inst)
-{
-	printf(
-	    "Like str_reg=%d pattern_reg=%d result_reg=%d case_insensitive=%d",
-	    inst.p1, inst.p2, inst.p3, inst.p5);
-}
-} // namespace Pattern
+
+ // namespace Pattern
 } // namespace Opcodes
 // ============================================================================
 // Debug Namespace
@@ -660,7 +682,8 @@ namespace Debug
 inline const char *
 opcode_name(OpCode op)
 {
-	switch (op) {
+	switch (op)
+	{
 	case OP_Goto:
 		return "Goto";
 	case OP_Halt:
@@ -704,11 +727,13 @@ opcode_name(OpCode op)
 inline void
 print_instruction(const VMInstruction &inst, int pc = -1)
 {
-	if (pc >= 0) {
+	if (pc >= 0)
+	{
 		printf("%3d: ", pc);
 	}
 	printf("%-12s ", opcode_name(inst.opcode));
-	switch (inst.opcode) {
+	switch (inst.opcode)
+	{
 	case OP_Goto:
 		Opcodes::Goto::print(inst);
 		break;
@@ -770,7 +795,8 @@ inline void
 print_program(VMInstruction *program, int program_size)
 {
 	printf("===== VM PROGRAM (%zu instructions) =====\n", program_size);
-	for (size_t i = 0; i < program_size; i++) {
+	for (size_t i = 0; i < program_size; i++)
+	{
 		print_instruction(program[i], i);
 	}
 	printf("==========================================\n");
@@ -793,11 +819,15 @@ print_cursor_state(int cursor_id, const char *state)
 // VM Runtime Definitions
 #define REGISTERS 40
 #define CURSORS	  10
-enum VM_RESULT { OK, ABORT, ERR };
+enum VM_RESULT
+{
+	OK,
+	ABORT,
+	ERR
+};
 // VM Functions
 VM_RESULT
-vm_execute(VMInstruction *instructions, int instruction_count,
-	   MemoryContext *ctx);
+vm_execute(VMInstruction *instructions, int instruction_count, MemoryContext *ctx);
 
 void
 vm_debug_print_all_registers();

@@ -781,6 +781,13 @@ pager_rollback()
 	return true;
 }
 
+
+/* Returns the next page that will be allocted */
+uint32_t pager_get_next() {
+    uint32_t free_page = PAGER.root.free_page_head;
+    return free_page != ROOT_PAGE_INDEX ? free_page : PAGER.root.page_counter;
+}
+
 void
 pager_close()
 {

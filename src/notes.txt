@@ -1,11 +1,2 @@
-
-TO CONSIDER:
-mass delete program logic
-BUGS:
-
-TESTING:
-
-
 TODO:
 query validation.
-get rid of stl and perfect containers

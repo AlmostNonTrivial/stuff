@@ -1,9 +1,11 @@
 // schema.cpp - Custom container version
 #include "catalog.hpp"
+#include "vm.hpp"
 #include "arena.hpp"
 #include "parser.hpp"
 #include "bplustree.hpp"
 #include "defs.hpp"
+#include "vm.hpp"
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -388,4 +390,80 @@ create_master(bool existed)
 	assert(get_table(master->table_name.data) == nullptr); // No duplicates
 
 	stringmap_insert(&tables, master->table_name.data, master);
+}
+
+/*EXAMPLE OF OP_FUNCTION */
+bool
+evaluate_like_pattern(const uint8_t *str, const uint8_t *pattern, uint32_t str_len, uint32_t pattern_len)
+{
+	uint32_t s = 0, p = 0;
+	uint32_t star_s = UINT32_MAX, star_p = UINT32_MAX;
+
+	// Remove trailing spaces for VARCHAR comparison
+	while (str_len > 0 && str[str_len - 1] == ' ')
+		str_len--;
+	while (pattern_len > 0 && pattern[pattern_len - 1] == ' ')
+		pattern_len--;
+
+	while (s < str_len)
+	{
+		if (p < pattern_len && pattern[p] == '%')
+		{
+			// Save position for backtracking
+			star_p = p++;
+			star_s = s;
+		}
+		else if (p < pattern_len && (pattern[p] == '_' || pattern[p] == str[s]))
+		{
+			// Single char match
+			p++;
+			s++;
+		}
+		else if (star_p != UINT32_MAX)
+		{
+			// Backtrack to last %
+			p = star_p + 1;
+			s = ++star_s;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	// Consume trailing %
+	while (p < pattern_len && pattern[p] == '%')
+		p++;
+
+	return p == pattern_len;
+}
+
+bool
+func(VMValue *result_reg, VMValue *args, uint32_t arg_count, MemoryContext *ctx)
+{
+	uint8_t *str = args->data;
+	uint8_t *pattern = (args + 1)->data;
+	uint32_t str_len = *(uint32_t *)(args + 2)->data;
+	uint32_t pattern_len = *(uint32_t *)(args + 3)->data;
+	bool	 match = evaluate_like_pattern(str, pattern, str_len, pattern_len);
+	*(uint32_t *)result_reg->data = match ? 1 : 0;
+	return true;
+}
+
+bool
+load_id(VMValue *result_reg, VMValue *args, uint32_t arg_count, MemoryContext *ctx)
+{
+	Table *table = get_table((const char *)args->data);
+	if (!table)
+	{
+		return false;
+	}
+
+	if (table->next_id.type != (args + 1)->type)
+	{
+		return false;
+	}
+
+	table->next_id.data = (uint8_t *)arena::alloc<SchemaArena>(table->next_id.type);
+	memcpy(table->next_id.data, (args + 1)->data, table->next_id.type);
 }

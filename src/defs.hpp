@@ -20,50 +20,7 @@ struct Buffer
 	size_t size;
 };
 
-inline bool
-evaluate_like_pattern(const uint8_t *str, const uint8_t *pattern, uint32_t str_len, uint32_t pattern_len)
-{
-	uint32_t s = 0, p = 0;
-	uint32_t star_s = UINT32_MAX, star_p = UINT32_MAX;
 
-	// Remove trailing spaces for VARCHAR comparison
-	while (str_len > 0 && str[str_len - 1] == ' ')
-		str_len--;
-	while (pattern_len > 0 && pattern[pattern_len - 1] == ' ')
-		pattern_len--;
-
-	while (s < str_len)
-	{
-		if (p < pattern_len && pattern[p] == '%')
-		{
-			// Save position for backtracking
-			star_p = p++;
-			star_s = s;
-		}
-		else if (p < pattern_len && (pattern[p] == '_' || pattern[p] == str[s]))
-		{
-			// Single char match
-			p++;
-			s++;
-		}
-		else if (star_p != UINT32_MAX)
-		{
-			// Backtrack to last %
-			p = star_p + 1;
-			s = ++star_s;
-		}
-		else
-		{
-			return false;
-		}
-	}
-
-	// Consume trailing %
-	while (p < pattern_len && pattern[p] == '%')
-		p++;
-
-	return p == pattern_len;
-}
 
 struct QueryArena
 {

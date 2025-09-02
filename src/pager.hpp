@@ -46,6 +46,8 @@ bool
 pager_commit();
 bool
 pager_rollback();
+uint32_t
+pager_get_next();
 pager_meta
 pager_get_stats();
 void
