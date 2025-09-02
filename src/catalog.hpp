@@ -8,6 +8,10 @@
 // Arena tag for schema storage
 struct SchemaArena {};
 
+
+
+
+
 // Column in a table schema
 struct Column {
     const char* name;  // Interned string
@@ -73,3 +77,6 @@ DataType get_column_type(const char* table_name, uint32_t col_index);
 Table* create_table(CreateTableStmt* node, int root_page = 0);
 Index* create_index(CreateIndexStmt* node, int root_page = 0);
 void create_master(bool existed);
+bool
+load_id(TypedValue *result_reg, TypedValue *args, uint32_t arg_count, MemoryContext *ctx);
+extern string_map<Table *, SchemaArena> tables;

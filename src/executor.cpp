@@ -1,5 +1,6 @@
 // executor.cpp - Refactored with command categorization
 #include "executor.hpp"
+#include "types.hpp"
 #include "validation.hpp"
 #include "arena.hpp"
 #include "bplustree.hpp"
@@ -17,6 +18,7 @@
 #include <cstring>
 #include <cstdio>
 #include <utility>
+#include <vector>
 
 enum CommandCategory
 {
@@ -53,7 +55,7 @@ print_result_callback(TypedValue *result, size_t count)
 {
 	for (int i = 0; i < count; i++)
 	{
-		// print_value(result[i].type, result[i].data);
+		result[i].print();
 		if (i != count - 1)
 		{
 			std::cout << ", ";
@@ -64,27 +66,28 @@ print_result_callback(TypedValue *result, size_t count)
 
 MemoryContext ctx = {
 	.alloc = arena::alloc<QueryArena>, .free = arena::reclaim<QueryArena>, .emit_row = print_result_callback};
-static array<array<TypedValue, QueryArena>, QueryArena> last_results;
+static std::vector<std::vector<TypedValue>> last_results;
 
 void
 print_results()
 {
-	int count = last_results.size;
+	int count = last_results.size();
 	for (int i = 0; i < count; i++)
 	{
-		print_result_callback(last_results.data[i].data, last_results.data[i].size);
+		print_result_callback(last_results[i].data(), last_results[i].size());
 	}
 }
 
 static void
 capture_result_callback(TypedValue *result, size_t count)
 {
-	auto row = array_create<TypedValue, QueryArena>();
+    std::vector<TypedValue> row;
 	for (size_t i = 0; i < count; i++)
 	{
-		array_push(row, result[i]);
+		row.push_back(result[i]);
 	}
-	array_push(&last_results, *row);
+
+	last_results.push_back(row);
 }
 
 // Add a mode flag
@@ -97,7 +100,7 @@ set_capture_mode(bool capture)
 	if (capture)
 	{
 		ctx.emit_row = capture_result_callback;
-		array_clear(&last_results);
+		last_results.clear();
 	}
 	else
 	{
@@ -109,18 +112,14 @@ set_capture_mode(bool capture)
 size_t
 get_row_count()
 {
-	return last_results.size;
+	return last_results.size();
 }
 
 bool
 check_int_value(size_t row, size_t col, int expected)
 {
-	if (row >= last_results.size)
-		return false;
-	if (col >= last_results.data[row].size)
-		return false;
 
-	TypedValue &val = last_results.data[row].data[col];
+	TypedValue &val = last_results[row][col];
 	if (val.type != TYPE_U32)
 		return false;
 
@@ -130,19 +129,15 @@ check_int_value(size_t row, size_t col, int expected)
 bool
 check_string_value(size_t row, size_t col, const char *expected)
 {
-	if (row >= last_results.size)
-		return false;
-	if (col >= last_results.data[row].size)
-		return false;
 
-	TypedValue &val = last_results.data[row].data[col];
+	TypedValue &val = last_results[row][col];
 	return strcmp((char *)val.data, expected) == 0;
 }
 
 void
 clear_results()
 {
-	array_clear(&last_results);
+    last_results.clear();
 }
 
 // ============================================================================
@@ -210,20 +205,20 @@ load_schema_from_master()
 	set_capture_mode(false);
 
 	// Process results to rebuild schema
-	for (size_t i = 0; i < last_results.size; i++)
+	for (size_t i = 0; i < last_results.size(); i++)
 	{
-		auto &row = last_results.data[i];
-		if (row.size < 6)
+		auto &row = last_results[i];
+		if (row.size ()< 6)
 		{
 			continue;
 		}
 
-		uint32_t	id = *(uint32_t *)row.data[0].data;
-		const char *type = (const char *)row.data[1].data;
-		const char *name = (const char *)row.data[2].data;
-		const char *tbl_name = (const char *)row.data[3].data;
-		uint32_t	rootpage = *(uint32_t *)row.data[4].data;
-		const char *sql = (const char *)row.data[5].data;
+		uint32_t	id = *(uint32_t *)row[0].data;
+		const char *type = (const char *)row[1].data;
+		const char *name = (const char *)row[2].data;
+		const char *tbl_name = (const char *)row[3].data;
+		uint32_t	rootpage = *(uint32_t *)row[4].data;
+		const char *sql = (const char *)row[5].data;
 
 		// Update ID counter
 		if (id >= executor_state.next_master_id)
@@ -741,9 +736,7 @@ execute_programs(CompiledProgram *programs, size_t program_count)
 		}
 	}
 
-	// Clean up arenas just like execute() does
-	arena::reset_and_decommit<QueryArena>();
-	arena::reset_and_decommit<ParserArena>();
+
 }
 
 void

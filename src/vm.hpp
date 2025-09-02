@@ -11,15 +11,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-struct VMValue
-{
-	DataType type;
-	uint8_t	 data[TYPE_256];
-};
+
 
 typedef bool (*VMFunction)(
-    VMValue* result,           // Output register
-    VMValue* args,            // Input registers array
+    TypedValue* result,           // Output register
+    TypedValue* args,            // Input registers array
     uint32_t arg_count,       // Number of arguments
     MemoryContext* ctx       // For allocation if needed
 );
@@ -239,11 +235,25 @@ print(const VMInstruction &inst)
 } // namespace Close
 namespace Rewind
 {
-inline VMInstruction
-create(int32_t cursor_id, char *label, bool to_end = false)
-{
+
+    inline VMInstruction
+    create(int32_t cursor_id, char *label, bool to_end = false)
+    {
 	return {OP_Rewind, cursor_id, -1, 0, label, (uint8_t)to_end};
+    }
+inline VMInstruction
+create_to_start(int32_t cursor_id, char *label)
+{
+	return {OP_Rewind, cursor_id, -1, 0, label, (uint8_t)false};
 }
+
+inline VMInstruction
+create_to_end(int32_t cursor_id, char *label)
+{
+	return {OP_Rewind, cursor_id, -1, 0, label, (uint8_t)true};
+}
+
+
 inline int32_t
 cursor_id(const VMInstruction &inst)
 {
@@ -489,7 +499,7 @@ print(const VMInstruction &inst)
 		if (inst.p4)
 		{
 			printf(" value=");
-			print_value((DataType)inst.p2, (uint8_t *)inst.p4);
+			// print_value((DataType)inst.p2, (uint8_t *)inst.p4);
 		}
 	}
 	else
@@ -658,9 +668,9 @@ namespace Function {
         int32_t dest_reg,      // Where to put result
         int32_t first_arg_reg, // First argument register
         int32_t arg_count,     // Number of arguments
-        VMFunction *fn_ptr      // Function pointer
+        VMFunction fn_ptr      // Function pointer
     ) {
-        return {OP_Function, dest_reg, first_arg_reg, arg_count, fn_ptr, 0};
+        return {OP_Function, dest_reg, first_arg_reg, arg_count, &fn_ptr, 0};
     }
 
     inline int32_t
@@ -802,11 +812,11 @@ print_program(VMInstruction *program, int program_size)
 	printf("==========================================\n");
 }
 inline void
-print_register(int reg_num, const VMValue &value)
+print_register(int reg_num, const TypedValue &value)
 {
 	printf("R[%2d]: type=%3d ", reg_num, value.type);
 	printf("value=");
-	print_value(value.type, value.data);
+	// print_value(value.type, value.data);
 	printf("\n");
 }
 inline void

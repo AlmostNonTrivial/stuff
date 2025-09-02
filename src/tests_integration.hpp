@@ -2,11 +2,12 @@
 #include "compile.hpp"
 #include "executor.hpp"
 #include "vm.hpp"
+#include <cassert>
 #define TEST_ASSERT(cond, msg)                                                                                         \
 	if (!(cond))                                                                                                       \
 	{                                                                                                                  \
 		printf("FAILED: %s\n", msg);                                                                                   \
-		return false;                                                                                                  \
+		assert(cond);                                                                                                  \
 	}
 
 inline bool
@@ -53,8 +54,10 @@ test_select_where_()
 	// Use the users table from previous test
 	set_capture_mode(true);
 
+	clear_results();
 	// Test equality
 	execute("SELECT * FROM users WHERE id = 2");
+	print_results();
 	TEST_ASSERT(get_row_count() == 1, "Should have 1 row with id=2");
 	TEST_ASSERT(check_int_value(0, 0, 2), "ID should be 2");
 	TEST_ASSERT(check_string_value(0, 1, "Bob"), "Name should be Bob");
@@ -109,17 +112,20 @@ test_update()
 
 	// Update without WHERE (update all)
 	execute("UPDATE users SET age = 50");
-	set_capture_mode(false);
-	execute("SELECT * FROM users");
 
+	clear_results();
+
+	execute("SELECT * FROM users");
 	TEST_ASSERT(get_row_count() == 3, "Should still have 3 rows");
+
+	// print_results();
 	// Check all ages are 50
 	for (int i = 0; i < 3; i++)
 	{
 		TEST_ASSERT(check_int_value(i, 2, 50), "All ages should be 50");
 	}
-	clear_results();
 
+	clear_results();
 	set_capture_mode(false);
 
 	printf("  ✓ UPDATE passed\n");
@@ -180,7 +186,7 @@ test_mixed_operations()
 	printf("Testing mixed operations...\n");
 
 	// Create a products table
-	execute("CREATE TABLE products (id INT, name VARCHAR(100), price INT, stock INT)");
+	execute("CREATE TABLE products (id INT, name VARCHAR(32), price INT, stock INT)");
 
 	// Insert products
 	execute("INSERT INTO products VALUES (1, 'Laptop', 1000, 10)");
@@ -259,10 +265,10 @@ run_integration_tests()
 
 	all_passed &= test_create_and_insert();
 	all_passed &= test_select_where_();
-	// all_passed &= test_update();
-	// all_passed &= test_delete();
-	// all_passed &= test_mixed_operations();
+	all_passed &= test_update();
+	all_passed &= test_delete();
 	all_passed &= test_multiple_inserts();
+	all_passed &= test_mixed_operations();
 
 	// Clean up
 	execute("DROP TABLE IF EXISTS users");
@@ -296,8 +302,8 @@ test_ephemeral_tree()
 	// Define the schema for ephemeral table
 	static RecordLayout					ephemeral_layout;
 	static array<DataType, SchemaArena> types;
-	array_push(&types, TYPE_4);	 // key: int
-	array_push(&types, TYPE_32); // value: varchar(32)
+	array_push(&types, TYPE_U32);	 // key: int
+	array_push(&types, TYPE_CHAR32); // value: varchar(32)
 	ephemeral_layout = RecordLayout::create(types);
 
 	// Build a single program that uses ephemeral storage
@@ -316,8 +322,8 @@ test_ephemeral_tree()
 	// 2. Insert all values
 	for (int i = 0; i < 7; i++)
 	{
-		array_push(&program.instructions, Opcodes::Move::create_load(0, TYPE_4, &keys[i]));
-		array_push(&program.instructions, Opcodes::Move::create_load(1, TYPE_32, values[i]));
+		array_push(&program.instructions, Opcodes::Move::create_load(0, TYPE_U32, &keys[i]));
+		array_push(&program.instructions, Opcodes::Move::create_load(1, TYPE_CHAR32, values[i]));
 		array_push(&program.instructions, Opcodes::Insert::create(0, 0, 2));
 	}
 
@@ -395,8 +401,8 @@ test_ephemeral_seek()
 	// Same schema
 	static RecordLayout					layout;
 	static array<DataType, SchemaArena> types2;
-	array_push(&types2, TYPE_4); // key
-	array_push(&types2, TYPE_4); // value
+	array_push(&types2, TYPE_U32); // key
+	array_push(&types2, TYPE_U32); // value
 	layout = RecordLayout::create(types2);
 
 	CompiledProgram program;
@@ -410,14 +416,14 @@ test_ephemeral_seek()
 
 	for (int i = 0; i < 5; i++)
 	{
-		array_push(&program.instructions, Opcodes::Move::create_load(0, TYPE_4, &data[i][0]));
-		array_push(&program.instructions, Opcodes::Move::create_load(1, TYPE_4, &data[i][1]));
+		array_push(&program.instructions, Opcodes::Move::create_load(0, TYPE_U32, &data[i][0]));
+		array_push(&program.instructions, Opcodes::Move::create_load(1, TYPE_U32, &data[i][1]));
 		array_push(&program.instructions, Opcodes::Insert::create(0, 0, 2));
 	}
 
 	// Test seeking to key >= 25 (should find 30)
 	static int seek_key = 25;
-	array_push(&program.instructions, Opcodes::Move::create_load(2, TYPE_4, &seek_key));
+	array_push(&program.instructions, Opcodes::Move::create_load(2, TYPE_U32, &seek_key));
 	array_push(&program.instructions, Opcodes::Seek::create(0, 2, -1, GE));
 
 	// Output the found row and next few

@@ -357,7 +357,9 @@ ValidationResult validate_insert_stmt(InsertStmt* node) {
 ValidationResult validate_update_stmt(UpdateStmt* node) {
     ValidationResult result;
 
+
     result.valid = true;
+
 
     if (!table_exists(node->table_name)) {
         add_error(&result, "Table does not exist", node->table_name);

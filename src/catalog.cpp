@@ -1,10 +1,10 @@
 // schema.cpp - Custom container version
 #include "catalog.hpp"
+#include "types.hpp"
 #include "vm.hpp"
 #include "arena.hpp"
 #include "parser.hpp"
 #include "bplustree.hpp"
-#include "defs.hpp"
 #include "vm.hpp"
 #include <cassert>
 #include <cstdint>
@@ -14,7 +14,7 @@
 
 #define MAX_RECORD_LAYOUT 32
 
-static string_map<Table *, SchemaArena> tables;
+string_map<Table *, SchemaArena> tables;
 
 void
 schema_init()
@@ -72,7 +72,7 @@ RecordLayout::create(array<DataType, SchemaArena> &column_types)
 	for (size_t i = 1; i < column_types.size; i++)
 	{
 		array_push(&layout.offsets, layout.record_size);
-		layout.record_size += column_types.data[i];
+		layout.record_size += type_size(column_types.data[i]);
 	}
 
 	return layout;
@@ -369,9 +369,9 @@ create_master(bool existed)
 	string_set(&master->table_name, "master_catalog");
 
 	// Columns: id (key), type, name, tbl_name, rootpage, sql
-	Column cols[] = {{intern_string("id"), TYPE_4},		  {intern_string("type"), TYPE_32},
-					 {intern_string("name"), TYPE_32},	  {intern_string("tbl_name"), TYPE_32},
-					 {intern_string("rootpage"), TYPE_4}, {intern_string("sql"), TYPE_256}};
+	Column cols[] = {{intern_string("id"), TYPE_U32},		  {intern_string("type"), TYPE_CHAR32},
+					 {intern_string("name"), TYPE_CHAR32},	  {intern_string("tbl_name"), TYPE_CHAR32},
+					 {intern_string("rootpage"), TYPE_U32}, {intern_string("sql"), TYPE_CHAR256}};
 
 	for (int i = 0; i < 6; i++)
 	{
@@ -381,7 +381,7 @@ create_master(bool existed)
 	RecordLayout layout = master->to_layout();
 	uint32_t	 record_size = layout.record_size;
 
-	master->bplustree = bplustree_create(TYPE_4, record_size, !existed);
+	master->bplustree = bplustree_create(TYPE_U32, record_size, !existed);
 	master->bplustree.root_page_index = 1;
 
 	assert(master != nullptr);
@@ -439,7 +439,7 @@ evaluate_like_pattern(const uint8_t *str, const uint8_t *pattern, uint32_t str_l
 }
 
 bool
-func(VMValue *result_reg, VMValue *args, uint32_t arg_count, MemoryContext *ctx)
+func(TypedValue *result_reg, TypedValue *args, uint32_t arg_count, MemoryContext *ctx)
 {
 	uint8_t *str = args->data;
 	uint8_t *pattern = (args + 1)->data;
@@ -451,7 +451,7 @@ func(VMValue *result_reg, VMValue *args, uint32_t arg_count, MemoryContext *ctx)
 }
 
 bool
-load_id(VMValue *result_reg, VMValue *args, uint32_t arg_count, MemoryContext *ctx)
+load_id(TypedValue *result_reg, TypedValue *args, uint32_t arg_count, MemoryContext *ctx)
 {
 	Table *table = get_table((const char *)args->data);
 	if (!table)

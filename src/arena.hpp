@@ -1646,3 +1646,64 @@ void stringmap_clear(string_map<V, Tag>* m) {
     m->size = 0;
     m->tombstones = 0;
 }
+// Pair structure
+template <typename K, typename V>
+struct pair {
+    K key;
+    V value;
+};
+
+// Collect all entries from string_map
+template <typename V, typename TagIn, typename TagOut>
+void stringmap_collect(string_map<V, TagIn>* m, array<pair<const char*, V>, TagOut>* out) {
+    array_clear(out);
+    if (!m || !m->entries || m->size == 0) return;
+
+    array_reserve(out, m->size);
+
+    for (uint32_t i = 0; i < m->capacity; i++) {
+        auto& entry = m->entries[i];
+        if (entry.state == string_map<V, TagIn>::Entry::OCCUPIED) {
+            pair<const char*, V> p = { entry.key, entry.value };
+            array_push(out, p);
+        }
+    }
+}
+
+// Collect all entries from hash_map
+template <typename K, typename V, typename TagIn, typename TagOut>
+void hashmap_collect(hash_map<K, V, TagIn>* m, array<pair<K, V>, TagOut>* out) {
+    array_clear(out);
+    if (!m || !m->entries || m->size == 0) return;
+
+    array_reserve(out, m->size);
+
+    for (uint32_t i = 0; i < m->capacity; i++) {
+        auto& entry = m->entries[i];
+        if (entry.state == hash_map<K, V, TagIn>::Entry::OCCUPIED) {
+            pair<K, V> p = { entry.key, entry.value };
+            array_push(out, p);
+        }
+    }
+}
+
+// Helper for map collection
+template <typename K, typename V, typename TagIn, typename TagOut>
+void map_collect_node(typename map<K, V, TagIn>::Node* node, array<pair<K, V>, TagOut>* out) {
+    if (!node) return;
+
+    map_collect_node<K, V, TagIn, TagOut>(node->left, out);
+    pair<K, V> p = { node->key, node->value };
+    array_push(out, p);
+    map_collect_node<K, V, TagIn, TagOut>(node->right, out);
+}
+
+// Collect all entries from map (in sorted order)
+template <typename K, typename V, typename TagIn, typename TagOut>
+void map_collect(map<K, V, TagIn>* m, array<pair<K, V>, TagOut>* out) {
+    array_clear(out);
+    if (!m || !m->root || m->size == 0) return;
+
+    array_reserve(out, m->size);
+    map_collect_node<K, V, TagIn, TagOut>(m->root, out);
+}

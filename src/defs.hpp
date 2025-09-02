@@ -1,11 +1,10 @@
 #pragma once
 
 #include <cstddef>
-#include <iostream>
-#include <cstdint>
+#include <iostream> #include <cstdint>
 #include "types.hpp"
 
-#define PAGE_SIZE 512
+#define PAGE_SIZE 2048
 
 struct Buffer
 {

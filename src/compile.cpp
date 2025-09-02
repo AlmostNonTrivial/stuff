@@ -1,7 +1,9 @@
 // programbuilder.cpp - Simplified version with full table scans only
 #include "compile.hpp"
+
 #include "arena.hpp"
 #include "defs.hpp"
+#include "types.hpp"
 #include "pager.hpp"
 #include "parser.hpp"
 #include "catalog.hpp"
@@ -89,7 +91,7 @@ struct ProgramBuilder
 			auto &inst = instructions.data[i];
 
 			char *label = (char *)inst.p4;
-			if (nullptr == label )
+			if (nullptr == label)
 			{
 				continue;
 			}
@@ -112,7 +114,6 @@ struct ProgramBuilder
 	}
 };
 
-
 // test_ephemeral_builder.cpp - Test ephemeral tree using ProgramBuilder
 #include "executor.hpp"
 #include "compile.hpp"
@@ -121,112 +122,111 @@ struct ProgramBuilder
 #include <cassert>
 #include <cstdio>
 
-void test_ephemeral_with_builder() {
-    printf("Testing ephemeral tree using ProgramBuilder\n");
+void
+test_ephemeral_with_builder()
+{
+	printf("Testing ephemeral tree using ProgramBuilder\n");
 
-    executor_init(false);
+	executor_init(false);
 
-    // Define the schema for ephemeral table
-    static RecordLayout ephemeral_layout;
-    static array<DataType, SchemaArena> types;
-    array_push(&types, TYPE_4);   // key: int
-    array_push(&types, TYPE_32);  // value: varchar(32)
-    ephemeral_layout = RecordLayout::create(types);
+	// Define the schema for ephemeral table
+	static RecordLayout					ephemeral_layout;
+	static array<DataType, SchemaArena> types;
+	array_push(&types, TYPE_U32);	 // key: int
+	array_push(&types, TYPE_CHAR32); // value: varchar(32)
+	ephemeral_layout = RecordLayout::create(types);
 
-    // Use ProgramBuilder to construct the program
-    ProgramBuilder builder;
+	// Use ProgramBuilder to construct the program
+	ProgramBuilder builder;
 
-    // Static data for inserts
-    static int keys[] = {10, 5, 15, 3, 7, 12, 20};
-    static char values[][32] = {"ten", "five", "fifteen", "three", "seven", "twelve", "twenty"};
+	// Static data for inserts
+	static int	keys[] = {10, 5, 15, 3, 7, 12, 20};
+	static char values[][32] = {"ten", "five", "fifteen", "three", "seven", "twelve", "twenty"};
 
-    // 1. Open ephemeral cursor
-    builder.emit(Opcodes::Open::create_ephemeral(0, &ephemeral_layout));
+	// 1. Open ephemeral cursor
+	builder.emit(Opcodes::Open::create_ephemeral(0, &ephemeral_layout));
 
-    // 2. Insert all values using allocated registers
-    for (int i = 0; i < 7; i++) {
-        int key_reg = builder.regs.allocate();
-        int val_reg = builder.regs.allocate();
+	// 2. Insert all values using allocated registers
+	for (int i = 0; i < 7; i++)
+	{
+		int key_reg = builder.regs.allocate();
+		int val_reg = builder.regs.allocate();
 
-        builder.emit(Opcodes::Move::create_load(key_reg, TYPE_4, &keys[i]))
-               .emit(Opcodes::Move::create_load(val_reg, TYPE_32, values[i]))
-               .emit(Opcodes::Insert::create(0, key_reg, 2));
-    }
+		builder.emit(Opcodes::Move::create_load(key_reg, TYPE_U32, &keys[i]))
+			.emit(Opcodes::Move::create_load(val_reg, TYPE_CHAR32, values[i]))
+			.emit(Opcodes::Insert::create(0, key_reg, 2));
+	}
 
-    // 3. Rewind to beginning
-    builder.emit(Opcodes::Rewind::create(0, "scan_done", false));
+	// 3. Rewind to beginning
+	builder.emit(Opcodes::Rewind::create(0, "scan_done", false));
 
-    // 4. Scan loop
-    builder.label("scan_loop");
+	// 4. Scan loop
+	builder.label("scan_loop");
 
-    int result_key_reg = builder.regs.allocate();
-    int result_val_reg = builder.regs.allocate();
+	int result_key_reg = builder.regs.allocate();
+	int result_val_reg = builder.regs.allocate();
 
-    builder.emit(Opcodes::Column::create(0, 0, result_key_reg))
-           .emit(Opcodes::Column::create(0, 1, result_val_reg))
-           .emit(Opcodes::Result::create(result_key_reg, 2))
-           .emit(Opcodes::Step::create(0, "scan_done", true))
-           .emit(Opcodes::Goto::create("scan_loop"));
+	builder.emit(Opcodes::Column::create(0, 0, result_key_reg))
+		.emit(Opcodes::Column::create(0, 1, result_val_reg))
+		.emit(Opcodes::Result::create(result_key_reg, 2))
+		.emit(Opcodes::Step::create(0, "scan_done", true))
+		.emit(Opcodes::Goto::create("scan_loop"));
 
-    // 5. Done
-    builder.label("scan_done")
-           .emit(Opcodes::Close::create(0))
-           .emit(Opcodes::Halt::create(0));
+	// 5. Done
+	builder.label("scan_done").emit(Opcodes::Close::create(0)).emit(Opcodes::Halt::create(0));
 
-    // Resolve all labels
-    builder.resolve_labels();
+	// Resolve all labels
+	builder.resolve_labels();
 
-    // Create CompiledProgram wrapper
-    CompiledProgram program;
-    program.type = PROG_DML_SELECT;
-    program.instructions = builder.instructions;
-    program.ast_node = nullptr;
+	// Create CompiledProgram wrapper
+	CompiledProgram program;
+	program.type = PROG_DML_SELECT;
+	program.instructions = builder.instructions;
+	program.ast_node = nullptr;
 
-    // Execute the program
-    set_capture_mode(false);
-    CompiledProgram programs[] = { program };
-    execute_programs(programs, 1);
+	// Execute the program
+	set_capture_mode(false);
+	CompiledProgram programs[] = {program};
+	execute_programs(programs, 1);
 
-    // Verify results - should be in sorted order by key
-    assert(get_row_count() == 7);
+	// Verify results - should be in sorted order by key
+	assert(get_row_count() == 7);
 
-    // Check sorted order: 3, 5, 7, 10, 12, 15, 20
-    assert(check_int_value(0, 0, 3));
-    assert(check_string_value(0, 1, "three"));
+	// Check sorted order: 3, 5, 7, 10, 12, 15, 20
+	assert(check_int_value(0, 0, 3));
+	assert(check_string_value(0, 1, "three"));
 
-    assert(check_int_value(1, 0, 5));
-    assert(check_string_value(1, 1, "five"));
+	assert(check_int_value(1, 0, 5));
+	assert(check_string_value(1, 1, "five"));
 
-    assert(check_int_value(2, 0, 7));
-    assert(check_string_value(2, 1, "seven"));
+	assert(check_int_value(2, 0, 7));
+	assert(check_string_value(2, 1, "seven"));
 
-    assert(check_int_value(3, 0, 10));
-    assert(check_string_value(3, 1, "ten"));
+	assert(check_int_value(3, 0, 10));
+	assert(check_string_value(3, 1, "ten"));
 
-    assert(check_int_value(4, 0, 12));
-    assert(check_string_value(4, 1, "twelve"));
+	assert(check_int_value(4, 0, 12));
+	assert(check_string_value(4, 1, "twelve"));
 
-    assert(check_int_value(5, 0, 15));
-    assert(check_string_value(5, 1, "fifteen"));
+	assert(check_int_value(5, 0, 15));
+	assert(check_string_value(5, 1, "fifteen"));
 
-    assert(check_int_value(6, 0, 20));
-    assert(check_string_value(6, 1, "twenty"));
+	assert(check_int_value(6, 0, 20));
+	assert(check_string_value(6, 1, "twenty"));
 
-    printf("  Results (sorted by key):\n");
-    // for (size_t i = 0; i < get_row_count(); i++) {
-    //     printf("    Key=%d, Value=%s\n",
-    //            *(int*)last_results.data[i].data[0].data,
-    //            (char*)last_results.data[i].data[1].data);
-    // }
+	printf("  Results (sorted by key):\n");
+	// for (size_t i = 0; i < get_row_count(); i++) {
+	//     printf("    Key=%d, Value=%s\n",
+	//            *(int*)last_results.data[i].data[0].data,
+	//            (char*)last_results.data[i].data[1].data);
+	// }
 
-    clear_results();
-    set_capture_mode(false);
-    executor_shutdown();
+	clear_results();
+	set_capture_mode(false);
+	executor_shutdown();
 
-    printf("  ✓ Ephemeral tree with ProgramBuilder test passed\n");
+	printf("  ✓ Ephemeral tree with ProgramBuilder test passed\n");
 }
-
-
 
 //------------------ PROGRAMS ---------------------//
 // Build functions for compile.cpp using new AST structures
@@ -312,7 +312,7 @@ build_select(ProgramBuilder &prog, SelectStmt *node)
 					DataType type = cond->right->lit_type;
 					uint8_t *data = nullptr;
 
-					if (type == TYPE_4)
+					if (type == TYPE_U32)
 					{
 						data = (uint8_t *)&cond->right->int_val;
 					}
@@ -387,7 +387,7 @@ build_insert(ProgramBuilder &prog, InsertStmt *node)
 				DataType type = value->lit_type;
 				uint8_t *data = nullptr;
 
-				if (type == TYPE_4 || type == TYPE_8)
+				if (type == TYPE_U32 || type == TYPE_U64)
 				{
 					data = (uint8_t *)&value->int_val;
 				}
@@ -487,7 +487,7 @@ build_update(ProgramBuilder &prog, UpdateStmt *node)
 					DataType type = cond->right->lit_type;
 					uint8_t *data = nullptr;
 
-					if (type == TYPE_4 || type == TYPE_8)
+					if (type == TYPE_U32 || type == TYPE_U64)
 					{
 						data = (uint8_t *)&cond->right->int_val;
 					}
@@ -536,7 +536,7 @@ build_update(ProgramBuilder &prog, UpdateStmt *node)
 				DataType type = value->lit_type;
 				uint8_t *data = nullptr;
 
-				if (type == TYPE_4 || type == TYPE_8)
+				if (type == TYPE_U32 || type == TYPE_U64)
 				{
 					data = (uint8_t *)&value->int_val;
 				}
@@ -648,7 +648,7 @@ build_delete(ProgramBuilder &prog, DeleteStmt *node)
 					DataType type = cond->right->lit_type;
 					uint8_t *data = nullptr;
 
-					if (type == TYPE_4 || type == TYPE_8)
+					if (type == TYPE_U32 || type == TYPE_U64)
 					{
 						data = (uint8_t *)&cond->right->int_val;
 					}
@@ -690,6 +690,33 @@ build_delete(ProgramBuilder &prog, DeleteStmt *node)
 
 	// Resolve all labels
 	prog.resolve_labels();
+}
+
+array<VMInstruction, QueryArena>
+load_table_ids_program()
+{
+	ProgramBuilder					   prog;
+	array<pair<const char *, Table *>> tables_array;
+	stringmap_collect(&tables, &tables_array);
+
+	int cursor_id = 0;
+	int result_reg = 0;
+	int table_name_reg = 1;
+	for (int i = 0; i < tables_array.size; i++)
+	{
+
+		prog.emit(Opcodes::Open::create_btree(cursor_id, tables_array.data[0].key, 0));
+		prog.emit(Opcodes::Rewind::create_to_end(cursor_id, "end or something"));
+		prog.emit(Opcodes::Column::create(cursor_id, 0, result_reg));
+		prog.emit(Opcodes::Move::create_load(table_name_reg, TYPE_CHAR32, (void *)tables_array.data[i].key));
+		prog.emit(Opcodes::Function::create(0, 0, 1, &load_id));
+		prog.emit(Opcodes::Close::create(cursor_id));
+		prog.label("_" + 1);
+	}
+
+	prog.emit(Opcodes::Halt::create());
+
+	return prog.instructions;
 }
 
 // Update build_from_ast to handle the statements
