@@ -178,7 +178,7 @@ clear_results()
 }
 
 bool
-vmfunc_create_table(TypedValue *result, TypedValue *args, uint32_t arg_count, MemoryContext *ctx)
+vmfunc_create_structure(TypedValue *result, TypedValue *args, uint32_t arg_count, MemoryContext *ctx)
 {
 	auto table_name = args->as_char();
 	auto structure = catalog[table_name].to_layout();
@@ -235,25 +235,30 @@ struct CSVReader
 		std::getline(file, line);
 	}
 
-	bool next_row(std::vector<std::string> &fields) {
-    if (!std::getline(file, line)) {
-        return false;
-    }
+	bool
+	next_row(std::vector<std::string> &fields)
+	{
+		if (!std::getline(file, line))
+		{
+			return false;
+		}
 
-    // Remove carriage return if present
-    if (!line.empty() && line.back() == '\r') {
-        line.pop_back();
-    }
+		// Remove carriage return if present
+		if (!line.empty() && line.back() == '\r')
+		{
+			line.pop_back();
+		}
 
-    fields.clear();
-    std::stringstream ss(line);
-    std::string field;
+		fields.clear();
+		std::stringstream ss(line);
+		std::string		  field;
 
-    while (std::getline(ss, field, ',')) {
-        fields.push_back(field);
-    }
-    return true;
-}
+		while (std::getline(ss, field, ','))
+		{
+			fields.push_back(field);
+		}
+		return true;
+	}
 };
 
 inline static void
@@ -287,7 +292,7 @@ create_all_tables(bool create)
 	{
 		prog.regs.push_scope();
 		int reg = prog.load(TypedValue::make(TYPE_CHAR16, (void *)table_name));
-		prog.call_function(vmfunc_create_table, reg, 1);
+		prog.call_function(vmfunc_create_structure, reg, 1);
 
 		prog.regs.pop_scope();
 	}
@@ -405,6 +410,102 @@ load_all_data()
 	printf("\n✅ All data loaded successfully!\n");
 }
 
+// like_demo.cpp
+#include "compile.hpp"
+#include "vm.hpp"
+#include "types.hpp"
+#include <cstring>
+
+// VM Function: LIKE pattern matching with % wildcard
+// Args: [0] = text (CHAR32), [1] = pattern (CHAR32)
+// Result: U32 (1 = match, 0 = no match)
+bool vmfunc_like(TypedValue* result, TypedValue* args, uint32_t arg_count, MemoryContext* ctx) {
+    if (arg_count != 2) return false;
+
+    const char* pattern = args[0].as_char();
+    const char* text = args[1].as_char();
+
+    // Simple % wildcard matching
+    const char* t = text;
+    const char* p = pattern;
+    const char* star_t = nullptr;
+    const char* star_p = nullptr;
+
+    while (*t) {
+        if (*p == '%') {
+            star_p = p++;
+            star_t = t;
+            continue;
+        }
+
+        if (*p == *t) {
+            p++;
+            t++;
+            continue;
+        }
+
+        if (star_p) {
+            p = star_p + 1;
+            t = ++star_t;
+            continue;
+        }
+
+        return false;
+    }
+
+    while (*p == '%') p++;
+
+    uint32_t match = (*p == '\0') ? 1 : 0;
+    result->type = TYPE_U32;
+    result->data = (uint8_t*)ctx->alloc(sizeof(uint32_t));
+    *(uint32_t*)result->data = match;
+
+    return true;
+}
+
+// Single program: Find products where title LIKE '%Phone%'
+void test_like_pattern() {
+    printf("\n=== LIKE Pattern Demo: SELECT * FROM products WHERE title LIKE '%%Ess%%' ===\n\n");
+
+    ProgramBuilder prog;
+
+    // Open products cursor
+    auto products_ctx = from_structure(catalog[PRODUCTS]);
+    prog.open_cursor(0, &products_ctx);
+
+    // Load pattern "%Phone%" into register
+    int pattern_reg = prog.load(TYPE_CHAR32, prog.alloc_string("%Ess%", 32));
+    int title_reg = prog.regs.allocate();
+
+    // Scan products
+    int at_end = prog.first(0);
+    auto loop = prog.begin_while(at_end);
+    {
+        // Get title column (index 1)
+        prog.get_column(0, 1, title_reg);
+
+        // Call LIKE: vmfunc_like(title, pattern)
+        int match_reg = prog.call_function(vmfunc_like, pattern_reg, 2);
+
+        // If match, output row
+        auto if_match = prog.begin_if(match_reg);
+        {
+            int row = prog.get_columns(0, 0, 6);
+            prog.result(row, 6);
+        }
+        prog.end_if(if_match);
+
+        prog.next(0, at_end);
+    }
+    prog.end_while(loop);
+
+    prog.close_cursor(0);
+    prog.halt();
+
+    prog.resolve_labels();
+    vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+}
+
 inline void
 test_select()
 {
@@ -472,177 +573,246 @@ test_select_order_by()
 	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
 }
 
-inline void test_nested_loop_join() {
-    printf("\n=== NESTED LOOP JOIN ===\n");
-    printf("Query: SELECT username, city, order_id, total FROM users JOIN orders ON users.user_id = orders.user_id\n\n");
+inline void
+test_nested_loop_join()
+{
+	printf("\n=== NESTED LOOP JOIN ===\n");
+	printf(
+		"Query: SELECT username, city, order_id, total FROM users JOIN orders ON users.user_id = orders.user_id\n\n");
 
+	ProgramBuilder prog;
 
+	auto users_ctx = from_structure(catalog[USERS]);
+	auto orders_ctx = from_structure(catalog[ORDERS]);
 
-    ProgramBuilder prog;
+	prog.open_cursor(0, &users_ctx);
+	prog.open_cursor(1, &orders_ctx);
 
-    auto users_ctx = from_structure(catalog[USERS]);
-    auto orders_ctx = from_structure(catalog[ORDERS]);
+	// Outer loop: scan users
+	{
+		prog.regs.push_scope();
 
-    prog.open_cursor(0, &users_ctx);
-    prog.open_cursor(1, &orders_ctx);
+		int	 at_end_users = prog.first(0);
+		auto outer_loop = prog.begin_while(at_end_users);
+		{
+			int user_id = prog.get_column(0, 0);
 
-    // Outer loop: scan users
-    {
-        prog.regs.push_scope();
+			// Inner loop: scan ALL orders
+			int	 at_end_orders = prog.first(1);
+			auto inner_loop = prog.begin_while(at_end_orders);
+			{
+				int order_user_id = prog.get_column(1, 1); // user_id is column 1 in orders
+				int match = prog.eq(user_id, order_user_id);
 
-        int at_end_users = prog.first(0);
-        auto outer_loop = prog.begin_while(at_end_users);
-        {
-            int user_id = prog.get_column(0, 0);
+				auto if_match = prog.begin_if(match);
+				{
+					// Output matched row
+					int username = prog.get_column(0, 1);
+					int city = prog.get_column(0, 4);
+					int order_id = prog.get_column(1, 0);
+					int total = prog.get_column(1, 2);
 
-            // Inner loop: scan ALL orders
-            int at_end_orders = prog.first(1);
-            auto inner_loop = prog.begin_while(at_end_orders);
-            {
-                int order_user_id = prog.get_column(1, 1);  // user_id is column 1 in orders
-                int match = prog.eq(user_id, order_user_id);
+					prog.result(username, 4);
+				}
+				prog.end_if(if_match);
 
-                auto if_match = prog.begin_if(match);
-                {
-                    // Output matched row
-                    int username = prog.get_column(0, 1);
-                    int city = prog.get_column(0, 4);
-                    int order_id = prog.get_column(1, 0);
-                    int total = prog.get_column(1, 2);
+				prog.next(1, at_end_orders);
+			}
+			prog.end_while(inner_loop);
 
-                    prog.result(username, 4);
-                }
-                prog.end_if(if_match);
+			prog.next(0, at_end_users);
+		}
+		prog.end_while(outer_loop);
 
-                prog.next(1, at_end_orders);
-            }
-            prog.end_while(inner_loop);
+		prog.regs.pop_scope();
+	}
 
-            prog.next(0, at_end_users);
-        }
-        prog.end_while(outer_loop);
+	prog.close_cursor(0);
+	prog.close_cursor(1);
+	prog.halt();
 
-        prog.regs.pop_scope();
-    }
-
-    prog.close_cursor(0);
-    prog.close_cursor(1);
-    prog.halt();
-
-    prog.resolve_labels();
-    vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	prog.resolve_labels();
+	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
 }
 
+inline void
+test_subquery_pattern()
+{
+	printf("\n=== SUBQUERY PATTERN DEMO ===\n");
+	printf("Simulating: SELECT * FROM (SELECT * FROM users WHERE age > 30) WHERE city='Chicago'\n\n");
+
+	ProgramBuilder prog;
+
+	// Cursor 0: source table (users)
+	// Cursor 1: temporary red-black tree for intermediate results
+
+	auto users_ctx = from_structure(catalog[USERS]);
+
+	// Create red-black tree with same layout as users table
+	Layout temp_layout = users_ctx.layout;
+	auto   temp_ctx = red_black(temp_layout);
+
+	prog.open_cursor(0, &users_ctx);
+	prog.open_cursor(1, &temp_ctx);
+
+	// ========================================================================
+	// PHASE 1: Scan users table, filter by age > 30, insert into temp tree
+	// ========================================================================
+
+	{
+		prog.regs.push_scope();
+		// Load constant 30 for age comparison
+		int age_const = prog.load(TYPE_U32, prog.alloc_value(30U));
+
+		int	 at_end = prog.first(0);
+		auto scan_loop = prog.begin_while(at_end);
+		{
+			// Get age column (index 3)
+			int age_reg = prog.get_column(0, 3);
+
+			// Test if age > 30
+			int age_test = prog.gt(age_reg, age_const);
+
+			// If condition met, insert into temp tree
+			auto if_ctx = prog.begin_if(age_test);
+			{
+				// Get all columns from current row
+				int row_start = prog.get_columns(0, 0, 5);
+
+				// Insert into red-black tree (cursor 1)
+				prog.insert_record(1, row_start, 5);
+			}
+			prog.end_if(if_ctx);
+
+			// Move to next record
+			prog.next(0, at_end);
+		}
+		prog.end_while(scan_loop);
+
+		prog.regs.pop_scope();
+	}
+
+	// ========================================================================
+	// PHASE 2: Scan temp tree, filter by city = 'Chigaco', output results
+	// ========================================================================
+
+	{
+		prog.regs.push_scope();
+
+		// Load constant "Portland" for city comparison
+
+		int city_const = prog.load(TYPE_CHAR16, prog.alloc_string("Chicago", type_size(TYPE_CHAR16)));
+
+		// Rewind temp tree to start
+		int at_end = prog.first(1);
+
+		// Begin scanning loop
+		auto scan_loop = prog.begin_while(at_end);
+		{
+			// Get city column (index 4)
+			int city_reg = prog.get_column(1, 4);
+
+			// Test if city == "Portland"
+			int city_test = prog.eq(city_reg, city_const);
+
+			// If condition met, output the row
+			auto if_ctx = prog.begin_if(city_test);
+			{
+				// Get all columns from current row
+				int row_start = prog.get_columns(1, 0, 5);
+
+				// Output result
+				prog.result(row_start, 5);
+			}
+			prog.end_if(if_ctx);
+
+			// Move to next record
+			prog.next(1, at_end);
+		}
+		prog.end_while(scan_loop);
+
+		prog.regs.pop_scope();
+	}
+
+	// Cleanup
+	prog.close_cursor(0);
+	prog.close_cursor(1);
+	prog.halt();
+
+	// Resolve labels and execute
+	prog.resolve_labels();
+
+	printf("Executing subquery pattern...\n");
+	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+}
+
+inline void
+test_create_composite_index()
+{
+	printf("\n=== CREATING COMPOSITE INDEX ON ORDERS ===\n");
+	printf("Index: idx_orders_by_user (user_id, order_id) -> order_id\n\n");
 
 
-inline void test_subquery_pattern() {
-    printf("\n=== SUBQUERY PATTERN DEMO ===\n");
-    printf("Simulating: SELECT * FROM (SELECT * FROM users WHERE age > 30) WHERE city='Chicago'\n\n");
-
-    ProgramBuilder prog;
-
-    // Cursor 0: source table (users)
-    // Cursor 1: temporary red-black tree for intermediate results
-
-    auto users_ctx = from_structure(catalog[USERS]);
-
-    // Create red-black tree with same layout as users table
-    Layout temp_layout = users_ctx.layout;
-    auto temp_ctx = red_black(temp_layout);
-
-    prog.open_cursor(0, &users_ctx);
-    prog.open_cursor(1, &temp_ctx);
-
-    // ========================================================================
-    // PHASE 1: Scan users table, filter by age > 30, insert into temp tree
-    // ========================================================================
-
-    {
-        prog.regs.push_scope();
-        // Load constant 30 for age comparison
-        int age_const = prog.load(TYPE_U32, prog.alloc_value(30U));
 
 
-        int at_end = prog.first(0);
-        auto scan_loop = prog.begin_while(at_end);
-        {
-            // Get age column (index 3)
-            int age_reg = prog.get_column(0, 3);
 
-            // Test if age > 30
-            int age_test = prog.gt(age_reg, age_const);
+	ProgramBuilder prog;
+	prog.begin_transaction();
 
-            // If condition met, insert into temp tree
-            auto if_ctx = prog.begin_if(age_test);
-            {
-                // Get all columns from current row
-                int row_start = prog.get_columns(0, 0, 5);
+	// Create index structure
+	{
+		prog.regs.push_scope();
 
-                // Insert into red-black tree (cursor 1)
-                prog.insert_record(1, row_start, 5);
-            }
-            prog.end_if(if_ctx);
+		// Composite key type: DUAL(u32, u32)
+		DataType composite_type = make_dual(TYPE_U32, TYPE_U32);
 
-            // Move to next record
-            prog.next(0, at_end);
-        }
-        prog.end_while(scan_loop);
+		int name_reg = prog.load(TYPE_CHAR32, prog.alloc_string("idx_orders_by_user", 32));
+		int key_type_reg = prog.load(TYPE_U64, prog.alloc_value((uint64_t)composite_type));
+		int record_size = prog.load(TYPE_U32, prog.alloc_value(0));
+		int unique = prog.load(TYPE_U32, prog.alloc_value(0U)); // non-unique
 
-        prog.regs.pop_scope();
-    }
+		prog.call_function(vmfunc_create_structure, name_reg, 4);
+		prog.regs.pop_scope();
+	}
 
-    // ========================================================================
-    // PHASE 2: Scan temp tree, filter by city = 'Chigaco', output results
-    // ========================================================================
+	// Populate from orders table
+	auto orders_ctx = from_structure(catalog[ORDERS]);
 
-    {
-        prog.regs.push_scope();
+	auto index_ctx = from_structure(catalog["idx_order_by_user"]);
 
-        // Load constant "Portland" for city comparison
+	prog.open_cursor(0, &orders_ctx);
+	prog.open_cursor(1, &index_ctx);
 
-        int city_const = prog.load(TYPE_CHAR16, prog.alloc_string("Chicago", type_size(TYPE_CHAR16)));
+	{
+		prog.regs.push_scope();
 
-        // Rewind temp tree to start
-        int at_end = prog.first(1);
+		int	 at_end = prog.first(0);
+		auto scan = prog.begin_while(at_end);
+		{
+			// Extract columns
+			int order_id = prog.get_column(0, 0);
+			int user_id = prog.get_column(0, 1);
 
-        // Begin scanning loop
-        auto scan_loop = prog.begin_while(at_end);
-        {
-            // Get city column (index 4)
-            int city_reg = prog.get_column(1, 4);
+			// Create composite key
+			int composite_key = prog.pack2(user_id, order_id);
 
-            // Test if city == "Portland"
-            int city_test = prog.eq(city_reg, city_const);
+			// Insert: composite_key -> order_id
+			prog.insert_record(1, composite_key);
 
-            // If condition met, output the row
-            auto if_ctx = prog.begin_if(city_test);
-            {
-                // Get all columns from current row
-                int row_start = prog.get_columns(1, 0, 5);
+			prog.next(0, at_end);
+		}
+		prog.end_while(scan);
 
-                // Output result
-                prog.result(row_start, 5);
-            }
-            prog.end_if(if_ctx);
+		prog.regs.pop_scope();
+	}
 
-            // Move to next record
-            prog.next(1, at_end);
-        }
-        prog.end_while(scan_loop);
+	prog.close_cursor(0);
+	prog.close_cursor(1);
+	prog.commit_transaction();
+	prog.halt();
 
-        prog.regs.pop_scope();
-    }
-
-    // Cleanup
-    prog.close_cursor(0);
-    prog.close_cursor(1);
-    prog.halt();
-
-    // Resolve labels and execute
-    prog.resolve_labels();
-
-    printf("Executing subquery pattern...\n");
-    vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	prog.resolve_labels();
+	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
 }
 
 // Call this in test_programs() after loading data:
@@ -669,10 +839,10 @@ test_programs()
 
 	// test_many_to_many_query();
 
-
 	// test_subquery_pattern();
 	// _debug = true;
-	test_nested_loop_join();
+	// test_nested_loop_join();
+	test_like_pattern();
 	pager_close();
 
 	printf("\n✅ All relational tests completed!\n");
