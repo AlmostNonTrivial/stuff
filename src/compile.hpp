@@ -1,6 +1,7 @@
 #pragma  once
 #include "vm.hpp"
 #include "catalog.hpp"
+#include <cstdint>
 // Enhanced ProgramBuilder with inline implementations
 struct RegisterAllocator {
     int next_free = 0;
@@ -219,7 +220,7 @@ struct ProgramBuilder {
 
     int load(const TypedValue& value) {
         int reg = regs.allocate();
-        emit(LOAD_MAKE(reg, value.type, value.data));
+        emit(LOAD_MAKE(reg, (int64_t)value.type, value.data));
         return reg;
     }
 
