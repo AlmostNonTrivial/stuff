@@ -449,10 +449,9 @@ test_select_order_by()
 		prog.next(cursor, at_end);
 		prog.end_while(while_context);
 		prog.regs.pop_scope();
-		prog.regs.push_scope();
 	}
 	{
-
+		prog.regs.push_scope();
 		int	 at_end = prog.last(memcursor);
 		auto while_ctx = prog.begin_while(at_end);
 		int	 dest_reg = prog.get_columns(memcursor, 0, 5);
