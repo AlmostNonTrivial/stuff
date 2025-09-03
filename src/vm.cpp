@@ -1,5 +1,6 @@
 // vm.cpp
 #include "vm.hpp"
+#include "cassert"
 #include "defs.hpp"
 #include "pager.hpp"
 #include "types.hpp"
@@ -754,11 +755,11 @@ step()
 
 		if (_debug)
 		{
-			printf("=> Cursor %d rewound to %s, R[%d]=%d\n", cursor_id,
-				   to_end ? "end" : "start", result_reg, result_val);
+			printf("=> Cursor %d rewound to %s, R[%d]=%d\n", cursor_id, to_end ? "end" : "start", result_reg,
+				   result_val);
 		}
 
-		set_register(&VM.registers[result_reg], (uint8_t*)&result_val, TYPE_U32);
+		set_register(&VM.registers[result_reg], (uint8_t *)&result_val, TYPE_U32);
 		VM.pc++;
 		return OK;
 	}
@@ -767,15 +768,15 @@ step()
 		int32_t	  result_reg = STEP_RESULT_REG(*inst);
 		bool	  forward = STEP_FORWARD(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
-		uint32_t has_more = vmcursor_step(cursor, forward) ? 1 : 0;
+		uint32_t  has_more = vmcursor_step(cursor, forward) ? 1 : 0;
 
 		if (_debug)
 		{
-			printf("=> Cursor %d stepped %s, R[%d]=%d\n", cursor_id,
-				   forward ? "forward" : "backward", result_reg, has_more);
+			printf("=> Cursor %d stepped %s, R[%d]=%d\n", cursor_id, forward ? "forward" : "backward", result_reg,
+				   has_more);
 		}
 
-		set_register(&VM.registers[result_reg], (uint8_t*)&has_more, TYPE_U32);
+		set_register(&VM.registers[result_reg], (uint8_t *)&has_more, TYPE_U32);
 		VM.pc++;
 		return OK;
 	}
@@ -796,7 +797,7 @@ step()
 			printf(", R[%d]=%d\n", result_reg, result_val);
 		}
 
-		set_register(&VM.registers[result_reg], (uint8_t*)&result_val, TYPE_U32);
+		set_register(&VM.registers[result_reg], (uint8_t *)&result_val, TYPE_U32);
 		VM.pc++;
 		return OK;
 	}
@@ -967,6 +968,76 @@ step()
 		}
 		pager_rollback();
 		return ABORT;
+	}
+	case OP_Pack: {
+		int32_t dest = PACK2_DEST_REG(*inst);
+		int32_t left = PACK2_LEFT_REG(*inst);
+		int32_t right = PACK2_RIGHT_REG(*inst);
+
+		TypedValue *a = &VM.registers[left];
+		TypedValue *b = &VM.registers[right];
+
+		// Create dual type from the two component types
+		DataType dual_type = make_dual(a->type, b->type);
+		uint32_t total_size = type_size(dual_type);
+
+		// Allocate space for packed value
+		uint8_t packed[total_size];
+
+		// Pack the two values
+		pack_dual(packed, a->type, a->data, b->type, b->data);
+
+		if (_debug)
+		{
+			printf("=> R[%d] = pack(", dest);
+			type_print(a->type, a->data);
+			printf(", ");
+			type_print(b->type, b->data);
+			printf(") -> ");
+			type_print(dual_type, packed);
+			printf(" (%s)\n", type_name(dual_type));
+		}
+
+		set_register(&VM.registers[dest], packed, dual_type);
+		VM.pc++;
+		return OK;
+	}
+
+	case OP_Unpack: {
+		int32_t first_dest = UNPACK2_FIRST_DEST_REG(*inst);
+		int32_t src = UNPACK2_SRC_REG(*inst);
+
+		TypedValue *dual_val = &VM.registers[src];
+
+		assert(type_is_dual(dual_val->type));
+
+		// Get component types
+		DataType type1 = dual_component_type(dual_val->type, 0);
+		DataType type2 = dual_component_type(dual_val->type, 1);
+
+		// Allocate space for unpacked values
+		uint8_t data1[type_size(type1)];
+		uint8_t data2[type_size(type2)];
+
+		// Unpack
+		unpack_dual(dual_val->type, dual_val->data, data1, data2);
+
+		if (_debug)
+		{
+			printf("=> unpack(");
+			type_print(dual_val->type, dual_val->data);
+			printf(") -> R[%d]=", first_dest);
+			type_print(type1, data1);
+			printf(" (%s), R[%d]=", type_name(type1), first_dest + 1);
+			type_print(type2, data2);
+			printf(" (%s)\n", type_name(type2));
+		}
+
+		set_register(&VM.registers[first_dest], data1, type1);
+		set_register(&VM.registers[first_dest + 1], data2, type2);
+
+		VM.pc++;
+		return OK;
 	}
 
 	default:

@@ -213,6 +213,26 @@ enum OpCode : uint8_t
 	OP_Rollback = 64,
 #define ROLLBACK_MAKE()			   {OP_Rollback, 0, 0, 0, nullptr, 0}
 #define ROLLBACK_DEBUG_PRINT(inst) printf("ROLLBACK transaction")
+
+// In vm.hpp - new opcodes
+OP_Pack = 65,
+#define PACK2_MAKE(dest_reg, left_reg, right_reg) \
+    {OP_Pack2, dest_reg, left_reg, right_reg, nullptr, 0}
+#define PACK2_DEST_REG(inst)  ((inst).p1)
+#define PACK2_LEFT_REG(inst)  ((inst).p2)
+#define PACK2_RIGHT_REG(inst) ((inst).p3)
+#define PACK2_DEBUG_PRINT(inst) \
+    printf("PACK2 R[%d] <- pack(R[%d], R[%d])", \
+           PACK2_DEST_REG(inst), PACK2_LEFT_REG(inst), PACK2_RIGHT_REG(inst))
+
+OP_Unpack= 66,
+#define UNPACK2_MAKE(first_dest_reg, src_reg) \
+    {OP_Unpack2, first_dest_reg, src_reg, 0, nullptr, 0}
+#define UNPACK2_FIRST_DEST_REG(inst) ((inst).p1)
+#define UNPACK2_SRC_REG(inst)         ((inst).p2)
+#define UNPACK2_DEBUG_PRINT(inst) \
+    printf("UNPACK2 R[%d],R[%d] <- unpack(R[%d])", \
+           UNPACK2_FIRST_DEST_REG(inst), UNPACK2_FIRST_DEST_REG(inst)+1, UNPACK2_SRC_REG(inst))
 };
 
 struct VMInstruction

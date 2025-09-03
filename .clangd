@@ -1,5 +1,5 @@
 CompileFlags:
-  Add: [-std=c++20, -Wall, -Wextra -Wvla-cxx-extension]
+  Add: [-std=c++20 -Wno-vla-cxx-extension]
   CompilationDatabase: build/
 
 Diagnostics:

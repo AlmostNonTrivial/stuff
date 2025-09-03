@@ -1,4 +1,4 @@
-// type_system.h - 64-bit DataType with seamless composite support
+// type_system.h - 64-bit DataType with dual type support
 #pragma once
 #include <cstdint>
 #include <stdint.h>
@@ -10,10 +10,12 @@
 #define likely(x)   __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
-// 64-bit type encoding: [type_id:8][comp_count:8][size1:8][size2:8][size3:8][size4:8][total_size:16]
+// 64-bit type encoding:
+// For scalars: [type_id:8][size:8][reserved:48]
+// For duals:   [TYPE_ID_DUAL:8][type1_id:8][type2_id:8][reserved:8][size1:8][size2:8][reserved:8][total_size:8]
 typedef uint64_t DataType;
 
-// Type IDs - each type gets unique ID, no overlap between signed/unsigned
+// Type IDs - each type gets unique ID
 enum TypeId : uint8_t {
     TYPE_ID_U8   = 0x01,
     TYPE_ID_U16  = 0x02,
@@ -31,60 +33,54 @@ enum TypeId : uint8_t {
     TYPE_ID_CHAR = 0x31,    // Fixed-size string
     TYPE_ID_VARCHAR = 0x32, // Variable-size string
 
-    TYPE_ID_MULTI = 0x50,   // Multi-component composite type
+    TYPE_ID_DUAL = 0x40,    // Dual type (pair of any two types)
 
     TYPE_ID_NULL = 0xFF
 };
 
-// Helper to construct DataType
-#define MAKE_TYPE_64(type_id, comp_count, size1, size2, size3, size4, total_size) \
-    (((uint64_t)(type_id) << 56) | \
-     ((uint64_t)(comp_count) << 48) | \
-     ((uint64_t)(size1) << 40) | \
-     ((uint64_t)(size2) << 32) | \
-     ((uint64_t)(size3) << 24) | \
-     ((uint64_t)(size4) << 16) | \
-     ((uint64_t)(total_size)))
+// Helper to construct scalar DataType
+#define MAKE_SCALAR_TYPE(type_id, size) \
+    (((uint64_t)(type_id) << 56) | ((uint64_t)(size) << 48))
+
+// Helper to construct dual DataType
+#define MAKE_DUAL_TYPE(type1_id, type2_id, size1, size2) \
+    (((uint64_t)(TYPE_ID_DUAL) << 56) | \
+     ((uint64_t)(type1_id) << 48) | \
+     ((uint64_t)(type2_id) << 40) | \
+     ((uint64_t)(0) << 32) | \
+     ((uint64_t)(size1) << 24) | \
+     ((uint64_t)(size2) << 16) | \
+     ((uint64_t)(0) << 8) | \
+     ((uint64_t)((size1) + (size2))))
 
 // Scalar type definitions
-#define TYPE_U8  MAKE_TYPE_64(TYPE_ID_U8,  0, 1, 0, 0, 0, 1)
-#define TYPE_U16 MAKE_TYPE_64(TYPE_ID_U16, 0, 2, 0, 0, 0, 2)
-#define TYPE_U32 MAKE_TYPE_64(TYPE_ID_U32, 0, 4, 0, 0, 0, 4)
-#define TYPE_U64 MAKE_TYPE_64(TYPE_ID_U64, 0, 8, 0, 0, 0, 8)
+#define TYPE_U8  MAKE_SCALAR_TYPE(TYPE_ID_U8,  1)
+#define TYPE_U16 MAKE_SCALAR_TYPE(TYPE_ID_U16, 2)
+#define TYPE_U32 MAKE_SCALAR_TYPE(TYPE_ID_U32, 4)
+#define TYPE_U64 MAKE_SCALAR_TYPE(TYPE_ID_U64, 8)
 
-#define TYPE_I8  MAKE_TYPE_64(TYPE_ID_I8,  0, 1, 0, 0, 0, 1)
-#define TYPE_I16 MAKE_TYPE_64(TYPE_ID_I16, 0, 2, 0, 0, 0, 2)
-#define TYPE_I32 MAKE_TYPE_64(TYPE_ID_I32, 0, 4, 0, 0, 0, 4)
-#define TYPE_I64 MAKE_TYPE_64(TYPE_ID_I64, 0, 8, 0, 0, 0, 8)
+#define TYPE_I8  MAKE_SCALAR_TYPE(TYPE_ID_I8,  1)
+#define TYPE_I16 MAKE_SCALAR_TYPE(TYPE_ID_I16, 2)
+#define TYPE_I32 MAKE_SCALAR_TYPE(TYPE_ID_I32, 4)
+#define TYPE_I64 MAKE_SCALAR_TYPE(TYPE_ID_I64, 8)
 
-#define TYPE_F32 MAKE_TYPE_64(TYPE_ID_F32, 0, 4, 0, 0, 0, 4)
-#define TYPE_F64 MAKE_TYPE_64(TYPE_ID_F64, 0, 8, 0, 0, 0, 8)
+#define TYPE_F32 MAKE_SCALAR_TYPE(TYPE_ID_F32, 4)
+#define TYPE_F64 MAKE_SCALAR_TYPE(TYPE_ID_F64, 8)
 
 // Fixed-size strings
-#define TYPE_CHAR8   MAKE_TYPE_64(TYPE_ID_CHAR, 0, 8, 0, 0, 0, 8)
-#define TYPE_CHAR16  MAKE_TYPE_64(TYPE_ID_CHAR, 0, 16, 0, 0, 0, 16)
-#define TYPE_CHAR32  MAKE_TYPE_64(TYPE_ID_CHAR, 0, 32, 0, 0, 0, 32)
-#define TYPE_CHAR64  MAKE_TYPE_64(TYPE_ID_CHAR, 0, 64, 0, 0, 0, 64)
-#define TYPE_CHAR128 MAKE_TYPE_64(TYPE_ID_CHAR, 0, 128, 0, 0, 0, 128)
-#define TYPE_CHAR256 MAKE_TYPE_64(TYPE_ID_CHAR, 0, 256, 0, 0, 0, 256)
+#define TYPE_CHAR8   MAKE_SCALAR_TYPE(TYPE_ID_CHAR, 8) | 8
+#define TYPE_CHAR16  MAKE_SCALAR_TYPE(TYPE_ID_CHAR, 16) | 16
+#define TYPE_CHAR32  MAKE_SCALAR_TYPE(TYPE_ID_CHAR, 32) | 32
+#define TYPE_CHAR64  MAKE_SCALAR_TYPE(TYPE_ID_CHAR, 64) | 64
+#define TYPE_CHAR128 MAKE_SCALAR_TYPE(TYPE_ID_CHAR, 128) | 128
+#define TYPE_CHAR256 MAKE_SCALAR_TYPE(TYPE_ID_CHAR, 256) | 256
 
 // Null type
-#define TYPE_NULL MAKE_TYPE_64(TYPE_ID_NULL, 0, 0, 0, 0, 0, 0)
+#define TYPE_NULL MAKE_SCALAR_TYPE(TYPE_ID_NULL, 0)
 
-// VARCHAR with runtime size (up to 65535 bytes) - using size1 for length
-#define TYPE_VARCHAR(len) MAKE_TYPE_64(TYPE_ID_VARCHAR, 0, ((len) & 0xFF), (((len) >> 8) & 0xFF), 0, 0, (len))
-
-// Composite types - component_count > 0
-#define TYPE_MULTI_U8_U8   MAKE_TYPE_64(TYPE_ID_MULTI, 2, 1, 1, 0, 0, 2)
-#define TYPE_MULTI_U16_U16 MAKE_TYPE_64(TYPE_ID_MULTI, 2, 2, 2, 0, 0, 4)
-#define TYPE_MULTI_U32_U32 MAKE_TYPE_64(TYPE_ID_MULTI, 2, 4, 4, 0, 0, 8)
-#define TYPE_MULTI_U64_U64 MAKE_TYPE_64(TYPE_ID_MULTI, 2, 8, 8, 0, 0, 16)
-#define TYPE_MULTI_U32_U64 MAKE_TYPE_64(TYPE_ID_MULTI, 2, 4, 8, 0, 0, 12)
-#define TYPE_MULTI_I32_I32 MAKE_TYPE_64(TYPE_ID_MULTI, 2, 4, 4, 0, 0, 8)
-
-// String composites (WARNING: second component uses memcmp, not strcmp!)
-#define TYPE_MULTI_CHAR8_CHAR8   MAKE_TYPE_64(TYPE_ID_MULTI, 2, 8, 8, 0, 0, 16)
-#define TYPE_MULTI_CHAR16_CHAR16 MAKE_TYPE_64(TYPE_ID_MULTI, 2, 16, 16, 0, 0, 32)
+// VARCHAR with runtime size
+#define TYPE_VARCHAR(len) \
+    (((uint64_t)(TYPE_ID_VARCHAR) << 56) | ((uint64_t)(len) << 48) | (len))
 
 // Factory method defines
 #define make_u8()    TYPE_U8
@@ -112,20 +108,12 @@ enum TypeId : uint8_t {
 // Functions for parameterized types
 __attribute__((always_inline))
 inline DataType make_char(uint16_t size) {
-    return MAKE_TYPE_64(TYPE_ID_CHAR, 0, (size & 0xFF), ((size >> 8) & 0xFF), 0, 0, size);
+    return MAKE_SCALAR_TYPE(TYPE_ID_CHAR, size) | size;
 }
 
 __attribute__((always_inline))
 inline DataType make_varchar(uint16_t size) {
     return TYPE_VARCHAR(size);
-}
-
-// Runtime composite type factory
-__attribute__((always_inline))
-inline DataType make_multi(uint8_t size1, uint8_t size2, uint8_t size3 = 0, uint8_t size4 = 0) {
-    uint8_t comp_count = (size1 > 0) + (size2 > 0) + (size3 > 0) + (size4 > 0);
-    uint16_t total = size1 + size2 + size3 + size4;
-    return MAKE_TYPE_64(TYPE_ID_MULTI, comp_count, size1, size2, size3, size4, total);
 }
 
 // ============================================================================
@@ -134,7 +122,15 @@ inline DataType make_multi(uint8_t size1, uint8_t size2, uint8_t size3 = 0, uint
 
 __attribute__((always_inline))
 inline uint16_t type_size(DataType type) {
-    return type & 0xFFFF;
+    uint8_t tid = type >> 56;
+    if (tid == TYPE_ID_DUAL) {
+        return type & 0xFF;  // Total size in lowest byte
+    }
+    // For scalars, size might be in different positions
+    if (tid == TYPE_ID_VARCHAR || tid == TYPE_ID_CHAR) {
+        return type & 0xFFFF;
+    }
+    return (type >> 48) & 0xFF;
 }
 
 __attribute__((always_inline))
@@ -142,32 +138,83 @@ inline uint8_t type_id(DataType type) {
     return type >> 56;
 }
 
+// Dual type specific extractors
 __attribute__((always_inline))
-inline uint8_t type_component_count(DataType type) {
+inline uint8_t dual_type_id_1(DataType type) {
     return (type >> 48) & 0xFF;
 }
 
 __attribute__((always_inline))
-inline uint8_t type_component_size(DataType type, uint32_t index) {
-    switch(index) {
-        case 0: return (type >> 40) & 0xFF;
-        case 1: return (type >> 32) & 0xFF;
-        case 2: return (type >> 24) & 0xFF;
-        case 3: return (type >> 16) & 0xFF;
-        default: return 0;
-    }
+inline uint8_t dual_type_id_2(DataType type) {
+    return (type >> 40) & 0xFF;
 }
 
 __attribute__((always_inline))
-inline uint32_t type_component_offset(DataType type, uint32_t index) {
-    uint32_t offset = 0;
-    for (uint32_t i = 0; i < index; i++) {
-        offset += type_component_size(type, i);
-    }
-    return offset;
+inline uint8_t dual_size_1(DataType type) {
+    return (type >> 24) & 0xFF;
 }
 
-// Alignment = size for most types, 1 for varchar
+__attribute__((always_inline))
+inline uint8_t dual_size_2(DataType type) {
+    return (type >> 16) & 0xFF;
+}
+
+// Reconstruct full DataType from component ID and size
+__attribute__((always_inline))
+inline DataType type_from_id_and_size(uint8_t id, uint16_t size) {
+    switch(id) {
+        case TYPE_ID_U8:  return TYPE_U8;
+        case TYPE_ID_U16: return TYPE_U16;
+        case TYPE_ID_U32: return TYPE_U32;
+        case TYPE_ID_U64: return TYPE_U64;
+
+        case TYPE_ID_I8:  return TYPE_I8;
+        case TYPE_ID_I16: return TYPE_I16;
+        case TYPE_ID_I32: return TYPE_I32;
+        case TYPE_ID_I64: return TYPE_I64;
+
+        case TYPE_ID_F32: return TYPE_F32;
+        case TYPE_ID_F64: return TYPE_F64;
+
+        case TYPE_ID_CHAR: return make_char(size);
+        case TYPE_ID_VARCHAR: return make_varchar(size);
+
+        default: return TYPE_NULL;
+    }
+}
+
+// Factory function for dual types
+__attribute__((always_inline))
+inline DataType make_dual(DataType type1, DataType type2) {
+    uint8_t id1 = type_id(type1);
+    uint8_t id2 = type_id(type2);
+    uint16_t size1 = type_size(type1);
+    uint16_t size2 = type_size(type2);
+    return MAKE_DUAL_TYPE(id1, id2, size1, size2);
+}
+
+// Get component types from dual
+__attribute__((always_inline))
+inline DataType dual_component_type(DataType type, uint32_t index) {
+    if (type_id(type) != TYPE_ID_DUAL) return TYPE_NULL;
+
+    if (index == 0) {
+        return type_from_id_and_size(dual_type_id_1(type), dual_size_1(type));
+    } else if (index == 1) {
+        return type_from_id_and_size(dual_type_id_2(type), dual_size_2(type));
+    }
+    return TYPE_NULL;
+}
+
+// Component offset for dual types
+__attribute__((always_inline))
+inline uint32_t dual_component_offset(DataType type, uint32_t index) {
+    if (index == 0) return 0;
+    if (index == 1) return dual_size_1(type);
+    return 0;
+}
+
+// Alignment
 __attribute__((always_inline))
 inline uint32_t type_align(DataType type) {
     uint32_t size = type_size(type);
@@ -175,7 +222,7 @@ inline uint32_t type_align(DataType type) {
     return size * !is_varchar + is_varchar;
 }
 
-// Type checking - based on type IDs
+// Type checking
 __attribute__((always_inline))
 inline bool type_is_unsigned(DataType type) {
     uint8_t id = type_id(type);
@@ -203,7 +250,7 @@ inline bool type_is_string(DataType type) {
 __attribute__((always_inline))
 inline bool type_is_numeric(DataType type) {
     uint8_t id = type_id(type);
-    return id <= TYPE_ID_F64;  // All numeric types have IDs <= 0x22
+    return id <= TYPE_ID_F64;
 }
 
 __attribute__((always_inline))
@@ -227,19 +274,19 @@ inline bool type_is_null(DataType type) {
 }
 
 __attribute__((always_inline))
-inline bool type_is_multi(DataType type) {
-    return type_id(type) == TYPE_ID_MULTI;
+inline bool type_is_dual(DataType type) {
+    return type_id(type) == TYPE_ID_DUAL;
 }
 
 // ============================================================================
-// Type comparison - unified for scalar and composite
+// Type comparison - unified for scalar and dual
 // ============================================================================
 
 __attribute__((always_inline))
 inline int type_compare(DataType type, const uint8_t* a, const uint8_t* b) {
     uint8_t tid = type_id(type);
 
-    // Scalar type comparison with proper type dispatch
+    // Scalar type comparison
     switch(tid) {
         case TYPE_ID_U8:  { uint8_t  av = *a, bv = *b; return (av > bv) - (av < bv); }
         case TYPE_ID_U16: { uint16_t av = *(uint16_t*)a, bv = *(uint16_t*)b; return (av > bv) - (av < bv); }
@@ -257,23 +304,18 @@ inline int type_compare(DataType type, const uint8_t* a, const uint8_t* b) {
         case TYPE_ID_CHAR:
         case TYPE_ID_VARCHAR:
             return strcmp((char*)a, (char*)b);
-        case TYPE_ID_MULTI:
-    {
-               uint32_t comp_count = type_component_count(type);
-               uint32_t offset = 0;
 
-               for (uint32_t i = 0; i < comp_count; i++) {
-                   uint32_t comp_size = type_component_size(type, i);
-                   if (comp_size == 0) break;
+        case TYPE_ID_DUAL: {
+            // Compare first component
+            DataType type1 = dual_component_type(type, 0);
+            int cmp1 = type_compare(type1, a, b);
+            if (cmp1 != 0) return cmp1;
 
-                   int cmp = memcmp(a + offset, b + offset, comp_size);
-                   if (cmp != 0) { return cmp; } // First difference determines result
-
-
-                   offset += comp_size;
-               }
-               return 0;  // All components equal
-    }
+            // Compare second component if first is equal
+            DataType type2 = dual_component_type(type, 1);
+            uint32_t offset = dual_size_1(type);
+            return type_compare(type2, a + offset, b + offset);
+        }
 
         default: return 0;
     }
@@ -305,7 +347,7 @@ inline bool type_equals(DataType type, const uint8_t* a, const uint8_t* b) {
 }
 
 __attribute__((always_inline))
-inline bool type_note_equals(DataType type, const uint8_t* a, const uint8_t* b) {
+inline bool type_not_equals(DataType type, const uint8_t* a, const uint8_t* b) {
     return type_compare(type, a, b) != 0;
 }
 
@@ -415,11 +457,11 @@ inline void type_copy(DataType type, uint8_t* dst, const uint8_t* src) {
         case 2: *(uint16_t*)dst = *(uint16_t*)src; break;
         case 4: *(uint32_t*)dst = *(uint32_t*)src; break;
         case 8: *(uint64_t*)dst = *(uint64_t*)src; break;
-        case 12: // Common for u32+u64
+        case 12: // Common for dual u32+u64
             *(uint64_t*)dst = *(uint64_t*)src;
             *(uint32_t*)(dst + 8) = *(uint32_t*)(src + 8);
             break;
-        case 16: // Common for u64+u64
+        case 16: // Common for dual u64+u64
             *(uint64_t*)dst = *(uint64_t*)src;
             *(uint64_t*)(dst + 8) = *(uint64_t*)(src + 8);
             break;
@@ -462,21 +504,17 @@ inline uint64_t type_hash(DataType type, const uint8_t* data) {
         return hash;
     }
 
-    if (type_is_multi(type)) {
-        // Hash each component
-        uint32_t comp_count = type_component_count(type);
-        uint32_t offset = 0;
+    if (type_is_dual(type)) {
+        // Hash first component
+        DataType type1 = dual_component_type(type, 0);
+        uint64_t hash1 = type_hash(type1, data);
 
-        for (uint32_t i = 0; i < comp_count; i++) {
-            uint32_t comp_size = type_component_size(type, i);
-            if (comp_size == 0) break;
+        // Hash second component
+        DataType type2 = dual_component_type(type, 1);
+        uint64_t hash2 = type_hash(type2, data + dual_size_1(type));
 
-            for (uint32_t j = 0; j < comp_size; j++) {
-                hash = (hash ^ data[offset + j]) * 0x100000001b3ull;
-            }
-            offset += comp_size;
-        }
-        return hash;
+        // Combine hashes
+        return hash1 ^ (hash2 * 0x100000001b3ull);
     }
 
     // Numeric types - hash based on size
@@ -517,23 +555,19 @@ inline void type_print(DataType type, const uint8_t* data) {
             printf("%s", (const char*)data);
             break;
 
-        case TYPE_ID_MULTI: {
+        case TYPE_ID_DUAL: {
             printf("(");
-            uint32_t comp_count = type_component_count(type);
-            uint32_t offset = 0;
 
-            for (uint32_t i = 0; i < comp_count; i++) {
-                if (i > 0) printf(", ");
-                uint32_t comp_size = type_component_size(type, i);
-                if (comp_size == 0) break;
+            // Print first component
+            DataType type1 = dual_component_type(type, 0);
+            type_print(type1, data);
 
-                // For now, just print as hex - could enhance with type info later
-                printf("0x");
-                for (uint32_t j = 0; j < comp_size; j++) {
-                    printf("%02x", data[offset + j]);
-                }
-                offset += comp_size;
-            }
+            printf(", ");
+
+            // Print second component
+            DataType type2 = dual_component_type(type, 1);
+            type_print(type2, data + dual_size_1(type));
+
             printf(")");
             break;
         }
@@ -570,10 +604,11 @@ inline const char* type_name(DataType type) {
             return buf;
         }
 
-        case TYPE_ID_MULTI: {
-            uint32_t comp_count = type_component_count(type);
-            uint32_t total_size = type_size(type);
-            snprintf(buf, sizeof(buf), "MULTI(%u components, %u bytes)", comp_count, total_size);
+        case TYPE_ID_DUAL: {
+            DataType type1 = dual_component_type(type, 0);
+            DataType type2 = dual_component_type(type, 1);
+            snprintf(buf, sizeof(buf), "DUAL(%s,%s)",
+                     type_name(type1), type_name(type2));
             return buf;
         }
 
@@ -583,71 +618,24 @@ inline const char* type_name(DataType type) {
 }
 
 // ============================================================================
-// Composite key building helpers
+// Dual type packing/unpacking helpers
 // ============================================================================
 
 __attribute__((always_inline))
-inline void pack_u8_u8(uint8_t* dest, uint8_t first, uint8_t second) {
-    dest[0] = first;
-    dest[1] = second;
+inline void pack_dual(uint8_t* dest, DataType type1, const uint8_t* data1,
+                      DataType type2, const uint8_t* data2) {
+    type_copy(type1, dest, data1);
+    type_copy(type2, dest + type_size(type1), data2);
 }
 
 __attribute__((always_inline))
-inline void pack_u16_u16(uint8_t* dest, uint16_t first, uint16_t second) {
-    *(uint16_t*)dest = first;
-    *(uint16_t*)(dest + 2) = second;
-}
+inline void unpack_dual(DataType dual_type, const uint8_t* src,
+                        uint8_t* data1, uint8_t* data2) {
+    DataType type1 = dual_component_type(dual_type, 0);
+    DataType type2 = dual_component_type(dual_type, 1);
 
-__attribute__((always_inline))
-inline void pack_u32_u32(uint8_t* dest, uint32_t first, uint32_t second) {
-    *(uint32_t*)dest = first;
-    *(uint32_t*)(dest + 4) = second;
-}
-
-__attribute__((always_inline))
-inline void pack_u64_u64(uint8_t* dest, uint64_t first, uint64_t second) {
-    *(uint64_t*)dest = first;
-    *(uint64_t*)(dest + 8) = second;
-}
-
-__attribute__((always_inline))
-inline void pack_u32_u64(uint8_t* dest, uint32_t first, uint64_t second) {
-    *(uint32_t*)dest = first;
-    *(uint64_t*)(dest + 4) = second;
-}
-
-__attribute__((always_inline))
-inline void pack_i32_i32(uint8_t* dest, int32_t first, int32_t second) {
-    *(int32_t*)dest = first;
-    *(int32_t*)(dest + 4) = second;
-}
-
-__attribute__((always_inline))
-inline void pack_char8_char8(uint8_t* dest, const char* first, const char* second) {
-    strncpy((char*)dest, first, 8);
-    strncpy((char*)(dest + 8), second, 8);
-}
-
-__attribute__((always_inline))
-inline void pack_char16_char16(uint8_t* dest, const char* first, const char* second) {
-    strncpy((char*)dest, first, 16);
-    strncpy((char*)(dest + 16), second, 16);
-}
-
-// Component extraction helpers
-__attribute__((always_inline))
-inline uint32_t extract_u32_at(const uint8_t* data, uint32_t offset) {
-    return *(uint32_t*)(data + offset);
-}
-
-__attribute__((always_inline))
-inline uint16_t extract_u16_at(const uint8_t* data, uint32_t offset) {
-    return *(uint16_t*)(data + offset);
-}
-
-__attribute__((always_inline))
-inline uint8_t extract_u8_at(const uint8_t* data, uint32_t offset) {
-    return data[offset];
+    type_copy(type1, data1, src);
+    type_copy(type2, data2, src + dual_size_1(dual_type));
 }
 
 // ============================================================================
@@ -661,7 +649,7 @@ struct TypedValue {
     // Property accessors
     inline uint8_t get_type_id() const { return type_id(type); }
     inline uint32_t get_size() const { return type_size(type); }
-    inline bool is_multi() const { return type_is_multi(type); }
+    inline bool is_dual() const { return type_is_dual(type); }
 
     // Type checking
     inline bool is_numeric() const { return type_is_numeric(type); }
@@ -678,7 +666,7 @@ struct TypedValue {
         data = (uint8_t*)str;
     }
 
-    // Comparison operators - work seamlessly with composite types
+    // Comparison operators - work seamlessly with dual types
     inline int compare(const TypedValue& other) const {
         return type_compare(type, data, other.data);
     }
@@ -717,7 +705,6 @@ struct TypedValue {
         type_print(type, data);
     }
 
-
     inline uint16_t size() const {
         return type_size(this->type);
     }
@@ -727,7 +714,7 @@ struct TypedValue {
     }
 
     // Factory methods
-    static TypedValue make(DataType type, void * data = nullptr) {
+    static TypedValue make(DataType type, void* data = nullptr) {
         return { (uint8_t*)data, type};
     }
 
