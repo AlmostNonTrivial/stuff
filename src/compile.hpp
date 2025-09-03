@@ -276,7 +276,7 @@ struct ProgramBuilder {
     }
 
     ProgramBuilder& seek(int cursor_id, int key_reg, CompareOp op = EQ, const char* jump_if_not = nullptr) {
-        emit(SEEK_MAKE(cursor_id, key_reg, void*jump_if_not, op));
+        emit(SEEK_MAKE(cursor_id, key_reg, (void*)jump_if_not, op));
         return *this;
     }
 

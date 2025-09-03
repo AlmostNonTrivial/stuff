@@ -25,5 +25,7 @@ main()
 	// test_programs();
 
 
+	test_programs();
+
 	return 0;
 }

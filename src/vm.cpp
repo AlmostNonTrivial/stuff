@@ -1,5 +1,6 @@
 // vm.cpp
 #include "vm.hpp"
+#include "defs.hpp"
 #include "pager.hpp"
 #include "types.hpp"
 #include "blob.hpp"
@@ -13,13 +14,13 @@
 #include <cstdlib>
 #include <cstring>
 
-#define CURSORS	  10
+#define CURSORS 10
 
 bool _debug = false;
+
 // POD struct - data only
 struct VmCursor
 {
-
 	CursorType type;
 	Layout	   layout;
 
@@ -30,32 +31,163 @@ struct VmCursor
 	} cursor;
 };
 
-// Initialization functions
-void
-vmcursor_open_bplus(VmCursor *cur, const Layout &table_layout, BPlusTree *tree)
+// ============================================================================
+// Debug Helper Functions
+// ============================================================================
+
+const char *
+debug_compare_op_name(CompareOp op)
 {
-	cur->type = CursorType::BPLUS;
-	cur->layout = table_layout;
-	cur->cursor.bptree.tree = tree;
-	cur->cursor.bptree.state = BPT_CURSOR_INVALID;
+	static const char *names[] = {"==", "!=", "<", "<=", ">", ">="};
+	return (op >= EQ && op <= GE) ? names[op] : "UNKNOWN";
+}
+
+const char *
+debug_arith_op_name(ArithOp op)
+{
+	static const char *names[] = {"+", "-", "*", "/", "%"};
+	return (op >= ARITH_ADD && op <= ARITH_MOD) ? names[op] : "UNKNOWN";
+}
+
+const char *
+debug_logic_op_name(LogicOp op)
+{
+	static const char *names[] = {"AND", "OR"};
+	return (op >= LOGIC_AND && op <= LOGIC_OR) ? names[op] : "UNKNOWN";
+}
+
+const char *
+debug_cursor_type_name(CursorType type)
+{
+	switch (type)
+	{
+	case CursorType::BPLUS:
+		return "BPLUS";
+	case CursorType::RED_BLACK:
+		return "RED_BLACK";
+	case CursorType::BLOB:
+		return "BLOB";
+	default:
+		return "UNKNOWN";
+	}
 }
 
 void
-vmcursor_open_red_black(VmCursor *cur, const Layout &ephemeral_layout, MemoryContext *ctx)
+vm_debug_print_instruction(const VMInstruction *inst, int pc)
 {
-	cur->type = CursorType::RED_BLACK;
-	cur->layout = ephemeral_layout;
-	DataType key_type = cur->layout.layout[0];
-	cur->cursor.mem.tree = memtree_create(key_type, cur->layout.record_size);
-	cur->cursor.mem.state = MemCursor::INVALID;
-	cur->cursor.mem.ctx = ctx;
+	printf("PC[%3d] ", pc);
+
+	switch (inst->opcode)
+	{
+	case OP_Goto:
+		printf("GOTO -> PC=%d", inst->p2);
+		break;
+	case OP_Halt:
+		printf("HALT exit_code=%d", inst->p1);
+		break;
+	case OP_Open:
+		printf("OPEN cursor=%d", inst->p1);
+		break;
+	case OP_Close:
+		printf("CLOSE cursor=%d", inst->p1);
+		break;
+	case OP_Rewind:
+		printf("REWIND cursor=%d to_%s jump_if_empty=%d", inst->p1, (inst->p5 != 0) ? "end" : "start", inst->p2);
+		break;
+	case OP_Step:
+		printf("STEP cursor=%d %s jump_if_done=%d", inst->p1, (inst->p5 != 0) ? "forward" : "backward", inst->p2);
+		break;
+	case OP_Seek:
+		printf("SEEK cursor=%d key=R[%d] op=%s jump_if_not=%d", inst->p1, inst->p2,
+			   debug_compare_op_name((CompareOp)inst->p5), inst->p3);
+		break;
+	case OP_Column:
+		printf("COLUMN cursor=%d col=%d -> R[%d]", inst->p1, inst->p2, inst->p3);
+		break;
+	case OP_Insert:
+		printf("INSERT cursor=%d key=R[%d] reg_count=%d", inst->p1, inst->p2, inst->p3);
+		break;
+	case OP_Delete:
+		printf("DELETE cursor=%d -> R[%d]=valid R[%d]=occurred", inst->p1, inst->p2, inst->p3);
+		break;
+	case OP_Update:
+		printf("UPDATE cursor=%d record=R[%d]", inst->p1, inst->p2);
+		break;
+	case OP_Move:
+		printf("MOVE R[%d] <- R[%d]", inst->p1, inst->p3);
+		break;
+	case OP_Load:
+		printf("LOAD R[%d] <- ", inst->p1);
+		type_print((DataType)inst->p2, (uint8_t *)inst->p4);
+		printf(" (%s)", type_name((DataType)inst->p2));
+		break;
+	case OP_Arithmetic:
+		printf("ARITHMETIC R[%d] <- R[%d] %s R[%d]", inst->p1, inst->p2, debug_arith_op_name((ArithOp)inst->p5),
+			   inst->p3);
+		break;
+	case OP_JumpIf:
+		printf("JUMPIF R[%d] %s -> PC=%d", inst->p1, (inst->p5 != 0) ? "TRUE" : "FALSE", inst->p2);
+		break;
+	case OP_Logic:
+		printf("LOGIC R[%d] <- R[%d] %s R[%d]", inst->p1, inst->p2, debug_logic_op_name((LogicOp)inst->p5), inst->p3);
+		break;
+	case OP_Result:
+		printf("RESULT R[%d..%d] (%d registers)", inst->p1, inst->p1 + inst->p2 - 1, inst->p2);
+		break;
+	case OP_Test:
+		printf("TEST R[%d] <- R[%d] %s R[%d]", inst->p1, inst->p2, debug_compare_op_name((CompareOp)inst->p5),
+			   inst->p3);
+		break;
+	case OP_Function:
+		printf("FUNCTION R[%d] <- fn(R[%d..%d]) %d args", inst->p1, inst->p2, inst->p2 + inst->p3 - 1, inst->p3);
+		break;
+	case OP_Begin:
+		printf("BEGIN transaction");
+		break;
+	case OP_Commit:
+		printf("COMMIT transaction");
+		break;
+	case OP_Rollback:
+		printf("ROLLBACK transaction");
+		break;
+	default:
+		printf("UNKNOWN opcode=%d", inst->opcode);
+		break;
+	}
+	printf("\n");
 }
 
 void
-vmcursor_open_blob(VmCursor *cur, MemoryContext *ctx)
+vmcursor_open(VmCursor *cursor, CursorContext *context, MemoryContext *ctx)
 {
-	cur->type = CursorType::BLOB;
-	cur->cursor.blob.ctx = ctx;
+
+	auto cur = cursor;
+	switch (context->type)
+	{
+	case CursorType::BPLUS: {
+
+		cur->type = CursorType::BPLUS;
+		cur->layout = context->context.btree.layout;
+		cur->cursor.bptree.tree = &context->context.btree.tree;
+		cur->cursor.bptree.state = BPT_CURSOR_INVALID;
+	}
+	case CursorType::RED_BLACK: {
+
+		cur->type = CursorType::RED_BLACK;
+		cur->layout = context->context.layout;
+		DataType key_type = cur->layout.layout[0];
+		cur->cursor.mem.tree = memtree_create(key_type, cur->layout.record_size);
+		cur->cursor.mem.state = MemCursor::INVALID;
+		cur->cursor.mem.ctx = ctx;
+		break;
+	}
+	case CursorType::BLOB: {
+
+		cur->type = CursorType::BLOB;
+		cur->cursor.blob.ctx = ctx;
+		break;
+	}
+	}
 }
 
 // Navigation functions
@@ -95,7 +227,6 @@ vmcursor_clear(VmCursor *cursor)
 	switch (cursor->type)
 	{
 	case CursorType::BPLUS: {
-
 		bplustree_clear(cursor->cursor.bptree.tree);
 		break;
 	}
@@ -262,7 +393,8 @@ vmcursor_print_current(VmCursor *cur)
 		if (key)
 		{
 			printf(", key=");
-			// print_value(cur->layout.layout.data[0], key);
+			DataType key_type = cur->layout.layout[0];
+			type_print(key_type, key);
 		}
 	}
 	printf("\n");
@@ -281,6 +413,7 @@ static struct
 	TypedValue	   registers[REGISTERS];
 	VmCursor	   cursors[CURSORS];
 } VM = {};
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -298,9 +431,9 @@ set_register(TypedValue *dest, uint8_t *src, DataType type)
 	}
 
 	dest->type = type;
-
 	type_copy(type, dest->data, src);
 }
+
 static void
 set_register(TypedValue *dest, TypedValue *src)
 {
@@ -319,6 +452,7 @@ build_record(uint8_t *data, int32_t first_reg, int32_t count)
 		offset += size;
 	}
 }
+
 static void
 reset()
 {
@@ -333,21 +467,123 @@ reset()
 	VM.program_size = 0;
 	VM.ctx = nullptr;
 }
+
 // ============================================================================
 // Debug Functions
 // ============================================================================
+
+void
+vm_debug_print_instruction_desc(const VMInstruction *inst, int pc)
+{
+	printf("PC[%3d] ", pc);
+
+	switch (inst->opcode)
+	{
+	case OP_Goto:
+		printf("GOTO -> PC=%d", inst->p2);
+		break;
+	case OP_Halt:
+		printf("HALT exit_code=%d", inst->p1);
+		break;
+	case OP_Open:
+		printf("OPEN cursor=%d", inst->p1);
+		break;
+	case OP_Close:
+		printf("CLOSE cursor=%d", inst->p1);
+		break;
+	case OP_Rewind:
+		printf("REWIND cursor=%d to_%s jump_if_empty=%d", inst->p1, (inst->p5 != 0) ? "end" : "start", inst->p2);
+		break;
+	case OP_Step:
+		printf("STEP cursor=%d %s jump_if_done=%d", inst->p1, (inst->p5 != 0) ? "forward" : "backward", inst->p2);
+		break;
+	case OP_Seek:
+		printf("SEEK cursor=%d key=R[%d] op=%s jump_if_not=%d", inst->p1, inst->p2,
+			   debug_compare_op_name((CompareOp)inst->p5), inst->p3);
+		break;
+	case OP_Column:
+		printf("COLUMN cursor=%d col=%d -> R[%d]", inst->p1, inst->p2, inst->p3);
+		break;
+	case OP_Insert:
+		printf("INSERT cursor=%d key=R[%d] reg_count=%d", inst->p1, inst->p2, inst->p3);
+		break;
+	case OP_Delete:
+		printf("DELETE cursor=%d -> R[%d]=valid R[%d]=occurred", inst->p1, inst->p2, inst->p3);
+		break;
+	case OP_Update:
+		printf("UPDATE cursor=%d record=R[%d]", inst->p1, inst->p2);
+		break;
+	case OP_Move:
+		printf("MOVE R[%d] <- R[%d]", inst->p1, inst->p3);
+		break;
+	case OP_Load:
+		printf("LOAD R[%d] <- ", inst->p1);
+		type_print((DataType)inst->p2, (uint8_t *)inst->p4);
+		printf(" (%s)", type_name((DataType)inst->p2));
+		break;
+	case OP_Arithmetic:
+		printf("ARITHMETIC R[%d] <- R[%d] %s R[%d]", inst->p1, inst->p2, debug_arith_op_name((ArithOp)inst->p5),
+			   inst->p3);
+		break;
+	case OP_JumpIf:
+		printf("JUMPIF R[%d] %s -> PC=%d", inst->p1, (inst->p5 != 0) ? "TRUE" : "FALSE", inst->p2);
+		break;
+	case OP_Logic:
+		printf("LOGIC R[%d] <- R[%d] %s R[%d]", inst->p1, inst->p2, debug_logic_op_name((LogicOp)inst->p5), inst->p3);
+		break;
+	case OP_Result:
+		printf("RESULT R[%d..%d] (%d registers)", inst->p1, inst->p1 + inst->p2 - 1, inst->p2);
+		break;
+	case OP_Test:
+		printf("TEST R[%d] <- R[%d] %s R[%d]", inst->p1, inst->p2, debug_compare_op_name((CompareOp)inst->p5),
+			   inst->p3);
+		break;
+	case OP_Function:
+		printf("FUNCTION R[%d] <- fn(R[%d..%d]) %d args", inst->p1, inst->p2, inst->p2 + inst->p3 - 1, inst->p3);
+		break;
+	case OP_Begin:
+		printf("BEGIN transaction");
+		break;
+	case OP_Commit:
+		printf("COMMIT transaction");
+		break;
+	case OP_Rollback:
+		printf("ROLLBACK transaction");
+		break;
+	default:
+		printf("UNKNOWN opcode=%d", inst->opcode);
+		break;
+	}
+	printf("\n");
+}
+
+void
+vm_debug_print_program(VMInstruction *instructions, int count)
+{
+	printf("\n===== PROGRAM LISTING =====\n");
+	for (int i = 0; i < count; i++)
+	{
+		vm_debug_print_instruction_desc(&instructions[i], i);
+	}
+	printf("===========================\n\n");
+}
+
 void
 vm_debug_print_all_registers()
 {
 	printf("===== REGISTERS =====\n");
 	for (int i = 0; i < REGISTERS; i++)
 	{
-		if (VM.registers[i].type != TYPE_NULL)
+		if (VM.registers[i].type != TYPE_NULL && VM.registers[i].data != nullptr)
 		{
+			printf("R[%2d] = ", i);
+			type_print(VM.registers[i].type, VM.registers[i].data);
+			printf(" (%s)\n", type_name(VM.registers[i].type));
 		}
 	}
 	printf("====================\n");
 }
+
 void
 vm_debug_print_cursor(int cursor_id)
 {
@@ -357,7 +593,12 @@ vm_debug_print_cursor(int cursor_id)
 		vmcursor_print_current(&VM.cursors[cursor_id]);
 		printf("====================\n");
 	}
+	else
+	{
+		printf("Invalid cursor ID: %d\n", cursor_id);
+	}
 }
+
 // ============================================================================
 // Main Execution Step
 // ============================================================================
@@ -365,15 +606,18 @@ static VM_RESULT
 step()
 {
 	VMInstruction *inst = &VM.program[VM.pc];
+
 	if (_debug)
 	{
+		vm_debug_print_instruction(inst, VM.pc);
 	}
+
 	switch (inst->opcode)
 	{
 	case OP_Halt: {
 		if (_debug)
 		{
-			printf("=> Halting with code %d", HALT_EXIT_CODE(*inst));
+			printf("=> Halting with code %d\n", HALT_EXIT_CODE(*inst));
 		}
 		VM.halted = true;
 		return OK;
@@ -382,7 +626,7 @@ step()
 		int32_t target = GOTO_TARGET(*inst);
 		if (_debug)
 		{
-			printf("=> Jumping to PC=%d", target);
+			printf("=> Jumping to PC=%d\n", target);
 		}
 		VM.pc = target;
 		return OK;
@@ -396,12 +640,11 @@ step()
 		if (_debug)
 		{
 			printf("=> R[%d] = ", dest_reg);
-			// print_value(type, data);
-			printf(" (type=%d)", type);
+			type_print(type, data);
+			printf(" (%s)\n", type_name(type));
 		}
 
 		set_register(&VM.registers[dest_reg], &to_load);
-
 		VM.pc++;
 		return OK;
 	}
@@ -412,8 +655,15 @@ step()
 		if (_debug)
 		{
 			printf("=> R[%d] = R[%d] = ", dest_reg, src_reg);
-			// print_value(src->type, src->data);
-			printf(" (type=%d)", src->type);
+			if (src->data)
+			{
+				type_print(src->type, src->data);
+			}
+			else
+			{
+				printf("NULL");
+			}
+			printf(" (%s)\n", type_name(src->type));
 		}
 		set_register(&VM.registers[dest_reg], src);
 		VM.pc++;
@@ -453,24 +703,43 @@ step()
 
 		if (_debug)
 		{
-			const char *op_names[] = {"==", "!=", "<", "<=", ">", ">="};
 			printf("=> R[%d] = (", dest);
-			// print_value(a->type, a->data);
-			printf(" %s ", op_names[op]);
-			// print_value(b->type, b->data);
-			printf(") = %s", test_result ? "TRUE" : "FALSE");
+			type_print(a->type, a->data);
+			printf(" %s ", debug_compare_op_name(op));
+			type_print(b->type, b->data);
+			printf(") = %s\n", test_result ? "TRUE" : "FALSE");
 		}
 
 		set_register(&VM.registers[dest], (uint8_t *)&test_result, TYPE_U32);
 		VM.pc++;
 		return OK;
 	}
-	// One opcode, multiple pattern types
 	case OP_Function: {
 		int32_t	   dest = FUNCTION_DEST_REG(*inst);
 		int32_t	   first_arg = FUNCTION_FIRST_ARG_REG(*inst);
 		int32_t	   count = FUNCTION_ARG_COUNT(*inst);
 		VMFunction fn = FUNCTION_FUNCTION(*inst);
+
+		if (_debug)
+		{
+			printf("=> R[%d] = fn(", dest);
+			for (int i = 0; i < count; i++)
+			{
+				if (i > 0)
+					printf(", ");
+				TypedValue *arg = &VM.registers[first_arg + i];
+				printf("R[%d]=", first_arg + i);
+				if (arg->data)
+				{
+					type_print(arg->type, arg->data);
+				}
+				else
+				{
+					printf("NULL");
+				}
+			}
+			printf(")\n");
+		}
 
 		// Pass registers directly as array
 		bool success = fn(&VM.registers[dest], &VM.registers[first_arg], count, VM.ctx);
@@ -490,13 +759,15 @@ step()
 		TypedValue *val = &VM.registers[test_reg];
 		bool		is_true = (*(uint32_t *)val->data != 0);
 		bool		will_jump = (is_true && jump_on_true) || (!is_true && !jump_on_true);
+
 		if (_debug)
 		{
 			printf("=> R[%d]=", test_reg);
-			// print_value(val->type, val->data);
-			printf(" (%s), jump_on_%s => %s to PC=%d", is_true ? "TRUE" : "FALSE", jump_on_true ? "true" : "false",
+			type_print(val->type, val->data);
+			printf(" (%s), jump_on_%s => %s to PC=%d\n", is_true ? "TRUE" : "FALSE", jump_on_true ? "true" : "false",
 				   will_jump ? "JUMPING" : "CONTINUE", will_jump ? target : VM.pc + 1);
 		}
+
 		if (will_jump)
 		{
 			VM.pc = target;
@@ -513,9 +784,11 @@ step()
 		int32_t	   right = LOGIC_RIGHT_REG(*inst);
 		LogicOp	   op = LOGIC_OP(*inst);
 		TypedValue result = TypedValue::make(TYPE_U32);
-		uint32_t   a = *(uint32_t *)VM.registers[left].data;
-		uint32_t   b = *(uint32_t *)VM.registers[right].data;
-		uint32_t   res_val;
+		result.data = (uint8_t *)VM.ctx->alloc(type_size(TYPE_U32));
+		uint32_t a = *(uint32_t *)VM.registers[left].data;
+		uint32_t b = *(uint32_t *)VM.registers[right].data;
+		uint32_t res_val;
+
 		switch (op)
 		{
 		case LOGIC_AND:
@@ -527,12 +800,14 @@ step()
 		default:
 			return ERR;
 		}
+
 		*(uint32_t *)result.data = res_val;
+
 		if (_debug)
 		{
-			const char *op_names[] = {"AND", "OR"};
-			printf("=> R[%d] = %d %s %d = %d", dest, a, op_names[op], b, res_val);
+			printf("=> R[%d] = %d %s %d = %d\n", dest, a, debug_logic_op_name(op), b, res_val);
 		}
+
 		set_register(&VM.registers[dest], &result);
 		VM.pc++;
 		return OK;
@@ -540,6 +815,27 @@ step()
 	case OP_Result: {
 		int32_t first_reg = RESULT_FIRST_REG(*inst);
 		int32_t reg_count = RESULT_REG_COUNT(*inst);
+
+		if (_debug)
+		{
+			printf("=> RESULT: ");
+			for (int i = 0; i < reg_count; i++)
+			{
+				if (i > 0)
+					printf(", ");
+				TypedValue *val = &VM.registers[first_reg + i];
+				printf("R[%d]=", first_reg + i);
+				if (val->data)
+				{
+					type_print(val->type, val->data);
+				}
+				else
+				{
+					printf("NULL");
+				}
+			}
+			printf("\n");
+		}
 
 		// Allocate output array using the context's allocator
 		TypedValue *values = (TypedValue *)VM.ctx->alloc(sizeof(TypedValue) * reg_count);
@@ -552,9 +848,7 @@ step()
 			memcpy(values[i].data, val->data, type_size(val->type));
 		}
 
-		// not sure how this will work for blobs
 		VM.ctx->emit_row(values, reg_count);
-
 		VM.pc++;
 		return OK;
 	}
@@ -567,29 +861,34 @@ step()
 		TypedValue *b = &VM.registers[right];
 
 		TypedValue result = {.type = (a->type > b->type) ? a->type : b->type};
-		bool	   success = true;
+		result.data = (uint8_t *)VM.ctx->alloc(type_size(result.type));
+
+		bool success = true;
 		arithmetic(op, result.type, result.data, a->data, b->data);
+
 		if (_debug)
 		{
-			const char *op_names[] = {"+", "-", "*", "/", "%"};
 			printf("=> R[%d] = ", dest);
-			// print_value(a->type, a->data);
-			printf(" %s ", op_names[op]);
-			// print_value(b->type, b->data);
+			type_print(a->type, a->data);
+			printf(" %s ", debug_arith_op_name(op));
+			type_print(b->type, b->data);
 			printf(" = ");
 			if (success)
 			{
-				// print_value(result.type, result.data);
+				type_print(result.type, result.data);
 			}
 			else
 			{
 				printf("ERROR");
 			}
+			printf("\n");
 		}
+
 		if (!success)
 		{
 			return ERR; // Division by zero
 		}
+
 		set_register(&VM.registers[dest], &result);
 		VM.pc++;
 		return OK;
@@ -599,23 +898,12 @@ step()
 		VmCursor	  *cursor = &VM.cursors[cursor_id];
 		CursorContext *context = OPEN_LAYOUT(*inst);
 
-		switch (context->type)
+		if (_debug)
 		{
-		case CursorType::BPLUS: {
-			vmcursor_open_bplus(cursor, context->context.btree.layout, &context->context.btree.tree);
-			break;
-		}
-		case CursorType::RED_BLACK: {
-			vmcursor_open_red_black(cursor, context->context.layout, VM.ctx);
-			break;
-		}
-		case CursorType::BLOB: {
-			vmcursor_open_blob(cursor, VM.ctx);
-			break;
-		}
+			printf("=> Opening cursor %d type=%s\n", cursor_id, debug_cursor_type_name(context->type));
 		}
 
-		// open
+		vmcursor_open(cursor, context, VM.ctx);
 
 		VM.pc++;
 		return OK;
@@ -624,9 +912,8 @@ step()
 		int32_t cursor_id = CLOSE_CURSOR_ID(*inst);
 		if (_debug)
 		{
-			printf("=> Closed cursor %d", cursor_id);
+			printf("=> Closed cursor %d\n", cursor_id);
 		}
-		// if(VM.cursors[cursor_id] == 0)
 
 		VM.pc++;
 		return OK;
@@ -637,6 +924,7 @@ step()
 		bool	  to_end = REWIND_TO_END(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
 		bool	  valid = vmcursor_rewind(cursor, to_end);
+
 		if (_debug)
 		{
 			printf("=> Cursor %d rewound to %s, valid=%d", cursor_id, to_end ? "end" : "start", valid);
@@ -644,7 +932,9 @@ step()
 			{
 				printf(", jumping to PC=%d", jump_if_empty);
 			}
+			printf("\n");
 		}
+
 		if (!valid && jump_if_empty >= 0)
 		{
 			VM.pc = jump_if_empty;
@@ -661,6 +951,7 @@ step()
 		bool	  forward = STEP_FORWARD(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
 		bool	  has_more = vmcursor_step(cursor, forward);
+
 		if (_debug)
 		{
 			printf("=> Cursor %d stepped %s, has_more=%d", cursor_id, forward ? "forward" : "backward", has_more);
@@ -668,7 +959,9 @@ step()
 			{
 				printf(", jumping to PC=%d", jump_if_done);
 			}
+			printf("\n");
 		}
+
 		if (!has_more && jump_if_done >= 0)
 		{
 			VM.pc = jump_if_done;
@@ -686,21 +979,20 @@ step()
 		CompareOp	op = SEEK_OP(*inst);
 		VmCursor   *cursor = &VM.cursors[cursor_id];
 		TypedValue *key = &VM.registers[key_reg];
-		bool		found;
-
-		found = vmcursor_seek(cursor, op, key->data);
+		bool		found = vmcursor_seek(cursor, op, key->data);
 
 		if (_debug)
 		{
-			const char *op_names[] = {"EQ", "NE", "LT", "LE", "GT", "GE"};
-			printf("=> Cursor %d seek %s with key=", cursor_id, op_names[op]);
-			// print_value(key->type, key->data);
+			printf("=> Cursor %d seek %s with key=", cursor_id, debug_compare_op_name(op));
+			type_print(key->type, key->data);
 			printf(", found=%d", found);
 			if (!found && jump_if_not >= 0)
 			{
 				printf(", jumping to PC=%d", jump_if_not);
 			}
+			printf("\n");
 		}
+
 		if (!found && jump_if_not >= 0)
 		{
 			VM.pc = jump_if_not;
@@ -727,14 +1019,15 @@ step()
 			printf("=> R[%d] = cursor[%d].col[%d] = ", dest_reg, cursor_id, col_index);
 			if (src.data)
 			{
-				// print_value(src.type, src.data);
+				type_print(src.type, src.data);
 			}
 			else
 			{
 				printf("NULL");
 			}
-			printf(" (type=%d)", src.type);
+			printf(" (%s)\n", type_name(src.type));
 		}
+
 		set_register(&VM.registers[dest_reg], &src);
 		VM.pc++;
 		return OK;
@@ -754,8 +1047,9 @@ step()
 
 		if (_debug)
 		{
-			printf("=> Cursor %d delete %s", cursor_id, success ? "OK" : "FAILED");
+			printf("=> Cursor %d delete %s, cursor still valid=%d\n", cursor_id, success ? "SUCCESS" : "FAILED", valid);
 		}
+
 		VM.pc++;
 		return OK;
 	}
@@ -767,33 +1061,60 @@ step()
 		TypedValue *first = &VM.registers[key_reg];
 		uint32_t	count = cursor->layout.layout.size() - 1;
 		bool		success;
+
+		if (_debug)
+		{
+			printf("=> Cursor %d insert key=", cursor_id);
+			type_print(first->type, first->data);
+			printf(" with %d record values", count);
+		}
+
 		if (1 == count)
 		{
 			/*
-				If we have a single register record it's either a signle TypedValue, hence doensn't need to be
+				If we have a single register record it's either a single TypedValue, hence doesn't need to be
 				built, or b) is a pointer to a blob
 			*/
 			TypedValue *value = &VM.registers[key_reg + 1];
 			success = vmcursor_insert(cursor, first->data, value->data, value->type);
+
+			if (_debug)
+			{
+				printf(" [");
+				type_print(value->type, value->data);
+				printf("]");
+			}
 		}
 		else
 		{
 			uint8_t data[cursor->layout.record_size];
 			build_record(data, key_reg + 1, count);
-
 			success = vmcursor_insert(cursor, first->data, data, cursor->layout.record_size);
+
+			if (_debug)
+			{
+				printf(" [");
+				for (uint32_t i = 0; i < count; i++)
+				{
+					if (i > 0)
+						printf(", ");
+					TypedValue *val = &VM.registers[key_reg + 1 + i];
+					type_print(val->type, val->data);
+				}
+				printf("]");
+			}
 		}
 
 		if (_debug)
 		{
-			printf("=> Cursor %d insert key=", cursor_id);
-			// print_value(first->type, first->data);
-			printf(" with %d values, success=%d", count - 1, success);
+			printf(", success=%d\n", success);
 		}
+
 		if (!success)
 		{
 			return ERR;
 		}
+
 		VM.pc++;
 		return OK;
 	}
@@ -802,29 +1123,51 @@ step()
 		int32_t	  record_reg = UPDATE_RECORD_REG(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
 		uint8_t	  data[cursor->layout.record_size];
-		build_record(data, record_reg, cursor->layout.layout.size() - 1);
+		uint32_t  record_count = cursor->layout.layout.size() - 1;
+
+		build_record(data, record_reg, record_count);
 		bool success = vmcursor_update(cursor, data);
+
 		if (_debug)
 		{
-			printf("=> Cursor %d update with data from R[%d], "
-				   "success=%d",
-				   cursor_id, record_reg, success);
+			printf("=> Cursor %d update with [", cursor_id);
+			for (uint32_t i = 0; i < record_count; i++)
+			{
+				if (i > 0)
+					printf(", ");
+				TypedValue *val = &VM.registers[record_reg + i];
+				type_print(val->type, val->data);
+			}
+			printf("], success=%d\n", success);
 		}
+
 		VM.pc++;
 		return OK;
 	}
 
 	case OP_Begin: {
+		if (_debug)
+		{
+			printf("=> Beginning transaction\n");
+		}
 		pager_begin_transaction();
 		VM.pc++;
 		break;
 	}
 	case OP_Commit: {
+		if (_debug)
+		{
+			printf("=> Committing transaction\n");
+		}
 		pager_commit();
 		VM.pc++;
 		break;
 	}
 	case OP_Rollback: {
+		if (_debug)
+		{
+			printf("=> Rolling back transaction\n");
+		}
 		pager_rollback();
 		return ABORT;
 	}
@@ -834,6 +1177,7 @@ step()
 		return ERR;
 	}
 }
+
 // ============================================================================
 // Main VM Execute Function
 // ============================================================================
@@ -845,11 +1189,13 @@ vm_execute(VMInstruction *instructions, int instruction_count, MemoryContext *ct
 	VM.program = instructions;
 	VM.program_size = instruction_count;
 	VM.ctx = ctx;
+
 	if (_debug)
 	{
-
+		vm_debug_print_program(instructions, instruction_count);
 		printf("\n===== EXECUTION TRACE =====\n");
 	}
+
 	while (!VM.halted && VM.pc < VM.program_size)
 	{
 		VM_RESULT result = step();
@@ -863,10 +1209,12 @@ vm_execute(VMInstruction *instructions, int instruction_count, MemoryContext *ct
 			return result;
 		}
 	}
+
 	if (_debug)
 	{
 		printf("\n\n===== EXECUTION COMPLETED =====\n");
 		vm_debug_print_all_registers();
 	}
+
 	return OK;
 }
