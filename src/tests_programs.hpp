@@ -387,10 +387,11 @@ load_all_data()
 	// Load in dependency order (tables with no FKs first)
 	load_table_from_csv("../users.csv", USERS);
 	load_table_from_csv("../products.csv", PRODUCTS);
-	load_table_from_csv("../tags.csv", TAGS);
+	load_table_from_csv("../orders.csv", ORDERS);
+	// load_table_from_csv("../tags.csv", TAGS);
 
 	// // Then tables with FKs
-	// load_table_from_csv("../orders.csv", ORDERS);
+
 	// load_table_from_csv("../posts.csv", POSTS);
 
 	// // Then tables with multiple FKs
@@ -469,6 +470,67 @@ test_select_order_by()
 	prog.resolve_labels();
 
 	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+}
+
+inline void test_nested_loop_join() {
+    printf("\n=== NESTED LOOP JOIN ===\n");
+    printf("Query: SELECT username, city, order_id, total FROM users JOIN orders ON users.user_id = orders.user_id\n\n");
+
+
+
+    ProgramBuilder prog;
+
+    auto users_ctx = from_structure(catalog[USERS]);
+    auto orders_ctx = from_structure(catalog[ORDERS]);
+
+    prog.open_cursor(0, &users_ctx);
+    prog.open_cursor(1, &orders_ctx);
+
+    // Outer loop: scan users
+    {
+        prog.regs.push_scope();
+
+        int at_end_users = prog.first(0);
+        auto outer_loop = prog.begin_while(at_end_users);
+        {
+            int user_id = prog.get_column(0, 0);
+
+            // Inner loop: scan ALL orders
+            int at_end_orders = prog.first(1);
+            auto inner_loop = prog.begin_while(at_end_orders);
+            {
+                int order_user_id = prog.get_column(1, 1);  // user_id is column 1 in orders
+                int match = prog.eq(user_id, order_user_id);
+
+                auto if_match = prog.begin_if(match);
+                {
+                    // Output matched row
+                    int username = prog.get_column(0, 1);
+                    int city = prog.get_column(0, 4);
+                    int order_id = prog.get_column(1, 0);
+                    int total = prog.get_column(1, 2);
+
+                    prog.result(username, 4);
+                }
+                prog.end_if(if_match);
+
+                prog.next(1, at_end_orders);
+            }
+            prog.end_while(inner_loop);
+
+            prog.next(0, at_end_users);
+        }
+        prog.end_while(outer_loop);
+
+        prog.regs.pop_scope();
+    }
+
+    prog.close_cursor(0);
+    prog.close_cursor(1);
+    prog.halt();
+
+    prog.resolve_labels();
+    vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
 }
 
 
@@ -608,7 +670,9 @@ test_programs()
 	// test_many_to_many_query();
 
 
-	test_subquery_pattern();
+	// test_subquery_pattern();
+	// _debug = true;
+	test_nested_loop_join();
 	pager_close();
 
 	printf("\n✅ All relational tests completed!\n");
