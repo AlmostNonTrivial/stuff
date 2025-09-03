@@ -26,7 +26,7 @@ struct CursorContext
 	CursorType type;
 	Layout	   layout;
 	union {
-		BPlusTree tree;
+		BPlusTree *tree;
 	} storage;
 };
 
@@ -68,13 +68,13 @@ enum OpCode : uint8_t
 		   REWIND_JUMP_IF_EMPTY(inst))
 
 	OP_Step = 14,
-#define STEP_MAKE(cursor_id, jump_label, forward) {OP_Step, cursor_id, -1, 0, jump_label, (uint8_t)forward}
+#define STEP_MAKE(cursor_id, result_reg, forward) {OP_Step, cursor_id, result_reg, 0, nullptr, (uint8_t)forward}
 #define STEP_CURSOR_ID(inst)					  ((inst).p1)
-#define STEP_JUMP_IF_DONE(inst)					  ((inst).p2)
+#define STEP_RESULT_REG(inst)					  ((inst).p2)
 #define STEP_FORWARD(inst)						  ((inst).p5 != 0)
 #define STEP_DEBUG_PRINT(inst)                                                                                         \
-	printf("STEP cursor=%d %s jump_if_done=%d", STEP_CURSOR_ID(inst), STEP_FORWARD(inst) ? "forward" : "backward",     \
-		   STEP_JUMP_IF_DONE(inst))
+	printf("STEP cursor=%d %s result_reg=%d", STEP_CURSOR_ID(inst), STEP_FORWARD(inst) ? "forward" : "backward",     \
+		   STEP_RESULT_REG(inst))
 
 	OP_Seek = 20,
 #define SEEK_MAKE(cursor_id, key_reg, jump_if_not, op) {OP_Seek, cursor_id, key_reg, -1, jump_if_not, (uint8_t)op}

@@ -142,15 +142,15 @@ test_insert_()
 	uint32_t   id1 = 1;
 	TypedValue id = TypedValue::make(TYPE_U32, &id1);
 
-	const char * name1 = "MIkey boy";
-	TypedValue name = TypedValue::make(TYPE_CHAR16, (void*)name1);
+	const char *name1 = "MIkey boy";
+	TypedValue	name = TypedValue::make(TYPE_CHAR16, (void *)name1);
 
 	uint8_t	   age1 = 25;
 	TypedValue age = TypedValue::make(TYPE_U8, &age1);
 
 	CursorContext cctx;
 	cctx.type = CursorType::BPLUS;
-	cctx.storage.tree = catalog[CUSTOMERS].storage.btree;
+	cctx.storage.tree = &catalog[CUSTOMERS].storage.btree;
 	cctx.layout = catalog[CUSTOMERS].to_layout();
 
 	prog.begin_transaction();
@@ -163,6 +163,34 @@ test_insert_()
 	prog.commit_transaction();
 	prog.halt();
 
+	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+}
+
+inline static void
+test_select_()
+{
+	ProgramBuilder prog;
+	int			   cursor_id = 0;
+
+	CursorContext cctx;
+	cctx.type = CursorType::BPLUS;
+	cctx.storage.tree = &catalog[CUSTOMERS].storage.btree;
+	cctx.layout = catalog[CUSTOMERS].to_layout();
+
+	prog.open_cursor(cursor_id, &cctx);
+	prog.rewind(cursor_id, "END");
+	LoopContext select_loop = prog.begin_loop();
+	int			first = prog.get_column(cursor_id, 0);
+	prog.get_column(cursor_id, 1);
+	prog.get_column(cursor_id, 2);
+	prog.result(first, 3);
+	int has_more_reg = prog.regs.allocate();
+	prog.step(cursor_id, has_more_reg);
+	prog.jumpif_true(has_more_reg, select_loop.start_label);
+	prog.label("END");
+	prog.close_cursor(cursor_id);
+	prog.halt();
+	prog.resolve_labels();
 
 	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
 }
@@ -174,8 +202,9 @@ test_programs()
 	pager_open(TEST_DB);
 
 	test_create_table();
-	_debug = true;
+	// _debug = true;
 	test_insert_();
+	test_select_();
 
 	pager_close();
 	os_file_delete(TEST_DB);

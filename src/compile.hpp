@@ -271,8 +271,8 @@ struct ProgramBuilder {
         return *this;
     }
 
-    ProgramBuilder& step(int cursor_id, const char* jump_if_done = nullptr, bool forward = true) {
-        emit(STEP_MAKE(cursor_id, (void*)jump_if_done, forward));
+    ProgramBuilder& step(int cursor_id, int32_t result_reg, bool forward = true) {
+        emit(STEP_MAKE(cursor_id, result_reg, forward));
         return *this;
     }
 

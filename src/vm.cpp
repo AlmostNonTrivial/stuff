@@ -74,7 +74,6 @@ debug_cursor_type_name(CursorType type)
 	}
 }
 
-
 void
 vmcursor_open(VmCursor *cursor, CursorContext *context, MemoryContext *ctx)
 {
@@ -86,8 +85,9 @@ vmcursor_open(VmCursor *cursor, CursorContext *context, MemoryContext *ctx)
 
 		cur->type = CursorType::BPLUS;
 		cur->layout = context->layout;
-		cur->cursor.bptree.tree = &context->storage.tree;
+		cur->cursor.bptree.tree = context->storage.tree;
 		cur->cursor.bptree.state = BPT_CURSOR_INVALID;
+		break;
 	}
 	case CursorType::RED_BLACK: {
 
@@ -385,7 +385,6 @@ reset()
 	VM.program_size = 0;
 	VM.ctx = nullptr;
 }
-
 
 void
 vm_debug_print_program(VMInstruction *instructions, int count)
@@ -777,29 +776,20 @@ step()
 	}
 	case OP_Step: {
 		int32_t	  cursor_id = STEP_CURSOR_ID(*inst);
-		int32_t	  jump_if_done = STEP_JUMP_IF_DONE(*inst);
+		int32_t	  result_reg = STEP_RESULT_REG(*inst);
 		bool	  forward = STEP_FORWARD(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
-		bool	  has_more = vmcursor_step(cursor, forward);
+		uint32_t has_more = vmcursor_step(cursor, forward) ? 1 : 0;
 
 		if (_debug)
 		{
 			printf("=> Cursor %d stepped %s, has_more=%d", cursor_id, forward ? "forward" : "backward", has_more);
-			if (!has_more && jump_if_done >= 0)
-			{
-				printf(", jumping to PC=%d", jump_if_done);
-			}
-			printf("\n");
 		}
 
-		if (!has_more && jump_if_done >= 0)
-		{
-			VM.pc = jump_if_done;
-		}
-		else
-		{
-			VM.pc++;
-		}
+		set_register(&VM.registers[result_reg], (uint8_t*)&has_more, TYPE_U32);
+
+		VM.pc++;
+
 		return OK;
 	}
 	case OP_Seek: {
@@ -1049,87 +1039,82 @@ vm_execute(VMInstruction *instructions, int instruction_count, MemoryContext *ct
 	return OK;
 }
 
-
-
-
-
-
 void
 vm_debug_print_instruction(const VMInstruction *inst, int pc)
 {
-    printf("PC[%3d] ", pc);
+	printf("PC[%3d] ", pc);
 
-    switch (inst->opcode)
-    {
-    case OP_Goto:
-        GOTO_DEBUG_PRINT(*inst);
-        break;
-    case OP_Halt:
-        HALT_DEBUG_PRINT(*inst);
-        break;
-    case OP_Open:
-        OPEN_DEBUG_PRINT(*inst);
-        break;
-    case OP_Close:
-        CLOSE_DEBUG_PRINT(*inst);
-        break;
-    case OP_Rewind:
-        REWIND_DEBUG_PRINT(*inst);
-        break;
-    case OP_Step:
-        STEP_DEBUG_PRINT(*inst);
-        break;
-    case OP_Seek:
-        SEEK_DEBUG_PRINT(*inst);
-        break;
-    case OP_Column:
-        COLUMN_DEBUG_PRINT(*inst);
-        break;
-    case OP_Insert:
-        INSERT_DEBUG_PRINT(*inst);
-        break;
-    case OP_Delete:
-        DELETE_DEBUG_PRINT(*inst);
-        break;
-    case OP_Update:
-        UPDATE_DEBUG_PRINT(*inst);
-        break;
-    case OP_Move:
-        MOVE_DEBUG_PRINT(*inst);
-        break;
-    case OP_Load:
-        LOAD_DEBUG_PRINT(*inst);
-        break;
-    case OP_Arithmetic:
-        ARITHMETIC_DEBUG_PRINT(*inst);
-        break;
-    case OP_JumpIf:
-        JUMPIF_DEBUG_PRINT(*inst);
-        break;
-    case OP_Logic:
-        LOGIC_DEBUG_PRINT(*inst);
-        break;
-    case OP_Result:
-        RESULT_DEBUG_PRINT(*inst);
-        break;
-    case OP_Test:
-        TEST_DEBUG_PRINT(*inst);
-        break;
-    case OP_Function:
-        FUNCTION_DEBUG_PRINT(*inst);
-        break;
-    case OP_Begin:
-        BEGIN_DEBUG_PRINT(*inst);
-        break;
-    case OP_Commit:
-        COMMIT_DEBUG_PRINT(*inst);
-        break;
-    case OP_Rollback:
-        ROLLBACK_DEBUG_PRINT(*inst);
-        break;
-    default:
-        printf("UNKNOWN opcode=%d", inst->opcode);
-        break;
-    }
-    printf("\n");
+	switch (inst->opcode)
+	{
+	case OP_Goto:
+		GOTO_DEBUG_PRINT(*inst);
+		break;
+	case OP_Halt:
+		HALT_DEBUG_PRINT(*inst);
+		break;
+	case OP_Open:
+		OPEN_DEBUG_PRINT(*inst);
+		break;
+	case OP_Close:
+		CLOSE_DEBUG_PRINT(*inst);
+		break;
+	case OP_Rewind:
+		REWIND_DEBUG_PRINT(*inst);
+		break;
+	case OP_Step:
+		STEP_DEBUG_PRINT(*inst);
+		break;
+	case OP_Seek:
+		SEEK_DEBUG_PRINT(*inst);
+		break;
+	case OP_Column:
+		COLUMN_DEBUG_PRINT(*inst);
+		break;
+	case OP_Insert:
+		INSERT_DEBUG_PRINT(*inst);
+		break;
+	case OP_Delete:
+		DELETE_DEBUG_PRINT(*inst);
+		break;
+	case OP_Update:
+		UPDATE_DEBUG_PRINT(*inst);
+		break;
+	case OP_Move:
+		MOVE_DEBUG_PRINT(*inst);
+		break;
+	case OP_Load:
+		LOAD_DEBUG_PRINT(*inst);
+		break;
+	case OP_Arithmetic:
+		ARITHMETIC_DEBUG_PRINT(*inst);
+		break;
+	case OP_JumpIf:
+		JUMPIF_DEBUG_PRINT(*inst);
+		break;
+	case OP_Logic:
+		LOGIC_DEBUG_PRINT(*inst);
+		break;
+	case OP_Result:
+		RESULT_DEBUG_PRINT(*inst);
+		break;
+	case OP_Test:
+		TEST_DEBUG_PRINT(*inst);
+		break;
+	case OP_Function:
+		FUNCTION_DEBUG_PRINT(*inst);
+		break;
+	case OP_Begin:
+		BEGIN_DEBUG_PRINT(*inst);
+		break;
+	case OP_Commit:
+		COMMIT_DEBUG_PRINT(*inst);
+		break;
+	case OP_Rollback:
+		ROLLBACK_DEBUG_PRINT(*inst);
+		break;
+	default:
+		printf("UNKNOWN opcode=%d", inst->opcode);
+		break;
+	}
+	printf("\n");
 }
