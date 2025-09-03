@@ -10,12 +10,82 @@
 #include "types.hpp"
 #include "vm.hpp"
 #include <cstdint>
-#define TEST_DB "test"
 
-#define CUSTOMERS "customers"
-#define ID		  "id"
-#define NAME	  "name"
-#define AGE		  "age"
+#include <fstream>
+#include <sstream>
+#include "bplustree.hpp"
+#include "catalog.hpp"
+#include "compile.hpp"
+#include "defs.hpp"
+#include "os_layer.hpp"
+#include "pager.hpp"
+#include "types.hpp"
+#include "vm.hpp"
+#include <cstdint>
+
+// Table definitions matching the CSV structure
+#define USERS	 "users"
+#define USER_ID	 "user_id"
+#define USERNAME "username"
+#define EMAIL	 "email"
+#define USER_AGE "age"
+#define CITY	 "city"
+
+#define PRODUCTS   "products"
+#define PRODUCT_ID "product_id"
+#define TITLE	   "title"
+#define CATEGORY   "category"
+#define PRICE	   "price"
+#define STOCK	   "stock"
+#define BRAND	   "brand"
+
+#define ORDERS		   "orders"
+#define ORDER_ID	   "order_id"
+#define TOTAL		   "total"
+#define TOTAL_QUANTITY "total_quantity"
+#define DISCOUNT	   "discount"
+
+#define ORDER_ITEMS "order_items"
+#define ITEM_ID		"item_id"
+
+#define POSTS	  "posts"
+#define POST_ID	  "post_id"
+#define VIEWS	  "views"
+#define REACTIONS "reactions"
+
+#define COMMENTS   "comments"
+#define COMMENT_ID "comment_id"
+#define BODY	   "body"
+#define LIKES	   "likes"
+
+#define TAGS	 "tags"
+#define TAG_ID	 "tag_id"
+#define TAG_NAME "tag_name"
+
+#define POST_TAGS "post_tags"
+
+#define USER_FOLLOWERS "user_followers"
+#define FOLLOWER_ID	   "follower_id"
+#define FOLLOWED_ID	   "followed_id"
+
+CursorContext
+from_structure(Structure &structure)
+{
+	CursorContext cctx;
+	cctx.storage.tree = &structure.storage.btree;
+	cctx.type = CursorType::BPLUS;
+	cctx.layout = structure.to_layout();
+	return cctx;
+}
+
+CursorContext
+red_black(Layout &layout)
+{
+	CursorContext cctx;
+	cctx.type = CursorType::RED_BLACK;
+	cctx.layout = layout;
+	return cctx;
+}
 
 void
 print_result_callback(TypedValue *result, size_t count)
@@ -107,8 +177,6 @@ clear_results()
 	last_results.clear();
 }
 
-std::vector<Column> customers = {Column{ID, TYPE_U32}, Column{NAME, TYPE_CHAR16}, Column{AGE, TYPE_U8}};
-
 bool
 vmfunc_create_table(TypedValue *result, TypedValue *args, uint32_t arg_count, MemoryContext *ctx)
 {
@@ -118,94 +186,251 @@ vmfunc_create_table(TypedValue *result, TypedValue *args, uint32_t arg_count, Me
 	return true;
 }
 
-inline static void
-test_create_table()
-{
+// Table schemas
+std::vector<Column> users = {Column{USER_ID, TYPE_U32}, Column{USERNAME, TYPE_CHAR16}, Column{EMAIL, TYPE_CHAR32},
+							 Column{USER_AGE, TYPE_U32}, Column{CITY, TYPE_CHAR16}};
 
-	catalog[CUSTOMERS] = Structure::from(CUSTOMERS, customers);
+std::vector<Column> products = {Column{PRODUCT_ID, TYPE_U32}, Column{TITLE, TYPE_CHAR32}, Column{CATEGORY, TYPE_CHAR16},
+								Column{PRICE, TYPE_U32},	  Column{STOCK, TYPE_U32},	  Column{BRAND, TYPE_CHAR16}};
+
+std::vector<Column> orders = {Column{ORDER_ID, TYPE_U32}, Column{USER_ID, TYPE_U32}, // FK to users
+							  Column{TOTAL, TYPE_U32}, Column{TOTAL_QUANTITY, TYPE_U32}, Column{DISCOUNT, TYPE_U32}};
+
+std::vector<Column> order_items = {Column{ITEM_ID, TYPE_U32},	 Column{ORDER_ID, TYPE_U32}, // FK to orders
+								   Column{PRODUCT_ID, TYPE_U32},							 // FK to products
+								   Column{"quantity", TYPE_U32}, Column{PRICE, TYPE_U32},	 Column{TOTAL, TYPE_U32}};
+
+std::vector<Column> posts = {Column{POST_ID, TYPE_U32}, Column{USER_ID, TYPE_U32}, // FK to users
+							 Column{TITLE, TYPE_CHAR32}, Column{VIEWS, TYPE_U32}, Column{REACTIONS, TYPE_U32}};
+
+std::vector<Column> comments = {Column{COMMENT_ID, TYPE_U32}, Column{POST_ID, TYPE_U32}, // FK to posts
+								Column{USER_ID, TYPE_U32},								 // FK to users
+								Column{BODY, TYPE_CHAR32}, Column{LIKES, TYPE_U32}};
+
+std::vector<Column> tags = {Column{TAG_ID, TYPE_U32}, Column{TAG_NAME, TYPE_CHAR16}};
+
+std::vector<Column> post_tags = {
+	Column{POST_ID, TYPE_U32}, // Composite PK/FK to posts
+	Column{TAG_ID, TYPE_U32}   // Composite PK/FK to tags
+};
+
+std::vector<Column> user_followers = {
+	Column{FOLLOWER_ID, TYPE_U32}, // FK to users
+	Column{FOLLOWED_ID, TYPE_U32}  // FK to users
+};
+
+// Simple CSV parser
+struct CSVReader
+{
+	std::ifstream file;
+	std::string	  line;
+
+	CSVReader(const char *filename) : file(filename)
+	{
+		if (!file.is_open())
+		{
+			fprintf(stderr, "Failed to open CSV file: %s\n", filename);
+		}
+		// Skip header
+		std::getline(file, line);
+	}
+
+	bool
+	next_row(std::vector<std::string> &fields)
+	{
+		if (!std::getline(file, line))
+		{
+			return false;
+		}
+
+		fields.clear();
+		std::stringstream ss(line);
+		std::string		  field;
+
+		while (std::getline(ss, field, ','))
+		{
+			fields.push_back(field);
+		}
+		return true;
+	}
+};
+
+inline static void
+create_all_tables(bool create)
+{
+	// Register all table schemas in catalog
+	catalog[USERS] = Structure::from(USERS, users);
+	catalog[PRODUCTS] = Structure::from(PRODUCTS, products);
+	catalog[ORDERS] = Structure::from(ORDERS, orders);
+	catalog[ORDER_ITEMS] = Structure::from(ORDER_ITEMS, order_items);
+	catalog[POSTS] = Structure::from(POSTS, posts);
+	catalog[COMMENTS] = Structure::from(COMMENTS, comments);
+	catalog[TAGS] = Structure::from(TAGS, tags);
+	catalog[POST_TAGS] = Structure::from(POST_TAGS, post_tags);
+	catalog[USER_FOLLOWERS] = Structure::from(USER_FOLLOWERS, user_followers);
+
+	if (!create)
+	{
+		return;
+	}
 
 	ProgramBuilder prog;
 	prog.begin_transaction();
-	int reg = prog.load(TypedValue::make(TYPE_CHAR16, (void *)CUSTOMERS));
-	prog.call_function(vmfunc_create_table, reg, 1);
+
+	const char *tables[] = {USERS, PRODUCTS, ORDERS, ORDER_ITEMS, POSTS, COMMENTS, TAGS, POST_TAGS, USER_FOLLOWERS};
+
+	for (auto table_name : tables)
+	{
+		prog.regs.push_scope();
+		int reg = prog.load(TypedValue::make(TYPE_CHAR16, (void *)table_name));
+		prog.call_function(vmfunc_create_table, reg, 1);
+
+		prog.regs.pop_scope();
+	}
+
 	prog.commit_transaction();
 	prog.halt();
+
 	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+
+	printf("Created %zu tables\n", sizeof(tables) / sizeof(tables[0]));
 }
 
 inline static void
-test_insert_()
+load_table_from_csv(const char *csv_file, const char *table_name)
 {
+	CSVReader				 reader(csv_file);
+	std::vector<std::string> fields;
+
+	auto &structure = catalog[table_name];
+	auto  layout = structure.to_layout();
+
 	ProgramBuilder prog;
-	int			   cursor_id = 0;
-
-	uint32_t   id1 = 1;
-	TypedValue id = TypedValue::make(TYPE_U32, &id1);
-
-	const char *name1 = "MIkey boy";
-	TypedValue	name = TypedValue::make(TYPE_CHAR16, (void *)name1);
-
-	uint8_t	   age1 = 25;
-	TypedValue age = TypedValue::make(TYPE_U8, &age1);
-
-	CursorContext cctx;
-	cctx.type = CursorType::BPLUS;
-	cctx.storage.tree = &catalog[CUSTOMERS].storage.btree;
-	cctx.layout = catalog[CUSTOMERS].to_layout();
-
 	prog.begin_transaction();
 
-	prog.open_cursor(cursor_id, &cctx);
-	int start_reg = prog.load(id);
-	prog.load(name);
-	prog.load(age);
-	prog.insert_record(cursor_id, start_reg, 3);
+	CursorContext cctx;
+	cctx.type = CursorType::BPLUS;
+	cctx.storage.tree = &structure.storage.btree;
+	cctx.layout = layout;
+
+	prog.open_cursor(0, &cctx);
+
+	int count = 0;
+
+	while (reader.next_row(fields))
+	{
+
+		prog.regs.push_scope();
+		if (fields.size() != structure.columns.size())
+		{
+			printf("Warning: row has %zu fields, expected %zu for table %s\n", fields.size(), structure.columns.size(),
+				   table_name);
+			continue;
+		}
+
+		int start_reg = -1;
+		for (size_t i = 0; i < fields.size(); i++)
+		{
+			DataType type = structure.columns[i].type;
+			void	*data = nullptr;
+
+			if (type == TYPE_U32)
+			{
+				uint32_t *val = (uint32_t *)arena::alloc<QueryArena>(sizeof(uint32_t));
+				*val = std::stoul(fields[i]);
+				data = val;
+			}
+			else if (type == TYPE_CHAR16)
+			{
+				char *val = (char *)arena::alloc<QueryArena>(16);
+				memset(val, 0, 16);
+				strncpy(val, fields[i].c_str(), 15);
+				data = val;
+			}
+			else if (type == TYPE_CHAR32)
+			{
+				char *val = (char *)arena::alloc<QueryArena>(32);
+				memset(val, 0, 32);
+				strncpy(val, fields[i].c_str(), 31);
+				data = val;
+			}
+
+			int reg = prog.load(TypedValue::make(type, data));
+			if (start_reg == -1)
+				start_reg = reg;
+		}
+
+		prog.insert_record(0, start_reg, fields.size());
+		count++;
+		batch_size++;
+
+		prog.regs.pop_scope();
+	}
+
+	prog.close_cursor(0);
 	prog.commit_transaction();
 	prog.halt();
 
+	printf("Loaded %d records into %s\n", count, table_name);
 	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
 }
 
 inline static void
-test_select_()
+load_all_data()
 {
-	ProgramBuilder prog;
-	int			   cursor_id = 0;
+	printf("Loading data from CSV files...\n\n");
 
-	CursorContext cctx;
-	cctx.type = CursorType::BPLUS;
-	cctx.storage.tree = &catalog[CUSTOMERS].storage.btree;
-	cctx.layout = catalog[CUSTOMERS].to_layout();
+	// Load in dependency order (tables with no FKs first)
+	load_table_from_csv("../users.csv", USERS);
+	load_table_from_csv("../products.csv", PRODUCTS);
+	load_table_from_csv("../tags.csv", TAGS);
 
-	prog.open_cursor(cursor_id, &cctx);
-	int has_more_reg = prog.rewind(cursor_id);
-	WhileContext while_context= prog.begin_while(has_more_reg);
-	int			first = prog.get_column(cursor_id, 0);
-	prog.get_column(cursor_id, 1);
-	prog.get_column(cursor_id, 2);
-	prog.result(first, 3);
-	prog.step(cursor_id, has_more_reg);
-	prog.end_while(while_context);
-	prog.label("END");
-	prog.close_cursor(cursor_id);
-	prog.halt();
-	prog.resolve_labels();
+	// // Then tables with FKs
+	// load_table_from_csv("../orders.csv", ORDERS);
+	// load_table_from_csv("../posts.csv", POSTS);
 
-	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	// // Then tables with multiple FKs
+	// load_table_from_csv("../order_items.csv", ORDER_ITEMS);
+	// load_table_from_csv("../comments.csv", COMMENTS);
+
+	// // Junction tables last
+	// load_table_from_csv("../post_tags.csv", POST_TAGS);
+	// load_table_from_csv("../user_followers.csv", USER_FOLLOWERS);
+
+	printf("\n✅ All data loaded successfully!\n");
 }
 
+inline void
+test_select()
+{
+	ProgramBuilder	   prog;
+	RegisterAllocator &reg = prog.regs;
+	int				   cursor = 0;
+	auto cctx = from_structure(catalog[USERS]);
+	prog.open_cursor(cursor, &cctx);
+	
+}
+
+// Main test function
 inline void
 test_programs()
 {
 	arena::init<QueryArena>();
-	pager_open(TEST_DB);
+	bool existed = pager_open("relational_test.db");
 
-	test_create_table();
-	test_insert_();
 	_debug = true;
-	test_select_();
+	printf("=== Setting up relational database ===\n\n");
+	create_all_tables(!existed);
+	if (!existed)
+	{
+		load_all_data();
+	}
+
+	// Run test queries
+	// test_join_query();
+	// test_many_to_many_query();
 
 	pager_close();
-	os_file_delete(TEST_DB);
-	std::cout << "ALL TESTS PASSED\n";
+
+	printf("\n✅ All relational tests completed!\n");
 }

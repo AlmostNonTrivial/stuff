@@ -1,5 +1,6 @@
 #pragma  once
 #include "vm.hpp"
+#include <cassert>
 #include "catalog.hpp"
 #include <cstdint>
 
@@ -9,19 +10,12 @@ struct RegisterAllocator {
     array<int, QueryArena> scope_stack;
 
     int allocate() {
-        if (next_free >= REGISTERS) {
-            printf("Error: Out of registers\n");
-            exit(1);
-        }
+        assert(next_free <= REGISTERS); 
         return next_free++;
     }
 
     int allocate_range(int count) {
-        if (next_free + count > REGISTERS) {
-            printf("Error: Cannot allocate %d registers (only %d available)\n",
-                   count, REGISTERS - next_free);
-            exit(1);
-        }
+        assert(next_free + count <= REGISTERS);
         int first = next_free;
         next_free += count;
         return first;
@@ -312,8 +306,7 @@ struct ProgramBuilder {
         return reg;
     }
 
-    int move_reg(int src_reg) {
-        int dest = regs.allocate();
+    int move_reg(int src_reg, int dest) {
         emit(MOVE_MOVE_MAKE(dest, src_reg));
         return dest;
     }
