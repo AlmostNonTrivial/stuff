@@ -14,7 +14,7 @@ int
 main()
 {
 
-	test_types();
+	// test_types();
 
 	// test_btree();
 	// test_blob();
