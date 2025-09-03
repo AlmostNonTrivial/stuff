@@ -238,7 +238,6 @@ vm_debug_print_program(VMInstruction *instructions, int count);
 
 
 
-
 // Debug helper functions for operation names
 const char* debug_compare_op_name(CompareOp op);
 const char* debug_arith_op_name(ArithOp op);

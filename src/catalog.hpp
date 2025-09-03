@@ -35,6 +35,9 @@ struct Structure
 
 	Layout
 	to_layout();
+
+	static Structure
+	from(const char *name, std::vector<Column> cols);
 };
 
-extern std::unordered_map<const char *, Structure> catalog;
+extern std::unordered_map<std::string_view, Structure> catalog;

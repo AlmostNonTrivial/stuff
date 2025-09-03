@@ -341,7 +341,7 @@ struct ProgramBuilder {
 
     int call_function(VMFunction fn, int first_arg_reg, int arg_count) {
         int result_reg = regs.allocate();
-        emit(FUNCTION_MAKE(result_reg, first_arg_reg, arg_count, &fn));
+        emit(FUNCTION_MAKE(result_reg, first_arg_reg, arg_count, (void*)fn));
         return result_reg;
     }
 };

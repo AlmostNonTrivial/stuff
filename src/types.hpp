@@ -717,6 +717,11 @@ struct TypedValue {
         type_print(type, data);
     }
 
+
+    inline uint16_t size() const {
+        return type_size(this->type);
+    }
+
     inline const char* name() const {
         return type_name(type);
     }
@@ -724,5 +729,57 @@ struct TypedValue {
     // Factory methods
     static TypedValue make(DataType type, void * data = nullptr) {
         return { (uint8_t*)data, type};
+    }
+
+    // Casting to unsigned integer types
+    uint8_t as_u8() const {
+        return *reinterpret_cast<uint8_t*>(data);
+    }
+
+    uint16_t as_u16() const {
+        return *reinterpret_cast<uint16_t*>(data);
+    }
+
+    uint32_t as_u32() const {
+        return *reinterpret_cast<uint32_t*>(data);
+    }
+
+    uint64_t as_u64() const {
+        return *reinterpret_cast<uint64_t*>(data);
+    }
+
+    // Casting to signed integer types
+    int8_t as_i8() const {
+        return *reinterpret_cast<int8_t*>(data);
+    }
+
+    int16_t as_i16() const {
+        return *reinterpret_cast<int16_t*>(data);
+    }
+
+    int32_t as_i32() const {
+        return *reinterpret_cast<int32_t*>(data);
+    }
+
+    int64_t as_i64() const {
+        return *reinterpret_cast<int64_t*>(data);
+    }
+
+    // Casting to floating-point types
+    float as_f32() const {
+        return *reinterpret_cast<float*>(data);
+    }
+
+    double as_f64() const {
+        return *reinterpret_cast<double*>(data);
+    }
+
+    // Casting to string types
+    const char* as_char() const {
+        return reinterpret_cast<const char*>(data);
+    }
+
+    const char* as_varchar() const {
+        return reinterpret_cast<const char*>(data);
     }
 };
