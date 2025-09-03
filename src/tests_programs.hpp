@@ -429,31 +429,41 @@ test_select_order_by()
 	int			   cursor = 0;
 	int			   memcursor = 1;
 	auto		   cctx = from_structure(catalog[USERS]);
-	Layout sorted_by_age = cctx.layout.reorder({3, 0,1,2,4 });
+	Layout		   sorted_by_age = cctx.layout.reorder({3, 0, 1, 2, 4});
 	auto		   mem = red_black(sorted_by_age);
+
 	prog.open_cursor(cursor, &cctx);
 	prog.open_cursor(memcursor, &mem);
 
-	int is_at_end = prog.rewind(cursor, false);
+	{
+		prog.regs.push_scope();
+		int	 at_end = prog.first(cursor);
+		auto while_context = prog.begin_while(at_end);
+		int	 dest_reg = prog.regs.allocate();
+		prog.get_column(cursor, 3, dest_reg);	  // age -> dest_reg
+		prog.get_column(cursor, 0, dest_reg + 1); // user_id -> dest_reg+1
+		prog.get_column(cursor, 1, dest_reg + 2); // username -> dest_reg+2
+		prog.get_column(cursor, 2, dest_reg + 3); // email -> dest_reg+3
+		prog.get_column(cursor, 4, dest_reg + 4); // city -> dest_reg+4
+		prog.insert_record(memcursor, dest_reg, 5);
+		prog.next(cursor, at_end);
+		prog.end_while(while_context);
+		prog.regs.pop_scope();
+		prog.regs.push_scope();
+	}
+	{
 
-	auto while_context = prog.begin_while(is_at_end);
-	int dest_reg = prog.get_column(cursor, 3);
-	prog.get_column(cursor, 0);
-	prog.get_column(cursor, 1);
-	prog.get_column(cursor, 2);
-	prog.get_column(cursor, 4);
-	prog.insert_record(memcursor, dest_reg, cctx.layout.count());
-	prog.next(cursor, is_at_end);
-	prog.end_while(while_context);
-
-	prog.rewind(memcursor, true, is_at_end);
-	auto while_ctx = prog.begin_while(is_at_end);
-	dest_reg = prog.get_columns(memcursor, 0, cctx.layout.count());
-	prog.result(dest_reg, cctx.layout.count());
-	prog.prev(memcursor, is_at_end);
-	prog.end_while(while_ctx);
+		int	 at_end = prog.last(memcursor);
+		auto while_ctx = prog.begin_while(at_end);
+		int	 dest_reg = prog.get_columns(memcursor, 0, 5);
+		prog.result(dest_reg, 5);
+		prog.step(memcursor, at_end);
+		prog.end_while(while_ctx);
+		prog.regs.pop_scope();
+	}
 
 	prog.close_cursor(cursor);
+	prog.close_cursor(memcursor);
 	prog.halt();
 	prog.resolve_labels();
 

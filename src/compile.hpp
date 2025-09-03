@@ -434,6 +434,13 @@ struct ProgramBuilder {
         return result_reg;
     }
 
+    int first(int cursor_id, int result_reg = -1) {
+        return rewind(cursor_id, false,result_reg );
+    }
+    int last(int cursor_id, int result_reg = -1) {
+        return rewind(cursor_id, false,result_reg );
+    }
+
     int step(int cursor_id, int result_reg = -1, bool forward = true) {
         if (result_reg == -1) {
             result_reg = regs.allocate();
@@ -443,19 +450,11 @@ struct ProgramBuilder {
     }
 
     int next(int cursor_id, int result_reg = -1) {
-        if (result_reg == -1) {
-            result_reg = regs.allocate();
-        }
-        emit(STEP_MAKE(cursor_id, result_reg, true));
-        return result_reg;
+        return step(cursor_id, result_reg, true);
     }
 
     int prev(int cursor_id, int result_reg = -1) {
-        if (result_reg == -1) {
-            result_reg = regs.allocate();
-        }
-        emit(STEP_MAKE(cursor_id, result_reg, false));
-        return result_reg;
+        return step(cursor_id, result_reg, false);
     }
 
     int seek(int cursor_id, int key_reg, CompareOp op = EQ, int result_reg = -1) {

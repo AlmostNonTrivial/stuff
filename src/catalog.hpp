@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bplustree.hpp"
+#include "types.hpp"
 #include <unordered_map>
 #include <vector>
 #include <cstdint>
@@ -34,23 +35,12 @@ struct Layout
 
 	// Create a new layout with swapped columns
     Layout reorder(std::initializer_list<uint32_t> new_order) const {
-        Layout result;
-        result.layout.reserve(layout.size());
-
+        std::vector<DataType> types = layout;
+        int i = 0;
         for (uint32_t idx : new_order) {
-            result.layout.push_back(layout[idx]);
+            types[i++] = layout[idx];
         }
-
-        // Rebuild offsets
-        result.offsets.push_back(0);
-        uint32_t offset = 0;
-        for (size_t i = 1; i < result.layout.size(); i++) {
-            offset += type_size(result.layout[i-1]);
-            result.offsets.push_back(offset);
-        }
-        result.record_size = offset + type_size(result.layout.back());
-
-        return result;
+        return Layout::create(types);
     }
 };
 
