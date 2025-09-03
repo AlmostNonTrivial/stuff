@@ -142,8 +142,8 @@ test_insert_()
 	uint32_t   id1 = 1;
 	TypedValue id = TypedValue::make(TYPE_U32, &id1);
 
-	uint32_t   name1 = 1;
-	TypedValue name = TypedValue::make(TYPE_CHAR16, &name1);
+	const char * name1 = "MIkey boy";
+	TypedValue name = TypedValue::make(TYPE_CHAR16, (void*)name1);
 
 	uint8_t	   age1 = 25;
 	TypedValue age = TypedValue::make(TYPE_U8, &age1);
