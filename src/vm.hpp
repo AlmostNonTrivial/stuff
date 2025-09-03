@@ -28,6 +28,7 @@ struct CursorContext
 	union {
 		BPlusTree *tree;
 	} storage;
+	uint8_t flags;
 };
 
 typedef void (*ResultCallback)(array<TypedValue, QueryArena> result);

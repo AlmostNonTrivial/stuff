@@ -815,6 +815,108 @@ test_create_composite_index()
 	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
 }
 
+inline void test_group_by_aggregate() {
+    printf("\n=== GROUP BY AGGREGATE DEMO ===\n");
+    printf("Query: SELECT city, COUNT(*), SUM(age) FROM users GROUP BY city\n\n");
+
+    ProgramBuilder prog;
+
+    // Create layout for aggregation tree:
+    // Key: city (CHAR16)
+    // Value: count (U32), sum_age (U32)
+    std::vector<DataType> agg_types = {
+        TYPE_CHAR16,  // city (key)
+        TYPE_U32,     // count
+        TYPE_U32      // sum_age
+    };
+    Layout agg_layout = Layout::create(agg_types);
+
+    auto users_ctx = from_structure(catalog[USERS]);
+    auto agg_ctx = red_black(agg_layout);
+
+    prog.open_cursor(0, &users_ctx);   // Users table
+    prog.open_cursor(1, &agg_ctx);     // Aggregation tree
+
+    // Phase 1: Scan users and build aggregates
+    {
+        prog.regs.push_scope();
+
+        // Constants
+        int one_const = prog.load(TYPE_U32, prog.alloc_value(1U));
+        int zero_const = prog.load(TYPE_U32, prog.alloc_value(0U));
+
+        int at_end = prog.first(0);
+        auto scan_loop = prog.begin_while(at_end);
+        {
+            // Get city and age from current user
+            int city_reg = prog.get_column(0, 4);  // city column
+            int age_reg = prog.get_column(0, 3);   // age column
+
+            // Try to find existing aggregate for this city
+            int found = prog.seek(1, city_reg, EQ);
+
+            auto if_found = prog.begin_if(found);
+            {
+                // City exists - update aggregates
+                int cur_count = prog.get_column(1, 1);
+                int cur_sum = prog.get_column(1, 2);
+
+                // Calculate new values in contiguous registers
+                int update_start = prog.regs.allocate();
+                prog.add(cur_count, one_const, update_start);      // new_count -> update_start
+                prog.add(cur_sum, age_reg, update_start + 1);      // new_sum -> update_start + 1
+
+                // Update the record (passes both count and sum)
+                prog.update_record(1, update_start);
+            }
+            prog.begin_else(if_found);
+            {
+                // New city - insert with initial values
+                // Need contiguous: city, count=1, sum=age
+                int insert_start = prog.regs.allocate_range(3);
+                prog.move(city_reg, insert_start);           // city
+                prog.move(one_const, insert_start + 1);      // count = 1
+                prog.move(age_reg, insert_start + 2);        // sum = age
+
+                prog.insert_record(1, insert_start, 3);
+            }
+            prog.end_if(if_found);
+
+            prog.next(0, at_end);
+        }
+        prog.end_while(scan_loop);
+
+        prog.regs.pop_scope();
+    }
+
+    // Phase 2: Output aggregated results
+    {
+        prog.regs.push_scope();
+
+        int at_end = prog.first(1);
+        auto output_loop = prog.begin_while(at_end);
+        {
+            // Get all aggregate columns in contiguous registers
+            int result_start = prog.get_columns(1, 0, 3);  // city, count, sum_age
+
+            // Output: city, count, sum_age
+            prog.result(result_start, 3);
+
+            prog.next(1, at_end);
+        }
+        prog.end_while(output_loop);
+
+        prog.regs.pop_scope();
+    }
+
+    prog.close_cursor(0);
+    prog.close_cursor(1);
+    prog.halt();
+
+    prog.resolve_labels();
+    vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+}
+
 // Call this in test_programs() after loading data:
 // test_subquery_pattern();
 
@@ -842,7 +944,9 @@ test_programs()
 	// test_subquery_pattern();
 	// _debug = true;
 	// test_nested_loop_join();
-	test_like_pattern();
+	// test_like_pattern();
+	// _debug = true;
+	test_group_by_aggregate();
 	pager_close();
 
 	printf("\n✅ All relational tests completed!\n");
