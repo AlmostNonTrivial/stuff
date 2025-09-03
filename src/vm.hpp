@@ -234,8 +234,10 @@ void
 vm_debug_print_cursor(int cursor_id);
 void
 vm_debug_print_program(VMInstruction *instructions, int count);
-void
-vm_debug_print_instruction(const VMInstruction *inst, int pc);
+
+
+
+
 
 // Debug helper functions for operation names
 const char* debug_compare_op_name(CompareOp op);
