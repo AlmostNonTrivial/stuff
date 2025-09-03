@@ -59,13 +59,13 @@ enum OpCode : uint8_t
 #define CLOSE_DEBUG_PRINT(inst) printf("CLOSE cursor=%d", CLOSE_CURSOR_ID(inst))
 
 	OP_Rewind = 13,
-#define REWIND_MAKE(cursor_id, label, to_end) {OP_Rewind, cursor_id, -1, 0, label, (uint8_t)to_end}
+#define REWIND_MAKE(cursor_id, result_reg, to_end) {OP_Rewind, cursor_id, result_reg, 0, nullptr, (uint8_t)to_end}
 #define REWIND_CURSOR_ID(inst)				  ((inst).p1)
-#define REWIND_JUMP_IF_EMPTY(inst)			  ((inst).p2)
+#define REWIND_RESULT_REG(inst)				  ((inst).p2)
 #define REWIND_TO_END(inst)					  ((inst).p5 != 0)
 #define REWIND_DEBUG_PRINT(inst)                                                                                       \
-	printf("REWIND cursor=%d to_%s jump_if_empty=%d", REWIND_CURSOR_ID(inst), REWIND_TO_END(inst) ? "end" : "start",   \
-		   REWIND_JUMP_IF_EMPTY(inst))
+	printf("REWIND cursor=%d to_%s -> R[%d]", REWIND_CURSOR_ID(inst), REWIND_TO_END(inst) ? "end" : "start",   \
+		   REWIND_RESULT_REG(inst))
 
 	OP_Step = 14,
 #define STEP_MAKE(cursor_id, result_reg, forward) {OP_Step, cursor_id, result_reg, 0, nullptr, (uint8_t)forward}
@@ -73,18 +73,18 @@ enum OpCode : uint8_t
 #define STEP_RESULT_REG(inst)					  ((inst).p2)
 #define STEP_FORWARD(inst)						  ((inst).p5 != 0)
 #define STEP_DEBUG_PRINT(inst)                                                                                         \
-	printf("STEP cursor=%d %s result_reg=%d", STEP_CURSOR_ID(inst), STEP_FORWARD(inst) ? "forward" : "backward",     \
+	printf("STEP cursor=%d %s -> R[%d]", STEP_CURSOR_ID(inst), STEP_FORWARD(inst) ? "forward" : "backward",     \
 		   STEP_RESULT_REG(inst))
 
 	OP_Seek = 20,
-#define SEEK_MAKE(cursor_id, key_reg, jump_if_not, op) {OP_Seek, cursor_id, key_reg, -1, jump_if_not, (uint8_t)op}
+#define SEEK_MAKE(cursor_id, key_reg, result_reg, op) {OP_Seek, cursor_id, key_reg, result_reg, nullptr, (uint8_t)op}
 #define SEEK_CURSOR_ID(inst)						   ((inst).p1)
 #define SEEK_KEY_REG(inst)							   ((inst).p2)
-#define SEEK_JUMP_IF_NOT(inst)						   ((inst).p3)
+#define SEEK_RESULT_REG(inst)						   ((inst).p3)
 #define SEEK_OP(inst)								   ((CompareOp)((inst).p5))
 #define SEEK_DEBUG_PRINT(inst)                                                                                         \
-	printf("SEEK cursor=%d key=R[%d] op=%s jump_if_not=%d", SEEK_CURSOR_ID(inst), SEEK_KEY_REG(inst),                  \
-		   debug_compare_op_name(SEEK_OP(inst)), SEEK_JUMP_IF_NOT(inst))
+	printf("SEEK cursor=%d key=R[%d] op=%s -> R[%d]", SEEK_CURSOR_ID(inst), SEEK_KEY_REG(inst),                  \
+		   debug_compare_op_name(SEEK_OP(inst)), SEEK_RESULT_REG(inst))
 
 	// Data operations
 	OP_Column = 30,

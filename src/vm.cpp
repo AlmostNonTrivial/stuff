@@ -436,10 +436,7 @@ step()
 {
 	VMInstruction *inst = &VM.program[VM.pc];
 
-	if (_debug)
-	{
-		vm_debug_print_instruction(inst, VM.pc);
-	}
+	// Instruction decode removed - just show execution results
 
 	switch (inst->opcode)
 	{
@@ -749,29 +746,20 @@ step()
 	}
 	case OP_Rewind: {
 		int32_t	  cursor_id = REWIND_CURSOR_ID(*inst);
-		int32_t	  jump_if_empty = REWIND_JUMP_IF_EMPTY(*inst);
+		int32_t	  result_reg = REWIND_RESULT_REG(*inst);
 		bool	  to_end = REWIND_TO_END(*inst);
 		VmCursor *cursor = &VM.cursors[cursor_id];
 		bool	  valid = vmcursor_rewind(cursor, to_end);
+		uint32_t  result_val = valid ? 1 : 0;
 
 		if (_debug)
 		{
-			printf("=> Cursor %d rewound to %s, valid=%d", cursor_id, to_end ? "end" : "start", valid);
-			if (!valid && jump_if_empty >= 0)
-			{
-				printf(", jumping to PC=%d", jump_if_empty);
-			}
-			printf("\n");
+			printf("=> Cursor %d rewound to %s, R[%d]=%d\n", cursor_id,
+				   to_end ? "end" : "start", result_reg, result_val);
 		}
 
-		if (!valid && jump_if_empty >= 0)
-		{
-			VM.pc = jump_if_empty;
-		}
-		else
-		{
-			VM.pc++;
-		}
+		set_register(&VM.registers[result_reg], (uint8_t*)&result_val, TYPE_U32);
+		VM.pc++;
 		return OK;
 	}
 	case OP_Step: {
@@ -783,44 +771,33 @@ step()
 
 		if (_debug)
 		{
-			printf("=> Cursor %d stepped %s, has_more=%d", cursor_id, forward ? "forward" : "backward", has_more);
+			printf("=> Cursor %d stepped %s, R[%d]=%d\n", cursor_id,
+				   forward ? "forward" : "backward", result_reg, has_more);
 		}
 
 		set_register(&VM.registers[result_reg], (uint8_t*)&has_more, TYPE_U32);
-
 		VM.pc++;
-
 		return OK;
 	}
 	case OP_Seek: {
 		int32_t		cursor_id = SEEK_CURSOR_ID(*inst);
 		int32_t		key_reg = SEEK_KEY_REG(*inst);
-		int32_t		jump_if_not = SEEK_JUMP_IF_NOT(*inst);
+		int32_t		result_reg = SEEK_RESULT_REG(*inst);
 		CompareOp	op = SEEK_OP(*inst);
 		VmCursor   *cursor = &VM.cursors[cursor_id];
 		TypedValue *key = &VM.registers[key_reg];
 		bool		found = vmcursor_seek(cursor, op, key->data);
+		uint32_t	result_val = found ? 1 : 0;
 
 		if (_debug)
 		{
 			printf("=> Cursor %d seek %s with key=", cursor_id, debug_compare_op_name(op));
 			type_print(key->type, key->data);
-			printf(", found=%d", found);
-			if (!found && jump_if_not >= 0)
-			{
-				printf(", jumping to PC=%d", jump_if_not);
-			}
-			printf("\n");
+			printf(", R[%d]=%d\n", result_reg, result_val);
 		}
 
-		if (!found && jump_if_not >= 0)
-		{
-			VM.pc = jump_if_not;
-		}
-		else
-		{
-			VM.pc++;
-		}
+		set_register(&VM.registers[result_reg], (uint8_t*)&result_val, TYPE_U32);
+		VM.pc++;
 		return OK;
 	}
 	case OP_Column: {

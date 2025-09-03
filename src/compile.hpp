@@ -2,6 +2,7 @@
 #include "vm.hpp"
 #include "catalog.hpp"
 #include <cstdint>
+
 // Enhanced ProgramBuilder with inline implementations
 struct RegisterAllocator {
     int next_free = 0;
@@ -55,6 +56,19 @@ struct LoopContext {
     const char* start_label;
     const char* end_label;
     int saved_reg_mark;
+};
+
+struct WhileContext {
+    const char* condition_label;  // Where we check the condition
+    const char* end_label;        // Where we exit
+    int condition_reg;            // Register holding the condition
+    int saved_reg_mark;
+};
+
+struct CursorLoopContext {
+    WhileContext while_ctx;
+    int cursor_id;
+    int condition_reg;  // The register that tracks validity
 };
 
 struct CondContext {
@@ -126,7 +140,6 @@ struct ProgramBuilder {
     // ========================================================================
 
     ProgramBuilder& goto_label(const char* label_name) {
-
         emit(GOTO_MAKE((void*)label_name));
         return *this;
     }
@@ -142,13 +155,20 @@ struct ProgramBuilder {
     }
 
     ProgramBuilder& jumpif_false(int test_reg, const char* label) {
-
         emit(JUMPIF_MAKE(test_reg, (void*)label, false));
         return *this;
     }
 
+    ProgramBuilder& jumpif_zero(int test_reg, const char* label) {
+        return jumpif_false(test_reg, label);  // 0 = false
+    }
+
+    ProgramBuilder& jumpif_not_zero(int test_reg, const char* label) {
+        return jumpif_true(test_reg, label);   // non-zero = true
+    }
+
     // ========================================================================
-    // Loop Management
+    // Loop Management (Original)
     // ========================================================================
 
     LoopContext begin_loop(const char* name = nullptr) {
@@ -179,6 +199,74 @@ struct ProgramBuilder {
 
     ProgramBuilder& continue_loop() {
         goto_label(current_loop.start_label);
+        return *this;
+    }
+
+    // ========================================================================
+    // While Loop Management
+    // ========================================================================
+
+    WhileContext begin_while(int condition_reg) {
+        WhileContext ctx = {
+            generate_label("while_check"),
+            generate_label("while_end"),
+            condition_reg,
+            regs.mark()
+        };
+
+        label(ctx.condition_label);
+        jumpif_zero(condition_reg, ctx.end_label);  // Exit if condition false
+        return ctx;
+    }
+
+    ProgramBuilder& end_while(const WhileContext& ctx) {
+        goto_label(ctx.condition_label);
+        label(ctx.end_label);
+        regs.restore(ctx.saved_reg_mark);
+        return *this;
+    }
+
+    WhileContext begin_do() {
+        WhileContext ctx = {
+            generate_label("do_start"),
+            generate_label("do_end"),
+            -1,  // No condition reg yet
+            regs.mark()
+        };
+
+        label(ctx.condition_label);  // Body starts here
+        return ctx;
+    }
+
+    ProgramBuilder& end_while_condition(const WhileContext& ctx, int condition_reg) {
+        jumpif_not_zero(condition_reg, ctx.condition_label);  // Continue if true
+        label(ctx.end_label);
+        regs.restore(ctx.saved_reg_mark);
+        return *this;
+    }
+
+    // ========================================================================
+    // Cursor-Specific Loop Helpers
+    // ========================================================================
+
+    CursorLoopContext begin_cursor_scan(int cursor_id, bool to_end = false) {
+        int valid_reg = rewind(cursor_id, to_end);
+        WhileContext while_ctx = begin_while(valid_reg);
+
+        return CursorLoopContext{
+            while_ctx,
+            cursor_id,
+            valid_reg
+        };
+    }
+
+    ProgramBuilder& end_cursor_scan(CursorLoopContext& ctx, bool forward = true) {
+        // Update condition for next iteration
+        ctx.condition_reg = step(ctx.cursor_id, forward);
+        // Copy the new condition value to the while condition register
+        emit(MOVE_MOVE_MAKE(ctx.while_ctx.condition_reg, ctx.condition_reg));
+
+        end_while(ctx.while_ctx);
         return *this;
     }
 
@@ -253,7 +341,7 @@ struct ProgramBuilder {
     }
 
     // ========================================================================
-    // Cursor Operations
+    // Cursor Operations (Updated to return registers)
     // ========================================================================
 
     ProgramBuilder& open_cursor(int cursor_id, CursorContext* context) {
@@ -266,19 +354,22 @@ struct ProgramBuilder {
         return *this;
     }
 
-    ProgramBuilder& rewind(int cursor_id, const char* jump_if_empty = nullptr, bool to_end = false) {
-        emit(REWIND_MAKE(cursor_id, (void*)jump_if_empty, to_end));
-        return *this;
+    int rewind(int cursor_id, bool to_end = false) {
+        int result_reg = regs.allocate();
+        emit(REWIND_MAKE(cursor_id, result_reg, to_end));
+        return result_reg;  // Returns 1 if valid, 0 if empty
     }
 
-    ProgramBuilder& step(int cursor_id, int32_t result_reg, bool forward = true) {
+    int step(int cursor_id, int result_reg = -1, bool forward = true) {
+        result_reg = result_reg == -1 ? regs.allocate() : result_reg;
         emit(STEP_MAKE(cursor_id, result_reg, forward));
-        return *this;
+        return result_reg;  // Returns 1 if more data, 0 if done
     }
 
-    ProgramBuilder& seek(int cursor_id, int key_reg, CompareOp op = EQ, const char* jump_if_not = nullptr) {
-        emit(SEEK_MAKE(cursor_id, key_reg, (void*)jump_if_not, op));
-        return *this;
+    int seek(int cursor_id, int key_reg, CompareOp op = EQ) {
+        int result_reg = regs.allocate();
+        emit(SEEK_MAKE(cursor_id, key_reg, result_reg, op));
+        return result_reg;  // Returns 1 if found, 0 if not found
     }
 
     int get_column(int cursor_id, int col_index) {
