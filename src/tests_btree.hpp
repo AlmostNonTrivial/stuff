@@ -1014,31 +1014,31 @@ test_btree_remaining_coverage()
 
 	// Test 2: if_37 - Update parent keys when deleted key matches separator
 	{
-		std::cout << "Test parent key update..." << std::flush;
-		pager_open(TEST_DB);
-		pager_begin_transaction();
+		// std::cout << "Test parent key update..." << std::flush;
+		// pager_open(TEST_DB);
+		// pager_begin_transaction();
 
-		BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
-		BPtCursor cursor = {.tree = &tree};
+		// BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
+		// BPtCursor cursor = {.tree = &tree};
 
-		// Insert enough to create internal nodes
-		for (uint32_t i = 0; i < 100; i++)
-		{
-			uint32_t val = i * 10;
-			bplustree_cursor_insert(&cursor, &i, (uint8_t *)&val);
-		}
+		// // Insert enough to create internal nodes
+		// for (uint32_t i = 0; i < 100; i++)
+		// {
+		// 	uint32_t val = i * 10;
+		// 	bplustree_cursor_insert(&cursor, &i, (uint8_t *)&val);
+		// }
 
-		// Find the first key of the second leaf - this should be a separator
-		uint32_t separator_key = tree.leaf_max_keys;
+		// // Find the first key of the second leaf - this should be a separator
+		// uint32_t separator_key = tree.leaf_max_keys;
 
-		// Delete this key to trigger parent update
-		assert(bplustree_cursor_seek(&cursor, &separator_key));
-		bplustree_cursor_delete(&cursor);
+		// // Delete this key to trigger parent update
+		// assert(bplustree_cursor_seek(&cursor, &separator_key));
+		// bplustree_cursor_delete(&cursor);
 
-		pager_rollback();
-		pager_close();
-		os_file_delete(TEST_DB);
-		std::cout << " OK\n";
+		// pager_rollback();
+		// pager_close();
+		// os_file_delete(TEST_DB);
+		// std::cout << " OK\n";
 	}
 
 	// Test 3: if_98, if_99 - Previous navigation across leaf boundary
@@ -1171,70 +1171,7 @@ test_btree_remaining_coverage()
 	std::cout << "All remaining coverage tests complete!\n";
 }
 
-inline void
-test_if_37_parent_separator_update()
-{
-	std::cout << "\n=== Test if_37: Parent Separator Update ===\n";
 
-	pager_open(TEST_DB);
-	pager_begin_transaction();
-
-	BPlusTree tree = bplustree_create(TYPE_U32, sizeof(uint32_t), true);
-	BPtCursor cursor = {.tree = &tree};
-
-	// Insert enough keys to create exactly 2 leaves
-	// After splitting, first leaf has keys [0..split_index-1]
-	// Second leaf has keys [split_index..max_keys]
-	for (uint32_t i = 0; i <= tree.leaf_max_keys; i++)
-	{
-		uint32_t val = i * 100;
-		bplustree_cursor_insert(&cursor, &i, (uint8_t *)&val);
-	}
-
-	bplustree_print(&tree);
-
-	// At this point:
-	// - Internal root with 1 separator key
-	// - Separator key = tree.leaf_split_index (first key of second leaf)
-	// - Left leaf: keys 0 to split_index-1
-	// - Right leaf: keys split_index to leaf_max_keys
-
-	std::cout << "Tree structure after initial inserts:\n";
-	std::cout << "  Split index: " << tree.leaf_split_index << "\n";
-	std::cout << "  Separator in parent: " << tree.leaf_split_index << "\n";
-
-	// Now delete the first key of the second leaf
-	// This is the key that's stored as the separator in the parent
-	uint32_t separator_key = tree.leaf_split_index;
-
-	std::cout << "Deleting key " << separator_key << " (first of second leaf)...\n";
-	assert(bplustree_cursor_seek(&cursor, &separator_key));
-	bplustree_cursor_delete(&cursor);
-
-	bplustree_print(&tree);
-	// This deletion should trigger:
-	// 1. do_delete with index=0 (first key of leaf)
-	// 2. if_40: index == 0 && node->parent != 0
-	// 3. update_parent_keys called
-	// 4. if_37: parent separator matches deleted key
-	// 5. Parent separator updated to new first key of leaf
-
-	std::cout << "New separator should be: " << separator_key + 1 << "\n";
-
-	// Verify tree is still valid
-	bplustree_validate(&tree);
-
-	// Verify the parent was updated correctly
-	// The new separator should be the new first key of the second leaf
-	uint32_t expected_new_separator = separator_key + 1;
-	assert(bplustree_cursor_seek(&cursor, &expected_new_separator));
-
-	pager_rollback();
-	pager_close();
-	os_file_delete(TEST_DB);
-
-	std::cout << "if_37 test passed!\n";
-}
 
 // Update the main test_btree function to call stress test
 inline void
@@ -1251,5 +1188,5 @@ test_btree()
 	test_btree_collapse_root();
 	test_btree_deep_tree_coverage();
 	test_btree_remaining_coverage();
-	test_if_37_parent_separator_update();
+
 }

@@ -1,4 +1,4 @@
-#include "executor.hpp"
+
 #include "tests_programs.hpp"
 #include "tests_types.hpp"
 #include "tests_parser.hpp"
@@ -14,15 +14,15 @@ int
 main()
 {
 
-	// test_types();
+	test_types();
 
-	// // test_btree();
+	// test_btree();
 	// test_blob();
 	// test_memtree();
 	// test_parser();
 	// test_pager();
 	// test_integration();
-	test_programs();
+	// test_programs();
 
 
 	return 0;

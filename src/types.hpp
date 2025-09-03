@@ -522,7 +522,8 @@ struct TypedValue {
     }
 
     inline bool operator!=(const TypedValue& other) const {
-        return !(*this == other);
+        return !type_equals(type, data, other.data);
+
     }
 
     // Operations

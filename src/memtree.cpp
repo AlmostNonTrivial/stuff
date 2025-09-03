@@ -514,16 +514,16 @@ static MemTreeNode* tree_predecessor(MemTreeNode* node) {
 // Replace the existing memcursor_seek function with this:
 
 bool memcursor_seek(MemCursor* cursor, const void* key) {
-    MemTreeNode* current = cursor->tree->root;
+    MemTreeNode* current = cursor->tree.root;
     MemTreeNode* found = nullptr;
 
     // Standard BST search, but keep searching left when duplicates are allowed
     while (current) {
-        int cmp_result = memtree_compare(cursor->tree, (const uint8_t*)key, node_key(current));
+        int cmp_result = memtree_compare(&cursor->tree, (const uint8_t*)key, node_key(current));
         if (cmp_result == 0) {
             found = current;
             // If duplicates allowed, keep searching left for the first occurrence
-            if (cursor->tree->allow_duplicates) {
+            if (cursor->tree.allow_duplicates) {
                 current = current->left;
             } else {
                 // No duplicates, this is the only instance
@@ -549,7 +549,7 @@ bool memcursor_seek(MemCursor* cursor, const void* key) {
 // Also update memcursor_count_duplicates to be more efficient:
 
 uint32_t memcursor_count_duplicates(MemCursor* cursor, const void* key) {
-    if (!cursor->tree->allow_duplicates) {
+    if (!cursor->tree.allow_duplicates) {
         return memcursor_seek(cursor, key) ? 1 : 0;
     }
 
@@ -559,7 +559,7 @@ uint32_t memcursor_count_duplicates(MemCursor* cursor, const void* key) {
     if (memcursor_seek(cursor, key)) {
         do {
             uint8_t* curr_key = memcursor_key(cursor);
-            if (memtree_compare(cursor->tree, (const uint8_t*)key, curr_key) != 0) {
+            if (memtree_compare(&cursor->tree, (const uint8_t*)key, curr_key) != 0) {
                 break;
             }
             count++;
@@ -570,13 +570,13 @@ uint32_t memcursor_count_duplicates(MemCursor* cursor, const void* key) {
 }
 
 bool memcursor_seek_exact(MemCursor* cursor, const void* key, const void* record) {
-    MemTreeNode* current = cursor->tree->root;
+    MemTreeNode* current = cursor->tree.root;
 
     while (current) {
         uint8_t* curr_key = node_key(current);
-        uint8_t* curr_rec = node_record(current, cursor->tree->key_size);
+        uint8_t* curr_rec = node_record(current, cursor->tree.key_size);
 
-        int cmp_result = memtree_compare_full(cursor->tree,
+        int cmp_result = memtree_compare_full(&cursor->tree,
                                               (const uint8_t*)key, (const uint8_t*)record,
                                               curr_key, curr_rec);
 
@@ -596,11 +596,11 @@ bool memcursor_seek_exact(MemCursor* cursor, const void* key, const void* record
 }
 
 bool memcursor_seek_ge(MemCursor* cursor, const void* key) {
-    MemTreeNode* current = cursor->tree->root;
+    MemTreeNode* current = cursor->tree.root;
     MemTreeNode* best = nullptr;
 
     while (current) {
-        int cmp_result = memtree_compare(cursor->tree, (const uint8_t*)key, node_key(current));
+        int cmp_result = memtree_compare(&cursor->tree, (const uint8_t*)key, node_key(current));
 
         if (cmp_result == 0) {
             cursor->current = current;
@@ -625,11 +625,11 @@ bool memcursor_seek_ge(MemCursor* cursor, const void* key) {
 }
 
 bool memcursor_seek_gt(MemCursor* cursor, const void* key) {
-    MemTreeNode* current = cursor->tree->root;
+    MemTreeNode* current = cursor->tree.root;
     MemTreeNode* best = nullptr;
 
     while (current) {
-        int cmp_result = memtree_compare(cursor->tree, (const uint8_t*)key, node_key(current));
+        int cmp_result = memtree_compare(&cursor->tree, (const uint8_t*)key, node_key(current));
 
         if (cmp_result < 0) {
             best = current;
@@ -650,15 +650,15 @@ bool memcursor_seek_gt(MemCursor* cursor, const void* key) {
 }
 
 bool memcursor_seek_le(MemCursor* cursor, const void* key) {
-    MemTreeNode* current = cursor->tree->root;
+    MemTreeNode* current = cursor->tree.root;
     MemTreeNode* best = nullptr;
 
     while (current) {
-        int cmp_result = memtree_compare(cursor->tree, (const uint8_t*)key, node_key(current));
+        int cmp_result = memtree_compare(&cursor->tree, (const uint8_t*)key, node_key(current));
 
         if (cmp_result == 0) {
             // For duplicates, find the last one with this key
-            if (cursor->tree->allow_duplicates) {
+            if (cursor->tree.allow_duplicates) {
                 best = current;
                 current = current->right;  // Keep looking for larger records with same key
             } else {
@@ -685,11 +685,11 @@ bool memcursor_seek_le(MemCursor* cursor, const void* key) {
 }
 
 bool memcursor_seek_lt(MemCursor* cursor, const void* key) {
-    MemTreeNode* current = cursor->tree->root;
+    MemTreeNode* current = cursor->tree.root;
     MemTreeNode* best = nullptr;
 
     while (current) {
-        int cmp_result = memtree_compare(cursor->tree, (const uint8_t*)key, node_key(current));
+        int cmp_result = memtree_compare(&cursor->tree, (const uint8_t*)key, node_key(current));
 
         if (cmp_result > 0) {
             best = current;
@@ -710,23 +710,23 @@ bool memcursor_seek_lt(MemCursor* cursor, const void* key) {
 }
 
 bool memcursor_first(MemCursor* cursor) {
-    if (!cursor->tree->root) {
+    if (!cursor->tree.root) {
         cursor->state = MemCursor::AT_END;
         return false;
     }
 
-    cursor->current = memtree_find_min(cursor->tree->root);
+    cursor->current = memtree_find_min(cursor->tree.root);
     cursor->state = cursor->current ? MemCursor::VALID : MemCursor::AT_END;
     return cursor->current != nullptr;
 }
 
 bool memcursor_last(MemCursor* cursor) {
-    if (!cursor->tree->root) {
+    if (!cursor->tree.root) {
         cursor->state = MemCursor::AT_END;
         return false;
     }
 
-    cursor->current = memtree_find_max(cursor->tree->root);
+    cursor->current = memtree_find_max(cursor->tree.root);
     cursor->state = cursor->current ? MemCursor::VALID : MemCursor::AT_END;
     return cursor->current != nullptr;
 }
@@ -772,7 +772,7 @@ uint8_t* memcursor_record(MemCursor* cursor) {
     if (cursor->state != MemCursor::VALID) {
         return nullptr;
     }
-    return node_record(cursor->current, cursor->tree->key_size);
+    return node_record(cursor->current, cursor->tree.key_size);
 }
 
 bool memcursor_is_valid(MemCursor* cursor) {
@@ -780,7 +780,7 @@ bool memcursor_is_valid(MemCursor* cursor) {
 }
 
 bool memcursor_insert(MemCursor* cursor, const void* key, const uint8_t* record) {
-    return memtree_insert(cursor->tree, (const uint8_t*)key, record, cursor->ctx);
+    return memtree_insert(&cursor->tree, (const uint8_t*)key, record, cursor->ctx);
 }
 
 bool memcursor_delete(MemCursor* cursor) {
@@ -789,28 +789,28 @@ bool memcursor_delete(MemCursor* cursor) {
     }
 
     // Save key (and record if duplicates allowed) for deletion
-    uint8_t data_copy[cursor->tree->data_size];
-    memcpy(data_copy, cursor->current->data, cursor->tree->data_size);
+    uint8_t data_copy[cursor->tree.data_size];
+    memcpy(data_copy, cursor->current->data, cursor->tree.data_size);
 
     // Move to next before deleting
     memcursor_next(cursor);
 
-    if (cursor->tree->allow_duplicates) {
+    if (cursor->tree.allow_duplicates) {
         // Delete exact match
-        return memtree_delete_exact(cursor->tree, data_copy,
-                                   data_copy + cursor->tree->key_size);
+        return memtree_delete_exact(&cursor->tree, data_copy,
+                                   data_copy + cursor->tree.key_size);
     } else {
         // Delete by key only
-        return memtree_delete(cursor->tree, data_copy);
+        return memtree_delete(&cursor->tree, data_copy);
     }
 }
 
 bool memcursor_update(MemCursor* cursor, const uint8_t* record) {
-    if (cursor->state != MemCursor::VALID || cursor->tree->record_size == 0) {
+    if (cursor->state != MemCursor::VALID || cursor->tree.record_size == 0) {
         return false;
     }
 
-    memcpy(node_record(cursor->current, cursor->tree->key_size), record, cursor->tree->record_size);
+    memcpy(node_record(cursor->current, cursor->tree.key_size), record, cursor->tree.record_size);
     return true;
 }
 
@@ -838,7 +838,7 @@ bool memcursor_seek_cmp(MemCursor* cursor, const uint8_t* key, CompareOp op) {
 }
 
 bool memcursor_has_duplicates(MemCursor* cursor) {
-    if (cursor->state != MemCursor::VALID || !cursor->tree->allow_duplicates) {
+    if (cursor->state != MemCursor::VALID || !cursor->tree.allow_duplicates) {
         return false;
     }
 
@@ -850,7 +850,7 @@ bool memcursor_has_duplicates(MemCursor* cursor) {
     if (memcursor_next(cursor)) {
         uint8_t* curr_key = node_key(saved);
         uint8_t* next_key = memcursor_key(cursor);
-        has_dup = (memtree_compare(cursor->tree, curr_key, next_key) == 0);
+        has_dup = (memtree_compare(&cursor->tree, curr_key, next_key) == 0);
     }
 
     // Restore position
@@ -969,7 +969,7 @@ void memtree_print(const MemTree* tree) {
     printf("MemTree Structure (Red-Black Tree)\n");
     printf("====================================\n");
     // printf("Key type: %s, Record size: %u bytes\n",
-           // type_to_string(tree->key_size), tree->record_size);
+           // type_to_string(tree->key_type), tree->record_size);
     printf("Allow duplicates: %s\n", tree->allow_duplicates ? "YES" : "NO");
     printf("Node count: %u\n", tree->node_count);
     printf("------------------------------------\n\n");
@@ -999,7 +999,7 @@ void memtree_print(const MemTree* tree) {
         // Print node info
         printf("  [");
         // print_key_value(tree, node_key(nl.node),
-        //                node_record(nl.node, tree->key_size));
+        //                node_record(nl.node, tree->key_type));
         printf("]");
 
         // Print color
@@ -1040,7 +1040,7 @@ static void print_inorder(const MemTree* tree, MemTreeNode* node) {
     print_inorder(tree, node->left);
 
     // print_key_value(tree, node_key(node),
-    //                node_record(node, tree->key_size));
+    //                node_record(node, tree->key_type));
     printf(" ");
 
     print_inorder(tree, node->right);

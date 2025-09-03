@@ -1,3 +1,8 @@
 TODO:
 - query validation for update
 - incrementing keys for tables and master catalog
+
+
+
+- re implement print debugging
+

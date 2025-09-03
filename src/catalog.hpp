@@ -1,6 +1,9 @@
 #pragma once
 #include "arena.hpp"
 #include "bplustree.hpp"
+
+#include <unordered_map>
+#include <vector>
 #include "defs.hpp"
 #include "parser.hpp"
 #include <cstdint>
@@ -20,8 +23,6 @@ struct Layout
 
 	static Layout
 	create(std::vector<DataType> &column_types);
-	static Layout
-	create(DataType key, DataType record);
 };
 
 struct Structure
@@ -32,7 +33,8 @@ struct Structure
 	} storage;
 	std::vector<Column> columns;
 
-	Layout to_layout();
+	Layout
+	to_layout();
 };
 
 extern std::unordered_map<const char *, Structure> catalog;

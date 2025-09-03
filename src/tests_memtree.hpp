@@ -25,9 +25,8 @@ inline void test_memtree_sequential_ops() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    MemTree tree = memtree_create(TYPE_U32, sizeof(uint32_t), false);
-    MemCursor cursor = {.tree = &tree, .ctx = &ctx};
-
+    MemCursor cursor = {.tree = memtree_create(TYPE_U32, sizeof(uint32_t), false), .ctx = &ctx};
+    MemTree &tree = cursor.tree;
     const int COUNT = 1000;
 
     // Sequential forward insertion
@@ -87,8 +86,8 @@ inline void test_memtree_random_ops() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    MemTree tree = memtree_create(TYPE_U32, sizeof(uint64_t), false);
-    MemCursor cursor = {.tree = &tree, .ctx = &ctx};
+    MemCursor cursor = {.tree = memtree_create(TYPE_U32, sizeof(uint64_t), false), .ctx = &ctx};
+    MemTree &tree = cursor.tree;
 
     const int COUNT = 1000;
 
@@ -108,7 +107,6 @@ inline void test_memtree_random_ops() {
         assert(memtree_insert(&tree, (uint8_t*)&key, (uint8_t*)&value, &ctx));
     }
     std::cout << " OK (" << COUNT << " unique keys)\n";
-
 
     // Verify all entries
     for (auto& [key, value] : data) {
@@ -156,9 +154,8 @@ inline void test_memtree_duplicates() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    // Create tree that allows duplicates
-    MemTree tree = memtree_create(TYPE_U32, sizeof(uint32_t), true);
-    MemCursor cursor = {.tree = &tree, .ctx = &ctx};
+    MemCursor cursor = {.tree = memtree_create(TYPE_U32, sizeof(uint32_t), true), .ctx = &ctx};
+    MemTree &tree = cursor.tree;
 
     // Insert multiple records with same key
     std::cout << "Insert duplicates..." << std::flush;
@@ -229,8 +226,8 @@ inline void test_memtree_composite_keys() {
         return (uint32_t)(key & 0xFFFFFFFF);
     };
 
-    MemTree tree = memtree_create(TYPE_U64, sizeof(uint64_t), false);
-    MemCursor cursor = {.tree = &tree, .ctx = &ctx};
+    MemCursor cursor = {.tree = memtree_create(TYPE_U64, sizeof(uint64_t), false), .ctx = &ctx};
+    MemTree &tree = cursor.tree;
 
     // Insert composite keys
     std::cout << "Insert composite keys..." << std::flush;
@@ -273,8 +270,8 @@ inline void test_memtree_cursor_operations() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    MemTree tree = memtree_create(TYPE_U32, sizeof(uint32_t), false);
-    MemCursor cursor = {.tree = &tree, .ctx = &ctx};
+    MemCursor cursor = {.tree = memtree_create(TYPE_U32, sizeof(uint32_t), false), .ctx = &ctx};
+    MemTree &tree = cursor.tree;
 
     // Insert test data
     for (uint32_t i = 0; i < 100; i += 10) {
@@ -347,8 +344,8 @@ inline void test_memtree_edge_cases() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    MemTree tree = memtree_create(TYPE_U32, sizeof(uint32_t), false);
-    MemCursor cursor = {.tree = &tree, .ctx = &ctx};
+    MemCursor cursor = {.tree = memtree_create(TYPE_U32, sizeof(uint32_t), false), .ctx = &ctx};
+    MemTree &tree = cursor.tree;
 
     // Empty tree operations
     std::cout << "Empty tree..." << std::flush;
@@ -402,8 +399,8 @@ inline void test_memtree_varchar_keys() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    MemTree tree = memtree_create(TYPE_CHAR32, sizeof(uint32_t), false);
-    MemCursor cursor = {.tree = &tree, .ctx = &ctx};
+    MemCursor cursor = {.tree = memtree_create(TYPE_CHAR32, sizeof(uint32_t), false), .ctx = &ctx};
+    MemTree &tree = cursor.tree;
 
     const char* test_strings[] = {
         "apple", "banana", "cherry", "date", "elderberry",

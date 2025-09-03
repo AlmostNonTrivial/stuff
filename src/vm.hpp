@@ -1,4 +1,3 @@
-
 // vm.hpp
 #pragma once
 #include "arena.hpp"
@@ -12,57 +11,158 @@
 #include <cstdio>
 #include <cstring>
 
-
-typedef bool (*VMFunction)(
-    TypedValue* result,           // Output register
-    TypedValue* args,            // Input registers array
-    uint32_t arg_count,       // Number of arguments
-    MemoryContext* ctx       // For allocation if needed
+typedef bool (*VMFunction)(TypedValue	 *result,	 // Output register
+						   TypedValue	 *args,		 // Input registers array
+						   uint32_t		  arg_count, // Number of arguments
+						   MemoryContext *ctx		 // For allocation if needed
 );
 
-enum class CursorType : uint8_t {
-    BPLUS,
-    RED_BLACK,
-    BLOB
+enum class CursorType : uint8_t
+{
+	BPLUS,
+	RED_BLACK,
+	BLOB
 };
 
 typedef void (*ResultCallback)(array<TypedValue, QueryArena> result);
 extern bool _debug;
+
 enum OpCode : uint32_t
 {
 	// Control flow
 	OP_Goto = 1,
+	#define GOTO_MAKE(label) {OP_Goto, 0, -1, 0, label, 0}
+	#define GOTO_TARGET(inst) ((inst).p2)
+
 	OP_Halt = 2,
+	#define HALT_MAKE(exit_code) {OP_Halt, exit_code, 0, 0, nullptr, 0}
+	#define HALT_EXIT_CODE(inst) ((inst).p1)
+
 	// Cursor operations
 	OP_Open = 10,
+	#define OPEN_MAKE(cursor_id, layout, type) {OP_Open, cursor_id, 0, 0, layout, (uint8_t)type}
+	#define OPEN_CURSOR_ID(inst) ((inst).p1)
+	#define OPEN_CURSOR_TYPE(inst) ((CursorType)((inst).p5))
+	#define OPEN_LAYOUT(inst) ((Layout *)((inst).p4))
+
 	OP_Close = 12,
+	#define CLOSE_MAKE(cursor_id) {OP_Close, cursor_id, 0, 0, nullptr, 0}
+	#define CLOSE_CURSOR_ID(inst) ((inst).p1)
+
 	OP_Rewind = 13,
+	#define REWIND_MAKE(cursor_id, label, to_end) {OP_Rewind, cursor_id, -1, 0, label, (uint8_t)to_end}
+	#define REWIND_CURSOR_ID(inst) ((inst).p1)
+	#define REWIND_JUMP_IF_EMPTY(inst) ((inst).p2)
+	#define REWIND_TO_END(inst) ((inst).p5 != 0)
+
 	OP_Step = 14,
+	#define STEP_MAKE(cursor_id, jump_label, forward) {OP_Step, cursor_id, -1, 0, jump_label, (uint8_t)forward}
+	#define STEP_CURSOR_ID(inst) ((inst).p1)
+	#define STEP_JUMP_IF_DONE(inst) ((inst).p2)
+	#define STEP_FORWARD(inst) ((inst).p5 != 0)
+
 	OP_Seek = 20,
+	#define SEEK_MAKE(cursor_id, key_reg, jump_if_not, op) {OP_Seek, cursor_id, key_reg, jump_if_not, nullptr, (uint8_t)op}
+	#define SEEK_CURSOR_ID(inst) ((inst).p1)
+	#define SEEK_KEY_REG(inst) ((inst).p2)
+	#define SEEK_JUMP_IF_NOT(inst) ((inst).p3)
+	#define SEEK_OP(inst) ((CompareOp)((inst).p5))
+
 	// Data operations
 	OP_Column = 30,
+	#define COLUMN_MAKE(cursor_id, column_index, dest_reg) {OP_Column, cursor_id, column_index, dest_reg, nullptr, 0}
+	#define COLUMN_CURSOR_ID(inst) ((inst).p1)
+	#define COLUMN_INDEX(inst) ((inst).p2)
+	#define COLUMN_DEST_REG(inst) ((inst).p3)
+
 	OP_Insert = 34,
+	#define INSERT_MAKE(cursor_id, start_reg, reg_count) {OP_Insert, cursor_id, start_reg, reg_count, nullptr, 0}
+	#define INSERT_CURSOR_ID(inst) ((inst).p1)
+	#define INSERT_KEY_REG(inst) ((inst).p2)
+	#define INSERT_REG_COUNT(inst) ((inst).p3)
+
 	OP_Delete = 35,
+	#define DELETE_MAKE(cursor_id, cursor_valid_reg, delete_occured_reg) {OP_Delete, cursor_id, cursor_valid_reg, delete_occured_reg, nullptr, 0}
+	#define DELETE_CURSOR_ID(inst) ((inst).p1)
+	#define DELETE_CURSOR_VALID_REG(inst) ((inst).p2)
+	#define DELETE_DELETE_OCCURED_REG(inst) ((inst).p3)
+
 	OP_Update = 36,
+	#define UPDATE_MAKE(cursor_id, record_reg) {OP_Update, cursor_id, record_reg, 0, nullptr, 0}
+	#define UPDATE_CURSOR_ID(inst) ((inst).p1)
+	#define UPDATE_RECORD_REG(inst) ((inst).p2)
 
 	// Register operations
 	OP_Move = 40,
+	#define MOVE_MOVE_MAKE(dest_reg, src_reg) {OP_Move, dest_reg, 0, src_reg, nullptr, 0}
+	#define MOVE_DEST_REG(inst) ((inst).p1)
+	#define MOVE_SRC_REG(inst) ((inst).p3)
+
 	OP_Load = 41,
+	#define LOAD_MAKE(dest_reg, type, data) {OP_Load, dest_reg, (int32_t)type, -1, data, 0}
+	#define LOAD_DEST_REG(inst) ((inst).p1)
+	#define LOAD_TYPE(inst) ((DataType)((inst).p2))
+	#define LOAD_DATA(inst) ((uint8_t *)((inst).p4))
+	#define LOAD_IS_LOAD(inst) ((inst).opcode == OP_Load)
+
 	// Computation
-	OP_Test = 60,
 	OP_Arithmetic = 51,
+	#define ARITHMETIC_MAKE(dest_reg, left_reg, right_reg, op) {OP_Arithmetic, dest_reg, left_reg, right_reg, nullptr, (uint8_t)op}
+	#define ARITHMETIC_DEST_REG(inst) ((inst).p1)
+	#define ARITHMETIC_LEFT_REG(inst) ((inst).p2)
+	#define ARITHMETIC_RIGHT_REG(inst) ((inst).p3)
+	#define ARITHMETIC_OP(inst) ((ArithOp)((inst).p5))
+
 	OP_JumpIf = 52,
+	#define JUMPIF_MAKE(test_reg, jump_label, jump_on_true) {OP_JumpIf, test_reg, -1, 0, jump_label, (uint8_t)jump_on_true}
+	#define JUMPIF_TEST_REG(inst) ((inst).p1)
+	#define JUMPIF_JUMP_TARGET(inst) ((inst).p2)
+	#define JUMPIF_JUMP_ON_TRUE(inst) ((inst).p5 != 0)
+
 	OP_Logic = 53,
+	#define LOGIC_MAKE(dest_reg, left_reg, right_reg, op) {OP_Logic, dest_reg, left_reg, right_reg, nullptr, (uint8_t)op}
+	#define LOGIC_DEST_REG(inst) ((inst).p1)
+	#define LOGIC_LEFT_REG(inst) ((inst).p2)
+	#define LOGIC_RIGHT_REG(inst) ((inst).p3)
+	#define LOGIC_OP(inst) ((LogicOp)((inst).p5))
+
 	OP_Result = 54,
-	OP_Function= 61,
+	#define RESULT_MAKE(first_reg, reg_count) {OP_Result, first_reg, reg_count, 0, nullptr, 0}
+	#define RESULT_FIRST_REG(inst) ((inst).p1)
+	#define RESULT_REG_COUNT(inst) ((inst).p2)
+
+	OP_Test = 60,
+	#define TEST_MAKE(dest_reg, left_reg, right_reg, op) {OP_Test, dest_reg, left_reg, right_reg, nullptr, (uint8_t)op}
+	#define TEST_DEST_REG(inst) ((inst).p1)
+	#define TEST_LEFT_REG(inst) ((inst).p2)
+	#define TEST_RIGHT_REG(inst) ((inst).p3)
+	#define TEST_OP(inst) ((CompareOp)((inst).p5))
+
+	OP_Function = 61,
+	#define FUNCTION_MAKE(dest_reg, first_arg_reg, arg_count, fn_ptr) {OP_Function, dest_reg, first_arg_reg, arg_count, fn_ptr, 0}
+	#define FUNCTION_DEST_REG(inst) ((inst).p1)
+	#define FUNCTION_FIRST_ARG_REG(inst) ((inst).p2)
+	#define FUNCTION_ARG_COUNT(inst) ((inst).p3)
+	#define FUNCTION_FUNCTION(inst) ((VMFunction)((inst).p4))
 
 	OP_Begin = 62,
-	OP_Commit = 63,
-	OP_Rollback = 64,
+	#define BEGIN_MAKE() {OP_Begin, 0, 0, 0, nullptr, 0}
 
+	OP_Commit = 63,
+	#define COMMIT_MAKE() {OP_Commit, 0, 0, 0, nullptr, 0}
+
+	OP_Rollback = 64,
+	#define ROLLBACK_MAKE() {OP_Rollback, 0, 0, 0, nullptr, 0}
 
 	OP_Create = 65,
+	#define CREATE_MAKE(cursor_id, type, root_page_reg) {OP_Create, cursor_id, root_page_reg, 0, nullptr, (uint8_t)type}
+	#define CREATE_CURSOR_ID(inst) ((inst).p1)
+	#define CREATE_ROOT_PAGE_REG(inst) ((inst).p2)
+	#define CREATE_CURSOR_TYPE(inst) ((CursorType)((inst).p5))
+
 	OP_Clear = 66
+	#define CLEAR_MAKE(cursor_id) {OP_Clear, cursor_id, 0, 0, nullptr, 0}
+	#define CLEAR_CURSOR_ID(inst) ((inst).p1)
 };
 struct VMInstruction
 {
@@ -75,578 +175,7 @@ struct VMInstruction
 };
 
 
-// ============================================================================
-// Opcode Namespace
-// ============================================================================
-namespace Opcodes
-{
-// Control Flow Operations
-namespace Goto
-{
-inline VMInstruction
-create(char *label)
-{
-	return {OP_Goto, 0, -1, 0, label, 0};
-}
-inline int32_t
-target(const VMInstruction &inst)
-{
-	return inst.p2;
-}
-inline void
-print(const VMInstruction &inst)
-{
-	printf("Goto %d", inst.p2);
-}
-} // namespace Goto
-namespace Halt
-{
-inline VMInstruction
-create(int32_t exit_code = 0)
-{
-	return {OP_Halt, exit_code, 0, 0, nullptr, 0};
-}
-inline int32_t
-exit_code(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline void
-print(const VMInstruction &inst)
-{
-	printf("Halt %d", inst.p1);
-}
-} // namespace Halt
-// Cursor Operations
-namespace Open
-{
-inline VMInstruction
-create_btree(int32_t cursor_id, const char *table_name, int32_t index_col = 0, bool is_write = false)
-{
-	uint8_t flags = (is_write ? 0x01 : 0);
-	return {OP_Open, cursor_id, index_col, 0, (void *)table_name, flags};
-}
-inline VMInstruction
-create_ephemeral(int32_t cursor_id, Layout *layout)
-{
-	uint8_t flags = (0x01) | (0x02);
-	return {OP_Open, cursor_id, 0, 0, layout, flags};
-}
-inline int32_t
-cursor_id(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline Layout *
-ephemeral_schema(const VMInstruction &inst)
-{
-	return (Layout *)inst.p4;
-}
-inline int32_t
-index_col(const VMInstruction &inst)
-{
-	return inst.p2;
-}
-inline const char *
-table_name(const VMInstruction &inst)
-{
-	return (const char *)inst.p4;
-}
-inline bool
-is_write(const VMInstruction &inst)
-{
-	return inst.p5 & 0x01;
-}
-inline bool
-is_ephemeral(const VMInstruction &inst)
-{
-	return inst.p5 & 0x02;
-}
-inline void
-print(const VMInstruction &inst)
-{
-	if (is_ephemeral(inst))
-	{
-		printf("Open cursor=%d ephemeral write=%d", inst.p1, is_write(inst));
-	}
-	else
-	{
-		printf("Open cursor=%d table=%s index_col=%d write=%d", inst.p1, table_name(inst), inst.p2, is_write(inst));
-	}
-}
-} // namespace Open
-namespace Close
-{
-inline VMInstruction
-create(int32_t cursor_id)
-{
-	return {OP_Close, cursor_id, 0, 0, nullptr, 0};
-}
-inline int32_t
-cursor_id(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline void
-print(const VMInstruction &inst)
-{
-	printf("Close cursor=%d", inst.p1);
-}
-} // namespace Close
-namespace Rewind
-{
 
-    inline VMInstruction
-    create(int32_t cursor_id, char *label, bool to_end = false)
-    {
-	return {OP_Rewind, cursor_id, -1, 0, label, (uint8_t)to_end};
-    }
-inline VMInstruction
-create_to_start(int32_t cursor_id, char *label)
-{
-	return {OP_Rewind, cursor_id, -1, 0, label, (uint8_t)false};
-}
-
-inline VMInstruction
-create_to_end(int32_t cursor_id, char *label)
-{
-	return {OP_Rewind, cursor_id, -1, 0, label, (uint8_t)true};
-}
-
-
-inline int32_t
-cursor_id(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline int32_t
-jump_if_empty(const VMInstruction &inst)
-{
-	return inst.p2;
-}
-inline bool
-to_end(const VMInstruction &inst)
-{
-	return inst.p5 != 0;
-}
-inline void
-print(const VMInstruction &inst)
-{
-	printf("Rewind cursor=%d jump_if_empty=%d to_end=%d", inst.p1, inst.p2, inst.p5);
-}
-} // namespace Rewind
-namespace Step
-{
-inline VMInstruction
-create(int32_t cursor_id, char *jump_label = nullptr, bool forward = true)
-{
-	return {OP_Step, cursor_id, -1, 0, jump_label, (uint8_t)forward};
-}
-inline int32_t
-cursor_id(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline int32_t
-jump_if_done(const VMInstruction &inst)
-{
-	return inst.p2;
-}
-inline bool
-forward(const VMInstruction &inst)
-{
-	return inst.p5 != 0;
-}
-inline void
-print(const VMInstruction &inst)
-{
-	printf("Step cursor=%d jump_if_done=%d forward=%d", inst.p1, inst.p2, inst.p5);
-}
-} // namespace Step
-namespace Seek
-{
-inline VMInstruction
-create(int32_t cursor_id, int32_t key_reg, int32_t jump_if_not, CompareOp op)
-{
-	return {OP_Seek, cursor_id, key_reg, jump_if_not, nullptr, (uint8_t)op};
-}
-inline int32_t
-cursor_id(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline int32_t
-key_reg(const VMInstruction &inst)
-{
-	return inst.p2;
-}
-inline int32_t
-jump_if_not(const VMInstruction &inst)
-{
-	return inst.p3;
-}
-inline CompareOp
-op(const VMInstruction &inst)
-{
-	return (CompareOp)inst.p5;
-}
-inline void
-print(const VMInstruction &inst)
-{
-	const char *op_names[] = {"EQ", "NE", "LT", "LE", "GT", "GE"};
-	printf("Seek cursor=%d key_reg=%d jump_if_not=%d op=%s", inst.p1, inst.p2, inst.p3, op_names[inst.p5]);
-}
-} // namespace Seek
-// Data Operations
-namespace Column
-{
-inline VMInstruction
-create(int32_t cursor_id, int32_t column_index, int32_t dest_reg)
-{
-	return {OP_Column, cursor_id, column_index, dest_reg, nullptr, 0};
-}
-inline int32_t
-cursor_id(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline int32_t
-column_index(const VMInstruction &inst)
-{
-	return inst.p2;
-}
-inline int32_t
-dest_reg(const VMInstruction &inst)
-{
-	return inst.p3;
-}
-inline void
-print(const VMInstruction &inst)
-{
-	printf("Column cursor=%d col=%d dest_reg=%d", inst.p1, inst.p2, inst.p3);
-}
-} // namespace Column
-namespace Insert
-{
-inline VMInstruction
-create(int32_t cursor_id, int32_t start_reg, int32_t reg_count)
-{
-	return {OP_Insert, cursor_id, start_reg, reg_count, nullptr, 0};
-}
-
-inline int32_t
-cursor_id(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline int32_t
-key_reg(const VMInstruction &inst)
-{
-	return inst.p2;
-}
-inline int32_t
-reg_count(const VMInstruction &inst)
-{
-	return inst.p3;
-}
-uint32_t inline size(const VMInstruction &inst)
-{
-	return inst.p3;
-}
-
-inline void
-print(const VMInstruction &inst)
-{
-	printf("Insert cursor=%d key_reg=%d reg_count=%d", inst.p1, inst.p2, inst.p3);
-}
-} // namespace Insert
-namespace Delete
-{
-inline VMInstruction
-create(int32_t cursor_id, int32_t cursor_valid_reg, int32_t delete_occured_reg)
-{
-	return {OP_Delete, cursor_id, cursor_valid_reg, delete_occured_reg, nullptr, 0};
-}
-inline int32_t
-cursor_id(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline int32_t
-delete_occured_reg(const VMInstruction &inst)
-{
-	return inst.p3;
-}
-inline int32_t
-cursor_valid_reg(const VMInstruction &inst)
-{
-	return inst.p2;
-}
-
-inline void
-print(const VMInstruction &inst)
-{
-	printf("Delete cursor=%d", inst.p1);
-}
-} // namespace Delete
-namespace Update
-{
-inline VMInstruction
-create(int32_t cursor_id, int32_t record_reg)
-{
-	return {OP_Update, cursor_id, record_reg, 0, nullptr, 0};
-}
-inline int32_t
-cursor_id(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline int32_t
-record_reg(const VMInstruction &inst)
-{
-	return inst.p2;
-}
-inline void
-print(const VMInstruction &inst)
-{
-	printf("Update cursor=%d record_reg=%d", inst.p1, inst.p2);
-}
-} // namespace Update
-// Register Operations
-namespace Move
-{
-inline VMInstruction
-create_load(int32_t dest_reg, DataType type, void *data)
-{
-	return {OP_Load, dest_reg, (int32_t)type, -1, data, 0};
-}
-inline VMInstruction
-create_move(int32_t dest_reg, int32_t src_reg)
-{
-	return {OP_Move, dest_reg, 0, src_reg, nullptr, 0};
-}
-inline bool
-is_load(const VMInstruction &inst)
-{
-	return inst.opcode == OP_Load;
-}
-inline int32_t
-dest_reg(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline int32_t
-src_reg(const VMInstruction &inst)
-{
-	return inst.p3;
-}
-inline uint8_t *
-data(const VMInstruction &inst)
-{
-	return (uint8_t *)inst.p4;
-}
-inline DataType
-type(const VMInstruction &inst)
-{
-	return (DataType)inst.p2;
-}
-inline void
-print(const VMInstruction &inst)
-{
-	if (inst.opcode == OP_Load)
-	{
-		printf("Load reg=%d type=%d", inst.p1, inst.p2);
-		if (inst.p4)
-		{
-			printf(" value=");
-			// print_value((DataType)inst.p2, (uint8_t *)inst.p4);
-		}
-	}
-	else
-	{
-		printf("Move dest=%d src=%d", inst.p1, inst.p3);
-	}
-}
-} // namespace Move
-// Computation
-namespace Test
-{
-inline VMInstruction
-create(int32_t dest_reg, int32_t left_reg, int32_t right_reg, CompareOp op)
-{
-	return {OP_Test, dest_reg, left_reg, right_reg, nullptr, (uint8_t)op};
-}
-inline int32_t
-dest_reg(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline int32_t
-left_reg(const VMInstruction &inst)
-{
-	return inst.p2;
-}
-inline int32_t
-right_reg(const VMInstruction &inst)
-{
-	return inst.p3;
-}
-inline CompareOp
-op(const VMInstruction &inst)
-{
-	return (CompareOp)inst.p5;
-}
-inline void
-print(const VMInstruction &inst)
-{
-	const char *op_names[] = {"EQ", "NE", "LT", "LE", "GT", "GE"};
-	printf("Test dest=%d left=%d right=%d op=%s", inst.p1, inst.p2, inst.p3, op_names[inst.p5]);
-}
-} // namespace Test
-namespace Arithmetic
-{
-inline VMInstruction
-create(int32_t dest_reg, int32_t left_reg, int32_t right_reg, ArithOp op)
-{
-	return {OP_Arithmetic, dest_reg, left_reg, right_reg, nullptr, (uint8_t)op};
-}
-inline int32_t
-dest_reg(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline int32_t
-left_reg(const VMInstruction &inst)
-{
-	return inst.p2;
-}
-inline int32_t
-right_reg(const VMInstruction &inst)
-{
-	return inst.p3;
-}
-inline ArithOp
-op(const VMInstruction &inst)
-{
-	return (ArithOp)inst.p5;
-}
-inline void
-print(const VMInstruction &inst)
-{
-	const char *op_names[] = {"ADD", "SUB", "MUL", "DIV", "MOD"};
-	printf("Arithmetic dest=%d left=%d right=%d op=%s", inst.p1, inst.p2, inst.p3, op_names[inst.p5]);
-}
-} // namespace Arithmetic
-namespace JumpIf
-{
-inline VMInstruction
-create(int32_t test_reg, char *jump_label, bool jump_on_true = true)
-{
-	return {OP_JumpIf, test_reg, -1, 0, jump_label, (uint8_t)jump_on_true};
-}
-inline int32_t
-test_reg(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline int32_t
-jump_target(const VMInstruction &inst)
-{
-	return inst.p2;
-}
-inline bool
-jump_on_true(const VMInstruction &inst)
-{
-	return inst.p5 != 0;
-}
-inline void
-print(const VMInstruction &inst)
-{
-	printf("JumpIf test_reg=%d target=%d on_true=%d", inst.p1, inst.p2, inst.p5);
-}
-} // namespace JumpIf
-namespace Logic
-{
-inline VMInstruction
-create(int32_t dest_reg, int32_t left_reg, int32_t right_reg, LogicOp op)
-{
-	return {OP_Logic, dest_reg, left_reg, right_reg, nullptr, (uint8_t)op};
-}
-inline int32_t
-dest_reg(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline int32_t
-left_reg(const VMInstruction &inst)
-{
-	return inst.p2;
-}
-inline int32_t
-right_reg(const VMInstruction &inst)
-{
-	return inst.p3;
-}
-inline LogicOp
-op(const VMInstruction &inst)
-{
-	return (LogicOp)inst.p5;
-}
-inline void
-print(const VMInstruction &inst)
-{
-	const char *op_names[] = {"AND", "OR"};
-	printf("Logic dest=%d left=%d right=%d op=%s", inst.p1, inst.p2, inst.p3, op_names[inst.p5]);
-}
-} // namespace Logic
-namespace Result
-{
-inline VMInstruction
-create(int32_t first_reg, int32_t reg_count)
-{
-	return {OP_Result, first_reg, reg_count, 0, nullptr, 0};
-}
-inline int32_t
-first_reg(const VMInstruction &inst)
-{
-	return inst.p1;
-}
-inline int32_t
-reg_count(const VMInstruction &inst)
-{
-	return inst.p2;
-}
-inline void
-print(const VMInstruction &inst)
-{
-	printf("Result first_reg=%d count=%d", inst.p1, inst.p2);
-}
-} // namespace Result
-
-namespace Function {
-    inline VMInstruction create(
-        int32_t dest_reg,      // Where to put result
-        int32_t first_arg_reg, // First argument register
-        int32_t arg_count,     // Number of arguments
-        VMFunction fn_ptr      // Function pointer
-    ) {
-        return {OP_Function, dest_reg, first_arg_reg, arg_count, &fn_ptr, 0};
-    }
-
-    inline int32_t
-    reg_count(const VMInstruction &inst)
-    {
-	return inst.p2;
-    }
-
-}
-
-
- // namespace Pattern
-} // namespace Opcodes
-// ============================================================================
-// Debug Namespace
-// ============================================================================
 namespace Debug
 {
 inline const char *
@@ -658,6 +187,8 @@ opcode_name(OpCode op)
 		return "Goto";
 	case OP_Halt:
 		return "Halt";
+	case OP_JumpIf:
+		return "JumpIf";
 	case OP_Open:
 		return "Open";
 	case OP_Close:
@@ -668,6 +199,10 @@ opcode_name(OpCode op)
 		return "Step";
 	case OP_Seek:
 		return "Seek";
+	case OP_Create:
+		return "Create";
+	case OP_Clear:
+		return "Clear";
 	case OP_Column:
 		return "Column";
 	case OP_Insert:
@@ -684,83 +219,29 @@ opcode_name(OpCode op)
 		return "Test";
 	case OP_Arithmetic:
 		return "Arithmetic";
-	case OP_JumpIf:
-		return "JumpIf";
 	case OP_Logic:
 		return "Logic";
 	case OP_Result:
 		return "Result";
+	case OP_Function:
+		return "Function";
+	case OP_Begin:
+		return "Begin";
+	case OP_Commit:
+		return "Commit";
+	case OP_Rollback:
+		return "Rollback";
 	default:
 		return "Unknown";
 	}
 }
+
 inline void
 print_instruction(const VMInstruction &inst, int pc = -1)
 {
-	if (pc >= 0)
-	{
-		printf("%3d: ", pc);
-	}
-	printf("%-12s ", opcode_name(inst.opcode));
-	switch (inst.opcode)
-	{
-	case OP_Goto:
-		Opcodes::Goto::print(inst);
-		break;
-	case OP_Halt:
-		Opcodes::Halt::print(inst);
-		break;
-	case OP_Open:
-		Opcodes::Open::print(inst);
-		break;
-	case OP_Close:
-		Opcodes::Close::print(inst);
-		break;
-	case OP_Rewind:
-		Opcodes::Rewind::print(inst);
-		break;
-	case OP_Step:
-		Opcodes::Step::print(inst);
-		break;
-	case OP_Seek:
-		Opcodes::Seek::print(inst);
-		break;
-	case OP_Column:
-		Opcodes::Column::print(inst);
-		break;
-	case OP_Insert:
-		Opcodes::Insert::print(inst);
-		break;
-	case OP_Delete:
-		Opcodes::Delete::print(inst);
-		break;
-	case OP_Update:
-		Opcodes::Update::print(inst);
-		break;
-	case OP_Move:
-	case OP_Load:
-		Opcodes::Move::print(inst);
-		break;
-	case OP_Test:
-		Opcodes::Test::print(inst);
-		break;
-	case OP_Arithmetic:
-		Opcodes::Arithmetic::print(inst);
-		break;
-	case OP_JumpIf:
-		Opcodes::JumpIf::print(inst);
-		break;
-	case OP_Logic:
-		Opcodes::Logic::print(inst);
-		break;
-	case OP_Result:
-		Opcodes::Result::print(inst);
-		break;
-	default:
-		printf("p1=%d p2=%d p3=%d", inst.p1, inst.p2, inst.p3);
-	}
-	printf("\n");
+printf("\n");
 }
+
 inline void
 print_program(VMInstruction *program, int program_size)
 {
@@ -771,6 +252,7 @@ print_program(VMInstruction *program, int program_size)
 	}
 	printf("==========================================\n");
 }
+
 inline void
 print_register(int reg_num, const TypedValue &value)
 {
@@ -779,6 +261,7 @@ print_register(int reg_num, const TypedValue &value)
 	// print_value(value.type, value.data);
 	printf("\n");
 }
+
 inline void
 print_cursor_state(int cursor_id, const char *state)
 {
@@ -786,15 +269,18 @@ print_cursor_state(int cursor_id, const char *state)
 }
 
 } // namespace Debug
+
 // VM Runtime Definitions
 #define REGISTERS 40
 #define CURSORS	  10
+
 enum VM_RESULT
 {
 	OK,
 	ABORT,
 	ERR
 };
+
 // VM Functions
 VM_RESULT
 vm_execute(VMInstruction *instructions, int instruction_count, MemoryContext *ctx);
