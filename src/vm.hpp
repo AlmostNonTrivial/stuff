@@ -160,10 +160,6 @@ struct VMInstruction
 };
 
 
-// VM Runtime Definitions
-#define REGISTERS 40
-#define CURSORS	  10
-
 enum VM_RESULT : uint8_t
 {
 	OK,

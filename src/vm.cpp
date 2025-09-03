@@ -12,7 +12,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <ios>
+
+
+// VM Runtime Definitions
+#define REGISTERS 40
+#define CURSORS	  10
 
 bool _debug = false;
 // POD struct - data only
