@@ -11,8 +11,8 @@
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
 // 64-bit type encoding:
-// For scalars: [type_id:8][size:8][reserved:48]
-// For duals:   [TYPE_ID_DUAL:8][type1_id:8][type2_id:8][reserved:8][size1:8][size2:8][reserved:8][total_size:8]
+// Simplified layout for ALL types: [type_id:8][reserved:32][size:24]
+// For duals: [TYPE_ID_DUAL:8][type1_id:8][type2_id:8][reserved:8][size1:12][size2:12][total_size:8]
 typedef uint64_t DataType;
 
 // Type IDs - each type gets unique ID
@@ -38,49 +38,46 @@ enum TypeId : uint8_t {
     TYPE_ID_NULL = 0xFF
 };
 
-// Helper to construct scalar DataType
-#define MAKE_SCALAR_TYPE(type_id, size) \
-    (((uint64_t)(type_id) << 56) | ((uint64_t)(size) << 48))
+// Simplified, consistent layout for ALL types
+#define MAKE_TYPE(id, size) \
+    (((uint64_t)(id) << 56) | ((uint64_t)(size) & 0xFFFFFF))
 
-// Helper to construct dual DataType
+// Dual type: [TYPE_ID_DUAL:8][type1_id:8][type2_id:8][reserved:8][size1:12][size2:12][total_size:8]
 #define MAKE_DUAL_TYPE(type1_id, type2_id, size1, size2) \
     (((uint64_t)(TYPE_ID_DUAL) << 56) | \
      ((uint64_t)(type1_id) << 48) | \
      ((uint64_t)(type2_id) << 40) | \
-     ((uint64_t)(0) << 32) | \
-     ((uint64_t)(size1) << 24) | \
-     ((uint64_t)(size2) << 16) | \
-     ((uint64_t)(0) << 8) | \
-     ((uint64_t)((size1) + (size2))))
+     ((uint64_t)((size1) & 0xFFF) << 28) | \
+     ((uint64_t)((size2) & 0xFFF) << 16) | \
+     ((uint64_t)(((size1) + (size2)) & 0xFF)))
 
 // Scalar type definitions
-#define TYPE_U8  MAKE_SCALAR_TYPE(TYPE_ID_U8,  1)
-#define TYPE_U16 MAKE_SCALAR_TYPE(TYPE_ID_U16, 2)
-#define TYPE_U32 MAKE_SCALAR_TYPE(TYPE_ID_U32, 4)
-#define TYPE_U64 MAKE_SCALAR_TYPE(TYPE_ID_U64, 8)
+#define TYPE_U8  MAKE_TYPE(TYPE_ID_U8,  1)
+#define TYPE_U16 MAKE_TYPE(TYPE_ID_U16, 2)
+#define TYPE_U32 MAKE_TYPE(TYPE_ID_U32, 4)
+#define TYPE_U64 MAKE_TYPE(TYPE_ID_U64, 8)
 
-#define TYPE_I8  MAKE_SCALAR_TYPE(TYPE_ID_I8,  1)
-#define TYPE_I16 MAKE_SCALAR_TYPE(TYPE_ID_I16, 2)
-#define TYPE_I32 MAKE_SCALAR_TYPE(TYPE_ID_I32, 4)
-#define TYPE_I64 MAKE_SCALAR_TYPE(TYPE_ID_I64, 8)
+#define TYPE_I8  MAKE_TYPE(TYPE_ID_I8,  1)
+#define TYPE_I16 MAKE_TYPE(TYPE_ID_I16, 2)
+#define TYPE_I32 MAKE_TYPE(TYPE_ID_I32, 4)
+#define TYPE_I64 MAKE_TYPE(TYPE_ID_I64, 8)
 
-#define TYPE_F32 MAKE_SCALAR_TYPE(TYPE_ID_F32, 4)
-#define TYPE_F64 MAKE_SCALAR_TYPE(TYPE_ID_F64, 8)
+#define TYPE_F32 MAKE_TYPE(TYPE_ID_F32, 4)
+#define TYPE_F64 MAKE_TYPE(TYPE_ID_F64, 8)
 
 // Fixed-size strings
-#define TYPE_CHAR8   MAKE_SCALAR_TYPE(TYPE_ID_CHAR, 8) | 8
-#define TYPE_CHAR16  MAKE_SCALAR_TYPE(TYPE_ID_CHAR, 16) | 16
-#define TYPE_CHAR32  MAKE_SCALAR_TYPE(TYPE_ID_CHAR, 32) | 32
-#define TYPE_CHAR64  MAKE_SCALAR_TYPE(TYPE_ID_CHAR, 64) | 64
-#define TYPE_CHAR128 MAKE_SCALAR_TYPE(TYPE_ID_CHAR, 128) | 128
-#define TYPE_CHAR256 MAKE_SCALAR_TYPE(TYPE_ID_CHAR, 256) | 256
+#define TYPE_CHAR8   MAKE_TYPE(TYPE_ID_CHAR, 8)
+#define TYPE_CHAR16  MAKE_TYPE(TYPE_ID_CHAR, 16)
+#define TYPE_CHAR32  MAKE_TYPE(TYPE_ID_CHAR, 32)
+#define TYPE_CHAR64  MAKE_TYPE(TYPE_ID_CHAR, 64)
+#define TYPE_CHAR128 MAKE_TYPE(TYPE_ID_CHAR, 128)
+#define TYPE_CHAR256 MAKE_TYPE(TYPE_ID_CHAR, 256)
 
 // Null type
-#define TYPE_NULL MAKE_SCALAR_TYPE(TYPE_ID_NULL, 0)
+#define TYPE_NULL MAKE_TYPE(TYPE_ID_NULL, 0)
 
-// VARCHAR with runtime size
-#define TYPE_VARCHAR(len) \
-    (((uint64_t)(TYPE_ID_VARCHAR) << 56) | ((uint64_t)(len) << 48) | (len))
+// VARCHAR with runtime size (up to 16MB)
+#define TYPE_VARCHAR(len) MAKE_TYPE(TYPE_ID_VARCHAR, (len))
 
 // Factory method defines
 #define make_u8()    TYPE_U8
@@ -107,13 +104,13 @@ enum TypeId : uint8_t {
 
 // Functions for parameterized types
 __attribute__((always_inline))
-inline DataType make_char(uint16_t size) {
-    return MAKE_SCALAR_TYPE(TYPE_ID_CHAR, size) | size;
+inline DataType make_char(uint32_t size) {
+    return MAKE_TYPE(TYPE_ID_CHAR, size);
 }
 
 __attribute__((always_inline))
-inline DataType make_varchar(uint16_t size) {
-    return TYPE_VARCHAR(size);
+inline DataType make_varchar(uint32_t size) {
+    return MAKE_TYPE(TYPE_ID_VARCHAR, size);
 }
 
 // ============================================================================
@@ -121,16 +118,12 @@ inline DataType make_varchar(uint16_t size) {
 // ============================================================================
 
 __attribute__((always_inline))
-inline uint16_t type_size(DataType type) {
+inline uint32_t type_size(DataType type) {
     uint8_t tid = type >> 56;
     if (tid == TYPE_ID_DUAL) {
-        return type & 0xFF;  // Total size in lowest byte
+        return type & 0xFF;  // Total size in lowest byte for dual types
     }
-    // For scalars, size might be in different positions
-    if (tid == TYPE_ID_VARCHAR || tid == TYPE_ID_CHAR) {
-        return type & 0xFFFF;
-    }
-    return (type >> 48) & 0xFF;
+    return type & 0xFFFFFF;  // Size always in bits 0-23 for regular types
 }
 
 __attribute__((always_inline))
@@ -150,18 +143,18 @@ inline uint8_t dual_type_id_2(DataType type) {
 }
 
 __attribute__((always_inline))
-inline uint8_t dual_size_1(DataType type) {
-    return (type >> 24) & 0xFF;
+inline uint16_t dual_size_1(DataType type) {
+    return (type >> 28) & 0xFFF;
 }
 
 __attribute__((always_inline))
-inline uint8_t dual_size_2(DataType type) {
-    return (type >> 16) & 0xFF;
+inline uint16_t dual_size_2(DataType type) {
+    return (type >> 16) & 0xFFF;
 }
 
 // Reconstruct full DataType from component ID and size
 __attribute__((always_inline))
-inline DataType type_from_id_and_size(uint8_t id, uint16_t size) {
+inline DataType type_from_id_and_size(uint8_t id, uint32_t size) {
     switch(id) {
         case TYPE_ID_U8:  return TYPE_U8;
         case TYPE_ID_U16: return TYPE_U16;
@@ -188,8 +181,8 @@ __attribute__((always_inline))
 inline DataType make_dual(DataType type1, DataType type2) {
     uint8_t id1 = type_id(type1);
     uint8_t id2 = type_id(type2);
-    uint16_t size1 = type_size(type1);
-    uint16_t size2 = type_size(type2);
+    uint32_t size1 = type_size(type1);
+    uint32_t size2 = type_size(type2);
     return MAKE_DUAL_TYPE(id1, id2, size1, size2);
 }
 
@@ -213,6 +206,8 @@ inline uint32_t dual_component_offset(DataType type, uint32_t index) {
     if (index == 1) return dual_size_1(type);
     return 0;
 }
+
+
 
 // Alignment
 __attribute__((always_inline))

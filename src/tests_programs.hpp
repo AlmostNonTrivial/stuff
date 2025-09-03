@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include "blob.hpp"
 #include "bplustree.hpp"
 #include "catalog.hpp"
 #include "compile.hpp"
@@ -419,91 +420,101 @@ load_all_data()
 // VM Function: LIKE pattern matching with % wildcard
 // Args: [0] = text (CHAR32), [1] = pattern (CHAR32)
 // Result: U32 (1 = match, 0 = no match)
-bool vmfunc_like(TypedValue* result, TypedValue* args, uint32_t arg_count, MemoryContext* ctx) {
-    if (arg_count != 2) return false;
+bool
+vmfunc_like(TypedValue *result, TypedValue *args, uint32_t arg_count, MemoryContext *ctx)
+{
+	if (arg_count != 2)
+		return false;
 
-    const char* pattern = args[0].as_char();
-    const char* text = args[1].as_char();
+	const char *pattern = args[0].as_char();
+	const char *text = args[1].as_char();
 
-    // Simple % wildcard matching
-    const char* t = text;
-    const char* p = pattern;
-    const char* star_t = nullptr;
-    const char* star_p = nullptr;
+	// Simple % wildcard matching
+	const char *t = text;
+	const char *p = pattern;
+	const char *star_t = nullptr;
+	const char *star_p = nullptr;
 
-    while (*t) {
-        if (*p == '%') {
-            star_p = p++;
-            star_t = t;
-            continue;
-        }
+	while (*t)
+	{
+		if (*p == '%')
+		{
+			star_p = p++;
+			star_t = t;
+			continue;
+		}
 
-        if (*p == *t) {
-            p++;
-            t++;
-            continue;
-        }
+		if (*p == *t)
+		{
+			p++;
+			t++;
+			continue;
+		}
 
-        if (star_p) {
-            p = star_p + 1;
-            t = ++star_t;
-            continue;
-        }
+		if (star_p)
+		{
+			p = star_p + 1;
+			t = ++star_t;
+			continue;
+		}
 
-        return false;
-    }
+		return false;
+	}
 
-    while (*p == '%') p++;
+	while (*p == '%')
+		p++;
 
-    uint32_t match = (*p == '\0') ? 1 : 0;
-    result->type = TYPE_U32;
-    result->data = (uint8_t*)ctx->alloc(sizeof(uint32_t));
-    *(uint32_t*)result->data = match;
+	uint32_t match = (*p == '\0') ? 1 : 0;
+	result->type = TYPE_U32;
+	result->data = (uint8_t *)ctx->alloc(sizeof(uint32_t));
+	*(uint32_t *)result->data = match;
 
-    return true;
+	return true;
 }
 
 // Single program: Find products where title LIKE '%Phone%'
-void test_like_pattern() {
-    printf("\n=== LIKE Pattern Demo: SELECT * FROM products WHERE title LIKE '%%Ess%%' ===\n\n");
+void
+test_like_pattern()
+{
+	printf("\n=== LIKE Pattern Demo: SELECT * FROM products WHERE title LIKE '%%Ess%%' ===\n\n");
 
-    ProgramBuilder prog;
+	ProgramBuilder prog;
 
-    // Open products cursor
-    auto products_ctx = from_structure(catalog[PRODUCTS]);
-    prog.open_cursor(0, &products_ctx);
+	// Open products cursor
+	auto products_ctx = from_structure(catalog[PRODUCTS]);
+	prog.open_cursor(0, &products_ctx);
 
-    // Load pattern "%Phone%" into register
-    int pattern_reg = prog.load(TYPE_CHAR32, prog.alloc_string("%Ess%", 32));
-    int title_reg = prog.regs.allocate();
+	// Load pattern "%Phone%" into register
+	int pattern_reg = prog.load(TYPE_CHAR32, prog.alloc_string("%Ess%", 32));
+	int title_reg = prog.regs.allocate();
 
-    // Scan products
-    int at_end = prog.first(0);
-    auto loop = prog.begin_while(at_end);
-    {
-        // Get title column (index 1)
-        prog.get_column(0, 1, title_reg);
+	// Scan products
+	int	 at_end = prog.first(0);
+	auto loop = prog.begin_while(at_end);
+	{
+		// Get title column (index 1)
+		prog.get_column(0, 1, title_reg);
 
-        // Call LIKE: vmfunc_like(title, pattern)
-        int match_reg = prog.call_function(vmfunc_like, pattern_reg, 2);
+		// Call LIKE: vmfunc_like(title, pattern)
+		int match_reg = prog.call_function(vmfunc_like, pattern_reg, 2);
 
-        // If match, output row
-        auto if_match = prog.begin_if(match_reg);
-        {
-            int row = prog.get_columns(0, 0, 6);
-            prog.result(row, 6);
-        }
-        prog.end_if(if_match);
+		// If match, output row
+		auto if_match = prog.begin_if(match_reg);
+		{
+			int row = prog.get_columns(0, 0, 6);
+			prog.result(row, 6);
+		}
+		prog.end_if(if_match);
 
-        prog.next(0, at_end);
-    }
-    prog.end_while(loop);
+		prog.next(0, at_end);
+	}
+	prog.end_while(loop);
 
-    prog.close_cursor(0);
-    prog.halt();
+	prog.close_cursor(0);
+	prog.halt();
 
-    prog.resolve_labels();
-    vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	prog.resolve_labels();
+	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
 }
 
 inline void
@@ -752,10 +763,6 @@ test_create_composite_index()
 	printf("\n=== CREATING COMPOSITE INDEX ON ORDERS ===\n");
 	printf("Index: idx_orders_by_user (user_id, order_id) -> order_id\n\n");
 
-
-
-
-
 	ProgramBuilder prog;
 	prog.begin_transaction();
 
@@ -815,106 +822,274 @@ test_create_composite_index()
 	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
 }
 
-inline void test_group_by_aggregate() {
-    printf("\n=== GROUP BY AGGREGATE DEMO ===\n");
-    printf("Query: SELECT city, COUNT(*), SUM(age) FROM users GROUP BY city\n\n");
+inline void
+test_group_by_aggregate()
+{
+	printf("\n=== GROUP BY AGGREGATE DEMO ===\n");
+	printf("Query: SELECT city, COUNT(*), SUM(age) FROM users GROUP BY city\n\n");
 
-    ProgramBuilder prog;
+	ProgramBuilder prog;
 
-    // Create layout for aggregation tree:
-    // Key: city (CHAR16)
-    // Value: count (U32), sum_age (U32)
-    std::vector<DataType> agg_types = {
-        TYPE_CHAR16,  // city (key)
-        TYPE_U32,     // count
-        TYPE_U32      // sum_age
-    };
-    Layout agg_layout = Layout::create(agg_types);
+	// Create layout for aggregation tree:
+	// Key: city (CHAR16)
+	// Value: count (U32), sum_age (U32)
+	std::vector<DataType> agg_types = {
+		TYPE_CHAR16, // city (key)
+		TYPE_U32,	 // count
+		TYPE_U32	 // sum_age
+	};
+	Layout agg_layout = Layout::create(agg_types);
 
-    auto users_ctx = from_structure(catalog[USERS]);
-    auto agg_ctx = red_black(agg_layout);
+	auto users_ctx = from_structure(catalog[USERS]);
+	auto agg_ctx = red_black(agg_layout);
 
-    prog.open_cursor(0, &users_ctx);   // Users table
-    prog.open_cursor(1, &agg_ctx);     // Aggregation tree
+	prog.open_cursor(0, &users_ctx); // Users table
+	prog.open_cursor(1, &agg_ctx);	 // Aggregation tree
 
-    // Phase 1: Scan users and build aggregates
-    {
-        prog.regs.push_scope();
+	// Phase 1: Scan users and build aggregates
+	{
+		prog.regs.push_scope();
 
-        // Constants
-        int one_const = prog.load(TYPE_U32, prog.alloc_value(1U));
-        int zero_const = prog.load(TYPE_U32, prog.alloc_value(0U));
+		// Constants
+		int one_const = prog.load(TYPE_U32, prog.alloc_value(1U));
+		int zero_const = prog.load(TYPE_U32, prog.alloc_value(0U));
 
-        int at_end = prog.first(0);
-        auto scan_loop = prog.begin_while(at_end);
-        {
-            // Get city and age from current user
-            int city_reg = prog.get_column(0, 4);  // city column
-            int age_reg = prog.get_column(0, 3);   // age column
+		int	 at_end = prog.first(0);
+		auto scan_loop = prog.begin_while(at_end);
+		{
+			// Get city and age from current user
+			int city_reg = prog.get_column(0, 4); // city column
+			int age_reg = prog.get_column(0, 3);  // age column
 
-            // Try to find existing aggregate for this city
-            int found = prog.seek(1, city_reg, EQ);
+			// Try to find existing aggregate for this city
+			int found = prog.seek(1, city_reg, EQ);
 
-            auto if_found = prog.begin_if(found);
-            {
-                // City exists - update aggregates
-                int cur_count = prog.get_column(1, 1);
-                int cur_sum = prog.get_column(1, 2);
+			auto if_found = prog.begin_if(found);
+			{
+				// City exists - update aggregates
+				int cur_count = prog.get_column(1, 1);
+				int cur_sum = prog.get_column(1, 2);
 
-                // Calculate new values in contiguous registers
-                int update_start = prog.regs.allocate();
-                prog.add(cur_count, one_const, update_start);      // new_count -> update_start
-                prog.add(cur_sum, age_reg, update_start + 1);      // new_sum -> update_start + 1
+				// Calculate new values in contiguous registers
+				int update_start = prog.regs.allocate();
+				prog.add(cur_count, one_const, update_start); // new_count -> update_start
+				prog.add(cur_sum, age_reg, update_start + 1); // new_sum -> update_start + 1
 
-                // Update the record (passes both count and sum)
-                prog.update_record(1, update_start);
-            }
-            prog.begin_else(if_found);
-            {
-                // New city - insert with initial values
-                // Need contiguous: city, count=1, sum=age
-                int insert_start = prog.regs.allocate_range(3);
-                prog.move(city_reg, insert_start);           // city
-                prog.move(one_const, insert_start + 1);      // count = 1
-                prog.move(age_reg, insert_start + 2);        // sum = age
+				// Update the record (passes both count and sum)
+				prog.update_record(1, update_start);
+			}
+			prog.begin_else(if_found);
+			{
+				// New city - insert with initial values
+				// Need contiguous: city, count=1, sum=age
+				int insert_start = prog.regs.allocate_range(3);
+				prog.move(city_reg, insert_start);		// city
+				prog.move(one_const, insert_start + 1); // count = 1
+				prog.move(age_reg, insert_start + 2);	// sum = age
 
-                prog.insert_record(1, insert_start, 3);
-            }
-            prog.end_if(if_found);
+				prog.insert_record(1, insert_start, 3);
+			}
+			prog.end_if(if_found);
 
-            prog.next(0, at_end);
-        }
-        prog.end_while(scan_loop);
+			prog.next(0, at_end);
+		}
+		prog.end_while(scan_loop);
 
-        prog.regs.pop_scope();
-    }
+		prog.regs.pop_scope();
+	}
 
-    // Phase 2: Output aggregated results
-    {
-        prog.regs.push_scope();
+	// Phase 2: Output aggregated results
+	{
+		prog.regs.push_scope();
 
-        int at_end = prog.first(1);
-        auto output_loop = prog.begin_while(at_end);
-        {
-            // Get all aggregate columns in contiguous registers
-            int result_start = prog.get_columns(1, 0, 3);  // city, count, sum_age
+		int	 at_end = prog.first(1);
+		auto output_loop = prog.begin_while(at_end);
+		{
+			// Get all aggregate columns in contiguous registers
+			int result_start = prog.get_columns(1, 0, 3); // city, count, sum_age
 
-            // Output: city, count, sum_age
-            prog.result(result_start, 3);
+			// Output: city, count, sum_age
+			prog.result(result_start, 3);
 
-            prog.next(1, at_end);
-        }
-        prog.end_while(output_loop);
+			prog.next(1, at_end);
+		}
+		prog.end_while(output_loop);
 
-        prog.regs.pop_scope();
-    }
+		prog.regs.pop_scope();
+	}
 
-    prog.close_cursor(0);
-    prog.close_cursor(1);
-    prog.halt();
+	prog.close_cursor(0);
+	prog.close_cursor(1);
+	prog.halt();
 
-    prog.resolve_labels();
-    vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	prog.resolve_labels();
+	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+}
+
+// Add these VM functions for blob operations
+bool
+vmfunc_write_blob(TypedValue *result, TypedValue *args, uint32_t arg_count, MemoryContext *ctx)
+{
+	if (arg_count != 2)
+		return false;
+
+	// args[0] = data pointer, args[1] = size
+	void	*data = (void *)args[0].as_u64(); // Assuming we pass pointer as u64
+	uint32_t size = args[1].as_u32();
+
+	BlobCursor b;
+	// Write blob and get page index
+	uint32_t page_idx = blob_cursor_insert(&b, (uint8_t *)data, size);
+
+	// Return page index
+	result->type = TYPE_U32;
+	result->data = (uint8_t *)ctx->alloc(sizeof(uint32_t));
+	*(uint32_t *)result->data = page_idx;
+
+	return true;
+}
+
+bool
+vmfunc_read_blob(TypedValue *result, TypedValue *args, uint32_t arg_count, MemoryContext *ctx)
+{
+	if (arg_count != 1)
+	{
+		return false;
+	}
+
+	// args[0] = page index
+	uint32_t   page_idx = args[0].as_u32();
+	BlobCursor b;
+
+	// Read blob
+	assert(blob_cursor_seek(&b, page_idx));
+	auto blob = blob_cursor_record(&b);
+
+	// For demo, return size as result (could return pointer)
+	result->type = TYPE_VARCHAR(blob.size);
+	result->data = (uint8_t*)blob.ptr;
+
+	return true;
+}
+inline void
+test_blob_storage()
+{
+	printf("\n=== BLOB STORAGE DEMO ===\n");
+	printf("Creating documents table with blob references\n\n");
+
+	// Define table structure and add to catalog FIRST
+	std::vector<Column> documents = {
+		Column{"doc_id", TYPE_U32},
+		Column{"title", TYPE_CHAR32},
+		Column{"blob_ref", TYPE_U32}  // Stores blob page index
+	};
+	catalog["documents"] = Structure::from("documents", documents);
+
+	ProgramBuilder prog;
+	prog.begin_transaction();
+
+	// Now create the btree for the structure that's already in the catalog
+	prog.regs.push_scope();
+	int name_reg = prog.load(TYPE_CHAR16, prog.alloc_string("documents", 16));
+	prog.call_function(vmfunc_create_structure, name_reg, 1);
+	prog.regs.pop_scope();
+
+	// Open cursor to documents table
+	auto docs_ctx = from_structure(catalog["documents"]);
+	prog.open_cursor(0, &docs_ctx);
+
+	// Insert a document with blob
+	{
+		prog.regs.push_scope();
+
+		// Simulate large content to store as blob
+		const char *large_content = "This is a very large document content that would be inefficient "
+									"to store directly in the btree. Instead, we store it as a blob "
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+									"and keep only the page reference in the table..."
+
+
+
+									;
+
+		// Write blob first and get page reference
+		int content_ptr = prog.load(TYPE_U64, prog.alloc_value((uint64_t)large_content));
+		int content_size = prog.load(TYPE_U32, prog.alloc_value((uint32_t)strlen(large_content)));
+		int blob_ref = prog.call_function(vmfunc_write_blob, content_ptr, 2);
+
+		// Now prepare row data in contiguous registers
+		int row_start = prog.regs.allocate_range(3);
+
+		// Load all three values in contiguous registers
+		prog.load(TYPE_U32, prog.alloc_value(1U), row_start);                      // doc_id (key)
+		prog.load(TYPE_CHAR32, prog.alloc_string("Technical Manual", 32), row_start + 1);  // title
+		prog.move(blob_ref, row_start + 2);                                        // blob_ref
+
+		// Insert row with all 3 values
+		prog.insert_record(0, row_start, 3);
+
+		printf("Inserted document with ID=1, blob_ref=");
+		prog.result(row_start + 2, 1);  // Output just the blob_ref
+
+		prog.regs.pop_scope();
+	}
+
+	// Now retrieve and read the blob
+	{
+		prog.regs.push_scope();
+
+		// Seek to our document
+		int search_key = prog.load(TYPE_U32, prog.alloc_value(1U));
+		int found = prog.first(0);
+		{
+			// Get all columns
+			int doc_id = prog.get_column(0, 0);    // doc_id
+			int title = prog.get_column(0, 1);     // title
+			int blob_ref = prog.get_column(0, 2);  // blob_ref
+
+			// Read blob using the reference
+			int blob_reg = prog.call_function(vmfunc_read_blob, blob_ref, 1);
+			prog.result(blob_reg);
+
+
+			// Output: doc_id, title, blob_ref, blob_size
+			printf("Retrieved document:\n");
+			prog.result(doc_id, 4);  // Output starting from doc_id for 4 values
+		}
+
+		prog.regs.pop_scope();
+	}
+
+	prog.close_cursor(0);
+	prog.commit_transaction();
+	prog.halt();
+
+	prog.resolve_labels();
+	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
 }
 
 // Call this in test_programs() after loading data:
@@ -946,7 +1121,8 @@ test_programs()
 	// test_nested_loop_join();
 	// test_like_pattern();
 	// _debug = true;
-	test_group_by_aggregate();
+	// test_group_by_aggregate();
+	// test_blob_storage();
 	pager_close();
 
 	printf("\n✅ All relational tests completed!\n");

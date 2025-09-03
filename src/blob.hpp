@@ -28,3 +28,7 @@ Buffer blob_cursor_record(BlobCursor* cursor);
 
 uint32_t blob_cursor_insert(BlobCursor* cursor,  const uint8_t* record, const uint32_t size);
 bool blob_cursor_delete(BlobCursor* cursor);
+
+
+
+uint32_t blob_store(uint8_t* data, uint32_t size);
