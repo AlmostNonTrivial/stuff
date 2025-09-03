@@ -255,8 +255,8 @@ struct ProgramBuilder {
     // Cursor Operations
     // ========================================================================
 
-    ProgramBuilder& open_cursor(int cursor_id, Layout* layout, CursorType type) {
-        emit(OPEN_MAKE(cursor_id, layout, type));
+    ProgramBuilder& open_cursor(int cursor_id, CursorContext* context) {
+        emit(OPEN_MAKE(cursor_id, context));
         return *this;
     }
 

@@ -13,9 +13,6 @@
 #include <cstdlib>
 #include <cstring>
 
-
-// VM Runtime Definitions
-#define REGISTERS 40
 #define CURSORS	  10
 
 bool _debug = false;
@@ -347,7 +344,6 @@ vm_debug_print_all_registers()
 	{
 		if (VM.registers[i].type != TYPE_NULL)
 		{
-
 		}
 	}
 	printf("====================\n");
@@ -371,7 +367,6 @@ step()
 	VMInstruction *inst = &VM.program[VM.pc];
 	if (_debug)
 	{
-
 	}
 	switch (inst->opcode)
 	{
@@ -600,10 +595,25 @@ step()
 		return OK;
 	}
 	case OP_Open: {
-		int32_t	   cursor_id = OPEN_CURSOR_ID(*inst);
-		CursorType type = OPEN_CURSOR_TYPE(*inst);
-		VmCursor  *cursor = &VM.cursors[cursor_id];
-		Layout	  *schema = OPEN_LAYOUT(*inst);
+		int32_t		   cursor_id = OPEN_CURSOR_ID(*inst);
+		VmCursor	  *cursor = &VM.cursors[cursor_id];
+		CursorContext *context = OPEN_LAYOUT(*inst);
+
+		switch (context->type)
+		{
+		case CursorType::BPLUS: {
+			vmcursor_open_bplus(cursor, context->context.btree.layout, &context->context.btree.tree);
+			break;
+		}
+		case CursorType::RED_BLACK: {
+			vmcursor_open_red_black(cursor, context->context.layout, VM.ctx);
+			break;
+		}
+		case CursorType::BLOB: {
+			vmcursor_open_blob(cursor, VM.ctx);
+			break;
+		}
+		}
 
 		// open
 
