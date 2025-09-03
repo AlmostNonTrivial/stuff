@@ -6,8 +6,7 @@ from datetime import datetime
 
 def truncate_string(s, length):
     """Truncate and pad string to exact length"""
-    s = str(s)[:length]
-    return s.ljust(length)
+    return str(s)[:length]
 
 def fetch_relational_data():
     """Fetch related data from dummyjson.com"""

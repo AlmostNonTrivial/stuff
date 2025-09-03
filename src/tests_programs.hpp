@@ -235,24 +235,25 @@ struct CSVReader
 		std::getline(file, line);
 	}
 
-	bool
-	next_row(std::vector<std::string> &fields)
-	{
-		if (!std::getline(file, line))
-		{
-			return false;
-		}
+	bool next_row(std::vector<std::string> &fields) {
+    if (!std::getline(file, line)) {
+        return false;
+    }
 
-		fields.clear();
-		std::stringstream ss(line);
-		std::string		  field;
+    // Remove carriage return if present
+    if (!line.empty() && line.back() == '\r') {
+        line.pop_back();
+    }
 
-		while (std::getline(ss, field, ','))
-		{
-			fields.push_back(field);
-		}
-		return true;
-	}
+    fields.clear();
+    std::stringstream ss(line);
+    std::string field;
+
+    while (std::getline(ss, field, ',')) {
+        fields.push_back(field);
+    }
+    return true;
+}
 };
 
 inline static void
@@ -345,10 +346,11 @@ load_table_from_csv(const char *csv_file, const char *table_name)
 			}
 			else if (type == TYPE_CHAR16)
 			{
-				char *val = (char *)arena::alloc<QueryArena>(16);
-				memset(val, 0, 16);
-				strncpy(val, fields[i].c_str(), 15);
-				data = val;
+
+				// char *val = (char *)arena::alloc<QueryArena>(16);
+				// memset(val, 0, 16);
+				// strncpy(val, fields[i].c_str(), 15);
+				data = prog.alloc_string(fields[i].c_str(), type_size(TYPE_CHAR16));
 			}
 			else if (type == TYPE_CHAR32)
 			{
@@ -469,6 +471,121 @@ test_select_order_by()
 	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
 }
 
+
+
+inline void test_subquery_pattern() {
+    printf("\n=== SUBQUERY PATTERN DEMO ===\n");
+    printf("Simulating: SELECT * FROM (SELECT * FROM users WHERE age > 30) WHERE city='Chicago'\n\n");
+
+    ProgramBuilder prog;
+
+    // Cursor 0: source table (users)
+    // Cursor 1: temporary red-black tree for intermediate results
+
+    auto users_ctx = from_structure(catalog[USERS]);
+
+    // Create red-black tree with same layout as users table
+    Layout temp_layout = users_ctx.layout;
+    auto temp_ctx = red_black(temp_layout);
+
+    prog.open_cursor(0, &users_ctx);
+    prog.open_cursor(1, &temp_ctx);
+
+    // ========================================================================
+    // PHASE 1: Scan users table, filter by age > 30, insert into temp tree
+    // ========================================================================
+
+    {
+        prog.regs.push_scope();
+        // Load constant 30 for age comparison
+        int age_const = prog.load(TYPE_U32, prog.alloc_value(30U));
+
+
+        int at_end = prog.first(0);
+        auto scan_loop = prog.begin_while(at_end);
+        {
+            // Get age column (index 3)
+            int age_reg = prog.get_column(0, 3);
+
+            // Test if age > 30
+            int age_test = prog.gt(age_reg, age_const);
+
+            // If condition met, insert into temp tree
+            auto if_ctx = prog.begin_if(age_test);
+            {
+                // Get all columns from current row
+                int row_start = prog.get_columns(0, 0, 5);
+
+                // Insert into red-black tree (cursor 1)
+                prog.insert_record(1, row_start, 5);
+            }
+            prog.end_if(if_ctx);
+
+            // Move to next record
+            prog.next(0, at_end);
+        }
+        prog.end_while(scan_loop);
+
+        prog.regs.pop_scope();
+    }
+
+    // ========================================================================
+    // PHASE 2: Scan temp tree, filter by city = 'Chigaco', output results
+    // ========================================================================
+
+    {
+        prog.regs.push_scope();
+
+        // Load constant "Portland" for city comparison
+
+        int city_const = prog.load(TYPE_CHAR16, prog.alloc_string("Chicago", type_size(TYPE_CHAR16)));
+
+        // Rewind temp tree to start
+        int at_end = prog.first(1);
+
+        // Begin scanning loop
+        auto scan_loop = prog.begin_while(at_end);
+        {
+            // Get city column (index 4)
+            int city_reg = prog.get_column(1, 4);
+
+            // Test if city == "Portland"
+            int city_test = prog.eq(city_reg, city_const);
+
+            // If condition met, output the row
+            auto if_ctx = prog.begin_if(city_test);
+            {
+                // Get all columns from current row
+                int row_start = prog.get_columns(1, 0, 5);
+
+                // Output result
+                prog.result(row_start, 5);
+            }
+            prog.end_if(if_ctx);
+
+            // Move to next record
+            prog.next(1, at_end);
+        }
+        prog.end_while(scan_loop);
+
+        prog.regs.pop_scope();
+    }
+
+    // Cleanup
+    prog.close_cursor(0);
+    prog.close_cursor(1);
+    prog.halt();
+
+    // Resolve labels and execute
+    prog.resolve_labels();
+
+    printf("Executing subquery pattern...\n");
+    vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+}
+
+// Call this in test_programs() after loading data:
+// test_subquery_pattern();
+
 // Main test function
 inline void
 test_programs()
@@ -486,9 +603,12 @@ test_programs()
 	// _debug = true;
 	// Run test queries
 	// test_select();
-	test_select_order_by();
+	// test_select_order_by();
+
 	// test_many_to_many_query();
 
+
+	test_subquery_pattern();
 	pager_close();
 
 	printf("\n✅ All relational tests completed!\n");

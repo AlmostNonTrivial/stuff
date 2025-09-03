@@ -1,186 +1,186 @@
 comment_id,post_id,user_id,body,likes
-1,242,105,This is some awesome thinking!  ,3
+1,242,105,This is some awesome thinking!,3
 2,46,183,What terrific math skills you're,4
-3,235,1,You are an amazing writer!      ,2
-4,31,89,Wow! You have improved so much! ,1
-5,212,149,Nice idea!                      ,1
+3,235,1,You are an amazing writer!,2
+4,31,89,Wow! You have improved so much!,1
+5,212,149,Nice idea!,1
 6,184,110,You are showing excellent unders,5
 7,172,4,"This is clear, concise, and comp",1
-8,233,145,What a powerful argument!       ,0
-9,207,207,I knew you could do it!         ,3
-10,87,86,Wonderful ideas!                ,0
+8,233,145,What a powerful argument!,0
+9,207,207,I knew you could do it!,3
+10,87,86,Wonderful ideas!,0
 11,156,162,It was a pleasure to grade this!,8
-12,119,90,Keep up the incredible work!    ,10
-13,108,87,"My goodness, how impressive!    ",10
-14,20,77,You're showing inventive ideas! ,8
-15,6,17,You've shown so much growth!    ,2
-16,14,199,Interesting thoughts!           ,5
-17,240,155,I love your neat work!          ,7
+12,119,90,Keep up the incredible work!,10
+13,108,87,"My goodness, how impressive!",10
+14,20,77,You're showing inventive ideas!,8
+15,6,17,You've shown so much growth!,2
+16,14,199,Interesting thoughts!,5
+17,240,155,I love your neat work!,7
 18,227,134,Doesn't it feel good to do such ,6
-19,245,203,First-rate work!                ,1
+19,245,203,First-rate work!,1
 20,176,39,This is fascinating information!,4
-21,229,113,You inspire me!                 ,0
-22,9,113,This is right on target!        ,5
-23,33,155,What an astounding observation! ,1
-24,121,169,This is very well thought out!  ,1
+21,229,113,You inspire me!,0
+22,9,113,This is right on target!,5
+23,33,155,What an astounding observation!,1
+24,121,169,This is very well thought out!,1
 25,247,160,I can tell you've been practicin,9
-26,79,59,You've come a long way!         ,7
+26,79,59,You've come a long way!,7
 27,55,57,I can tell you've been paying at,9
-28,209,177,Reading this made my day!       ,8
-29,31,168,This is very perceptive!        ,2
-30,126,89,What an accomplishment!         ,8
-31,105,83,You make a great point here!    ,9
-32,150,94,I really like your creativity!  ,6
-33,77,171,You are an exceptional student! ,7
-34,112,115,You have brilliant thoughts!    ,7
-35,86,83,This is beautiful!              ,7
-36,220,174,Dazzling examples!              ,9
-37,47,12,Vivid language choices!         ,5
-38,193,189,You express your ideas so well! ,3
-39,146,196,This was a delight to read!     ,7
-40,79,157,This is a persuasive argument!  ,3
+28,209,177,Reading this made my day!,8
+29,31,168,This is very perceptive!,2
+30,126,89,What an accomplishment!,8
+31,105,83,You make a great point here!,9
+32,150,94,I really like your creativity!,6
+33,77,171,You are an exceptional student!,7
+34,112,115,You have brilliant thoughts!,7
+35,86,83,This is beautiful!,7
+36,220,174,Dazzling examples!,9
+37,47,12,Vivid language choices!,5
+38,193,189,You express your ideas so well!,3
+39,146,196,This was a delight to read!,7
+40,79,157,This is a persuasive argument!,3
 41,91,116,You show an impressive grasp on ,3
-42,213,83,You are gifted!                 ,3
-43,40,171,You are so clever!              ,8
-44,181,177,What a great learner you are!   ,5
-45,146,48,I value these thoughts!         ,10
+42,213,83,You are gifted!,3
+43,40,171,You are so clever!,8
+44,181,177,What a great learner you are!,5
+45,146,48,I value these thoughts!,10
 46,176,68,You are such a motivated worker!,8
 47,245,115,You show great attention to deta,1
-48,197,36,You are so artistic!            ,4
-49,86,144,I am so proud of you!           ,3
-50,203,74,Lovely handwriting!             ,2
-51,120,15,Great example!                  ,4
-52,84,93,You worked so hard!             ,7
-53,162,115,You are a star!                 ,3
-54,117,86,You learned so much!            ,6
-55,50,29,You are so smart!               ,1
-56,58,35,You've made a lot of progress!  ,8
-57,25,194,What bright thinking!           ,0
-58,81,106,You rocked this!                ,10
-59,15,74,Great thinking!                 ,1
-60,239,18,You did your best!              ,10
-61,174,40,I love this!                    ,10
-62,229,76,You can do hard things!         ,10
-63,215,98,You are talented!               ,1
-64,123,171,You amaze me!                   ,6
-65,87,100,You discovered something new!   ,8
-66,226,44,I enjoyed reading this!         ,8
-67,176,13,You are so ambitious!           ,0
-68,240,51,I appreciate your hard work!    ,8
-69,66,148,This is magical work!           ,5
-70,133,78,You did it!                     ,5
-71,109,188,You've achieved so much!        ,4
-72,143,84,You really challenged yourself! ,6
-73,242,52,I admire you!                   ,3
-74,63,192,You are unstoppable!            ,3
-75,104,164,You have great ideas!           ,7
-76,2,68,This really sparkles!           ,8
-77,215,57,What a great vision you have!   ,0
-78,174,198,You have really improved!       ,9
-79,51,195,You've really grown!            ,6
+48,197,36,You are so artistic!,4
+49,86,144,I am so proud of you!,3
+50,203,74,Lovely handwriting!,2
+51,120,15,Great example!,4
+52,84,93,You worked so hard!,7
+53,162,115,You are a star!,3
+54,117,86,You learned so much!,6
+55,50,29,You are so smart!,1
+56,58,35,You've made a lot of progress!,8
+57,25,194,What bright thinking!,0
+58,81,106,You rocked this!,10
+59,15,74,Great thinking!,1
+60,239,18,You did your best!,10
+61,174,40,I love this!,10
+62,229,76,You can do hard things!,10
+63,215,98,You are talented!,1
+64,123,171,You amaze me!,6
+65,87,100,You discovered something new!,8
+66,226,44,I enjoyed reading this!,8
+67,176,13,You are so ambitious!,0
+68,240,51,I appreciate your hard work!,8
+69,66,148,This is magical work!,5
+70,133,78,You did it!,5
+71,109,188,You've achieved so much!,4
+72,143,84,You really challenged yourself!,6
+73,242,52,I admire you!,3
+74,63,192,You are unstoppable!,3
+75,104,164,You have great ideas!,7
+76,2,68,This really sparkles!,8
+77,215,57,What a great vision you have!,0
+78,174,198,You have really improved!,9
+79,51,195,You've really grown!,6
 80,171,112,You are a snappy problem-solver!,2
-81,97,146,This really shines!             ,7
-82,201,95,You make me want to learn more! ,9
-83,15,204,This made me smile!             ,8
-84,3,14,You are a winner!               ,8
-85,220,90,I love your creativity!         ,8
-86,167,30,You are so intelligent!         ,4
-87,12,80,You should be proud!            ,2
-88,49,28,You have amazing potential!     ,0
-89,161,78,This is top-notch!              ,5
-90,202,135,You deserve a high five!        ,9
-91,133,38,Way to think it through!        ,9
-92,159,150,This blew me away!              ,3
-93,1,190,These are fabulous ideas!       ,7
-94,189,197,This gets my seal of approval!  ,0
-95,233,174,This is quality work!           ,7
-96,109,2,You reached your goal!          ,1
-97,16,208,Out of this world!              ,7
-98,158,126,You're on top of it!            ,2
+81,97,146,This really shines!,7
+82,201,95,You make me want to learn more!,9
+83,15,204,This made me smile!,8
+84,3,14,You are a winner!,8
+85,220,90,I love your creativity!,8
+86,167,30,You are so intelligent!,4
+87,12,80,You should be proud!,2
+88,49,28,You have amazing potential!,0
+89,161,78,This is top-notch!,5
+90,202,135,You deserve a high five!,9
+91,133,38,Way to think it through!,9
+92,159,150,This blew me away!,3
+93,1,190,These are fabulous ideas!,7
+94,189,197,This gets my seal of approval!,0
+95,233,174,This is quality work!,7
+96,109,2,You reached your goal!,1
+97,16,208,Out of this world!,7
+98,158,126,You're on top of it!,2
 99,49,166,I can tell this is your best eff,9
-100,26,11,I love how motivated you are!   ,2
-101,228,44,You are so focused!             ,7
+100,26,11,I love how motivated you are!,2
+101,228,44,You are so focused!,7
 102,128,81,I'm so lucky to grade your work!,5
-103,221,21,I love your enthusiasm!         ,7
+103,221,21,I love your enthusiasm!,7
 104,12,39,I think this is the best I've se,0
 105,111,115,"Not enough for me, you are every",6
 106,105,50,Just when I couldn't love you mo,5
-107,1,131,You are a symbol of beauty.     ,7
+107,1,131,You are a symbol of beauty.,7
 108,225,206,Surely you are the most beautifu,0
-109,108,109,You mean the world to me.       ,6
+109,108,109,You mean the world to me.,6
 110,17,6,The word pretty is worthless wit,8
 111,95,122,You are the definition of Beauty,6
 112,56,184,Flawless outstanding eccentric l,9
 113,11,102,"The stars, the moon, and the sun",3
-114,14,130,You are graceful.               ,2
+114,14,130,You are graceful.,2
 115,167,2,Surely you would have been arres,1
 116,44,62,"You're an incredibly stunning, a",5
 117,151,16,"I guess this is your best look, ",7
-118,229,18,You look mesmerizing.           ,2
+118,229,18,You look mesmerizing.,2
 119,67,25,I wonder how cute you would be l,9
-120,68,14,You are so much lovely.         ,5
-121,41,14,I love your curly hair.         ,7
+120,68,14,You are so much lovely.,5
+121,41,14,I love your curly hair.,7
 122,22,16,Your dressing sense is appreciab,8
 123,72,15,You are the sweetest girl I have,2
 124,197,116,I love that straight hair of you,1
-125,122,143,You are pleasing.               ,10
+125,122,143,You are pleasing.,10
 126,217,107,Just 'WOW' for your natural beau,4
 127,65,154,I love how comfortable you are i,8
-128,39,37,You are very much adorable.     ,2
+128,39,37,You are very much adorable.,2
 129,55,63,You look even more pretty withou,0
-130,225,4,I feel so happy to be with you. ,5
-131,124,29,You are my safest place.        ,2
+130,225,4,I feel so happy to be with you.,5
+131,124,29,You are my safest place.,2
 132,17,191,You look beautiful in that dress,4
-133,100,69,I wish I had your makeup.       ,5
-134,96,125,You are stunning.               ,10
-135,216,32,That natural beauty tho.        ,6
+133,100,69,I wish I had your makeup.,5
+134,96,125,You are stunning.,10
+135,216,32,That natural beauty tho.,6
 136,146,7,"You have the most beautiful, spa",3
 137,226,6,You have the most beautiful smil,0
-138,152,126,Your sense of fashion is great. ,3
-139,120,92,I like your hair.               ,8
+138,152,126,Your sense of fashion is great.,3
+139,120,92,I like your hair.,8
 140,117,98,You look more beautiful than in ,4
-141,157,144,You look stunning.              ,4
-142,78,26,You're classy.                  ,4
-143,81,110,You're very trendy.             ,4
-144,141,77,Your true colors are beautiful. ,6
+141,157,144,You look stunning.,4
+142,78,26,You're classy.,4
+143,81,110,You're very trendy.,4
+144,141,77,Your true colors are beautiful.,6
 145,238,130,Getting lost in your chroma can ,7
-146,149,137,You've got a beautiful heart.   ,8
-147,246,76,Inside out; you are beautiful.  ,1
-148,54,15,You take my breath away.        ,4
+146,149,137,You've got a beautiful heart.,8
+147,246,76,Inside out; you are beautiful.,1
+148,54,15,You take my breath away.,4
 149,14,37,I love how expressive your eyes ,2
 150,42,39,Your beauty is one of the things,7
-151,153,130,"Honestly, you are beautiful.    ",1
-152,179,110,You're helping us sound lovely. ,4
+151,153,130,"Honestly, you are beautiful.",1
+152,179,110,You're helping us sound lovely.,4
 153,243,55,The beauty lies within the soul.,6
-154,114,127,"It's refreshing, your beauty.   ",8
+154,114,127,"It's refreshing, your beauty.",8
 155,199,168,You are a whisper of perfection.,7
-156,88,161,You've got lovely eyes.         ,2
+156,88,161,You've got lovely eyes.,2
 157,239,147,There are endless possibilities ,10
-158,229,39,You are a true beauty epitome.  ,0
+158,229,39,You are a true beauty epitome.,0
 159,145,142,You're beautiful and enthusiasti,5
-160,117,174,I see the power of your grace.  ,5
-161,14,65,You're like the sun's ray.      ,6
-162,177,205,You're a divine present.        ,7
+160,117,174,I see the power of your grace.,5
+161,14,65,You're like the sun's ray.,6
+162,177,205,You're a divine present.,7
 163,36,87,Beauty is just one of the beauti,10
-164,46,44,The expression is lovely.       ,8
-165,236,148,Sorry is overcome by the grace. ,10
+164,46,44,The expression is lovely.,8
+165,236,148,Sorry is overcome by the grace.,10
 166,55,24,"You are true, beautiful and pure",9
-167,146,1,You're flawless.                ,3
-168,191,105,You have a beautiful smile.     ,10
-169,24,71,Your beauty is amazing.         ,10
-170,181,51,I see the beauty of your life.  ,9
-171,104,27,I think you're fascinated.      ,10
-172,179,67,"You're energetic, aren't ya?    ",4
-173,241,26,Impressive pic.                 ,6
-174,145,60,Strong and confident.           ,4
-175,163,25,The picture is lit!             ,8
-176,208,86,Vibes everywhere!               ,8
+167,146,1,You're flawless.,3
+168,191,105,You have a beautiful smile.,10
+169,24,71,Your beauty is amazing.,10
+170,181,51,I see the beauty of your life.,9
+171,104,27,I think you're fascinated.,10
+172,179,67,"You're energetic, aren't ya?",4
+173,241,26,Impressive pic.,6
+174,145,60,Strong and confident.,4
+175,163,25,The picture is lit!,8
+176,208,86,Vibes everywhere!,8
 177,219,10,I love your straight hair with a,9
 178,40,180,The most stunning thing I've see,0
 179,11,17,Your smile makes everyone happy.,0
-180,84,189,You are so gorgeous.            ,6
-181,149,90,You made my day.                ,3
-182,132,82,This beauty has no boundaries.  ,8
+180,84,189,You are so gorgeous.,6
+181,149,90,You made my day.,3
+182,132,82,This beauty has no boundaries.,8
 183,172,164,No one makes me smile more than ,9
 184,111,167,"Lady, you make me feel like a ma",10
 185,155,28,I just can't stop wondering abou,0
@@ -189,13 +189,13 @@ comment_id,post_id,user_id,body,likes
 188,143,162,"I can never get angry with you, ",0
 189,213,74,"If there is no “you”, then my li",2
 190,58,207,I get attracted to you when you ,9
-191,76,47,I want to see you.              ,4
-192,13,152,Hehe. cute monkey.              ,5
+191,76,47,I want to see you.,4
+192,13,152,Hehe. cute monkey.,5
 193,30,113,"You're too short, just like your",9
-194,20,28,"Hey, you brainless cutie….      ",0
+194,20,28,"Hey, you brainless cutie….",0
 195,88,181,I am still wondering how can god,7
-196,4,39,You are my precious fool.       ,8
-197,14,98,Hello idiot!                    ,7
+196,4,39,You are my precious fool.,8
+197,14,98,Hello idiot!,7
 198,2,150,"What did I just see, that's amaz",5
-199,79,117,Cute little bitch.              ,4
+199,79,117,Cute little bitch.,4
 200,141,100,Surely you'd have used a photo e,3

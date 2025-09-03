@@ -129,7 +129,7 @@ enum OpCode : uint8_t
 #define MOVE_DEBUG_PRINT(inst)			  printf("MOVE R[%d] <- R[%d]", MOVE_DEST_REG(inst), MOVE_SRC_REG(inst))
 
 	OP_Load = 41,
-#define LOAD_MAKE(dest_reg, type, data) {OP_Load, dest_reg, type, -1, data, 0}
+#define LOAD_MAKE(dest_reg, type, data) {OP_Load, dest_reg, type, 0, data, 0}
 #define LOAD_DEST_REG(inst)				((inst).p1)
 #define LOAD_TYPE(inst)					((DataType)((inst).p2))
 #define LOAD_DATA(inst)					((uint8_t *)((inst).p4))
