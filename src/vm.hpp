@@ -1,14 +1,9 @@
 // vm.hpp
 #pragma once
 #include "arena.hpp"
-#include "blob.hpp"
-#include "memtree.hpp"
 #include "defs.hpp"
-#include "catalog.hpp"
-
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 
 typedef bool (*VMFunction)(TypedValue	 *result,	 // Output register
@@ -27,7 +22,7 @@ enum class CursorType : uint8_t
 typedef void (*ResultCallback)(array<TypedValue, QueryArena> result);
 extern bool _debug;
 
-enum OpCode : uint32_t
+enum OpCode :uint8_t
 {
 	// Control flow
 	OP_Goto = 1,
@@ -153,16 +148,6 @@ enum OpCode : uint32_t
 
 	OP_Rollback = 64,
 	#define ROLLBACK_MAKE() {OP_Rollback, 0, 0, 0, nullptr, 0}
-
-	OP_Create = 65,
-	#define CREATE_MAKE(cursor_id, type, root_page_reg) {OP_Create, cursor_id, root_page_reg, 0, nullptr, (uint8_t)type}
-	#define CREATE_CURSOR_ID(inst) ((inst).p1)
-	#define CREATE_ROOT_PAGE_REG(inst) ((inst).p2)
-	#define CREATE_CURSOR_TYPE(inst) ((CursorType)((inst).p5))
-
-	OP_Clear = 66
-	#define CLEAR_MAKE(cursor_id) {OP_Clear, cursor_id, 0, 0, nullptr, 0}
-	#define CLEAR_CURSOR_ID(inst) ((inst).p1)
 };
 struct VMInstruction
 {
@@ -175,106 +160,11 @@ struct VMInstruction
 };
 
 
-
-namespace Debug
-{
-inline const char *
-opcode_name(OpCode op)
-{
-	switch (op)
-	{
-	case OP_Goto:
-		return "Goto";
-	case OP_Halt:
-		return "Halt";
-	case OP_JumpIf:
-		return "JumpIf";
-	case OP_Open:
-		return "Open";
-	case OP_Close:
-		return "Close";
-	case OP_Rewind:
-		return "Rewind";
-	case OP_Step:
-		return "Step";
-	case OP_Seek:
-		return "Seek";
-	case OP_Create:
-		return "Create";
-	case OP_Clear:
-		return "Clear";
-	case OP_Column:
-		return "Column";
-	case OP_Insert:
-		return "Insert";
-	case OP_Delete:
-		return "Delete";
-	case OP_Update:
-		return "Update";
-	case OP_Move:
-		return "Move";
-	case OP_Load:
-		return "Load";
-	case OP_Test:
-		return "Test";
-	case OP_Arithmetic:
-		return "Arithmetic";
-	case OP_Logic:
-		return "Logic";
-	case OP_Result:
-		return "Result";
-	case OP_Function:
-		return "Function";
-	case OP_Begin:
-		return "Begin";
-	case OP_Commit:
-		return "Commit";
-	case OP_Rollback:
-		return "Rollback";
-	default:
-		return "Unknown";
-	}
-}
-
-inline void
-print_instruction(const VMInstruction &inst, int pc = -1)
-{
-printf("\n");
-}
-
-inline void
-print_program(VMInstruction *program, int program_size)
-{
-	printf("===== VM PROGRAM (%zu instructions) =====\n", program_size);
-	for (size_t i = 0; i < program_size; i++)
-	{
-		print_instruction(program[i], i);
-	}
-	printf("==========================================\n");
-}
-
-inline void
-print_register(int reg_num, const TypedValue &value)
-{
-	printf("R[%2d]: type=%3d ", reg_num, value.type);
-	printf("value=");
-	// print_value(value.type, value.data);
-	printf("\n");
-}
-
-inline void
-print_cursor_state(int cursor_id, const char *state)
-{
-	printf("Cursor[%d]: %s\n", cursor_id, state);
-}
-
-} // namespace Debug
-
 // VM Runtime Definitions
 #define REGISTERS 40
 #define CURSORS	  10
 
-enum VM_RESULT
+enum VM_RESULT : uint8_t
 {
 	OK,
 	ABORT,

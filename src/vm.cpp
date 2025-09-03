@@ -343,7 +343,7 @@ vm_debug_print_all_registers()
 	{
 		if (VM.registers[i].type != TYPE_NULL)
 		{
-			Debug::print_register(i, VM.registers[i]);
+
 		}
 	}
 	printf("====================\n");
@@ -367,7 +367,7 @@ step()
 	VMInstruction *inst = &VM.program[VM.pc];
 	if (_debug)
 	{
-		printf("\n[%3d] %-12s ", VM.pc, Debug::opcode_name(inst->opcode));
+
 	}
 	switch (inst->opcode)
 	{
@@ -800,32 +800,6 @@ step()
 		return OK;
 	}
 
-	case OP_Create: {
-		// int32_t	   cursor_id = CREATE_CURSOR_ID(*inst);
-		// int32_t	   root_page_reg = CREATE_ROOT_PAGE_REG(*inst);
-		// CursorType type = CREATE_CURSOR_TYPE(*inst);
-
-		// switch (type)
-		// {
-		// case CursorType::BPLUS: {
-
-        // bplustree_create(DataType key, uint32_t record_size, bool init)
-
-		// 	break;
-		// }
-		// }
-
-		VM.pc++;
-		break;
-	}
-
-	case OP_Clear: {
-		int32_t cursor_id = CLEAR_CURSOR_ID(*inst);
-
-		VM.pc++;
-		break;
-	}
-
 	case OP_Begin: {
 		pager_begin_transaction();
 		VM.pc++;
@@ -859,7 +833,7 @@ vm_execute(VMInstruction *instructions, int instruction_count, MemoryContext *ct
 	VM.ctx = ctx;
 	if (_debug)
 	{
-		Debug::print_program(instructions, instruction_count);
+
 		printf("\n===== EXECUTION TRACE =====\n");
 	}
 	while (!VM.halted && VM.pc < VM.program_size)
