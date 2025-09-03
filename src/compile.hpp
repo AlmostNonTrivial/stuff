@@ -1,24 +1,26 @@
-#pragma  once
+#pragma once
+#include "types.hpp"
 #include "vm.hpp"
 #include <cassert>
-#include "catalog.hpp"
 #include <cstdint>
 
-// Enhanced ProgramBuilder with inline implementations
+// Enhanced RegisterAllocator with strong scope-based management
 struct RegisterAllocator {
     int next_free = 0;
     array<int, QueryArena> scope_stack;
 
-    int allocate() {
-        assert(next_free <= REGISTERS); 
-        return next_free++;
-    }
+    // Allocate a single register (optionally specific one)
+    int allocate(int specific = -1) {
+        if (specific >= 0) {
+            assert(specific < REGISTERS && "Register out of range");
+            // If requesting a specific register, it better be at or past our allocation point
+            assert(specific >= next_free && "Cannot allocate already-used register");
+            next_free = specific + 1;
+            return specific;
+        }
 
-    int allocate_range(int count) {
-        assert(next_free + count <= REGISTERS);
-        int first = next_free;
-        next_free += count;
-        return first;
+        assert(next_free < REGISTERS && "Out of registers");
+        return next_free++;
     }
 
     void push_scope() {
@@ -26,21 +28,25 @@ struct RegisterAllocator {
     }
 
     void pop_scope() {
-        if (scope_stack.size > 0) {
-            next_free = scope_stack.data[scope_stack.size - 1];
-            scope_stack.size--;
-        }
+        assert(scope_stack.size > 0 && "No scope to pop");
+        next_free = scope_stack.data[scope_stack.size - 1];
+        scope_stack.size--;
     }
 
-    int mark() {
+    int mark() const {
         return next_free;
     }
 
     void restore(int mark) {
+        assert(mark <= next_free && "Cannot restore to future position");
         next_free = mark;
     }
 
-    void clear() {
+    int available() const {
+        return REGISTERS - next_free;
+    }
+
+    void reset() {
         next_free = 0;
         array_clear(&scope_stack);
     }
@@ -53,16 +59,16 @@ struct LoopContext {
 };
 
 struct WhileContext {
-    const char* condition_label;  // Where we check the condition
-    const char* end_label;        // Where we exit
-    int condition_reg;            // Register holding the condition
+    const char* condition_label;
+    const char* end_label;
+    int condition_reg;
     int saved_reg_mark;
 };
 
 struct CursorLoopContext {
     WhileContext while_ctx;
     int cursor_id;
-    int condition_reg;  // The register that tracks validity
+    int condition_reg;
 };
 
 struct CondContext {
@@ -79,7 +85,6 @@ struct ProgramBuilder {
     RegisterAllocator regs;
     int label_counter = 0;
 
-    // Current control flow context
     LoopContext current_loop;
 
     // ========================================================================
@@ -107,7 +112,7 @@ struct ProgramBuilder {
         return name;
     }
 
-    int here() {
+    int here() const {
         return instructions.size;
     }
 
@@ -124,7 +129,7 @@ struct ProgramBuilder {
                     if (inst.p2 == -1) inst.p2 = *target;
                     if (inst.p3 == -1) inst.p3 = *target;
                 }
-                inst.p4 = nullptr;  // Clean up
+                inst.p4 = nullptr;
             }
         }
     }
@@ -154,15 +159,15 @@ struct ProgramBuilder {
     }
 
     ProgramBuilder& jumpif_zero(int test_reg, const char* label) {
-        return jumpif_false(test_reg, label);  // 0 = false
+        return jumpif_false(test_reg, label);
     }
 
     ProgramBuilder& jumpif_not_zero(int test_reg, const char* label) {
-        return jumpif_true(test_reg, label);   // non-zero = true
+        return jumpif_true(test_reg, label);
     }
 
     // ========================================================================
-    // Loop Management (Original)
+    // Loop Management
     // ========================================================================
 
     LoopContext begin_loop(const char* name = nullptr) {
@@ -209,7 +214,7 @@ struct ProgramBuilder {
         };
 
         label(ctx.condition_label);
-        jumpif_zero(condition_reg, ctx.end_label);  // Exit if condition false
+        jumpif_zero(condition_reg, ctx.end_label);
         return ctx;
     }
 
@@ -228,39 +233,14 @@ struct ProgramBuilder {
             regs.mark()
         };
 
-        label(ctx.condition_label);  // Body starts here
+        label(ctx.condition_label);
         return ctx;
     }
 
     ProgramBuilder& end_while_condition(const WhileContext& ctx, int condition_reg) {
-        jumpif_not_zero(condition_reg, ctx.condition_label);  // Continue if true
+        jumpif_not_zero(condition_reg, ctx.condition_label);
         label(ctx.end_label);
         regs.restore(ctx.saved_reg_mark);
-        return *this;
-    }
-
-    // ========================================================================
-    // Cursor-Specific Loop Helpers
-    // ========================================================================
-
-    CursorLoopContext begin_cursor_scan(int cursor_id, bool to_end = false) {
-        int valid_reg = rewind(cursor_id, to_end);
-        WhileContext while_ctx = begin_while(valid_reg);
-
-        return CursorLoopContext{
-            while_ctx,
-            cursor_id,
-            valid_reg
-        };
-    }
-
-    ProgramBuilder& end_cursor_scan(CursorLoopContext& ctx, bool forward = true) {
-        // Update condition for next iteration
-        ctx.condition_reg = step(ctx.cursor_id, forward);
-        // Copy the new condition value to the while condition register
-        emit(MOVE_MOVE_MAKE(ctx.while_ctx.condition_reg, ctx.condition_reg));
-
-        end_while(ctx.while_ctx);
         return *this;
     }
 
@@ -281,7 +261,7 @@ struct ProgramBuilder {
     }
 
     ProgramBuilder& begin_else(CondContext& ctx) {
-        goto_label(ctx.end_label);  // Skip else block if we took the if path
+        goto_label(ctx.end_label);
         label(ctx.else_label);
         ctx.has_else = true;
         return *this;
@@ -289,7 +269,7 @@ struct ProgramBuilder {
 
     ProgramBuilder& end_if(const CondContext& ctx) {
         if (!ctx.has_else) {
-            label(ctx.else_label);  // Else label still needed for false jumps
+            label(ctx.else_label);
         }
         label(ctx.end_label);
         regs.restore(ctx.saved_reg_mark);
@@ -300,41 +280,118 @@ struct ProgramBuilder {
     // Data Loading and Register Operations
     // ========================================================================
 
-    int load(const TypedValue& value) {
-        int reg = regs.allocate();
-        emit(LOAD_MAKE(reg, (int64_t)value.type, value.data));
-        return reg;
+    int load(const TypedValue& value, int dest_reg = -1) {
+        if (dest_reg == -1) {
+            dest_reg = regs.allocate();
+        }
+        emit(LOAD_MAKE(dest_reg, (int64_t)value.type, value.data));
+        return dest_reg;
     }
 
-    int move_reg(int src_reg, int dest) {
-        emit(MOVE_MOVE_MAKE(dest, src_reg));
-        return dest;
+    int load(DataType type, void* value, int dest_reg = -1) {
+        if (dest_reg == -1) {
+            dest_reg = regs.allocate();
+        }
+        emit(LOAD_MAKE(dest_reg, (int64_t)type, value));
+        return dest_reg;
+    }
+
+
+    int load_null(int dest_reg = -1) {
+        return load(TypedValue::make(TYPE_NULL, nullptr), dest_reg);
+    }
+
+
+    int move(int src_reg, int dest_reg = -1) {
+        if (dest_reg == -1) {
+            dest_reg = regs.allocate();
+        }
+        emit(MOVE_MOVE_MAKE(dest_reg, src_reg));
+        return dest_reg;
     }
 
     // ========================================================================
     // Arithmetic and Logic
     // ========================================================================
 
-    int arithmetic(int left_reg, int right_reg, ArithOp op) {
-        int result = regs.allocate();
-        emit(ARITHMETIC_MAKE(result, left_reg, right_reg, op));
-        return result;
+    int arithmetic(int left_reg, int right_reg, ArithOp op, int dest_reg = -1) {
+        if (dest_reg == -1) {
+            dest_reg = regs.allocate();
+        }
+        emit(ARITHMETIC_MAKE(dest_reg, left_reg, right_reg, op));
+        return dest_reg;
     }
 
-    int test(int left_reg, int right_reg, CompareOp op) {
-        int result = regs.allocate();
-        emit(TEST_MAKE(result, left_reg, right_reg, op));
-        return result;
+    int add(int left_reg, int right_reg, int dest_reg = -1) {
+        return arithmetic(left_reg, right_reg, ARITH_ADD, dest_reg);
     }
 
-    int logic(int left_reg, int right_reg, LogicOp op) {
-        int result = regs.allocate();
-        emit(LOGIC_MAKE(result, left_reg, right_reg, op));
-        return result;
+    int sub(int left_reg, int right_reg, int dest_reg = -1) {
+        return arithmetic(left_reg, right_reg, ARITH_SUB, dest_reg);
+    }
+
+    int mul(int left_reg, int right_reg, int dest_reg = -1) {
+        return arithmetic(left_reg, right_reg, ARITH_MUL, dest_reg);
+    }
+
+    int div(int left_reg, int right_reg, int dest_reg = -1) {
+        return arithmetic(left_reg, right_reg, ARITH_DIV, dest_reg);
+    }
+
+    int mod(int left_reg, int right_reg, int dest_reg = -1) {
+        return arithmetic(left_reg, right_reg, ARITH_MOD, dest_reg);
+    }
+
+    int test(int left_reg, int right_reg, CompareOp op, int dest_reg = -1) {
+        if (dest_reg == -1) {
+            dest_reg = regs.allocate();
+        }
+        emit(TEST_MAKE(dest_reg, left_reg, right_reg, op));
+        return dest_reg;
+    }
+
+    int eq(int left_reg, int right_reg, int dest_reg = -1) {
+        return test(left_reg, right_reg, EQ, dest_reg);
+    }
+
+    int ne(int left_reg, int right_reg, int dest_reg = -1) {
+        return test(left_reg, right_reg, NE, dest_reg);
+    }
+
+    int lt(int left_reg, int right_reg, int dest_reg = -1) {
+        return test(left_reg, right_reg, LT, dest_reg);
+    }
+
+    int le(int left_reg, int right_reg, int dest_reg = -1) {
+        return test(left_reg, right_reg, LE, dest_reg);
+    }
+
+    int gt(int left_reg, int right_reg, int dest_reg = -1) {
+        return test(left_reg, right_reg, GT, dest_reg);
+    }
+
+    int ge(int left_reg, int right_reg, int dest_reg = -1) {
+        return test(left_reg, right_reg, GE, dest_reg);
+    }
+
+    int logic(int left_reg, int right_reg, LogicOp op, int dest_reg = -1) {
+        if (dest_reg == -1) {
+            dest_reg = regs.allocate();
+        }
+        emit(LOGIC_MAKE(dest_reg, left_reg, right_reg, op));
+        return dest_reg;
+    }
+
+    int logic_and(int left_reg, int right_reg, int dest_reg = -1) {
+        return logic(left_reg, right_reg, LOGIC_AND, dest_reg);
+    }
+
+    int logic_or(int left_reg, int right_reg, int dest_reg = -1) {
+        return logic(left_reg, right_reg, LOGIC_OR, dest_reg);
     }
 
     // ========================================================================
-    // Cursor Operations (Updated to return registers)
+    // Cursor Operations
     // ========================================================================
 
     ProgramBuilder& open_cursor(int cursor_id, CursorContext* context) {
@@ -347,40 +404,66 @@ struct ProgramBuilder {
         return *this;
     }
 
-    int rewind(int cursor_id, bool to_end = false) {
-        int result_reg = regs.allocate();
+    int rewind(int cursor_id, bool to_end = false, int result_reg = -1) {
+        if (result_reg == -1) {
+            result_reg = regs.allocate();
+        }
         emit(REWIND_MAKE(cursor_id, result_reg, to_end));
-        return result_reg;  // Returns 1 if valid, 0 if empty
+        return result_reg;
     }
 
     int step(int cursor_id, int result_reg = -1, bool forward = true) {
-        result_reg = result_reg == -1 ? regs.allocate() : result_reg;
+        if (result_reg == -1) {
+            result_reg = regs.allocate();
+        }
         emit(STEP_MAKE(cursor_id, result_reg, forward));
-        return result_reg;  // Returns 1 if more data, 0 if done
+        return result_reg;
     }
 
-    int seek(int cursor_id, int key_reg, CompareOp op = EQ) {
-        int result_reg = regs.allocate();
+    int seek(int cursor_id, int key_reg, CompareOp op = EQ, int result_reg = -1) {
+        if (result_reg == -1) {
+            result_reg = regs.allocate();
+        }
         emit(SEEK_MAKE(cursor_id, key_reg, result_reg, op));
-        return result_reg;  // Returns 1 if found, 0 if not found
+        return result_reg;
     }
 
-    int get_column(int cursor_id, int col_index) {
-        int reg = regs.allocate();
-        emit(COLUMN_MAKE(cursor_id, col_index, reg));
-        return reg;
+    int get_column(int cursor_id, int col_index, int dest_reg = -1) {
+        if (dest_reg == -1) {
+            dest_reg = regs.allocate();
+        }
+        emit(COLUMN_MAKE(cursor_id, col_index, dest_reg));
+        return dest_reg;
     }
+
+    // Get multiple columns into contiguous registers
+    int get_columns(int cursor_id, int start_col, int count, int first_dest_reg = -1) {
+        if (first_dest_reg == -1) {
+            first_dest_reg = regs.allocate_range(count);
+        }
+
+        for (int i = 0; i < count; i++) {
+            emit(COLUMN_MAKE(cursor_id, start_col + i, first_dest_reg + i));
+        }
+
+        return first_dest_reg;
+    }
+
 
     ProgramBuilder& insert_record(int cursor_id, int key_reg, int record_count = 1) {
         emit(INSERT_MAKE(cursor_id, key_reg, record_count));
         return *this;
     }
 
-    int delete_record(int cursor_id) {
-        int delete_occurred = regs.allocate();
-        int cursor_valid = regs.allocate();
-        emit(DELETE_MAKE(cursor_id, cursor_valid, delete_occurred));
-        return delete_occurred;  // Return whether delete happened
+    int delete_record(int cursor_id, int occurred_reg = -1, int valid_reg = -1) {
+        if (occurred_reg == -1) {
+            occurred_reg = regs.allocate();
+        }
+        if (valid_reg == -1) {
+            valid_reg = regs.allocate();
+        }
+        emit(DELETE_MAKE(cursor_id, valid_reg, occurred_reg));
+        return occurred_reg;
     }
 
     ProgramBuilder& update_record(int cursor_id, int record_reg) {
@@ -392,13 +475,9 @@ struct ProgramBuilder {
     // Result Output
     // ========================================================================
 
-    ProgramBuilder& result(int first_reg, int reg_count) {
+    ProgramBuilder& result(int first_reg, int reg_count = 1) {
         emit(RESULT_MAKE(first_reg, reg_count));
         return *this;
-    }
-
-    ProgramBuilder& result(int single_reg) {
-        return result(single_reg, 1);
     }
 
     // ========================================================================
@@ -424,9 +503,10 @@ struct ProgramBuilder {
     // Function Calls
     // ========================================================================
 
-    int call_function(VMFunction fn, int first_arg_reg, int arg_count) {
-        int result_reg = regs.allocate();
+    int call_function(VMFunction fn, int first_arg_reg, int arg_count, int result_reg = -1) {
+        if (result_reg == -1) {
+            result_reg = regs.allocate();
+        }
         emit(FUNCTION_MAKE(result_reg, first_arg_reg, arg_count, (void*)fn));
         return result_reg;
     }
-};
