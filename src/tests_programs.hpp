@@ -35,7 +35,7 @@ MemoryContext ctx = {
 	.alloc = arena::alloc<QueryArena>, .free = arena::reclaim<QueryArena>, .emit_row = print_result_callback};
 static std::vector<std::vector<TypedValue>> last_results;
 
-void
+inline static void
 print_results()
 {
 	int count = last_results.size();
@@ -45,7 +45,7 @@ print_results()
 	}
 }
 
-static void
+inline static void
 capture_result_callback(TypedValue *result, size_t count)
 {
 	std::vector<TypedValue> row;
@@ -60,7 +60,7 @@ capture_result_callback(TypedValue *result, size_t count)
 // Add a mode flag
 static bool capture_mode = false;
 
-void
+inline static void
 set_capture_mode(bool capture)
 {
 	capture_mode = capture;
@@ -76,13 +76,13 @@ set_capture_mode(bool capture)
 }
 
 // Simple accessors
-size_t
+inline static size_t
 get_row_count()
 {
 	return last_results.size();
 }
 
-bool
+inline static bool
 check_int_value(size_t row, size_t col, int expected)
 {
 
@@ -93,7 +93,7 @@ check_int_value(size_t row, size_t col, int expected)
 	return *(uint32_t *)val.data == expected;
 }
 
-bool
+inline static bool
 check_string_value(size_t row, size_t col, const char *expected)
 {
 
@@ -101,7 +101,7 @@ check_string_value(size_t row, size_t col, const char *expected)
 	return strcmp((char *)val.data, expected) == 0;
 }
 
-void
+inline static void
 clear_results()
 {
 	last_results.clear();
@@ -114,11 +114,11 @@ vmfunc_create_table(TypedValue *result, TypedValue *args, uint32_t arg_count, Me
 {
 	auto table_name = args->as_char();
 	auto structure = catalog[table_name].to_layout();
-	bplustree_create(structure.layout.at(0), structure.record_size, true);
+	catalog[table_name].storage.btree = bplustree_create(structure.layout.at(0), structure.record_size, true);
 	return true;
 }
 
-void
+inline static void
 test_create_table()
 {
 
@@ -133,14 +133,49 @@ test_create_table()
 	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
 }
 
+inline static void
+test_insert_()
+{
+	ProgramBuilder prog;
+	int			   cursor_id = 0;
+
+	uint32_t   id1 = 1;
+	TypedValue id = TypedValue::make(TYPE_U32, &id1);
+
+	uint32_t   name1 = 1;
+	TypedValue name = TypedValue::make(TYPE_CHAR16, &name1);
+
+	uint8_t	   age1 = 25;
+	TypedValue age = TypedValue::make(TYPE_U8, &age1);
+
+	CursorContext cctx;
+	cctx.type = CursorType::BPLUS;
+	cctx.storage.tree = catalog[CUSTOMERS].storage.btree;
+	cctx.layout = catalog[CUSTOMERS].to_layout();
+
+	prog.begin_transaction();
+
+	prog.open_cursor(cursor_id, &cctx);
+	int start_reg = prog.load(id);
+	prog.load(name);
+	prog.load(age);
+	prog.insert_record(cursor_id, start_reg, 3);
+	prog.commit_transaction();
+	prog.halt();
+
+
+	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+}
+
 inline void
 test_programs()
 {
 	arena::init<QueryArena>();
 	pager_open(TEST_DB);
 
-	_debug = true;
 	test_create_table();
+	_debug = true;
+	test_insert_();
 
 	pager_close();
 	os_file_delete(TEST_DB);

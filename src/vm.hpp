@@ -23,15 +23,11 @@ enum class CursorType : uint8_t
 
 struct CursorContext
 {
-    CursorType type;
+	CursorType type;
+	Layout	   layout;
 	union {
-	    Layout layout;
-		struct
-		{
-		    Layout layout;
-			BPlusTree tree;
-		} btree;
-	} context;
+		BPlusTree tree;
+	} storage;
 };
 
 typedef void (*ResultCallback)(array<TypedValue, QueryArena> result);
@@ -41,25 +37,25 @@ enum OpCode : uint8_t
 {
 	// Control flow
 	OP_Goto = 1,
-#define GOTO_MAKE(label)  {OP_Goto, 0, -1, 0, label, 0}
-#define GOTO_TARGET(inst) ((inst).p2)
+#define GOTO_MAKE(label)	   {OP_Goto, 0, -1, 0, label, 0}
+#define GOTO_TARGET(inst)	   ((inst).p2)
 #define GOTO_DEBUG_PRINT(inst) printf("GOTO -> PC=%d", GOTO_TARGET(inst))
 
 	OP_Halt = 2,
-#define HALT_MAKE(exit_code) {OP_Halt, exit_code, 0, 0, nullptr, 0}
-#define HALT_EXIT_CODE(inst) ((inst).p1)
+#define HALT_MAKE(exit_code)   {OP_Halt, exit_code, 0, 0, nullptr, 0}
+#define HALT_EXIT_CODE(inst)   ((inst).p1)
 #define HALT_DEBUG_PRINT(inst) printf("HALT exit_code=%d", HALT_EXIT_CODE(inst))
 
 	// Cursor operations
 	OP_Open = 10,
 #define OPEN_MAKE(cursor_id, context) {OP_Open, cursor_id, 0, 0, context, 0}
-#define OPEN_CURSOR_ID(inst)			   ((inst).p1)
-#define OPEN_LAYOUT(inst)				   ((CursorContext*)((inst).p4))
-#define OPEN_DEBUG_PRINT(inst) printf("OPEN cursor=%d", OPEN_CURSOR_ID(inst))
+#define OPEN_CURSOR_ID(inst)		  ((inst).p1)
+#define OPEN_LAYOUT(inst)			  ((CursorContext *)((inst).p4))
+#define OPEN_DEBUG_PRINT(inst)		  printf("OPEN cursor=%d", OPEN_CURSOR_ID(inst))
 
 	OP_Close = 12,
-#define CLOSE_MAKE(cursor_id) {OP_Close, cursor_id, 0, 0, nullptr, 0}
-#define CLOSE_CURSOR_ID(inst) ((inst).p1)
+#define CLOSE_MAKE(cursor_id)	{OP_Close, cursor_id, 0, 0, nullptr, 0}
+#define CLOSE_CURSOR_ID(inst)	((inst).p1)
 #define CLOSE_DEBUG_PRINT(inst) printf("CLOSE cursor=%d", CLOSE_CURSOR_ID(inst))
 
 	OP_Rewind = 13,
@@ -67,16 +63,18 @@ enum OpCode : uint8_t
 #define REWIND_CURSOR_ID(inst)				  ((inst).p1)
 #define REWIND_JUMP_IF_EMPTY(inst)			  ((inst).p2)
 #define REWIND_TO_END(inst)					  ((inst).p5 != 0)
-#define REWIND_DEBUG_PRINT(inst) printf("REWIND cursor=%d to_%s jump_if_empty=%d", \
-    REWIND_CURSOR_ID(inst), REWIND_TO_END(inst) ? "end" : "start", REWIND_JUMP_IF_EMPTY(inst))
+#define REWIND_DEBUG_PRINT(inst)                                                                                       \
+	printf("REWIND cursor=%d to_%s jump_if_empty=%d", REWIND_CURSOR_ID(inst), REWIND_TO_END(inst) ? "end" : "start",   \
+		   REWIND_JUMP_IF_EMPTY(inst))
 
 	OP_Step = 14,
 #define STEP_MAKE(cursor_id, jump_label, forward) {OP_Step, cursor_id, -1, 0, jump_label, (uint8_t)forward}
 #define STEP_CURSOR_ID(inst)					  ((inst).p1)
 #define STEP_JUMP_IF_DONE(inst)					  ((inst).p2)
 #define STEP_FORWARD(inst)						  ((inst).p5 != 0)
-#define STEP_DEBUG_PRINT(inst) printf("STEP cursor=%d %s jump_if_done=%d", \
-    STEP_CURSOR_ID(inst), STEP_FORWARD(inst) ? "forward" : "backward", STEP_JUMP_IF_DONE(inst))
+#define STEP_DEBUG_PRINT(inst)                                                                                         \
+	printf("STEP cursor=%d %s jump_if_done=%d", STEP_CURSOR_ID(inst), STEP_FORWARD(inst) ? "forward" : "backward",     \
+		   STEP_JUMP_IF_DONE(inst))
 
 	OP_Seek = 20,
 #define SEEK_MAKE(cursor_id, key_reg, jump_if_not, op) {OP_Seek, cursor_id, key_reg, -1, jump_if_not, (uint8_t)op}
@@ -84,8 +82,9 @@ enum OpCode : uint8_t
 #define SEEK_KEY_REG(inst)							   ((inst).p2)
 #define SEEK_JUMP_IF_NOT(inst)						   ((inst).p3)
 #define SEEK_OP(inst)								   ((CompareOp)((inst).p5))
-#define SEEK_DEBUG_PRINT(inst) printf("SEEK cursor=%d key=R[%d] op=%s jump_if_not=%d", \
-    SEEK_CURSOR_ID(inst), SEEK_KEY_REG(inst), debug_compare_op_name(SEEK_OP(inst)), SEEK_JUMP_IF_NOT(inst))
+#define SEEK_DEBUG_PRINT(inst)                                                                                         \
+	printf("SEEK cursor=%d key=R[%d] op=%s jump_if_not=%d", SEEK_CURSOR_ID(inst), SEEK_KEY_REG(inst),                  \
+		   debug_compare_op_name(SEEK_OP(inst)), SEEK_JUMP_IF_NOT(inst))
 
 	// Data operations
 	OP_Column = 30,
@@ -93,16 +92,17 @@ enum OpCode : uint8_t
 #define COLUMN_CURSOR_ID(inst)						   ((inst).p1)
 #define COLUMN_INDEX(inst)							   ((inst).p2)
 #define COLUMN_DEST_REG(inst)						   ((inst).p3)
-#define COLUMN_DEBUG_PRINT(inst) printf("COLUMN cursor=%d col=%d -> R[%d]", \
-    COLUMN_CURSOR_ID(inst), COLUMN_INDEX(inst), COLUMN_DEST_REG(inst))
+#define COLUMN_DEBUG_PRINT(inst)                                                                                       \
+	printf("COLUMN cursor=%d col=%d -> R[%d]", COLUMN_CURSOR_ID(inst), COLUMN_INDEX(inst), COLUMN_DEST_REG(inst))
 
 	OP_Insert = 34,
 #define INSERT_MAKE(cursor_id, start_reg, reg_count) {OP_Insert, cursor_id, start_reg, reg_count, nullptr, 0}
 #define INSERT_CURSOR_ID(inst)						 ((inst).p1)
 #define INSERT_KEY_REG(inst)						 ((inst).p2)
 #define INSERT_REG_COUNT(inst)						 ((inst).p3)
-#define INSERT_DEBUG_PRINT(inst) printf("INSERT cursor=%d key=R[%d] reg_count=%d", \
-    INSERT_CURSOR_ID(inst), INSERT_KEY_REG(inst), INSERT_REG_COUNT(inst))
+#define INSERT_DEBUG_PRINT(inst)                                                                                       \
+	printf("INSERT cursor=%d key=R[%d] reg_count=%d", INSERT_CURSOR_ID(inst), INSERT_KEY_REG(inst),                    \
+		   INSERT_REG_COUNT(inst))
 
 	OP_Delete = 35,
 #define DELETE_MAKE(cursor_id, cursor_valid_reg, delete_occured_reg)                                                   \
@@ -110,22 +110,23 @@ enum OpCode : uint8_t
 #define DELETE_CURSOR_ID(inst)			((inst).p1)
 #define DELETE_CURSOR_VALID_REG(inst)	((inst).p2)
 #define DELETE_DELETE_OCCURED_REG(inst) ((inst).p3)
-#define DELETE_DEBUG_PRINT(inst) printf("DELETE cursor=%d -> R[%d]=valid R[%d]=occurred", \
-    DELETE_CURSOR_ID(inst), DELETE_CURSOR_VALID_REG(inst), DELETE_DELETE_OCCURED_REG(inst))
+#define DELETE_DEBUG_PRINT(inst)                                                                                       \
+	printf("DELETE cursor=%d -> R[%d]=valid R[%d]=occurred", DELETE_CURSOR_ID(inst), DELETE_CURSOR_VALID_REG(inst),    \
+		   DELETE_DELETE_OCCURED_REG(inst))
 
 	OP_Update = 36,
 #define UPDATE_MAKE(cursor_id, record_reg) {OP_Update, cursor_id, record_reg, 0, nullptr, 0}
 #define UPDATE_CURSOR_ID(inst)			   ((inst).p1)
 #define UPDATE_RECORD_REG(inst)			   ((inst).p2)
-#define UPDATE_DEBUG_PRINT(inst) printf("UPDATE cursor=%d record=R[%d]", \
-    UPDATE_CURSOR_ID(inst), UPDATE_RECORD_REG(inst))
+#define UPDATE_DEBUG_PRINT(inst)                                                                                       \
+	printf("UPDATE cursor=%d record=R[%d]", UPDATE_CURSOR_ID(inst), UPDATE_RECORD_REG(inst))
 
 	// Register operations
 	OP_Move = 40,
 #define MOVE_MOVE_MAKE(dest_reg, src_reg) {OP_Move, dest_reg, 0, src_reg, nullptr, 0}
 #define MOVE_DEST_REG(inst)				  ((inst).p1)
 #define MOVE_SRC_REG(inst)				  ((inst).p3)
-#define MOVE_DEBUG_PRINT(inst) printf("MOVE R[%d] <- R[%d]", MOVE_DEST_REG(inst), MOVE_SRC_REG(inst))
+#define MOVE_DEBUG_PRINT(inst)			  printf("MOVE R[%d] <- R[%d]", MOVE_DEST_REG(inst), MOVE_SRC_REG(inst))
 
 	OP_Load = 41,
 #define LOAD_MAKE(dest_reg, type, data) {OP_Load, dest_reg, (int32_t)type, -1, data, 0}
@@ -133,11 +134,13 @@ enum OpCode : uint8_t
 #define LOAD_TYPE(inst)					((DataType)((inst).p2))
 #define LOAD_DATA(inst)					((uint8_t *)((inst).p4))
 #define LOAD_IS_LOAD(inst)				((inst).opcode == OP_Load)
-#define LOAD_DEBUG_PRINT(inst) do { \
-    printf("LOAD R[%d] <- ", LOAD_DEST_REG(inst)); \
-    type_print(LOAD_TYPE(inst), LOAD_DATA(inst)); \
-    printf(" (%s)", type_name(LOAD_TYPE(inst))); \
-} while(0)
+#define LOAD_DEBUG_PRINT(inst)                                                                                         \
+	do                                                                                                                 \
+	{                                                                                                                  \
+		printf("LOAD R[%d] <- ", LOAD_DEST_REG(inst));                                                                 \
+		type_print(LOAD_TYPE(inst), LOAD_DATA(inst));                                                                  \
+		printf(" (%s)", type_name(LOAD_TYPE(inst)));                                                                   \
+	} while (0)
 
 	// Computation
 	OP_Arithmetic = 51,
@@ -147,16 +150,18 @@ enum OpCode : uint8_t
 #define ARITHMETIC_LEFT_REG(inst)  ((inst).p2)
 #define ARITHMETIC_RIGHT_REG(inst) ((inst).p3)
 #define ARITHMETIC_OP(inst)		   ((ArithOp)((inst).p5))
-#define ARITHMETIC_DEBUG_PRINT(inst) printf("ARITHMETIC R[%d] <- R[%d] %s R[%d]", \
-    ARITHMETIC_DEST_REG(inst), ARITHMETIC_LEFT_REG(inst), debug_arith_op_name(ARITHMETIC_OP(inst)), ARITHMETIC_RIGHT_REG(inst))
+#define ARITHMETIC_DEBUG_PRINT(inst)                                                                                   \
+	printf("ARITHMETIC R[%d] <- R[%d] %s R[%d]", ARITHMETIC_DEST_REG(inst), ARITHMETIC_LEFT_REG(inst),                 \
+		   debug_arith_op_name(ARITHMETIC_OP(inst)), ARITHMETIC_RIGHT_REG(inst))
 
 	OP_JumpIf = 52,
 #define JUMPIF_MAKE(test_reg, jump_label, jump_on_true) {OP_JumpIf, test_reg, -1, 0, jump_label, (uint8_t)jump_on_true}
 #define JUMPIF_TEST_REG(inst)							((inst).p1)
 #define JUMPIF_JUMP_TARGET(inst)						((inst).p2)
 #define JUMPIF_JUMP_ON_TRUE(inst)						((inst).p5 != 0)
-#define JUMPIF_DEBUG_PRINT(inst) printf("JUMPIF R[%d] %s -> PC=%d", \
-    JUMPIF_TEST_REG(inst), JUMPIF_JUMP_ON_TRUE(inst) ? "TRUE" : "FALSE", JUMPIF_JUMP_TARGET(inst))
+#define JUMPIF_DEBUG_PRINT(inst)                                                                                       \
+	printf("JUMPIF R[%d] %s -> PC=%d", JUMPIF_TEST_REG(inst), JUMPIF_JUMP_ON_TRUE(inst) ? "TRUE" : "FALSE",            \
+		   JUMPIF_JUMP_TARGET(inst))
 
 	OP_Logic = 53,
 #define LOGIC_MAKE(dest_reg, left_reg, right_reg, op) {OP_Logic, dest_reg, left_reg, right_reg, nullptr, (uint8_t)op}
@@ -164,15 +169,17 @@ enum OpCode : uint8_t
 #define LOGIC_LEFT_REG(inst)						  ((inst).p2)
 #define LOGIC_RIGHT_REG(inst)						  ((inst).p3)
 #define LOGIC_OP(inst)								  ((LogicOp)((inst).p5))
-#define LOGIC_DEBUG_PRINT(inst) printf("LOGIC R[%d] <- R[%d] %s R[%d]", \
-    LOGIC_DEST_REG(inst), LOGIC_LEFT_REG(inst), debug_logic_op_name(LOGIC_OP(inst)), LOGIC_RIGHT_REG(inst))
+#define LOGIC_DEBUG_PRINT(inst)                                                                                        \
+	printf("LOGIC R[%d] <- R[%d] %s R[%d]", LOGIC_DEST_REG(inst), LOGIC_LEFT_REG(inst),                                \
+		   debug_logic_op_name(LOGIC_OP(inst)), LOGIC_RIGHT_REG(inst))
 
 	OP_Result = 54,
 #define RESULT_MAKE(first_reg, reg_count) {OP_Result, first_reg, reg_count, 0, nullptr, 0}
 #define RESULT_FIRST_REG(inst)			  ((inst).p1)
 #define RESULT_REG_COUNT(inst)			  ((inst).p2)
-#define RESULT_DEBUG_PRINT(inst) printf("RESULT R[%d..%d] (%d registers)", \
-    RESULT_FIRST_REG(inst), RESULT_FIRST_REG(inst) + RESULT_REG_COUNT(inst) - 1, RESULT_REG_COUNT(inst))
+#define RESULT_DEBUG_PRINT(inst)                                                                                       \
+	printf("RESULT R[%d..%d] (%d registers)", RESULT_FIRST_REG(inst),                                                  \
+		   RESULT_FIRST_REG(inst) + RESULT_REG_COUNT(inst) - 1, RESULT_REG_COUNT(inst))
 
 	OP_Test = 60,
 #define TEST_MAKE(dest_reg, left_reg, right_reg, op) {OP_Test, dest_reg, left_reg, right_reg, nullptr, (uint8_t)op}
@@ -180,8 +187,9 @@ enum OpCode : uint8_t
 #define TEST_LEFT_REG(inst)							 ((inst).p2)
 #define TEST_RIGHT_REG(inst)						 ((inst).p3)
 #define TEST_OP(inst)								 ((CompareOp)((inst).p5))
-#define TEST_DEBUG_PRINT(inst) printf("TEST R[%d] <- R[%d] %s R[%d]", \
-    TEST_DEST_REG(inst), TEST_LEFT_REG(inst), debug_compare_op_name(TEST_OP(inst)), TEST_RIGHT_REG(inst))
+#define TEST_DEBUG_PRINT(inst)                                                                                         \
+	printf("TEST R[%d] <- R[%d] %s R[%d]", TEST_DEST_REG(inst), TEST_LEFT_REG(inst),                                   \
+		   debug_compare_op_name(TEST_OP(inst)), TEST_RIGHT_REG(inst))
 
 	OP_Function = 61,
 #define FUNCTION_MAKE(dest_reg, first_arg_reg, arg_count, fn_ptr)                                                      \
@@ -190,20 +198,20 @@ enum OpCode : uint8_t
 #define FUNCTION_FIRST_ARG_REG(inst) ((inst).p2)
 #define FUNCTION_ARG_COUNT(inst)	 ((inst).p3)
 #define FUNCTION_FUNCTION(inst)		 ((VMFunction)((inst).p4))
-#define FUNCTION_DEBUG_PRINT(inst) printf("FUNCTION R[%d] <- fn(R[%d..%d]) %d args", \
-    FUNCTION_DEST_REG(inst), FUNCTION_FIRST_ARG_REG(inst), \
-    FUNCTION_FIRST_ARG_REG(inst) + FUNCTION_ARG_COUNT(inst) - 1, FUNCTION_ARG_COUNT(inst))
+#define FUNCTION_DEBUG_PRINT(inst)                                                                                     \
+	printf("FUNCTION R[%d] <- fn(R[%d..%d]) %d args", FUNCTION_DEST_REG(inst), FUNCTION_FIRST_ARG_REG(inst),           \
+		   FUNCTION_FIRST_ARG_REG(inst) + FUNCTION_ARG_COUNT(inst) - 1, FUNCTION_ARG_COUNT(inst))
 
 	OP_Begin = 62,
-#define BEGIN_MAKE() {OP_Begin, 0, 0, 0, nullptr, 0}
+#define BEGIN_MAKE()			{OP_Begin, 0, 0, 0, nullptr, 0}
 #define BEGIN_DEBUG_PRINT(inst) printf("BEGIN transaction")
 
 	OP_Commit = 63,
-#define COMMIT_MAKE() {OP_Commit, 0, 0, 0, nullptr, 0}
+#define COMMIT_MAKE()			 {OP_Commit, 0, 0, 0, nullptr, 0}
 #define COMMIT_DEBUG_PRINT(inst) printf("COMMIT transaction")
 
 	OP_Rollback = 64,
-#define ROLLBACK_MAKE() {OP_Rollback, 0, 0, 0, nullptr, 0}
+#define ROLLBACK_MAKE()			   {OP_Rollback, 0, 0, 0, nullptr, 0}
 #define ROLLBACK_DEBUG_PRINT(inst) printf("ROLLBACK transaction")
 };
 
@@ -235,14 +243,15 @@ vm_debug_print_cursor(int cursor_id);
 void
 vm_debug_print_program(VMInstruction *instructions, int count);
 
-
-
-
 // Debug helper functions for operation names
-const char* debug_compare_op_name(CompareOp op);
-const char* debug_arith_op_name(ArithOp op);
-const char* debug_logic_op_name(LogicOp op);
-const char* debug_cursor_type_name(CursorType type);
+const char *
+debug_compare_op_name(CompareOp op);
+const char *
+debug_arith_op_name(ArithOp op);
+const char *
+debug_logic_op_name(LogicOp op);
+const char *
+debug_cursor_type_name(CursorType type);
 
 // VM Runtime Definitions
 #define REGISTERS 40

@@ -85,14 +85,14 @@ vmcursor_open(VmCursor *cursor, CursorContext *context, MemoryContext *ctx)
 	case CursorType::BPLUS: {
 
 		cur->type = CursorType::BPLUS;
-		cur->layout = context->context.btree.layout;
-		cur->cursor.bptree.tree = &context->context.btree.tree;
+		cur->layout = context->layout;
+		cur->cursor.bptree.tree = &context->storage.tree;
 		cur->cursor.bptree.state = BPT_CURSOR_INVALID;
 	}
 	case CursorType::RED_BLACK: {
 
 		cur->type = CursorType::RED_BLACK;
-		cur->layout = context->context.layout;
+		cur->layout = context->layout;
 		DataType key_type = cur->layout.layout[0];
 		cur->cursor.mem.tree = memtree_create(key_type, cur->layout.record_size);
 		cur->cursor.mem.state = MemCursor::INVALID;

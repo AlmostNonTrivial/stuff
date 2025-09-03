@@ -1,11 +1,8 @@
 #pragma once
-#include "arena.hpp"
-#include "bplustree.hpp"
 
+#include "bplustree.hpp"
 #include <unordered_map>
 #include <vector>
-#include "defs.hpp"
-#include "parser.hpp"
 #include <cstdint>
 
 struct Column
