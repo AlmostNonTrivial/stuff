@@ -722,4 +722,27 @@ struct ProgramBuilder
 		emit(FUNCTION_MAKE(result_reg, first_arg_reg, arg_count, (void *)fn));
 		return result_reg;
 	}
+
+	// In ProgramBuilder (compile.hpp)
+	int
+	pack2(int left_reg, int right_reg, int dest_reg = -1)
+	{
+		if (dest_reg == -1)
+		{
+			dest_reg = regs.allocate();
+		}
+		emit(PACK2_MAKE(dest_reg, left_reg, right_reg));
+		return dest_reg;
+	}
+
+	ProgramBuilder &
+	unpack2(int src_reg, int first_dest_reg = -1)
+	{
+		if (first_dest_reg == -1)
+		{
+			first_dest_reg = regs.allocate_range(2);
+		}
+		emit(UNPACK2_MAKE(first_dest_reg, src_reg));
+		return *this;
+	}
 };

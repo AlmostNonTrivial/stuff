@@ -867,40 +867,25 @@ step()
 			printf(" with %d record values", count);
 		}
 
-		if (1 == count)
+		uint8_t data[cursor->layout.record_size];
+		if (count > 1)
 		{
-			/*
-				If we have a single register record it's either a single TypedValue, hence doesn't need to be
-				built, or b) is a pointer to a blob
-			*/
-			TypedValue *value = &VM.registers[key_reg + 1];
-			success = vmcursor_insert(cursor, first->data, value->data, value->type);
-
-			if (_debug)
-			{
-				printf(" [");
-				type_print(value->type, value->data);
-				printf("]");
-			}
-		}
-		else
-		{
-			uint8_t data[cursor->layout.record_size];
 			build_record(data, key_reg + 1, count);
-			success = vmcursor_insert(cursor, first->data, data, cursor->layout.record_size);
+		}
 
-			if (_debug)
+		success = vmcursor_insert(cursor, first->data, data, cursor->layout.record_size);
+
+		if (_debug)
+		{
+			printf(" [");
+			for (uint32_t i = 0; i < count; i++)
 			{
-				printf(" [");
-				for (uint32_t i = 0; i < count; i++)
-				{
-					if (i > 0)
-						printf(", ");
-					TypedValue *val = &VM.registers[key_reg + 1 + i];
-					type_print(val->type, val->data);
-				}
-				printf("]");
+				if (i > 0)
+					printf(", ");
+				TypedValue *val = &VM.registers[key_reg + 1 + i];
+				type_print(val->type, val->data);
 			}
+			printf("]");
 		}
 
 		if (_debug)
@@ -1085,84 +1070,4 @@ vm_execute(VMInstruction *instructions, int instruction_count, MemoryContext *ct
 	}
 
 	return OK;
-}
-
-void
-vm_debug_print_instruction(const VMInstruction *inst, int pc)
-{
-	printf("PC[%3d] ", pc);
-
-	switch (inst->opcode)
-	{
-	case OP_Goto:
-		GOTO_DEBUG_PRINT(*inst);
-		break;
-	case OP_Halt:
-		HALT_DEBUG_PRINT(*inst);
-		break;
-	case OP_Open:
-		OPEN_DEBUG_PRINT(*inst);
-		break;
-	case OP_Close:
-		CLOSE_DEBUG_PRINT(*inst);
-		break;
-	case OP_Rewind:
-		REWIND_DEBUG_PRINT(*inst);
-		break;
-	case OP_Step:
-		STEP_DEBUG_PRINT(*inst);
-		break;
-	case OP_Seek:
-		SEEK_DEBUG_PRINT(*inst);
-		break;
-	case OP_Column:
-		COLUMN_DEBUG_PRINT(*inst);
-		break;
-	case OP_Insert:
-		INSERT_DEBUG_PRINT(*inst);
-		break;
-	case OP_Delete:
-		DELETE_DEBUG_PRINT(*inst);
-		break;
-	case OP_Update:
-		UPDATE_DEBUG_PRINT(*inst);
-		break;
-	case OP_Move:
-		MOVE_DEBUG_PRINT(*inst);
-		break;
-	case OP_Load:
-		LOAD_DEBUG_PRINT(*inst);
-		break;
-	case OP_Arithmetic:
-		ARITHMETIC_DEBUG_PRINT(*inst);
-		break;
-	case OP_JumpIf:
-		JUMPIF_DEBUG_PRINT(*inst);
-		break;
-	case OP_Logic:
-		LOGIC_DEBUG_PRINT(*inst);
-		break;
-	case OP_Result:
-		RESULT_DEBUG_PRINT(*inst);
-		break;
-	case OP_Test:
-		TEST_DEBUG_PRINT(*inst);
-		break;
-	case OP_Function:
-		FUNCTION_DEBUG_PRINT(*inst);
-		break;
-	case OP_Begin:
-		BEGIN_DEBUG_PRINT(*inst);
-		break;
-	case OP_Commit:
-		COMMIT_DEBUG_PRINT(*inst);
-		break;
-	case OP_Rollback:
-		ROLLBACK_DEBUG_PRINT(*inst);
-		break;
-	default:
-		printf("UNKNOWN opcode=%d", inst->opcode);
-		break;
-	}
-	printf("\n");
 }

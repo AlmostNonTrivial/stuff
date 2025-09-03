@@ -217,7 +217,7 @@ enum OpCode : uint8_t
 // In vm.hpp - new opcodes
 OP_Pack = 65,
 #define PACK2_MAKE(dest_reg, left_reg, right_reg) \
-    {OP_Pack2, dest_reg, left_reg, right_reg, nullptr, 0}
+    {OP_Pack, dest_reg, left_reg, right_reg, nullptr, 0}
 #define PACK2_DEST_REG(inst)  ((inst).p1)
 #define PACK2_LEFT_REG(inst)  ((inst).p2)
 #define PACK2_RIGHT_REG(inst) ((inst).p3)
@@ -227,7 +227,7 @@ OP_Pack = 65,
 
 OP_Unpack= 66,
 #define UNPACK2_MAKE(first_dest_reg, src_reg) \
-    {OP_Unpack2, first_dest_reg, src_reg, 0, nullptr, 0}
+    {OP_Unpack, first_dest_reg, src_reg, 0, nullptr, 0}
 #define UNPACK2_FIRST_DEST_REG(inst) ((inst).p1)
 #define UNPACK2_SRC_REG(inst)         ((inst).p2)
 #define UNPACK2_DEBUG_PRINT(inst) \
@@ -275,3 +275,83 @@ debug_cursor_type_name(CursorType type);
 
 // VM Runtime Definitions
 #define REGISTERS 40
+
+inline void
+vm_debug_print_instruction(const VMInstruction *inst, int pc)
+{
+	printf("PC[%3d] ", pc);
+
+	switch (inst->opcode)
+	{
+	case OP_Goto:
+		GOTO_DEBUG_PRINT(*inst);
+		break;
+	case OP_Halt:
+		HALT_DEBUG_PRINT(*inst);
+		break;
+	case OP_Open:
+		OPEN_DEBUG_PRINT(*inst);
+		break;
+	case OP_Close:
+		CLOSE_DEBUG_PRINT(*inst);
+		break;
+	case OP_Rewind:
+		REWIND_DEBUG_PRINT(*inst);
+		break;
+	case OP_Step:
+		STEP_DEBUG_PRINT(*inst);
+		break;
+	case OP_Seek:
+		SEEK_DEBUG_PRINT(*inst);
+		break;
+	case OP_Column:
+		COLUMN_DEBUG_PRINT(*inst);
+		break;
+	case OP_Insert:
+		INSERT_DEBUG_PRINT(*inst);
+		break;
+	case OP_Delete:
+		DELETE_DEBUG_PRINT(*inst);
+		break;
+	case OP_Update:
+		UPDATE_DEBUG_PRINT(*inst);
+		break;
+	case OP_Move:
+		MOVE_DEBUG_PRINT(*inst);
+		break;
+	case OP_Load:
+		LOAD_DEBUG_PRINT(*inst);
+		break;
+	case OP_Arithmetic:
+		ARITHMETIC_DEBUG_PRINT(*inst);
+		break;
+	case OP_JumpIf:
+		JUMPIF_DEBUG_PRINT(*inst);
+		break;
+	case OP_Logic:
+		LOGIC_DEBUG_PRINT(*inst);
+		break;
+	case OP_Result:
+		RESULT_DEBUG_PRINT(*inst);
+		break;
+	case OP_Test:
+		TEST_DEBUG_PRINT(*inst);
+		break;
+	case OP_Function:
+		FUNCTION_DEBUG_PRINT(*inst);
+		break;
+	case OP_Begin:
+		BEGIN_DEBUG_PRINT(*inst);
+		break;
+	case OP_Commit:
+		COMMIT_DEBUG_PRINT(*inst);
+		break;
+	case OP_Rollback:
+		ROLLBACK_DEBUG_PRINT(*inst);
+		break;
+	default:
+		printf("UNKNOWN opcode=%d", inst->opcode);
+		break;
+	}
+	printf("\n");
+}
