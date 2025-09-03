@@ -23,6 +23,28 @@ struct RegisterAllocator {
         return next_free++;
     }
 
+    // Allocate a contiguous range of registers
+    int allocate_range(int count, int start_at = -1) {
+        if (start_at >= 0) {
+            assert(start_at + count <= REGISTERS && "Register range out of bounds");
+            assert(start_at >= next_free && "Cannot allocate in used range");
+            int first = start_at;
+            next_free = start_at + count;
+            return first;
+        }
+
+        assert(next_free + count <= REGISTERS && "Not enough registers for range");
+        int first = next_free;
+        next_free += count;
+        return first;
+    }
+
+    // Reserve space without returning a register (for manual management)
+    void reserve(int count) {
+        assert(next_free + count <= REGISTERS && "Not enough registers to reserve");
+        next_free += count;
+    }
+
     void push_scope() {
         array_push(&scope_stack, next_free);
     }
@@ -420,6 +442,22 @@ struct ProgramBuilder {
         return result_reg;
     }
 
+    int next(int cursor_id, int result_reg = -1) {
+        if (result_reg == -1) {
+            result_reg = regs.allocate();
+        }
+        emit(STEP_MAKE(cursor_id, result_reg, true));
+        return result_reg;
+    }
+
+    int prev(int cursor_id, int result_reg = -1) {
+        if (result_reg == -1) {
+            result_reg = regs.allocate();
+        }
+        emit(STEP_MAKE(cursor_id, result_reg, false));
+        return result_reg;
+    }
+
     int seek(int cursor_id, int key_reg, CompareOp op = EQ, int result_reg = -1) {
         if (result_reg == -1) {
             result_reg = regs.allocate();
@@ -510,3 +548,4 @@ struct ProgramBuilder {
         emit(FUNCTION_MAKE(result_reg, first_arg_reg, arg_count, (void*)fn));
         return result_reg;
     }
+};

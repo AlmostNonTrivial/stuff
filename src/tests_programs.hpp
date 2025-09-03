@@ -262,12 +262,12 @@ create_all_tables(bool create)
 	catalog[USERS] = Structure::from(USERS, users);
 	catalog[PRODUCTS] = Structure::from(PRODUCTS, products);
 	catalog[ORDERS] = Structure::from(ORDERS, orders);
-	catalog[ORDER_ITEMS] = Structure::from(ORDER_ITEMS, order_items);
-	catalog[POSTS] = Structure::from(POSTS, posts);
-	catalog[COMMENTS] = Structure::from(COMMENTS, comments);
-	catalog[TAGS] = Structure::from(TAGS, tags);
-	catalog[POST_TAGS] = Structure::from(POST_TAGS, post_tags);
-	catalog[USER_FOLLOWERS] = Structure::from(USER_FOLLOWERS, user_followers);
+	// catalog[ORDER_ITEMS] = Structure::from(ORDER_ITEMS, order_items);
+	// catalog[POSTS] = Structure::from(POSTS, posts);
+	// catalog[COMMENTS] = Structure::from(COMMENTS, comments);
+	// catalog[TAGS] = Structure::from(TAGS, tags);
+	// catalog[POST_TAGS] = Structure::from(POST_TAGS, post_tags);
+	// catalog[USER_FOLLOWERS] = Structure::from(USER_FOLLOWERS, user_followers);
 
 	if (!create)
 	{
@@ -277,7 +277,10 @@ create_all_tables(bool create)
 	ProgramBuilder prog;
 	prog.begin_transaction();
 
-	const char *tables[] = {USERS, PRODUCTS, ORDERS, ORDER_ITEMS, POSTS, COMMENTS, TAGS, POST_TAGS, USER_FOLLOWERS};
+	const char *tables[] = {
+		USERS, PRODUCTS, ORDERS,
+		// ORDER_ITEMS, POSTS, COMMENTS, TAGS, POST_TAGS, USER_FOLLOWERS};
+	};
 
 	for (auto table_name : tables)
 	{
@@ -362,7 +365,6 @@ load_table_from_csv(const char *csv_file, const char *table_name)
 
 		prog.insert_record(0, start_reg, fields.size());
 		count++;
-		batch_size++;
 
 		prog.regs.pop_scope();
 	}
@@ -403,12 +405,59 @@ load_all_data()
 inline void
 test_select()
 {
-	ProgramBuilder	   prog;
-	RegisterAllocator &reg = prog.regs;
-	int				   cursor = 0;
-	auto cctx = from_structure(catalog[USERS]);
+	ProgramBuilder prog;
+	int			   cursor = 0;
+	auto		   cctx = from_structure(catalog[USERS]);
 	prog.open_cursor(cursor, &cctx);
-	
+	int	 is_at_end = prog.rewind(cursor, false);
+	auto while_context = prog.begin_while(is_at_end);
+	int	 dest_reg = prog.get_columns(cursor, 0, cctx.layout.count());
+	prog.result(dest_reg, cctx.layout.count());
+	prog.next(cursor, is_at_end);
+	prog.end_while(while_context);
+	prog.close_cursor(cursor);
+	prog.halt();
+	prog.resolve_labels();
+
+	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+}
+
+inline void
+test_select_order_by()
+{
+	ProgramBuilder prog;
+	int			   cursor = 0;
+	int			   memcursor = 1;
+	auto		   cctx = from_structure(catalog[USERS]);
+	Layout sorted_by_age = cctx.layout.reorder({3, 0,1,2,4 });
+	auto		   mem = red_black(sorted_by_age);
+	prog.open_cursor(cursor, &cctx);
+	prog.open_cursor(memcursor, &mem);
+
+	int is_at_end = prog.rewind(cursor, false);
+
+	auto while_context = prog.begin_while(is_at_end);
+	int dest_reg = prog.get_column(cursor, 3);
+	prog.get_column(cursor, 0);
+	prog.get_column(cursor, 1);
+	prog.get_column(cursor, 2);
+	prog.get_column(cursor, 4);
+	prog.insert_record(memcursor, dest_reg, cctx.layout.count());
+	prog.next(cursor, is_at_end);
+	prog.end_while(while_context);
+
+	prog.rewind(memcursor, true, is_at_end);
+	auto while_ctx = prog.begin_while(is_at_end);
+	dest_reg = prog.get_columns(memcursor, 0, cctx.layout.count());
+	prog.result(dest_reg, cctx.layout.count());
+	prog.prev(memcursor, is_at_end);
+	prog.end_while(while_ctx);
+
+	prog.close_cursor(cursor);
+	prog.halt();
+	prog.resolve_labels();
+
+	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
 }
 
 // Main test function
@@ -418,7 +467,6 @@ test_programs()
 	arena::init<QueryArena>();
 	bool existed = pager_open("relational_test.db");
 
-	_debug = true;
 	printf("=== Setting up relational database ===\n\n");
 	create_all_tables(!existed);
 	if (!existed)
@@ -426,8 +474,10 @@ test_programs()
 		load_all_data();
 	}
 
+	// _debug = true;
 	// Run test queries
-	// test_join_query();
+	// test_select();
+	test_select_order_by();
 	// test_many_to_many_query();
 
 	pager_close();
