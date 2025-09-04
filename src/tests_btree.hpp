@@ -1,5 +1,5 @@
 #pragma once
-#include "bplustree.hpp"
+#include "btree.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -14,6 +14,7 @@
 #include "os_layer.hpp"
 #include "pager.hpp"
 #include "test_utils.hpp"
+#include "types.hpp"
 #include "vm.hpp"
 #include <cassert>
 #include <cstdint>
@@ -364,47 +365,52 @@ test_btree_stress()
 // B+Tree Integration Tests - Four focused tests
 // ============================================================================
 
-// // Test 1: U32+U32 composite (main use case)
-// inline void test_btree_u32_u32() {
-//     printf("Test 1: U32+U32 composite keys\n");
-//     pager_open(TEST_DB);
-//     pager_begin_transaction();
+// // Test 1: U32+U64 composite (main use case)
+inline void test_btree_u32_u64() {
+    printf("Test 1: U32+U64 composite keys\n");
+    pager_open(TEST_DB);
+    pager_begin_transaction();
 
-//     DataType key_type = TYPE_MULTI_U32_U32;
-//     BPlusTree tree = btree_create(key_type, 0, true);
-//     BPtCursor cursor = {.tree = &tree};
+    DataType key_type = make_dual(TYPE_U32, TYPE_U64);
+    BTree tree = btree_create(key_type, 0, true);
+    BtCursor cursor = {.tree = &tree};
 
-//     uint8_t key_data[8];
-//     uint8_t empty_value = 0;
+    uint8_t key_data[12];
+    uint8_t empty_value = 0;
 
-//     // Insert user+timestamp pairs
-//     for (uint32_t user = 1; user <= 5; user++) {
-//         for (uint32_t time = 100; time <= 103; time++) {
-//             pack_u32_u32(key_data, user, time);
-//             assert(btree_cursor_insert(&cursor, key_data, &empty_value));
-//         }
-//     }
+    // Insert user+timestamp pairs
+    for (uint32_t user = 1; user <= 5; user++) {
+        for (uint64_t time = 100; time <= 103; time++) {
+            pack_dual(key_data, TYPE_U32, &user, TYPE_U64, &time);
+            assert(btree_cursor_insert(&cursor, key_data, &empty_value));
+        }
+    }
 
-//     // Range query for user 3
-//     pack_u32_u32(key_data, 3, 0);
+    // Range query for user 3
 
-//     assert(btree_cursor_seek(&cursor, key_data, GE));
+    uint32_t a = 3;
+    uint64_t  b = 0;
+    pack_dual(key_data, TYPE_U32, &a, TYPE_U64, &b);
 
-//     int count = 0;
-//     do {
-//         uint8_t* found = btree_cursor_key(&cursor);
-//         uint32_t found_user = extract_u32_at(found, 0);
-//         if (found_user != 3) break;
-//         count++;
-//     } while (btree_cursor_next(&cursor));
+    assert(btree_cursor_seek(&cursor, key_data, GE));
 
-//     assert(count == 4);
-//     printf("  Found %d entries for user 3\n", count);
+    int count = 0;
+    do {
+        void* found = btree_cursor_key(&cursor);
+        uint32_t a;
+        uint64_t b;
+        unpack_dual(key_type, found, &a, &b);
+        if (a != 3) break;
+        count++;
+    } while (btree_cursor_next(&cursor));
 
-//     pager_rollback();
-//     pager_close();
-//     os_file_delete(TEST_DB);
-// }
+    assert(count == 4);
+    printf("  Found %d entries for user 3\n", count);
+
+    pager_rollback();
+    pager_close();
+    os_file_delete(TEST_DB);
+}
 
 // // Test 2: U16+U16 composite
 // inline void test_btree_u16_u16() {
@@ -490,24 +496,24 @@ test_btree_stress()
 //     pager_open(TEST_DB);
 //     pager_begin_transaction();
 
-//     DataType key_type = TYPE_MULTI_U32_U64;
-//     BPlusTree tree = btree_create(key_type, 0, true);
-//     BPtCursor cursor = {.tree = &tree};
+//     DataType key_type = make_dual(TYPE_U32, TYPE_U64);
+//     BTree tree = btree_create(key_type, 0, true);
+//     BtCursor cursor = {.tree = &tree};
 
 //     uint8_t key_data[12];
 //     uint8_t empty_value = 0;
 
 //     for (uint32_t order = 100; order <= 102; order++) {
 //         for (uint64_t ts = 1000000000000ULL; ts <= 1000000000002ULL; ts++) {
-//             pack_u32_u64(key_data, order, ts);
+//             pack_dual(key_data, TYPE_U32, &order, TYPE_U64, &ts);
 //             assert(btree_cursor_insert(&cursor, key_data, &empty_value));
 //         }
 //     }
 
 //     // Test that first component dominates
 //     uint8_t key_small[12], key_large[12];
-//     pack_u32_u64(key_small, 101, 0ULL);
-//     pack_u32_u64(key_large, 100, 0xFFFFFFFFFFFFFFFFULL);
+//     // pack_u32_u64(key_small, 101, 0ULL);
+//     // pack_u32_u64(key_large, 100, 0xFFFFFFFFFFFFFFFFULL);
 
 //     assert(type_compare(key_type, key_large, key_small) < 0);  // (100,MAX) < (101,0)
 //     printf("  Verified first component dominates: (100,MAX) < (101,0)\n");
@@ -1283,7 +1289,7 @@ test_btree()
 
 
     printf("\n=== Composite Type B+Tree Integration Tests ===\n");
-    // test_btree_u32_u32();
+    test_btree_u32_u64();
     // test_btree_u16_u16();
     // test_btree_u8_u8();
     // test_btree_u32_u64();

@@ -7,7 +7,7 @@
 #include "blob.hpp"
 #include "arena.hpp"
 #include "blob.hpp"
-#include "bplustree.hpp"
+#include "btree.hpp"
 #include "memtree.hpp"
 #include "catalog.hpp"
 #include <cstdint>

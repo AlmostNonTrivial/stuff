@@ -2,7 +2,7 @@
 #pragma once
 #include "arena_types.hpp"
 #include "blob.hpp"
-#include "bplustree.hpp"
+#include "btree.hpp"
 #include "catalog.hpp"
 #include "compile.hpp"
 #include "defs.hpp"
@@ -14,7 +14,7 @@
 
 #include <fstream>
 #include <sstream>
-#include "bplustree.hpp"
+#include "btree.hpp"
 #include "catalog.hpp"
 #include "compile.hpp"
 #include "defs.hpp"

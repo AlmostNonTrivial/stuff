@@ -1,7 +1,7 @@
 // vm.hpp
 #pragma once
 #include "arena.hpp"
-#include "bplustree.hpp"
+#include "btree.hpp"
 #include "catalog.hpp"
 #include "defs.hpp"
 #include <cstddef>
