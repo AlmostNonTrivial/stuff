@@ -201,6 +201,7 @@ copy_record(BPlusTree &tree, void *dst, void *src)
 static uint32_t
 find_child_index(BPlusTree &tree, BTreeNode *parent, BTreeNode *child)
 {
+	// cannot be converted to binary search, because the page indicies are not sorted
 	uint32_t *children = GET_CHILDREN(parent);
 	for (uint32_t i = 0; i <= parent->num_keys; i++)
 	{
@@ -253,14 +254,6 @@ unlink_leaf_node(BTreeNode *node)
 	link_leaf_nodes(prev_node, next_node);
 }
 
-// Set parent and update child's parent pointer
-static void
-set_parent(BTreeNode *node, uint32_t parent_index)
-{
-	MARK_DIRTY(node);
-	node->parent = parent_index;
-}
-
 // Set child at index and update its parent
 static void
 set_child(BPlusTree &tree, BTreeNode *node, uint32_t child_index, uint32_t node_index)
@@ -276,7 +269,9 @@ set_child(BPlusTree &tree, BTreeNode *node, uint32_t child_index, uint32_t node_
 		BTreeNode *child_node = GET_NODE(node_index);
 		if (child_node)
 		{
-			set_parent(child_node, node->index);
+
+			MARK_DIRTY(child_node);
+			child_node->parent = node->index;
 		}
 	}
 }
@@ -412,7 +407,8 @@ swap_with_root(BPlusTree &tree, BTreeNode *root, BTreeNode *other)
 			if (children[i])
 			{
 				BTreeNode *child = GET_NODE(children[i]);
-				set_parent(child, tree.root_page_index);
+				MARK_DIRTY(child);
+				child->parent = tree.root_page_index;
 			}
 		}
 	}
