@@ -1392,7 +1392,7 @@ inline uint32_t hash_string(const char* str) {
 }
 
 // Helper to allocate and copy string
-template <typename Tag>
+template <typename Tag = global_arena>
 inline char* string_dup(const char* str) {
     size_t len = strlen(str) + 1;
     char* copy = (char*)Arena<Tag>::alloc(len);
@@ -1510,7 +1510,7 @@ static void stringmap_grow(string_map<V, Tag>* m) {
     Arena<Tag>::reclaim(old_entries, old_capacity * sizeof(typename string_map<V, Tag>::Entry));
 }
 
-template <typename V, typename Tag>
+template <typename V, typename Tag >
 V* stringmap_insert(string_map<V, Tag>* m, const char* key, V value) {
     if (!m->entries) {
         stringmap_init(m);

@@ -821,7 +821,7 @@ test_merge_empty_root()
 		btree_cursor_insert(&cursor, &i, (void *)&i);
 	}
 	uint32_t key = 30;
-	btree_print(&tree);
+	// btree_print(&tree);
 	btree_cursor_seek(&cursor, &key);
 	btree_cursor_delete(&cursor);
 
