@@ -10,24 +10,24 @@
 // Provides same cursor interface as BTree but lives entirely in QueryArena
 // Key and record stored contiguously: [key_bytes][record_bytes]
 
-enum MemTreeColor : uint8_t
+enum TreeColor : uint8_t
 {
 	RED = 0,
 	BLACK = 1
 };
 
-struct MemTreeNode
+struct ephemeral_tree_node
 {
 	uint8_t		*data; // Single pointer: key at offset 0, record at offset key_size
-	MemTreeNode *left;
-	MemTreeNode *right;
-	MemTreeNode *parent; // Parent pointer for red-black operations
-	MemTreeColor color;	 // Node color for red-black tree
+	ephemeral_tree_node *left;
+	ephemeral_tree_node *right;
+	ephemeral_tree_node *parent; // Parent pointer for red-black operations
+	TreeColor color;	 // Node color for red-black tree
 };
 
-struct MemTree
+struct ephemeral_tree
 {
-	MemTreeNode *root;
+	ephemeral_tree_node *root;
 	DataType	 key_type;
 	uint32_t	 key_size;
 	uint32_t	 record_size;
@@ -38,10 +38,10 @@ struct MemTree
 };
 
 // Cursor for traversing the memory tree
-struct MemCursor
+struct et_cursor
 {
-	MemTree		   tree;
-	MemTreeNode	  *current;
+	ephemeral_tree		   tree;
+	ephemeral_tree_node	  *current;
 	MemoryContext *ctx; // Context for allocations
 
 	enum State
@@ -56,25 +56,25 @@ struct MemCursor
 // Tree Creation and Management
 // ============================================================================
 
-MemTree
-memtree_create(DataType key_type, uint32_t record_size, uint8_t flags = 0b11000000);
+ephemeral_tree
+ephemeral_tree_create(DataType key_type, uint32_t record_size, uint8_t flags = 0b11000000);
 
 
 void
-memtree_clear(MemTree *tree);
+ephemeral_tree_clear(ephemeral_tree *tree);
 
 // ============================================================================
 // Tree Operations
 // ============================================================================
 
 bool
-memtree_insert(MemTree *tree, const uint8_t *key, const uint8_t *record, MemoryContext *ctx);
+ephemeral_tree_insert(ephemeral_tree *tree, void*key, void*record, MemoryContext *ctx);
 
 bool
-memtree_delete(MemTree *tree, const uint8_t *key);
+ephemeral_tree_delete(ephemeral_tree *tree, void*key);
 
 bool
-memtree_delete_exact(MemTree *tree, const uint8_t *key, const uint8_t *record);
+ephemeral_tree_delete_exact(ephemeral_tree *tree, void*key, void*record);
 
 // ============================================================================
 // Cursor Operations - Matching BPlusTree cursor interface
@@ -82,46 +82,46 @@ memtree_delete_exact(MemTree *tree, const uint8_t *key, const uint8_t *record);
 
 // Cursor navigation functions
 bool
-memcursor_seek(MemCursor *cursor, const void *key, CompareOp op = EQ);
+et_cursor_seek(et_cursor *cursor, const void *key, CompareOp op = EQ);
 
 bool
-memcursor_previous(MemCursor *cursor);
+et_cursor_previous(et_cursor *cursor);
 
 bool
-memcursor_next(MemCursor *cursor);
+et_cursor_next(et_cursor *cursor);
 
 bool
-memcursor_last(MemCursor *cursor);
+et_cursor_last(et_cursor *cursor);
 
 bool
-memcursor_first(MemCursor *cursor);
+et_cursor_first(et_cursor *cursor);
 
 // Cursor data modification functions
 bool
-memcursor_update(MemCursor *cursor, const uint8_t *record);
+et_cursor_update(et_cursor *cursor, void *record);
 
 bool
-memcursor_insert(MemCursor *cursor, const void *key, const uint8_t *record);
+et_cursor_insert(et_cursor *cursor, void *key, void*record);
 
 bool
-memcursor_delete(MemCursor *cursor);
+et_cursor_delete(et_cursor *cursor);
 
 // Cursor data access functions
-uint8_t *
-memcursor_key(MemCursor *cursor);
+void *
+et_cursor_key(et_cursor *cursor);
 
-uint8_t *
-memcursor_record(MemCursor *cursor);
+void *
+et_cursor_record(et_cursor *cursor);
 
 // Cursor state query functions
 bool
-memcursor_is_valid(MemCursor *cursor);
+et_cursor_is_valid(et_cursor *cursor);
 
 bool
-memcursor_has_next(MemCursor *cursor);
+et_cursor_has_next(et_cursor *cursor);
 
 bool
-memcursor_has_previous(MemCursor *cursor);
+et_cursor_has_previous(et_cursor *cursor);
 
 
 
@@ -130,13 +130,13 @@ memcursor_has_previous(MemCursor *cursor);
 // ============================================================================
 
 uint32_t
-memtree_count(const MemTree *tree);
+et_count(const ephemeral_tree *tree);
 
 bool
-memtree_is_empty(const MemTree *tree);
+et_is_empty(const ephemeral_tree *tree);
 
 void
-memtree_validate(const MemTree *tree);
+et_validate(const ephemeral_tree *tree);
 
 void
-memtree_print(const MemTree *tree);
+ephemeral_tree_print(const ephemeral_tree *tree);

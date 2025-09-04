@@ -115,7 +115,7 @@
 ** The contiguous storage of keys enables efficient binary search and
 ** maximizes CPU cache utilization during traversal operations.
 */
-struct BTreeNode
+struct btree_node
 {
 	/* Node identification and navigation (24 bytes total) */
 	uint32_t index;	   /* This node's page index in the database file */
@@ -133,7 +133,7 @@ struct BTreeNode
 ** Compile-time verification that node structure matches page size exactly.
 ** This is critical for atomic I/O operations and proper alignment.
 */
-static_assert(sizeof(BTreeNode) == PAGE_SIZE, "BTreeNode must be exactly PAGE_SIZE");
+static_assert(sizeof(btree_node) == PAGE_SIZE, "btree_node must be exactly PAGE_SIZE");
 
 /*
 ** ACCESSOR MACROS
@@ -175,10 +175,10 @@ static_assert(sizeof(BTreeNode) == PAGE_SIZE, "BTreeNode must be exactly PAGE_SI
 ** Page-to-node conversion macros
 **
 ** GET_NODE converts a page index to a node pointer through the pager.
-** The cast is safe because BTreeNode is designed to overlay exactly
+** The cast is safe because btree_node is designed to overlay exactly
 ** onto a page structure.
 */
-#define GET_NODE(index)	 (reinterpret_cast<BTreeNode *>(pager_get(index)))
+#define GET_NODE(index)	 (reinterpret_cast<btree_node *>(pager_get(index)))
 #define GET_ROOT()		 GET_NODE(tree->root_page_index)
 #define GET_PARENT(node) GET_NODE((node)->parent)
 
@@ -343,7 +343,7 @@ static_assert(sizeof(BTreeNode) == PAGE_SIZE, "BTreeNode must be exactly PAGE_SI
 ** Asserts: Child must actually be a child of parent
 */
 static uint32_t
-find_child_index(BTree *tree, BTreeNode *parent, BTreeNode *child)
+find_child_index(btree *tree, btree_node *parent, btree_node *child)
 {
 	// cannot be converted to binary search, because the page indicies are not sorted
 	uint32_t *children = GET_CHILDREN(parent);
@@ -374,7 +374,7 @@ find_child_index(BTree *tree, BTreeNode *parent, BTreeNode *child)
 ** Returns mid+1 to follow the right child (contains keys >= separator).
 */
 static uint32_t
-binary_search(BTree *tree, BTreeNode *node, void *key)
+binary_search(btree *tree, btree_node *node, void *key)
 {
 	uint32_t left = 0;
 	uint32_t right = node->num_keys;
@@ -415,10 +415,10 @@ binary_search(BTree *tree, BTreeNode *node, void *key)
 **
 ** Returns: The leaf node where this key belongs (for search or insertion)
 */
-static BTreeNode *
-find_leaf_for_key(BTree *tree, void *key)
+static btree_node *
+find_leaf_for_key(btree *tree, void *key)
 {
-	BTreeNode *node = GET_ROOT();
+	btree_node *node = GET_ROOT();
 
 	while (IS_INTERNAL(node))
 	{
@@ -443,7 +443,7 @@ find_leaf_for_key(BTree *tree, void *key)
 ** Note: Both nodes are marked dirty since their pointers change.
 */
 static void
-link_leaf_nodes(BTreeNode *left, BTreeNode *right)
+link_leaf_nodes(btree_node *left, btree_node *right)
 {
 	if (left)
 	{
@@ -467,15 +467,15 @@ link_leaf_nodes(BTreeNode *left, BTreeNode *right)
 ** The node being removed is not modified - it will be deleted after this.
 */
 static void
-unlink_leaf_node(BTreeNode *node)
+unlink_leaf_node(btree_node *node)
 {
 	if (!IS_LEAF(node))
 	{
 		return;
 	}
 
-	BTreeNode *prev_node = nullptr;
-	BTreeNode *next_node = nullptr;
+	btree_node *prev_node = nullptr;
+	btree_node *next_node = nullptr;
 
 	if (node->previous != 0)
 	{
@@ -505,7 +505,7 @@ unlink_leaf_node(BTreeNode *node)
 ** Both nodes are marked dirty since the relationship change must persist.
 */
 static void
-set_child(BTree *tree, BTreeNode *node, uint32_t child_index, uint32_t node_index)
+set_child(btree *tree, btree_node *node, uint32_t child_index, uint32_t node_index)
 {
 	assert(IS_INTERNAL(node));
 
@@ -515,7 +515,7 @@ set_child(BTree *tree, BTreeNode *node, uint32_t child_index, uint32_t node_inde
 
 	if (node_index != 0)
 	{
-		BTreeNode *child_node = GET_NODE(node_index);
+		btree_node *child_node = GET_NODE(node_index);
 		if (child_node)
 		{
 
@@ -535,12 +535,12 @@ set_child(BTree *tree, BTreeNode *node, uint32_t child_index, uint32_t node_inde
 ** The node is immediately marked dirty to ensure the initialization
 ** is written to disk within the current transaction.
 */
-static BTreeNode *
-create_node(BTree *tree, bool is_leaf)
+static btree_node *
+create_node(btree *tree, bool is_leaf)
 {
 	uint32_t page_index = pager_new();
 	assert(page_index != PAGE_INVALID);
-	BTreeNode *node = GET_NODE(page_index);
+	btree_node *node = GET_NODE(page_index);
 
 	node->index = page_index;
 	node->parent = 0;
@@ -572,7 +572,7 @@ create_node(BTree *tree, bool is_leaf)
 ** tree and in external structures.
 */
 static void
-swap_with_root(BTree *tree, BTreeNode *root, BTreeNode *other)
+swap_with_root(btree *tree, btree_node *root, btree_node *other)
 {
 	MARK_DIRTY(root);
 	MARK_DIRTY(other);
@@ -584,10 +584,10 @@ swap_with_root(BTree *tree, BTreeNode *root, BTreeNode *other)
 	uint32_t saved_other_index = other->index;
 
 	// Swap all content
-	BTreeNode temp;
-	memcpy(&temp, other, sizeof(BTreeNode));
-	memcpy(other, root, sizeof(BTreeNode));
-	memcpy(root, &temp, sizeof(BTreeNode));
+	btree_node temp;
+	memcpy(&temp, other, sizeof(btree_node));
+	memcpy(other, root, sizeof(btree_node));
+	memcpy(root, &temp, sizeof(btree_node));
 
 	// Restore the original indices
 	root->index = saved_root_index;
@@ -602,7 +602,7 @@ swap_with_root(BTree *tree, BTreeNode *root, BTreeNode *other)
 		{
 			if (children[i])
 			{
-				BTreeNode *child = GET_NODE(children[i]);
+				btree_node *child = GET_NODE(children[i]);
 				MARK_DIRTY(child);
 				child->parent = tree->root_page_index;
 			}
@@ -635,12 +635,12 @@ swap_with_root(BTree *tree, BTreeNode *root, BTreeNode *other)
 **
 ** Returns: Parent node (which may now be full and need splitting)
 */
-static BTreeNode *
-split(BTree *tree, BTreeNode *node)
+static btree_node *
+split(btree *tree, btree_node *node)
 {
 	// === PREPARATION ===
 	uint32_t   split_point = GET_SPLIT_INDEX(node);
-	BTreeNode *new_right = create_node(tree, IS_LEAF(node));
+	btree_node *new_right = create_node(tree, IS_LEAF(node));
 
 	// Save the key that will be promoted to parent
 	// (for leaves, this is a copy; for internals, it moves up)
@@ -651,16 +651,16 @@ split(BTree *tree, BTreeNode *node)
 	MARK_DIRTY(new_right);
 
 	// === ENSURE PARENT EXISTS ===
-	BTreeNode *parent = GET_PARENT(node);
+	btree_node *parent = GET_PARENT(node);
 	uint32_t   position_in_parent = 0;
 
 	if (!parent)
 	{
 		// Special case: splitting root requires creating new root above it
 		// 1. Create new node for the internal
-		BTreeNode *new_node = create_node(tree, false);
+		btree_node *new_node = create_node(tree, false);
 		// 2. Get current root
-		BTreeNode *root = GET_NODE(tree->root_page_index);
+		btree_node *root = GET_NODE(tree->root_page_index);
 		// 3. Swap contents: root becomes empty, new_node gets old root data
 		swap_with_root(tree, root, new_node);
 		// 4. Make the old root data (now in new_node) a child of the new root
@@ -744,9 +744,9 @@ split(BTree *tree, BTreeNode *node)
 ** location may have changed during the restructuring.
 */
 static void
-insert_element(BTree *tree, void *key, void *data)
+insert_element(btree *tree, void *key, void *data)
 {
-	BTreeNode *root = GET_ROOT();
+	btree_node *root = GET_ROOT();
 
 	if (root->num_keys == 0)
 	{
@@ -759,18 +759,18 @@ insert_element(BTree *tree, void *key, void *data)
 	}
 
 	// Find leaf
-	BTreeNode *leaf = find_leaf_for_key(tree, (void *)key);
+	btree_node *leaf = find_leaf_for_key(tree, (void *)key);
 
 	// Make room if needed
 	if (NODE_IS_FULL(leaf))
 	{
-		BTreeNode *node = leaf;
+		btree_node *node = leaf;
 		while (node && NODE_IS_FULL(node))
 		{
 			// split might propagate to parent,
 			// stop when split doesn't return new parent of split node
 			// and research
-			BTreeNode *parent = split(tree, node);
+			btree_node *parent = split(tree, node);
 			node = IS_ROOT(parent) ? nullptr : parent;
 		}
 
@@ -801,7 +801,7 @@ insert_element(BTree *tree, void *key, void *data)
 ** the page to the pager's free list for reuse.
 */
 static void
-destroy_node(BTreeNode *node)
+destroy_node(btree_node *node)
 {
 	unlink_leaf_node(node);
 	pager_delete(node->index);
@@ -817,13 +817,13 @@ destroy_node(BTreeNode *node)
 ** at the same page index.
 */
 static void
-collapse_empty_root(BTree *tree, BTreeNode *root)
+collapse_empty_root(btree *tree, btree_node *root)
 {
 	assert(root->num_keys == 0);
 	assert(IS_INTERNAL(root));
 
 	// The root has only one child - make it the new root
-	BTreeNode *only_child = GET_CHILD(root, 0);
+	btree_node *only_child = GET_CHILD(root, 0);
 
 	// Swap contents: only_child becomes root, root gets child's data
 	swap_with_root(tree, root, only_child);
@@ -849,9 +849,9 @@ collapse_empty_root(BTree *tree, BTreeNode *root)
 ** partition the key space between siblings.
 */
 static void
-borrow_from_left_sibling(BTree *tree, BTreeNode *node, BTreeNode *left_sibling, uint32_t separator_index)
+borrow_from_left_sibling(btree *tree, btree_node *node, btree_node *left_sibling, uint32_t separator_index)
 {
-	BTreeNode *parent = GET_PARENT(node);
+	btree_node *parent = GET_PARENT(node);
 
 	MARK_DIRTY(node);
 	MARK_DIRTY(left_sibling);
@@ -904,9 +904,9 @@ borrow_from_left_sibling(BTree *tree, BTreeNode *node, BTreeNode *left_sibling, 
 ** in the opposite direction.
 */
 static void
-borrow_from_right_sibling(BTree *tree, BTreeNode *node, BTreeNode *right_sibling, uint32_t separator_index)
+borrow_from_right_sibling(btree *tree, btree_node *node, btree_node *right_sibling, uint32_t separator_index)
 {
-	BTreeNode *parent = GET_PARENT(node);
+	btree_node *parent = GET_PARENT(node);
 
 	MARK_DIRTY(node);
 	MARK_DIRTY(right_sibling);
@@ -960,15 +960,15 @@ borrow_from_right_sibling(BTree *tree, BTreeNode *node, BTreeNode *right_sibling
 ** Returns: true if borrowing succeeded, false if both siblings are minimal
 */
 static bool
-try_borrow_from_siblings(BTree *tree, BTreeNode *node)
+try_borrow_from_siblings(btree *tree, btree_node *node)
 {
-	BTreeNode *parent = GET_PARENT(node);
+	btree_node *parent = GET_PARENT(node);
 	uint32_t   child_index = find_child_index(tree, parent, node);
 
 	// Try left sibling first (consistent strategy)
 	if (child_index > 0)
 	{
-		BTreeNode *left = GET_CHILD(parent, child_index - 1);
+		btree_node *left = GET_CHILD(parent, child_index - 1);
 		if (NODE_CAN_SPARE(left))
 		{
 			borrow_from_left_sibling(tree, node, left, child_index - 1);
@@ -979,7 +979,7 @@ try_borrow_from_siblings(BTree *tree, BTreeNode *node)
 	// Try right sibling
 	if (child_index < parent->num_keys)
 	{
-		BTreeNode *right = GET_CHILD(parent, child_index + 1);
+		btree_node *right = GET_CHILD(parent, child_index + 1);
 		if (NODE_CAN_SPARE(right))
 		{
 			borrow_from_right_sibling(tree, node, right, child_index);
@@ -1004,13 +1004,13 @@ try_borrow_from_siblings(BTree *tree, BTreeNode *node)
 **
 ** Returns: Parent node (which may now underflow and need repair)
 */
-static BTreeNode *
-perform_merge_with_sibling(BTree *tree, BTreeNode *node)
+static btree_node *
+perform_merge_with_sibling(btree *tree, btree_node *node)
 {
-	BTreeNode *parent = GET_PARENT(node);
+	btree_node *parent = GET_PARENT(node);
 	uint32_t   child_index = find_child_index(tree, parent, node);
 
-	BTreeNode *left, *right;
+	btree_node *left, *right;
 	uint32_t   separator_index;
 
 	// Decide which sibling to merge with
@@ -1098,7 +1098,7 @@ perform_merge_with_sibling(BTree *tree, BTreeNode *node)
 ** with no keys), we collapse it.
 */
 static void
-repair_underflow(BTree *tree, BTreeNode *node)
+repair_underflow(btree *tree, btree_node *node)
 {
 	// Step 1: Check if repair is needed
 	if (!IS_UNDERFLOWING(node))
@@ -1119,7 +1119,7 @@ repair_underflow(BTree *tree, BTreeNode *node)
 	}
 
 	// Step 3: Destructive fix (merge with sibling)
-	BTreeNode *parent = perform_merge_with_sibling(tree, node);
+	btree_node *parent = perform_merge_with_sibling(tree, node);
 
 	// Step 4: Check if parent needs repair (cascade)
 	if (parent && IS_UNDERFLOWING(parent))
@@ -1145,7 +1145,7 @@ repair_underflow(BTree *tree, BTreeNode *node)
 ** Special case: Root leaf with one entry becomes empty but remains valid.
 */
 static void
-delete_element(BTree *tree, BTreeNode *node, void *key, uint32_t index)
+delete_element(btree *tree, btree_node *node, void *key, uint32_t index)
 {
 	assert(IS_LEAF(node));
 
@@ -1176,7 +1176,7 @@ delete_element(BTree *tree, BTreeNode *node, void *key, uint32_t index)
 ** pager's free list for reuse.
 */
 void
-clear_recurse(BTree *tree, BTreeNode *node)
+clear_recurse(btree *tree, btree_node *node)
 {
 	if (IS_LEAF(node))
 	{
@@ -1185,7 +1185,7 @@ clear_recurse(BTree *tree, BTreeNode *node)
 	}
 
 	uint32_t   i = 0;
-	BTreeNode *child = GET_CHILD(node, i);
+	btree_node *child = GET_CHILD(node, i);
 	while (child != nullptr)
 	{
 		clear_recurse(tree, child);
@@ -1202,7 +1202,7 @@ clear_recurse(BTree *tree, BTreeNode *node)
 ** The tree structure itself remains valid for future use.
 */
 bool
-btree_clear(BTree *tree)
+btree_clear(btree *tree)
 {
 	if (0 == tree->root_page_index)
 	{
@@ -1236,10 +1236,10 @@ btree_clear(BTree *tree)
 **
 ** Returns: Initialized BTree structure (zero-initialized on failure)
 */
-BTree
+btree
 btree_create(DataType key, uint32_t record_size, bool init = false)
 {
-	BTree tree = {0};
+	btree tree = {0};
 
 	tree.node_key_type = key;
 	tree.node_key_size = type_size(key);
@@ -1278,7 +1278,7 @@ btree_create(DataType key, uint32_t record_size, bool init = false)
 
 	if (init)
 	{
-		BTreeNode *root = create_node(&tree, true);
+		btree_node *root = create_node(&tree, true);
 		tree.root_page_index = root->index;
 	}
 	return tree;
@@ -1306,7 +1306,7 @@ btree_create(DataType key, uint32_t record_size, bool init = false)
 ** a seek operation.
 */
 static void
-cursor_clear(BtCursor *cursor)
+cursor_clear(bt_cursor *cursor)
 {
 	cursor->leaf_page = 0;
 	cursor->leaf_index = 0;
@@ -1319,20 +1319,20 @@ cursor_clear(BtCursor *cursor)
 ** Helper for btree_cursor_first/last. Handles empty tree case.
 */
 static bool
-cursor_move_end(BtCursor *cursor, bool left)
+cursor_move_end(bt_cursor *cursor, bool left)
 {
 
-	BTree *tree = cursor->tree;
+	btree *tree = cursor->tree;
 	cursor_clear(cursor);
 
-	BTreeNode *root = GET_ROOT();
+	btree_node *root = GET_ROOT();
 	if (!root || root->num_keys == 0)
 	{
 		cursor->state = BT_CURSOR_INVALID;
 		return false;
 	}
 
-	BTreeNode *current = root;
+	btree_node *current = root;
 
 	while (!IS_LEAF(current))
 	{
@@ -1377,9 +1377,9 @@ cursor_move_end(BtCursor *cursor, bool left)
 ** Returns: true if a matching key was found, false otherwise
 */
 bool
-btree_cursor_seek(BtCursor *cursor, void *key, CompareOp op)
+btree_cursor_seek(bt_cursor *cursor, void *key, CompareOp op)
 {
-	BTree *tree = cursor->tree;
+	btree *tree = cursor->tree;
 	cursor_clear(cursor);
 
 	if (!cursor->tree->root_page_index)
@@ -1389,7 +1389,7 @@ btree_cursor_seek(BtCursor *cursor, void *key, CompareOp op)
 	}
 
 	// Find the leaf and position
-	BTreeNode *leaf = find_leaf_for_key(cursor->tree, key);
+	btree_node *leaf = find_leaf_for_key(cursor->tree, key);
 	uint32_t   index = binary_search(cursor->tree, leaf, key);
 
 	cursor->leaf_page = leaf->index;
@@ -1463,7 +1463,7 @@ btree_cursor_seek(BtCursor *cursor, void *key, CompareOp op)
 ** Check if cursor points to a valid position.
 */
 bool
-btree_cursor_is_valid(BtCursor *cursor)
+btree_cursor_is_valid(bt_cursor *cursor)
 {
 	return cursor->state == BT_CURSOR_VALID;
 }
@@ -1475,16 +1475,16 @@ btree_cursor_is_valid(BtCursor *cursor)
 ** Note: Pointer becomes invalid after any tree modification
 */
 void *
-btree_cursor_key(BtCursor *cursor)
+btree_cursor_key(bt_cursor *cursor)
 {
 
-	BTree *tree = cursor->tree;
+	btree *tree = cursor->tree;
 	if (cursor->state != BT_CURSOR_VALID)
 	{
 		return nullptr;
 	}
 
-	BTreeNode *node = GET_NODE(cursor->leaf_page);
+	btree_node *node = GET_NODE(cursor->leaf_page);
 	if (!node || cursor->leaf_index >= node->num_keys)
 	{
 		return nullptr;
@@ -1500,16 +1500,16 @@ btree_cursor_key(BtCursor *cursor)
 ** Note: Pointer becomes invalid after any tree modification
 */
 void *
-btree_cursor_record(BtCursor *cursor)
+btree_cursor_record(bt_cursor *cursor)
 {
 
-	BTree *tree = cursor->tree;
+	btree *tree = cursor->tree;
 	if (cursor->state != BT_CURSOR_VALID)
 	{
 		return nullptr;
 	}
 
-	BTreeNode *node = GET_NODE(cursor->leaf_page);
+	btree_node *node = GET_NODE(cursor->leaf_page);
 	if (!node || cursor->leaf_index >= node->num_keys)
 	{
 		return nullptr;
@@ -1526,7 +1526,7 @@ btree_cursor_record(BtCursor *cursor)
 ** contains the next entry due to shifting).
 */
 bool
-btree_cursor_delete(BtCursor *cursor)
+btree_cursor_delete(bt_cursor *cursor)
 {
 	if (cursor->state != BT_CURSOR_VALID)
 	{
@@ -1570,7 +1570,7 @@ btree_cursor_delete(BtCursor *cursor)
 ** Cursor position becomes undefined after insertion.
 */
 bool
-btree_cursor_insert(BtCursor *cursor, void *key, void *record)
+btree_cursor_insert(bt_cursor *cursor, void *key, void *record)
 {
 
 	if (btree_cursor_seek(cursor, key))
@@ -1589,7 +1589,7 @@ btree_cursor_insert(BtCursor *cursor, void *key, void *record)
 ** position remains valid after update.
 */
 bool
-btree_cursor_update(BtCursor *cursor, void *record)
+btree_cursor_update(bt_cursor *cursor, void *record)
 {
 	if (cursor->state != BT_CURSOR_VALID)
 	{
@@ -1605,7 +1605,7 @@ btree_cursor_update(BtCursor *cursor, void *record)
 ** Move cursor to first entry in tree.
 */
 bool
-btree_cursor_first(BtCursor *cursor)
+btree_cursor_first(bt_cursor *cursor)
 {
 	return cursor_move_end(cursor, true);
 }
@@ -1614,7 +1614,7 @@ btree_cursor_first(BtCursor *cursor)
 ** Move cursor to last entry in tree.
 */
 bool
-btree_cursor_last(BtCursor *cursor)
+btree_cursor_last(bt_cursor *cursor)
 {
 	return cursor_move_end(cursor, false);
 }
@@ -1626,14 +1626,14 @@ btree_cursor_last(BtCursor *cursor)
 ** to parent nodes. Returns false at end of tree.
 */
 bool
-btree_cursor_next(BtCursor *cursor)
+btree_cursor_next(bt_cursor *cursor)
 {
 	if (cursor->state != BT_CURSOR_VALID)
 	{
 		return false;
 	}
 
-	BTreeNode *node = GET_NODE(cursor->leaf_page);
+	btree_node *node = GET_NODE(cursor->leaf_page);
 	if (!node)
 	{
 		cursor->state = BT_CURSOR_INVALID;
@@ -1646,7 +1646,7 @@ btree_cursor_next(BtCursor *cursor)
 	{
 		if (node->next != 0)
 		{
-			BTreeNode *next_node = GET_NEXT(node);
+			btree_node *next_node = GET_NEXT(node);
 			if (next_node && next_node->num_keys > 0)
 			{
 				cursor->leaf_page = next_node->index;
@@ -1667,14 +1667,14 @@ btree_cursor_next(BtCursor *cursor)
 ** Returns false at beginning of tree.
 */
 bool
-btree_cursor_previous(BtCursor *cursor)
+btree_cursor_previous(bt_cursor *cursor)
 {
 	if (cursor->state != BT_CURSOR_VALID)
 	{
 		return false;
 	}
 
-	BTreeNode *node = GET_NODE(cursor->leaf_page);
+	btree_node *node = GET_NODE(cursor->leaf_page);
 	if (!node)
 	{
 		cursor->state = BT_CURSOR_INVALID;
@@ -1690,7 +1690,7 @@ btree_cursor_previous(BtCursor *cursor)
 	// Move to previous leaf
 	if (node->previous != 0)
 	{
-		BTreeNode *prev_node = GET_PREV(node);
+		btree_node *prev_node = GET_PREV(node);
 		if (prev_node && prev_node->num_keys > 0)
 		{
 			cursor->leaf_page = prev_node->index;
@@ -1706,7 +1706,7 @@ btree_cursor_previous(BtCursor *cursor)
 ** Check if cursor can move forward without changing position.
 */
 bool
-btree_cursor_has_next(BtCursor *cursor)
+btree_cursor_has_next(bt_cursor *cursor)
 {
 	if (btree_cursor_next(cursor))
 	{
@@ -1720,7 +1720,7 @@ btree_cursor_has_next(BtCursor *cursor)
 ** Check if cursor can move backward without changing position.
 */
 bool
-btree_cursor_has_previous(BtCursor *cursor)
+btree_cursor_has_previous(bt_cursor *cursor)
 {
 	if (btree_cursor_previous(cursor))
 	{
@@ -1747,21 +1747,21 @@ struct ValidationResult
 	uint32_t   depth;
 	uint8_t	  *min_key;
 	uint8_t	  *max_key;
-	BTreeNode *leftmost_leaf;
-	BTreeNode *rightmost_leaf;
+	btree_node *leftmost_leaf;
+	btree_node *rightmost_leaf;
 };
 
 // Forward declaration
 static ValidationResult
-validate_node_recursive(BTree *tree, BTreeNode *node, uint32_t expected_parent, void *parent_min_bound,
+validate_node_recursive(btree *tree, btree_node *node, uint32_t expected_parent, void *parent_min_bound,
 						void *parent_max_bound, std::unordered_set<uint32_t> &visited);
 
 // Main validation function
 void
-btree_validate(BTree *tree_ptr)
+btree_validate(btree *tree_ptr)
 {
 
-	BTree *tree = tree_ptr;
+	btree *tree = tree_ptr;
 	ASSERT_PRINT(tree_ptr != nullptr, tree_ptr);
 
 	// Empty tree is valid
@@ -1770,7 +1770,7 @@ btree_validate(BTree *tree_ptr)
 		return;
 	}
 
-	BTreeNode *root = GET_ROOT();
+	btree_node *root = GET_ROOT();
 	ASSERT_PRINT(root != nullptr, tree_ptr);
 
 	// Root specific checks
@@ -1793,8 +1793,8 @@ btree_validate(BTree *tree_ptr)
 	else if (IS_INTERNAL(root))
 	{
 		// Verify complete leaf chain by walking it
-		BTreeNode					*first_leaf = result.leftmost_leaf;
-		BTreeNode					*current = first_leaf;
+		btree_node					*first_leaf = result.leftmost_leaf;
+		btree_node					*current = first_leaf;
 		std::unordered_set<uint32_t> leaf_visited;
 
 		ASSERT_PRINT(current->previous == 0, tree_ptr); // First leaf has no previous
@@ -1807,7 +1807,7 @@ btree_validate(BTree *tree_ptr)
 
 			if (current->next != 0)
 			{
-				BTreeNode *next = GET_NEXT(current);
+				btree_node *next = GET_NEXT(current);
 				ASSERT_PRINT(next != nullptr, tree_ptr);
 				ASSERT_PRINT(next->previous == current->index, tree_ptr); // Bidirectional link integrity
 				current = next;
@@ -1821,7 +1821,7 @@ btree_validate(BTree *tree_ptr)
 	}
 }
 static ValidationResult
-validate_node_recursive(BTree *tree, BTreeNode *node, uint32_t expected_parent, void *parent_min_bound,
+validate_node_recursive(btree *tree, btree_node *node, uint32_t expected_parent, void *parent_min_bound,
 						void *parent_max_bound, std::unordered_set<uint32_t> &visited)
 {
 	ASSERT_PRINT(node != nullptr, tree);
@@ -1906,14 +1906,14 @@ validate_node_recursive(BTree *tree, BTreeNode *node, uint32_t expected_parent, 
 		if (node->next != 0)
 		{
 			ASSERT_PRINT(node->next != node->index, tree); // No self-reference
-			BTreeNode *next = GET_NEXT(node);
+			btree_node *next = GET_NEXT(node);
 			ASSERT_PRINT(next != nullptr, tree);
 			ASSERT_PRINT(IS_LEAF(next), tree);
 		}
 		if (node->previous != 0)
 		{
 			ASSERT_PRINT(node->previous != node->index, tree); // No self-reference
-			BTreeNode *prev = GET_PREV(node);
+			btree_node *prev = GET_PREV(node);
 			ASSERT_PRINT(prev != nullptr, tree);
 			ASSERT_PRINT(IS_LEAF(prev), tree);
 		}
@@ -1925,8 +1925,8 @@ validate_node_recursive(BTree *tree, BTreeNode *node, uint32_t expected_parent, 
 		ASSERT_PRINT(children != nullptr, tree);
 
 		uint32_t   child_depth = UINT32_MAX;
-		BTreeNode *leftmost_leaf = nullptr;
-		BTreeNode *rightmost_leaf = nullptr;
+		btree_node *leftmost_leaf = nullptr;
+		btree_node *rightmost_leaf = nullptr;
 
 		// Internal nodes have num_keys + 1 children
 		for (uint32_t i = 0; i <= node->num_keys; i++)
@@ -1934,7 +1934,7 @@ validate_node_recursive(BTree *tree, BTreeNode *node, uint32_t expected_parent, 
 			ASSERT_PRINT(children[i] != 0, tree);			// No null children
 			ASSERT_PRINT(children[i] != node->index, tree); // No self-reference
 
-			BTreeNode *child = GET_CHILD(node, i);
+			btree_node *child = GET_CHILD(node, i);
 			ASSERT_PRINT(child != nullptr, tree);
 
 			// Determine bounds for this child
@@ -1992,7 +1992,7 @@ validate_node_recursive(BTree *tree, BTreeNode *node, uint32_t expected_parent, 
 
 // Helper to print a single key based on type
 static void
-print_key(BTree *tree, void *key)
+print_key(btree *tree, void *key)
 {
 	if (!key)
 	{
@@ -2004,9 +2004,9 @@ print_key(BTree *tree, void *key)
 
 // Main B+Tree print function
 void
-btree_print(BTree *tree_ptr)
+btree_print(btree *tree_ptr)
 {
-	BTree *tree = tree_ptr;
+	btree *tree = tree_ptr;
 	if (!tree_ptr || tree_ptr->root_page_index == 0)
 	{
 		printf("B+Tree: EMPTY\n");
@@ -2039,7 +2039,7 @@ btree_print(BTree *tree_ptr)
 			uint32_t page_index = current_level.front();
 			current_level.pop();
 
-			BTreeNode *node = GET_NODE(page_index);
+			btree_node *node = GET_NODE(page_index);
 			if (!node)
 			{
 				printf("  ERROR: Cannot read page %u\n", page_index);
@@ -2118,7 +2118,7 @@ btree_print(BTree *tree_ptr)
 	printf("------------------------------------\n");
 
 	// Find leftmost leaf
-	BTreeNode *current = GET_ROOT();
+	btree_node *current = GET_ROOT();
 	while (IS_INTERNAL(current))
 	{
 		current = GET_CHILD(current, 0);
@@ -2153,9 +2153,9 @@ btree_print(BTree *tree_ptr)
 
 // Compact tree printer (single line per node)
 void
-btree_print_compact(BTree *tree_ptr)
+btree_print_compact(btree *tree_ptr)
 {
-	BTree *tree = tree_ptr;
+	btree *tree = tree_ptr;
 	if (!tree_ptr || tree_ptr->root_page_index == 0)
 	{
 		printf("B+Tree: EMPTY\n");
@@ -2185,7 +2185,7 @@ btree_print_compact(BTree *tree_ptr)
 			current_level = level;
 		}
 
-		BTreeNode *node = GET_NODE(page_index);
+		btree_node *node = GET_NODE(page_index);
 		if (!node)
 			continue;
 

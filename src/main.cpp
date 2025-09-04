@@ -18,8 +18,8 @@ main()
 
 	// test_types();
 
-	test_btree();
-	// test_memtree();
+	// test_btree();
+	test_memtree();
 	// test_blob();
 	// test_memtree();
 	// test_parser();

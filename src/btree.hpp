@@ -76,23 +76,24 @@
 ** while ensuring balanced splits and merges.
 ** ============================================================================ */
 
-struct BTree {
-    uint32_t root_page_index;      /* Root node location */
+struct btree
+{
+	uint32_t root_page_index; /* Root node location */
 
-    /* Node capacity limits */
-    uint32_t internal_max_keys;    /* Max keys in internal node */
-    uint32_t leaf_max_keys;        /* Max keys in leaf node */
-    uint32_t internal_min_keys;    /* Min keys (non-root internal) */
-    uint32_t leaf_min_keys;        /* Min keys (non-root leaf) */
+	/* Node capacity limits */
+	uint32_t internal_max_keys; /* Max keys in internal node */
+	uint32_t leaf_max_keys;		/* Max keys in leaf node */
+	uint32_t internal_min_keys; /* Min keys (non-root internal) */
+	uint32_t leaf_min_keys;		/* Min keys (non-root leaf) */
 
-    /* Split points for overflow handling */
-    uint32_t internal_split_index; /* Where to split internal nodes */
-    uint32_t leaf_split_index;     /* Where to split leaf nodes */
+	/* Split points for overflow handling */
+	uint32_t internal_split_index; /* Where to split internal nodes */
+	uint32_t leaf_split_index;	   /* Where to split leaf nodes */
 
-    /* Data configuration */
-    uint32_t record_size;          /* Size of value/record */
-    uint32_t node_key_size;        /* Size of key */
-    DataType node_key_type;        /* Key data type */
+	/* Data configuration */
+	uint32_t record_size;	/* Size of value/record */
+	uint32_t node_key_size; /* Size of key */
+	DataType node_key_type; /* Key data type */
 };
 
 /* ============================================================================
@@ -115,7 +116,8 @@ struct BTree {
 **   - Calculates optimal node capacities based on PAGE_SIZE
 **   - Returns invalid tree (root_page_index=0) if record_size too large
 */
-BTree btree_create(DataType key, uint32_t record_size, bool init);
+btree
+btree_create(DataType key, uint32_t record_size, bool init);
 
 /*
 ** Clear all nodes in a B+Tree.
@@ -133,7 +135,8 @@ BTree btree_create(DataType key, uint32_t record_size, bool init);
 ** NOTE: Requires active transaction. This is a destructive operation
 ** that cannot be undone except by transaction rollback.
 */
-bool btree_clear(BTree* tree);
+bool
+btree_clear(btree *tree);
 
 /* ============================================================================
 ** CURSOR STATE MANAGEMENT
@@ -149,9 +152,10 @@ bool btree_clear(BTree* tree);
 ** BT_CURSOR_INVALID: Cursor is not positioned at any valid entry
 ** BT_CURSOR_VALID: Cursor points to a valid key-value pair
 */
-enum BtCursorState : uint8_t {
-    BT_CURSOR_INVALID = 0,
-    BT_CURSOR_VALID = 1,
+enum BtCursorState : uint8_t
+{
+	BT_CURSOR_INVALID = 0,
+	BT_CURSOR_VALID = 1,
 };
 
 /*
@@ -170,11 +174,12 @@ enum BtCursorState : uint8_t {
 ** NOTE: Cursors do not survive tree modifications by other cursors.
 ** After external modifications, cursors should be re-positioned.
 */
-struct BtCursor {
-    BTree*        tree;        /* Tree being traversed */
-    uint32_t      leaf_page;   /* Current leaf page */
-    uint32_t      leaf_index;  /* Position in leaf */
-    BtCursorState state;       /* Cursor validity */
+struct bt_cursor
+{
+	btree		 *tree;		  /* Tree being traversed */
+	uint32_t	  leaf_page;  /* Current leaf page */
+	uint32_t	  leaf_index; /* Position in leaf */
+	BtCursorState state;	  /* Cursor validity */
 };
 
 /* ============================================================================
@@ -203,7 +208,8 @@ struct BtCursor {
 **   - seek(cursor, &k, GE): Find first key >= k
 **   - seek(cursor, &k, LT): Find last key < k
 */
-bool btree_cursor_seek(BtCursor* cursor, void* key, CompareOp op = EQ);
+bool
+btree_cursor_seek(bt_cursor *cursor, void *key, CompareOp op = EQ);
 
 /*
 ** Move cursor to the previous key in sort order.
@@ -213,7 +219,8 @@ bool btree_cursor_seek(BtCursor* cursor, void* key, CompareOp op = EQ);
 **
 ** NOTE: Cursor becomes invalid if it moves before the first key.
 */
-bool btree_cursor_previous(BtCursor* cursor);
+bool
+btree_cursor_previous(bt_cursor *cursor);
 
 /*
 ** Move cursor to the next key in sort order.
@@ -223,7 +230,8 @@ bool btree_cursor_previous(BtCursor* cursor);
 **
 ** NOTE: Cursor becomes invalid if it moves past the last key.
 */
-bool btree_cursor_next(BtCursor* cursor);
+bool
+btree_cursor_next(bt_cursor *cursor);
 
 /*
 ** Position cursor at the last key in the tree.
@@ -231,7 +239,8 @@ bool btree_cursor_next(BtCursor* cursor);
 ** Returns:
 **   true if tree is non-empty, false if tree is empty
 */
-bool btree_cursor_last(BtCursor* cursor);
+bool
+btree_cursor_last(bt_cursor *cursor);
 
 /*
 ** Position cursor at the first key in the tree.
@@ -239,7 +248,8 @@ bool btree_cursor_last(BtCursor* cursor);
 ** Returns:
 **   true if tree is non-empty, false if tree is empty
 */
-bool btree_cursor_first(BtCursor* cursor);
+bool
+btree_cursor_first(bt_cursor *cursor);
 
 /* ============================================================================
 ** DATA MODIFICATION OPERATIONS
@@ -263,7 +273,8 @@ bool btree_cursor_first(BtCursor* cursor);
 **
 ** NOTE: Requires active transaction. Marks page as dirty.
 */
-bool btree_cursor_update(BtCursor* cursor, void* record);
+bool
+btree_cursor_update(bt_cursor *cursor, void *record);
 
 /*
 ** Insert a new key-value pair.
@@ -284,7 +295,8 @@ bool btree_cursor_update(BtCursor* cursor, void* record);
 **   - May trigger node splits up to root
 **   - Cursor position after insert is undefined
 */
-bool btree_cursor_insert(BtCursor* cursor, void* key, void* record);
+bool
+btree_cursor_insert(bt_cursor *cursor, void *key, void *record);
 
 /*
 ** Delete entry at cursor position.
@@ -303,7 +315,8 @@ bool btree_cursor_insert(BtCursor* cursor, void* key, void* record);
 **   - May trigger node merges up to root
 **   - Cursor may become invalid if tree becomes empty
 */
-bool btree_cursor_delete(BtCursor* cursor);
+bool
+btree_cursor_delete(bt_cursor *cursor);
 
 /* ============================================================================
 ** DATA ACCESS OPERATIONS
@@ -321,7 +334,8 @@ bool btree_cursor_delete(BtCursor* cursor);
 ** NOTE: Pointer is valid only until next tree modification or page eviction.
 ** Callers should copy data if persistence is needed.
 */
-void* btree_cursor_key(BtCursor* cursor);
+void *
+btree_cursor_key(bt_cursor *cursor);
 
 /*
 ** Get pointer to record at cursor position.
@@ -332,7 +346,8 @@ void* btree_cursor_key(BtCursor* cursor);
 ** NOTE: Pointer is valid only until next tree modification or page eviction.
 ** Callers should copy data if persistence is needed.
 */
-void* btree_cursor_record(BtCursor* cursor);
+void *
+btree_cursor_record(bt_cursor *cursor);
 
 /* ============================================================================
 ** CURSOR STATE QUERIES
@@ -346,7 +361,8 @@ void* btree_cursor_record(BtCursor* cursor);
 ** Returns:
 **   true if cursor points to valid data, false otherwise
 */
-bool btree_cursor_is_valid(BtCursor* cursor);
+bool
+btree_cursor_is_valid(bt_cursor *cursor);
 
 /*
 ** Check if cursor can move to next entry.
@@ -356,7 +372,8 @@ bool btree_cursor_is_valid(BtCursor* cursor);
 **
 ** NOTE: Does not actually move the cursor.
 */
-bool btree_cursor_has_next(BtCursor* cursor);
+bool
+btree_cursor_has_next(bt_cursor *cursor);
 
 /*
 ** Check if cursor can move to previous entry.
@@ -366,7 +383,8 @@ bool btree_cursor_has_next(BtCursor* cursor);
 **
 ** NOTE: Does not actually move the cursor.
 */
-bool btree_cursor_has_previous(BtCursor* cursor);
+bool
+btree_cursor_has_previous(bt_cursor *cursor);
 
 /* ============================================================================
 ** DEBUG AND VALIDATION OPERATIONS
@@ -391,7 +409,8 @@ bool btree_cursor_has_previous(BtCursor* cursor);
 ** NOTE: This is an expensive O(n) operation. Use only for debugging.
 ** Assertion failures indicate tree corruption.
 */
-void btree_validate(BTree* tree);
+void
+btree_validate(btree *tree);
 
 /*
 ** Print tree structure for debugging.
@@ -405,4 +424,5 @@ void btree_validate(BTree* tree);
 ** NOTE: Output format is implementation-defined and may change.
 ** Intended for debugging only.
 */
-void btree_print(BTree* tree);
+void
+btree_print(btree *tree);

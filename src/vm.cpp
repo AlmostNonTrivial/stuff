@@ -26,8 +26,8 @@ struct VmCursor
 	Layout	   layout;
 
 	union {
-		BtCursor  bptree;
-		MemCursor  mem;
+		bt_cursor  bptree;
+		et_cursor  mem;
 		BlobCursor blob;
 	} cursor;
 };
@@ -96,8 +96,8 @@ vmcursor_open(VmCursor *cursor, CursorContext *context, MemoryContext *ctx)
 		cur->layout = context->layout;
 		DataType key_type = cur->layout.layout[0];
 		bool	 allow_duplicates = (bool)context->flags;
-		cur->cursor.mem.tree = memtree_create(key_type, cur->layout.record_size, allow_duplicates);
-		cur->cursor.mem.state = MemCursor::INVALID;
+		cur->cursor.mem.tree = ephemeral_tree_create(key_type, cur->layout.record_size, allow_duplicates);
+		cur->cursor.mem.state = et_cursor::INVALID;
 		cur->cursor.mem.ctx = ctx;
 		break;
 	}
@@ -117,7 +117,7 @@ vmcursor_rewind(VmCursor *cur, bool to_end)
 	switch (cur->type)
 	{
 	case CursorType::RED_BLACK:
-		return to_end ? memcursor_last(&cur->cursor.mem) : memcursor_first(&cur->cursor.mem);
+		return to_end ? et_cursor_last(&cur->cursor.mem) : et_cursor_first(&cur->cursor.mem);
 	case CursorType::BPLUS:
 		return to_end ? btree_cursor_last(&cur->cursor.bptree) : btree_cursor_first(&cur->cursor.bptree);
 	case CursorType::BLOB:
@@ -132,7 +132,7 @@ vmcursor_step(VmCursor *cur, bool forward)
 	switch (cur->type)
 	{
 	case CursorType::RED_BLACK:
-		return forward ? memcursor_next(&cur->cursor.mem) : memcursor_previous(&cur->cursor.mem);
+		return forward ? et_cursor_next(&cur->cursor.mem) : et_cursor_previous(&cur->cursor.mem);
 	case CursorType::BPLUS:
 		return forward ? btree_cursor_next(&cur->cursor.bptree) : btree_cursor_previous(&cur->cursor.bptree);
 	case CursorType::BLOB:
@@ -163,7 +163,7 @@ vmcursor_seek(VmCursor *cur, CompareOp op, uint8_t *key)
 	switch (cur->type)
 	{
 	case CursorType::RED_BLACK:
-		return memcursor_seek(&cur->cursor.mem, key, op);
+		return et_cursor_seek(&cur->cursor.mem, key, op);
 	case CursorType::BPLUS:
 		return btree_cursor_seek(&cur->cursor.bptree, key, op);
 	case CursorType::BLOB:
@@ -179,7 +179,7 @@ vmcursor_is_valid(VmCursor *cur)
 	switch (cur->type)
 	{
 	case CursorType::RED_BLACK:
-		return memcursor_is_valid(&cur->cursor.mem);
+		return et_cursor_is_valid(&cur->cursor.mem);
 
 	case CursorType::BPLUS:
 		return btree_cursor_is_valid(&cur->cursor.bptree);
@@ -196,7 +196,7 @@ vmcursor_get_key(VmCursor *cur)
 	switch (cur->type)
 	{
 	case CursorType::RED_BLACK:
-		return memcursor_key(&cur->cursor.mem);
+		return (uint8_t*)et_cursor_key(&cur->cursor.mem);
 	case CursorType::BPLUS:
 		return (uint8_t*)btree_cursor_key(&cur->cursor.bptree);
 	case CursorType::BLOB:
@@ -211,7 +211,7 @@ vmcursor_get_record(VmCursor *cur)
 	switch (cur->type)
 	{
 	case CursorType::RED_BLACK:
-		return memcursor_record(&cur->cursor.mem);
+		return (uint8_t*)et_cursor_record(&cur->cursor.mem);
 	case CursorType::BPLUS:
 		return (uint8_t*)btree_cursor_record(&cur->cursor.bptree);
 	case CursorType::BLOB:
@@ -245,7 +245,7 @@ vmcursor_insert(VmCursor *cur, uint8_t *key, uint8_t *record, uint32_t size)
 	switch (cur->type)
 	{
 	case CursorType::RED_BLACK:
-		return memcursor_insert(&cur->cursor.mem, key, record);
+		return et_cursor_insert(&cur->cursor.mem, (void*)key, (void*)record);
 	case CursorType::BPLUS:
 		return btree_cursor_insert(&cur->cursor.bptree, key, record);
 	case CursorType::BLOB:
@@ -261,7 +261,7 @@ vmcursor_update(VmCursor *cur, uint8_t *record)
 	switch (cur->type)
 	{
 	case CursorType::RED_BLACK:
-		return memcursor_update(&cur->cursor.mem, record);
+		return et_cursor_update(&cur->cursor.mem, record);
 	case CursorType::BPLUS:
 		return btree_cursor_update(&cur->cursor.bptree, record);
 	case CursorType::BLOB:
@@ -276,7 +276,7 @@ vmcursor_remove(VmCursor *cur)
 	switch (cur->type)
 	{
 	case CursorType::RED_BLACK:
-		return memcursor_delete(&cur->cursor.mem);
+		return et_cursor_delete(&cur->cursor.mem);
 	case CursorType::BPLUS:
 		return btree_cursor_delete(&cur->cursor.bptree);
 	case CursorType::BLOB:
