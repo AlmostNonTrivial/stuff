@@ -31,7 +31,8 @@ struct CursorContext
 	uint8_t flags;
 };
 
-typedef void (*ResultCallback)(array<TypedValue, QueryArena> result);
+// typedef void (*ResultCallback)(array<TypedValue, QueryArena> result);
+typedef void (*ResultCallback)(TypedValue *values, size_t count);
 extern bool _debug;
 
 enum OpCode : uint8_t

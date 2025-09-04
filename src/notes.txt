@@ -1,2 +1,19 @@
+DONE:
+- Aggregates
+- Index/composite keys
+- Subqueries
+- Joins
+- Custom evaluations (%LIKE%)
+
 TODO:
 - flag for duplicates in memtree
+- clarify allowable types
+- basic compiler
+- put casserts everywhere
+- refactor btree
+- get rid of stl
+
+
+DOING: refactor memtree
+- make sure cursors are the same, probs get rid of cmp
+- make sure printing records work

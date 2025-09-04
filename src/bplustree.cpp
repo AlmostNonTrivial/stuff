@@ -986,16 +986,27 @@ cursor_move_end(BPtCursor *cursor, bool first)
 
 	return cursor_move_in_subtree(cursor, root, first);
 }
+
 bool
-bplustree_cursor_seek_cmp(BPtCursor *cursor, const void *key, CompareOp op)
+seek_find(BPtCursor *cursor, const void *key);
+bool
+bplustree_cursor_seek(BPtCursor *cursor, const void *key, CompareOp op)
 {
 	bool exact_match_ok = (op == GE || op == LE);
 	bool forward = (op == GE || op == GT);
 
-	if (bplustree_cursor_seek(cursor, key) && exact_match_ok)
+	bool exact = seek_find(cursor, key);
+
+	if (op == EQ)
+	{
+		return exact;
+	}
+
+	if (exact && exact_match_ok)
 	{
 		return true;
 	}
+
 	do
 	{
 		const uint8_t *current_key = bplustree_cursor_key(cursor);
@@ -1062,7 +1073,7 @@ bplustree_cursor_record(BPtCursor *cursor)
 }
 
 bool
-bplustree_cursor_seek(BPtCursor *cursor, const void *key)
+seek_find(BPtCursor *cursor, const void *key)
 {
 	cursor_clear(cursor);
 

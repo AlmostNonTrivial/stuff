@@ -95,7 +95,7 @@ vmcursor_open(VmCursor *cursor, CursorContext *context, MemoryContext *ctx)
 		cur->type = CursorType::RED_BLACK;
 		cur->layout = context->layout;
 		DataType key_type = cur->layout.layout[0];
-		bool allow_duplicates = (bool)context->flags;
+		bool	 allow_duplicates = (bool)context->flags;
 		cur->cursor.mem.tree = memtree_create(key_type, cur->layout.record_size, allow_duplicates);
 		cur->cursor.mem.state = MemCursor::INVALID;
 		cur->cursor.mem.ctx = ctx;
@@ -163,10 +163,9 @@ vmcursor_seek(VmCursor *cur, CompareOp op, uint8_t *key)
 	switch (cur->type)
 	{
 	case CursorType::RED_BLACK:
-		return memcursor_seek_cmp(&cur->cursor.mem, key, op);
-
+		return memcursor_seek(&cur->cursor.mem, key, op);
 	case CursorType::BPLUS:
-		return bplustree_cursor_seek_cmp(&cur->cursor.bptree, key, op);
+		return bplustree_cursor_seek(&cur->cursor.bptree, key, op);
 	case CursorType::BLOB:
 		return blob_cursor_seek(&cur->cursor.blob, *(uint32_t *)key);
 	default:
@@ -332,6 +331,7 @@ static struct
 	bool		   halted;
 	TypedValue	   registers[REGISTERS];
 	VmCursor	   cursors[CURSORS];
+	ResultCallback emit_row;
 } VM = {};
 
 // ============================================================================
@@ -676,7 +676,7 @@ step()
 			memcpy(values[i].data, val->data, type_size(val->type));
 		}
 
-		VM.ctx->emit_row(values, reg_count);
+		VM.emit_row(values, reg_count);
 		VM.pc++;
 		return OK;
 	}
@@ -1071,4 +1071,10 @@ vm_execute(VMInstruction *instructions, int instruction_count, MemoryContext *ct
 	}
 
 	return OK;
+}
+
+void
+set_result_callback(ResultCallback callback)
+{
+	VM.emit_row = callback;
 }

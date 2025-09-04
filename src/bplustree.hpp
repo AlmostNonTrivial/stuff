@@ -55,7 +55,7 @@ struct BPtCursor
 
 // B+Tree cursor navigation functions
 bool
-bplustree_cursor_seek(BPtCursor *cursor, const void *key);
+bplustree_cursor_seek(BPtCursor *cursor, const void *key, CompareOp op  = EQ);
 bool
 bplustree_cursor_previous(BPtCursor *cursor);
 bool
@@ -89,9 +89,6 @@ bplustree_cursor_has_next(BPtCursor *cursor);
 bool
 bplustree_cursor_has_previous(BPtCursor *cursor);
 
-// B+Tree cursor advanced operations
-bool
-bplustree_cursor_seek_cmp(BPtCursor *cursor, const void *key, CompareOp op);
 
 void
 bplustree_validate(BPlusTree *tree);

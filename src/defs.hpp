@@ -46,7 +46,6 @@ struct MemoryContext
 {
 	void *(*alloc)(size_t size);						// Function pointer for allocation
 	void (*free)(void *ptr, size_t size);				// Function pointer for allocation
-	void (*emit_row)(TypedValue *values, size_t count); // Result callback
 };
 
 inline void

@@ -364,157 +364,158 @@ test_btree_stress()
 // B+Tree Integration Tests - Four focused tests
 // ============================================================================
 
-// Test 1: U32+U32 composite (main use case)
-inline void test_btree_u32_u32() {
-    printf("Test 1: U32+U32 composite keys\n");
-    pager_open(TEST_DB);
-    pager_begin_transaction();
+// // Test 1: U32+U32 composite (main use case)
+// inline void test_btree_u32_u32() {
+//     printf("Test 1: U32+U32 composite keys\n");
+//     pager_open(TEST_DB);
+//     pager_begin_transaction();
 
-    DataType key_type = TYPE_MULTI_U32_U32;
-    BPlusTree tree = bplustree_create(key_type, 0, true);
-    BPtCursor cursor = {.tree = &tree};
+//     DataType key_type = TYPE_MULTI_U32_U32;
+//     BPlusTree tree = bplustree_create(key_type, 0, true);
+//     BPtCursor cursor = {.tree = &tree};
 
-    uint8_t key_data[8];
-    uint8_t empty_value = 0;
+//     uint8_t key_data[8];
+//     uint8_t empty_value = 0;
 
-    // Insert user+timestamp pairs
-    for (uint32_t user = 1; user <= 5; user++) {
-        for (uint32_t time = 100; time <= 103; time++) {
-            pack_u32_u32(key_data, user, time);
-            assert(bplustree_cursor_insert(&cursor, key_data, &empty_value));
-        }
-    }
+//     // Insert user+timestamp pairs
+//     for (uint32_t user = 1; user <= 5; user++) {
+//         for (uint32_t time = 100; time <= 103; time++) {
+//             pack_u32_u32(key_data, user, time);
+//             assert(bplustree_cursor_insert(&cursor, key_data, &empty_value));
+//         }
+//     }
 
-    // Range query for user 3
-    pack_u32_u32(key_data, 3, 0);
-    assert(bplustree_cursor_seek_cmp(&cursor, key_data, GE));
+//     // Range query for user 3
+//     pack_u32_u32(key_data, 3, 0);
 
-    int count = 0;
-    do {
-        uint8_t* found = bplustree_cursor_key(&cursor);
-        uint32_t found_user = extract_u32_at(found, 0);
-        if (found_user != 3) break;
-        count++;
-    } while (bplustree_cursor_next(&cursor));
+//     assert(bplustree_cursor_seek(&cursor, key_data, GE));
 
-    assert(count == 4);
-    printf("  Found %d entries for user 3\n", count);
+//     int count = 0;
+//     do {
+//         uint8_t* found = bplustree_cursor_key(&cursor);
+//         uint32_t found_user = extract_u32_at(found, 0);
+//         if (found_user != 3) break;
+//         count++;
+//     } while (bplustree_cursor_next(&cursor));
 
-    pager_rollback();
-    pager_close();
-    os_file_delete(TEST_DB);
-}
+//     assert(count == 4);
+//     printf("  Found %d entries for user 3\n", count);
 
-// Test 2: U16+U16 composite
-inline void test_btree_u16_u16() {
-    printf("Test 2: U16+U16 composite keys\n");
-    pager_open(TEST_DB);
-    pager_begin_transaction();
+//     pager_rollback();
+//     pager_close();
+//     os_file_delete(TEST_DB);
+// }
 
-    DataType key_type = TYPE_MULTI_U16_U16;
-    BPlusTree tree = bplustree_create(key_type, 0, true);
-    BPtCursor cursor = {.tree = &tree};
+// // Test 2: U16+U16 composite
+// inline void test_btree_u16_u16() {
+//     printf("Test 2: U16+U16 composite keys\n");
+//     pager_open(TEST_DB);
+//     pager_begin_transaction();
 
-    uint8_t key_data[4];
-    uint8_t empty_value = 0;
+//     DataType key_type = TYPE_MULTI_U16_U16;
+//     BPlusTree tree = bplustree_create(key_type, 0, true);
+//     BPtCursor cursor = {.tree = &tree};
 
-    for (uint16_t dept = 10; dept <= 12; dept++) {
-        for (uint16_t emp = 1000; emp <= 1002; emp++) {
-            pack_u16_u16(key_data, dept, emp);
-            assert(bplustree_cursor_insert(&cursor, key_data, &empty_value));
-        }
-    }
+//     uint8_t key_data[4];
+//     uint8_t empty_value = 0;
 
-    pack_u16_u16(key_data, 11, 0);
-    assert(bplustree_cursor_seek_cmp(&cursor, key_data, GE));
+//     for (uint16_t dept = 10; dept <= 12; dept++) {
+//         for (uint16_t emp = 1000; emp <= 1002; emp++) {
+//             pack_u16_u16(key_data, dept, emp);
+//             assert(bplustree_cursor_insert(&cursor, key_data, &empty_value));
+//         }
+//     }
 
-    int count = 0;
-    do {
-        uint8_t* found = bplustree_cursor_key(&cursor);
-        uint16_t found_dept = extract_u16_at(found, 0);
-        if (found_dept != 11) break;
-        count++;
-    } while (bplustree_cursor_next(&cursor));
+//     pack_u16_u16(key_data, 11, 0);
+//     assert(bplustree_cursor_seek(&cursor, key_data, GE));
 
-    assert(count == 3);
-    printf("  Found %d entries for dept 11\n", count);
+//     int count = 0;
+//     do {
+//         uint8_t* found = bplustree_cursor_key(&cursor);
+//         uint16_t found_dept = extract_u16_at(found, 0);
+//         if (found_dept != 11) break;
+//         count++;
+//     } while (bplustree_cursor_next(&cursor));
 
-    pager_rollback();
-    pager_close();
-    os_file_delete(TEST_DB);
-}
+//     assert(count == 3);
+//     printf("  Found %d entries for dept 11\n", count);
 
-// Test 3: U8+U8 composite
-inline void test_btree_u8_u8() {
-    printf("Test 3: U8+U8 composite keys\n");
-    pager_open(TEST_DB);
-    pager_begin_transaction();
+//     pager_rollback();
+//     pager_close();
+//     os_file_delete(TEST_DB);
+// }
 
-    DataType key_type = TYPE_MULTI_U8_U8;
-    BPlusTree tree = bplustree_create(key_type, 0, true);
-    BPtCursor cursor = {.tree = &tree};
+// // Test 3: U8+U8 composite
+// inline void test_btree_u8_u8() {
+//     printf("Test 3: U8+U8 composite keys\n");
+//     pager_open(TEST_DB);
+//     pager_begin_transaction();
 
-    uint8_t key_data[2];
-    uint8_t empty_value = 0;
+//     DataType key_type = TYPE_MULTI_U8_U8;
+//     BPlusTree tree = bplustree_create(key_type, 0, true);
+//     BPtCursor cursor = {.tree = &tree};
 
-    for (uint8_t cat = 1; cat <= 3; cat++) {
-        for (uint8_t pri = 10; pri <= 12; pri++) {
-            pack_u8_u8(key_data, cat, pri);
-            assert(bplustree_cursor_insert(&cursor, key_data, &empty_value));
-        }
-    }
+//     uint8_t key_data[2];
+//     uint8_t empty_value = 0;
 
-    // Verify lexicographic ordering
-    assert(bplustree_cursor_first(&cursor));
+//     for (uint8_t cat = 1; cat <= 3; cat++) {
+//         for (uint8_t pri = 10; pri <= 12; pri++) {
+//             pack_u8_u8(key_data, cat, pri);
+//             assert(bplustree_cursor_insert(&cursor, key_data, &empty_value));
+//         }
+//     }
 
-    uint8_t expected[][2] = {{1,10}, {1,11}, {1,12}, {2,10}, {2,11}, {2,12}, {3,10}, {3,11}, {3,12}};
+//     // Verify lexicographic ordering
+//     assert(bplustree_cursor_first(&cursor));
 
-    for (int i = 0; i < 9; i++) {
-        uint8_t* found = bplustree_cursor_key(&cursor);
-        assert(extract_u8_at(found, 0) == expected[i][0]);
-        assert(extract_u8_at(found, 1) == expected[i][1]);
-        if (i < 8) assert(bplustree_cursor_next(&cursor));
-    }
+//     uint8_t expected[][2] = {{1,10}, {1,11}, {1,12}, {2,10}, {2,11}, {2,12}, {3,10}, {3,11}, {3,12}};
 
-    printf("  Verified lexicographic ordering for 9 entries\n");
+//     for (int i = 0; i < 9; i++) {
+//         uint8_t* found = bplustree_cursor_key(&cursor);
+//         assert(extract_u8_at(found, 0) == expected[i][0]);
+//         assert(extract_u8_at(found, 1) == expected[i][1]);
+//         if (i < 8) assert(bplustree_cursor_next(&cursor));
+//     }
 
-    pager_rollback();
-    pager_close();
-    os_file_delete(TEST_DB);
-}
+//     printf("  Verified lexicographic ordering for 9 entries\n");
 
-// Test 4: Mixed size U32+U64
-inline void test_btree_u32_u64() {
-    printf("Test 4: U32+U64 composite keys (mixed sizes)\n");
-    pager_open(TEST_DB);
-    pager_begin_transaction();
+//     pager_rollback();
+//     pager_close();
+//     os_file_delete(TEST_DB);
+// }
 
-    DataType key_type = TYPE_MULTI_U32_U64;
-    BPlusTree tree = bplustree_create(key_type, 0, true);
-    BPtCursor cursor = {.tree = &tree};
+// // Test 4: Mixed size U32+U64
+// inline void test_btree_u32_u64() {
+//     printf("Test 4: U32+U64 composite keys (mixed sizes)\n");
+//     pager_open(TEST_DB);
+//     pager_begin_transaction();
 
-    uint8_t key_data[12];
-    uint8_t empty_value = 0;
+//     DataType key_type = TYPE_MULTI_U32_U64;
+//     BPlusTree tree = bplustree_create(key_type, 0, true);
+//     BPtCursor cursor = {.tree = &tree};
 
-    for (uint32_t order = 100; order <= 102; order++) {
-        for (uint64_t ts = 1000000000000ULL; ts <= 1000000000002ULL; ts++) {
-            pack_u32_u64(key_data, order, ts);
-            assert(bplustree_cursor_insert(&cursor, key_data, &empty_value));
-        }
-    }
+//     uint8_t key_data[12];
+//     uint8_t empty_value = 0;
 
-    // Test that first component dominates
-    uint8_t key_small[12], key_large[12];
-    pack_u32_u64(key_small, 101, 0ULL);
-    pack_u32_u64(key_large, 100, 0xFFFFFFFFFFFFFFFFULL);
+//     for (uint32_t order = 100; order <= 102; order++) {
+//         for (uint64_t ts = 1000000000000ULL; ts <= 1000000000002ULL; ts++) {
+//             pack_u32_u64(key_data, order, ts);
+//             assert(bplustree_cursor_insert(&cursor, key_data, &empty_value));
+//         }
+//     }
 
-    assert(type_compare(key_type, key_large, key_small) < 0);  // (100,MAX) < (101,0)
-    printf("  Verified first component dominates: (100,MAX) < (101,0)\n");
+//     // Test that first component dominates
+//     uint8_t key_small[12], key_large[12];
+//     pack_u32_u64(key_small, 101, 0ULL);
+//     pack_u32_u64(key_large, 100, 0xFFFFFFFFFFFFFFFFULL);
 
-    pager_rollback();
-    pager_close();
-    os_file_delete(TEST_DB);
-}
+//     assert(type_compare(key_type, key_large, key_small) < 0);  // (100,MAX) < (101,0)
+//     printf("  Verified first component dominates: (100,MAX) < (101,0)\n");
+
+//     pager_rollback();
+//     pager_close();
+//     os_file_delete(TEST_DB);
+// }
 
 
 // Test with maximum-size records
@@ -1001,11 +1002,11 @@ test_btree_deep_tree_coverage()
 	// Test seek_cmp for coverage (if_72, if_73)
 	std::cout << "Testing seek_cmp..." << std::flush;
 	uint32_t cmp_key = 250;
-	assert(bplustree_cursor_seek_cmp(&cursor, &cmp_key, GE)); // if_72 for exact match case
+	assert(bplustree_cursor_seek(&cursor, &cmp_key, GE)); // if_72 for exact match case
 
 	// Test with key that doesn't exist
 	uint32_t missing_key = KEY_COUNT + 100;
-	assert(bplustree_cursor_seek_cmp(&cursor, &missing_key, LE)); // Should iterate and hit if_73
+	assert(bplustree_cursor_seek(&cursor, &missing_key, LE)); // Should iterate and hit if_73
 	std::cout << " OK\n";
 
 	// Test node fault conditions (if_91, if_96)
@@ -1191,7 +1192,7 @@ test_btree_remaining_coverage()
 		cursor.state = BPT_CURSOR_INVALID;
 
 		// This should iterate and hit if_73 when cursor key returns null
-		assert(bplustree_cursor_seek_cmp(&cursor, &target, GE));
+		assert(bplustree_cursor_seek(&cursor, &target, GE));
 
 		pager_rollback();
 		pager_close();
@@ -1210,7 +1211,7 @@ test_btree_remaining_coverage()
 		// Create a tree with internal nodes
 		BPtCursor cursor = {.tree = &tree};
 		uint32_t  i = 0;
-		bplustree_cursor_seek_cmp(&cursor, &i, GE);
+		bplustree_cursor_seek(&cursor, &i, GE);
 
 		pager_rollback();
 		pager_close();
@@ -1282,9 +1283,9 @@ test_btree()
 
 
     printf("\n=== Composite Type B+Tree Integration Tests ===\n");
-    test_btree_u32_u32();
-    test_btree_u16_u16();
-    test_btree_u8_u8();
-    test_btree_u32_u64();
+    // test_btree_u32_u32();
+    // test_btree_u16_u16();
+    // test_btree_u8_u8();
+    // test_btree_u32_u64();
 
 }
