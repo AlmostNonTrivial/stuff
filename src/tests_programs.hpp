@@ -1,6 +1,6 @@
 
 #pragma once
-
+#include "arena_types.hpp"
 #include "blob.hpp"
 #include "bplustree.hpp"
 #include "catalog.hpp"
@@ -1094,6 +1094,211 @@ test_blob_storage()
 
 // Call this in test_programs() after loading data:
 // test_subquery_pattern();
+//
+// Add to test_programs.hpp - Replace or augment existing validation system
+
+// ============================================================================
+// Queue-based Validation System
+// ============================================================================
+
+struct ExpectedRow {
+    array<TypedValue, QueryArena> values;
+};
+static array<ExpectedRow, QueryArena> expected_queue;
+static uint32_t validation_failures = 0;
+static uint32_t validation_row_count = 0;
+static bool validation_active = false;
+// Validation callback
+void validation_callback(TypedValue* result, size_t count) {
+    validation_row_count++;
+
+    if (expected_queue.size == 0) {
+        printf("❌ Row %u: Unexpected row (no more expected)\n", validation_row_count);
+        printf("   Got: ");
+        print_result_callback(result, count);
+        validation_failures++;
+        return;
+    }
+
+    // Pop from front
+    ExpectedRow& expected = expected_queue.data[0];
+
+    // Validate column count
+    if (expected.values.size != count) {
+        printf("❌ Row %u: Column count mismatch (expected %u, got %zu)\n",
+               validation_row_count, expected.values.size, count);
+        validation_failures++;
+    } else {
+        // Validate each column
+        bool row_matches = true;
+        for (size_t i = 0; i < count; i++) {
+            if (expected.values.data[i].type != result[i].type ||
+                type_compare(result[i].type, result[i].data, expected.values.data[i].data) != 0) {
+
+                if (row_matches) { // First mismatch in this row
+                    printf("❌ Row %u: Value mismatch\n", validation_row_count);
+                    row_matches = false;
+                }
+
+                printf("   Column %zu: expected ", i);
+                type_print(expected.values.data[i].type, expected.values.data[i].data);
+                printf(" (%s), got ", type_name(expected.values.data[i].type));
+                type_print(result[i].type, result[i].data);
+                printf(" (%s)\n", type_name(result[i].type));
+            }
+        }
+
+        if (!row_matches) {
+            validation_failures++;
+        }
+    }
+
+    // Remove from queue (shift array)
+    for (uint32_t i = 1; i < expected_queue.size; i++) {
+        expected_queue.data[i-1] = expected_queue.data[i];
+    }
+    expected_queue.size--;
+}
+
+
+// Clear validation state
+inline void validation_reset() {
+    array_clear(&expected_queue);
+    validation_failures = 0;
+    validation_row_count = 0;
+    validation_active = false;
+}
+
+// Start validation mode
+inline void validation_begin() {
+    validation_reset();
+    validation_active = true;
+    ctx.emit_row = validation_callback;
+}
+
+// End validation and report
+inline bool validation_end() {
+    validation_active = false;
+    ctx.emit_row = print_result_callback;
+
+    bool success = (validation_failures == 0);
+
+    if (expected_queue.size > 0) {
+        printf("❌ %u expected rows were not emitted\n", expected_queue.size);
+        for (uint32_t i = 0; i < expected_queue.size; i++) {
+            printf("   Missing row %u: ", validation_row_count + i + 1);
+            for (uint32_t j = 0; j < expected_queue.data[i].values.size; j++) {
+                if (j > 0) printf(", ");
+                type_print(expected_queue.data[i].values.data[j].type,
+                          expected_queue.data[i].values.data[j].data);
+            }
+            printf("\n");
+        }
+        success = false;
+    }
+
+    if (success) {
+        printf("✅ All %u rows validated successfully\n", validation_row_count);
+    } else {
+        printf("❌ Validation failed: %u mismatches\n", validation_failures);
+    }
+
+    return success;
+}
+
+// Add expected row with TypedValues
+inline void expect_row_values(std::initializer_list<TypedValue> values) {
+    ExpectedRow row;
+    array_reserve(&row.values, values.size());
+
+    for (const auto& val : values) {
+        // Deep copy the value
+        uint32_t size = type_size(val.type);
+        uint8_t* data = (uint8_t*)arena::alloc<QueryArena>(size);
+        type_copy(val.type, data, val.data);
+        array_push(&row.values, TypedValue::make(val.type, data));
+    }
+
+    array_push(&expected_queue, row);
+}
+
+
+
+// ============================================================================
+// Example test using validation queue
+// ============================================================================
+
+inline void test_select_with_validation() {
+    printf("\n=== SELECT with Queue Validation ===\n");
+
+    // Setup expected results BEFORE execution
+    validation_begin();
+    expect_row_values({
+        alloc_u32(1),
+        alloc_char16("emilys"),
+        alloc_char32("emily.johnson@x.dummyjson.com"),
+        alloc_u32(28),
+        alloc_char16("Phoenix")
+    });
+
+    expect_row_values({
+        alloc_u32(2),
+        alloc_char16("michaelw"),
+        alloc_char32("michael.williams@x.dummyjson.com"),
+        alloc_u32(35),
+        alloc_char16("Houston")
+    });
+
+    expect_row_values({
+        alloc_u32(3),
+        alloc_char16("sophiab"),
+        alloc_char32("sophia.brown@x.dummyjson.com"),
+        alloc_u32(42),
+        alloc_char16("Washington")
+    });
+
+    // Build and execute program
+    ProgramBuilder prog;
+    auto cctx = from_structure(catalog[USERS]);
+    prog.open_cursor(0, &cctx);
+
+    // Only get first 3 rows for this test
+    int count = 0;
+    int three = prog.load(TYPE_U32, prog.alloc_value(3U));
+    int counter = prog.load(TYPE_U32, prog.alloc_value(0U));
+
+    int at_end = prog.first(0);
+    auto while_ctx = prog.begin_while(at_end);
+    {
+        int row = prog.get_columns(0, 0, 5);
+        prog.result(row, 5);
+
+        // Increment counter
+        int one = prog.load(TYPE_U32, prog.alloc_value(1U));
+        prog.add(counter, one, counter);
+
+        // Check if we've done 3 rows
+        int done = prog.ge(counter, three);
+        prog.jumpif_true(done, "exit");
+
+        prog.next(0, at_end);
+    }
+    prog.end_while(while_ctx);
+
+    prog.label("exit");
+    prog.close_cursor(0);
+    prog.halt();
+    prog.resolve_labels();
+
+    // Execute with validation active
+    vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+
+    // Check results
+    validation_end();
+}
+
+// Macro for quick row expectations
+#define EXPECT_ROW(...) expect_row_values({__VA_ARGS__})
 
 // Main test function
 inline void
@@ -1108,7 +1313,7 @@ test_programs()
 	{
 		load_all_data();
 	}
-
+	test_select_with_validation();
 	// _debug = true;
 	// Run test queries
 	// test_select();

@@ -1,4 +1,4 @@
-// type_system.h - 64-bit DataType with dual type support
+
 #pragma once
 #include <cstdint>
 #include <stdint.h>
@@ -11,8 +11,8 @@
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
 // 64-bit type encoding:
-// Simplified layout for ALL types: [type_id:8][reserved:32][size:24]
-// For duals: [TYPE_ID_DUAL:8][type1_id:8][type2_id:8][reserved:8][size1:12][size2:12][total_size:8]
+// Single types: [type_id:8][reserved:32][size:24]
+// Dual types:   [TYPE_ID_DUAL:8][type1_id:8][type2_id:8][reserved:8][size1:12][size2:12][total_size:24]
 typedef uint64_t DataType;
 
 // Type IDs - each type gets unique ID
@@ -38,18 +38,18 @@ enum TypeId : uint8_t {
     TYPE_ID_NULL = 0xFF
 };
 
-// Simplified, consistent layout for ALL types
+// Uniform encoding - size always in bits 0-23
 #define MAKE_TYPE(id, size) \
     (((uint64_t)(id) << 56) | ((uint64_t)(size) & 0xFFFFFF))
 
-// Dual type: [TYPE_ID_DUAL:8][type1_id:8][type2_id:8][reserved:8][size1:12][size2:12][total_size:8]
+// Dual type: [TYPE_ID_DUAL:8][type1_id:8][type2_id:8][reserved:8][size1:12][size2:12][total_size:24]
 #define MAKE_DUAL_TYPE(type1_id, type2_id, size1, size2) \
     (((uint64_t)(TYPE_ID_DUAL) << 56) | \
      ((uint64_t)(type1_id) << 48) | \
      ((uint64_t)(type2_id) << 40) | \
      ((uint64_t)((size1) & 0xFFF) << 28) | \
      ((uint64_t)((size2) & 0xFFF) << 16) | \
-     ((uint64_t)(((size1) + (size2)) & 0xFF)))
+     ((uint64_t)((size1) + (size2)) & 0xFFFFFF))
 
 // Scalar type definitions
 #define TYPE_U8  MAKE_TYPE(TYPE_ID_U8,  1)
@@ -117,13 +117,10 @@ inline DataType make_varchar(uint32_t size) {
 // Type property extraction
 // ============================================================================
 
+// BRANCHLESS - size always in bits 0-23
 __attribute__((always_inline))
 inline uint32_t type_size(DataType type) {
-    uint8_t tid = type >> 56;
-    if (tid == TYPE_ID_DUAL) {
-        return type & 0xFF;  // Total size in lowest byte for dual types
-    }
-    return type & 0xFFFFFF;  // Size always in bits 0-23 for regular types
+    return type & 0xFFFFFF;
 }
 
 __attribute__((always_inline))
@@ -206,8 +203,6 @@ inline uint32_t dual_component_offset(DataType type, uint32_t index) {
     if (index == 1) return dual_size_1(type);
     return 0;
 }
-
-
 
 // Alignment
 __attribute__((always_inline))

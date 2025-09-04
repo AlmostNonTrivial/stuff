@@ -1,4 +1,4 @@
-// blob.cpp
+
 #include "blob.hpp"
 #include "defs.hpp"
 #include "pager.hpp"
