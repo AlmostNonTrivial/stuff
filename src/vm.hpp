@@ -26,7 +26,7 @@ struct CursorContext
 	CursorType type;
 	Layout	   layout;
 	union {
-		BPlusTree *tree;
+		BTree *tree;
 	} storage;
 	uint8_t flags;
 };

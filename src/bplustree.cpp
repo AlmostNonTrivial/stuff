@@ -12,11 +12,12 @@
 #include <sys/types.h>
 
 static void
-print_key(BPlusTree &tree, uint8_t *key);
+print_key(BTree &tree, void *key);
 
 // Constants
 #define NODE_HEADER_SIZE 24
 #define NODE_DATA_SIZE	 PAGE_SIZE - NODE_HEADER_SIZE
+#define MIN_ENTRY_COUNT	 3
 
 // B+Tree node structure - fits in a single page
 struct BTreeNode
@@ -27,8 +28,7 @@ struct BTreeNode
 	uint32_t next;		 // Next sibling (for leaf nodes)
 	uint32_t previous;	 // Previous sibling (for leaf nodes)
 	uint32_t num_keys;	 // Number of keys in this node
-	uint8_t	 is_leaf;	 // 1 if leaf, 0 if internal
-	uint8_t	 padding[3]; // Alignment padding
+	uint32_t is_leaf;	 // 1 if leaf, 0 if internal, and padding
 	// Data area - stores keys, children pointers, and data
 	// Layout for internal nodes: [keys][children]
 	// Layout for leaf nodes: [keys][records]
@@ -78,12 +78,6 @@ static_assert(sizeof(BTreeNode) == PAGE_SIZE, "BTreeNode must be exactly PAGE_SI
 
 // Utility macros
 #define MARK_DIRTY(node) pager_mark_dirty((node)->index)
-#define ASSERT_PRINT(condition, tree)                                                                                  \
-	if (!(condition))                                                                                                  \
-	{                                                                                                                  \
-		bplustree_print(tree);                                                                                         \
-		assert(condition);                                                                                             \
-	}
 
 // ============================================================================
 // MEMORY OPERATION HELPERS - Core shift and copy operations
@@ -91,53 +85,53 @@ static_assert(sizeof(BTreeNode) == PAGE_SIZE, "BTreeNode must be exactly PAGE_SI
 
 // Shift keys right within a node (creates gap at from_idx)
 static void
-shift_keys_right(BPlusTree &tree, BTreeNode *node, uint32_t from_idx, uint32_t count)
+shift_keys_right(BTree &tree, BTreeNode *node, uint32_t from_idx, uint32_t count)
 {
 	if (count == 0)
 		return;
-	uint8_t *src = GET_KEY_AT(node, from_idx);
-	uint8_t *dst = GET_KEY_AT(node, from_idx + 1);
+	void *src = GET_KEY_AT(node, from_idx);
+	void *dst = GET_KEY_AT(node, from_idx + 1);
 	memcpy(dst, src, count * tree.node_key_size);
 }
 
 // Shift keys left within a node (removes gap at from_idx)
 static void
-shift_keys_left(BPlusTree &tree, BTreeNode *node, uint32_t from_idx, uint32_t count)
+shift_keys_left(BTree &tree, BTreeNode *node, uint32_t from_idx, uint32_t count)
 {
 	if (count == 0)
 		return;
-	uint8_t *dst = GET_KEY_AT(node, from_idx);
-	uint8_t *src = GET_KEY_AT(node, from_idx + 1);
+	void *dst = GET_KEY_AT(node, from_idx);
+	void *src = GET_KEY_AT(node, from_idx + 1);
 	memcpy(dst, src, count * tree.node_key_size);
 }
 
 // Shift records right in a leaf node
 static void
-shift_records_right(BPlusTree &tree, BTreeNode *node, uint32_t from_idx, uint32_t count)
+shift_records_right(BTree &tree, BTreeNode *node, uint32_t from_idx, uint32_t count)
 {
 	if (count == 0)
 		return;
-	uint8_t *base = GET_RECORD_DATA(node);
-	uint8_t *src = base + from_idx * tree.record_size;
-	uint8_t *dst = base + (from_idx + 1) * tree.record_size;
+	uint8_t*base = GET_RECORD_DATA(node);
+	void *src = base + from_idx * tree.record_size;
+	void *dst = base + (from_idx + 1) * tree.record_size;
 	memcpy(dst, src, count * tree.record_size);
 }
 
 // Shift records left in a leaf node
 static void
-shift_records_left(BPlusTree &tree, BTreeNode *node, uint32_t from_idx, uint32_t count)
+shift_records_left(BTree &tree, BTreeNode *node, uint32_t from_idx, uint32_t count)
 {
 	if (count == 0)
 		return;
-	uint8_t *base = GET_RECORD_DATA(node);
-	uint8_t *dst = base + from_idx * tree.record_size;
-	uint8_t *src = base + (from_idx + 1) * tree.record_size;
+	uint8_t*base = GET_RECORD_DATA(node);
+	void *dst = base + from_idx * tree.record_size;
+	void *src = base + (from_idx + 1) * tree.record_size;
 	memcpy(dst, src, count * tree.record_size);
 }
 
 // Shift children right in an internal node
 static void
-shift_children_right(BPlusTree &tree, BTreeNode *node, uint32_t from_idx, uint32_t count)
+shift_children_right(BTree &tree, BTreeNode *node, uint32_t from_idx, uint32_t count)
 {
 	if (count == 0)
 		return;
@@ -147,7 +141,7 @@ shift_children_right(BPlusTree &tree, BTreeNode *node, uint32_t from_idx, uint32
 
 // Shift children left in an internal node
 static void
-shift_children_left(BPlusTree &tree, BTreeNode *node, uint32_t from_idx, uint32_t count)
+shift_children_left(BTree &tree, BTreeNode *node, uint32_t from_idx, uint32_t count)
 {
 	if (count == 0)
 		return;
@@ -157,7 +151,7 @@ shift_children_left(BPlusTree &tree, BTreeNode *node, uint32_t from_idx, uint32_
 
 // Copy keys between nodes
 static void
-copy_keys(BPlusTree &tree, BTreeNode *src, uint32_t src_idx, BTreeNode *dst, uint32_t dst_idx, uint32_t count)
+copy_keys(BTree &tree, BTreeNode *src, uint32_t src_idx, BTreeNode *dst, uint32_t dst_idx, uint32_t count)
 {
 	if (count == 0)
 	{
@@ -169,26 +163,26 @@ copy_keys(BPlusTree &tree, BTreeNode *src, uint32_t src_idx, BTreeNode *dst, uin
 
 // Copy records between leaf nodes
 static void
-copy_records(BPlusTree &tree, BTreeNode *src, uint32_t src_idx, BTreeNode *dst, uint32_t dst_idx, uint32_t count)
+copy_records(BTree &tree, BTreeNode *src, uint32_t src_idx, BTreeNode *dst, uint32_t dst_idx, uint32_t count)
 {
 	if (count == 0)
 		return;
-	uint8_t *src_records = GET_RECORD_DATA(src);
-	uint8_t *dst_records = GET_RECORD_DATA(dst);
+	uint8_t*src_records = GET_RECORD_DATA(src);
+	uint8_t*dst_records = GET_RECORD_DATA(dst);
 	memcpy(dst_records + dst_idx * tree.record_size, src_records + src_idx * tree.record_size,
 		   count * tree.record_size);
 }
 
 // Copy a single key
 static void
-copy_key(BPlusTree &tree, uint8_t *dst, uint8_t *src)
+copy_key(BTree &tree, void *dst, void *src)
 {
 	memcpy(dst, src, tree.node_key_size);
 }
 
 // Copy a single record
 static void
-copy_record(BPlusTree &tree, void *dst, void *src)
+copy_record(BTree &tree, void *dst, void *src)
 {
 	memcpy(dst, src, tree.record_size);
 }
@@ -199,7 +193,7 @@ copy_record(BPlusTree &tree, void *dst, void *src)
 
 // Find a child's index in its parent's children array
 static uint32_t
-find_child_index(BPlusTree &tree, BTreeNode *parent, BTreeNode *child)
+find_child_index(BTree &tree, BTreeNode *parent, BTreeNode *child)
 {
 	// cannot be converted to binary search, because the page indicies are not sorted
 	uint32_t *children = GET_CHILDREN(parent);
@@ -210,7 +204,7 @@ find_child_index(BPlusTree &tree, BTreeNode *parent, BTreeNode *child)
 			return i;
 		}
 	}
-	ASSERT_PRINT(false, &tree); // Should never happen
+	assert(false);
 	return 0;
 }
 
@@ -256,9 +250,9 @@ unlink_leaf_node(BTreeNode *node)
 
 // Set child at index and update its parent
 static void
-set_child(BPlusTree &tree, BTreeNode *node, uint32_t child_index, uint32_t node_index)
+set_child(BTree &tree, BTreeNode *node, uint32_t child_index, uint32_t node_index)
 {
-	ASSERT_PRINT(IS_INTERNAL(node), &tree);
+	assert(IS_INTERNAL(node));
 
 	MARK_DIRTY(node);
 	uint32_t *children = GET_CHILDREN(node);
@@ -281,7 +275,7 @@ set_child(BPlusTree &tree, BTreeNode *node, uint32_t child_index, uint32_t node_
 // ============================================================================
 
 static uint32_t
-binary_search(BPlusTree &tree, BTreeNode *node, const uint8_t *key)
+binary_search(BTree &tree, BTreeNode *node, void *key)
 {
 	uint32_t left = 0;
 	uint32_t right = node->num_keys;
@@ -289,7 +283,7 @@ binary_search(BPlusTree &tree, BTreeNode *node, const uint8_t *key)
 	while (left < right)
 	{
 		uint32_t mid = left + (right - left) / 2;
-		uint8_t *mid_key = GET_KEY_AT(node, mid);
+		void *mid_key = GET_KEY_AT(node, mid);
 
 		if (type_less_than(tree.node_key_type, mid_key, key))
 		{
@@ -314,10 +308,10 @@ binary_search(BPlusTree &tree, BTreeNode *node, const uint8_t *key)
 }
 
 static BTreeNode *
-create_node(BPlusTree &tree, bool is_leaf)
+create_node(BTree &tree, bool is_leaf)
 {
 	uint32_t page_index = pager_new();
-	ASSERT_PRINT(page_index != PAGE_INVALID, &tree);
+	assert(page_index != PAGE_INVALID);
 	BTreeNode *node = GET_NODE(page_index);
 
 	node->index = page_index;
@@ -331,10 +325,10 @@ create_node(BPlusTree &tree, bool is_leaf)
 	return node;
 }
 
-BPlusTree
-bplustree_create(DataType key, uint32_t record_size, bool init = false)
+BTree
+btree_create(DataType key, uint32_t record_size, bool init = false)
 {
-	BPlusTree tree = {0};
+	BTree tree = {0};
 
 	tree.node_key_type = key;
 	tree.node_key_size = type_size(key);
@@ -376,12 +370,12 @@ bplustree_create(DataType key, uint32_t record_size, bool init = false)
 }
 
 static void
-swap_with_root(BPlusTree &tree, BTreeNode *root, BTreeNode *other)
+swap_with_root(BTree &tree, BTreeNode *root, BTreeNode *other)
 {
 	MARK_DIRTY(root);
 	MARK_DIRTY(other);
 	// Verify root is actually the root
-	ASSERT_PRINT(root->index == tree.root_page_index, &tree);
+	assert(root->index == tree.root_page_index);
 
 	// Swap everything EXCEPT the index field
 	uint32_t saved_root_index = root->index;
@@ -424,7 +418,7 @@ destroy_node(BTreeNode *node)
 // Split a full node into two nodes, promoting a key to the parent
 // Returns the parent node (which may need splitting if it's now full)
 static BTreeNode *
-split(BPlusTree &tree, BTreeNode *node)
+split(BTree &tree, BTreeNode *node)
 {
 	// === PREPARATION ===
 	uint32_t   split_point = GET_SPLIT_INDEX(node);
@@ -518,7 +512,7 @@ split(BPlusTree &tree, BTreeNode *node)
 
 // Just find the leaf - no insertion
 static BTreeNode *
-find_leaf_for_key(BPlusTree &tree, uint8_t *key)
+find_leaf_for_key(BTree &tree, void *key)
 {
 	BTreeNode *node = GET_ROOT();
 
@@ -533,7 +527,7 @@ find_leaf_for_key(BPlusTree &tree, uint8_t *key)
 
 // Clean, simple insert
 static void
-insert_element(BPlusTree &tree, void *key, const uint8_t *data)
+insert_element(BTree &tree, void *key, void *data)
 {
 	BTreeNode *root = GET_ROOT();
 
@@ -541,14 +535,14 @@ insert_element(BPlusTree &tree, void *key, const uint8_t *data)
 	{
 		// Direct insert into empty root
 		MARK_DIRTY(root);
-		copy_key(tree, GET_KEY_AT(root, 0), (uint8_t *)key);
+		copy_key(tree, GET_KEY_AT(root, 0), (void *)key);
 		copy_record(tree, GET_RECORD_AT(root, 0), (void *)data);
 		root->num_keys = 1;
 		return;
 	}
 
 	// Find leaf
-	BTreeNode *leaf = find_leaf_for_key(tree, (uint8_t *)key);
+	BTreeNode *leaf = find_leaf_for_key(tree, (void *)key);
 
 	// Make room if needed
 	if (NODE_IS_FULL(leaf))
@@ -564,17 +558,17 @@ insert_element(BPlusTree &tree, void *key, const uint8_t *data)
 		}
 
 		// Re-find because splits may have moved our key
-		leaf = find_leaf_for_key(tree, (uint8_t *)key);
+		leaf = find_leaf_for_key(tree, (void *)key);
 	}
 
 	// Now insert
-	uint32_t pos = binary_search(tree, leaf, (uint8_t *)key);
+	uint32_t pos = binary_search(tree, leaf, (void *)key);
 	MARK_DIRTY(leaf);
 
 	shift_keys_right(tree, leaf, pos, leaf->num_keys - pos);
 	shift_records_right(tree, leaf, pos, leaf->num_keys - pos);
 
-	copy_key(tree, GET_KEY_AT(leaf, pos), (uint8_t *)key);
+	copy_key(tree, GET_KEY_AT(leaf, pos), (void *)key);
 	copy_record(tree, GET_RECORD_AT(leaf, pos), (void *)data);
 	leaf->num_keys++;
 }
@@ -587,10 +581,10 @@ insert_element(BPlusTree &tree, void *key, const uint8_t *data)
 
 // Collapse root when it becomes empty (has only one child)
 static void
-collapse_empty_root(BPlusTree &tree, BTreeNode *root)
+collapse_empty_root(BTree &tree, BTreeNode *root)
 {
-	ASSERT_PRINT(root->num_keys == 0, &tree);
-	ASSERT_PRINT(IS_INTERNAL(root), &tree);
+	assert(root->num_keys == 0);
+	assert(IS_INTERNAL(root));
 
 	// The root has only one child - make it the new root
 	BTreeNode *only_child = GET_CHILD(root, 0);
@@ -605,7 +599,7 @@ collapse_empty_root(BPlusTree &tree, BTreeNode *root)
 // === BORROWING OPERATIONS (non-destructive repair) ===
 
 static void
-borrow_from_left_sibling(BPlusTree &tree, BTreeNode *node, BTreeNode *left_sibling, uint32_t separator_index)
+borrow_from_left_sibling(BTree &tree, BTreeNode *node, BTreeNode *left_sibling, uint32_t separator_index)
 {
 	BTreeNode *parent = GET_PARENT(node);
 
@@ -654,7 +648,7 @@ borrow_from_left_sibling(BPlusTree &tree, BTreeNode *node, BTreeNode *left_sibli
 }
 
 static void
-borrow_from_right_sibling(BPlusTree &tree, BTreeNode *node, BTreeNode *right_sibling, uint32_t separator_index)
+borrow_from_right_sibling(BTree &tree, BTreeNode *node, BTreeNode *right_sibling, uint32_t separator_index)
 {
 	BTreeNode *parent = GET_PARENT(node);
 
@@ -702,7 +696,7 @@ borrow_from_right_sibling(BPlusTree &tree, BTreeNode *node, BTreeNode *right_sib
 
 // Try to borrow from either sibling
 static bool
-try_borrow_from_siblings(BPlusTree &tree, BTreeNode *node)
+try_borrow_from_siblings(BTree &tree, BTreeNode *node)
 {
 	BTreeNode *parent = GET_PARENT(node);
 	uint32_t   child_index = find_child_index(tree, parent, node);
@@ -734,12 +728,42 @@ try_borrow_from_siblings(BPlusTree &tree, BTreeNode *node)
 
 // === MERGE OPERATION (destructive repair) ===
 
-// Always merges right node into left node
-static void
-merge_nodes(BPlusTree &tree, BTreeNode *left, BTreeNode *right, BTreeNode *parent, uint32_t separator_index)
+// Perform merge with an available sibling (with merge logic inlined)
+static BTreeNode *
+perform_merge_with_sibling(BTree &tree, BTreeNode *node)
 {
-	ASSERT_PRINT(left->index == GET_CHILDREN(parent)[separator_index], &tree);
-	ASSERT_PRINT(right->index == GET_CHILDREN(parent)[separator_index + 1], &tree);
+	BTreeNode *parent = GET_PARENT(node);
+	uint32_t   child_index = find_child_index(tree, parent, node);
+
+	BTreeNode *left, *right;
+	uint32_t   separator_index;
+
+	// Decide which sibling to merge with
+	// Prefer merging with right sibling (consistent strategy)
+	if (child_index < parent->num_keys)
+	{
+		// Merge with right sibling
+		left = node;
+		right = GET_CHILD(parent, child_index + 1);
+		separator_index = child_index;
+	}
+	else if (child_index > 0)
+	{
+		// We're the rightmost child, merge with left sibling
+		left = GET_CHILD(parent, child_index - 1);
+		right = node;
+		separator_index = child_index - 1;
+	}
+	else
+	{
+		// Should never happen - non-root node must have siblings
+		assert(false);
+		return nullptr;
+	}
+
+	// === MERGE LOGIC (previously merge_nodes) ===
+	assert(left->index == GET_CHILDREN(parent)[separator_index]);
+	assert(right->index == GET_CHILDREN(parent)[separator_index + 1]);
 
 	MARK_DIRTY(left);
 	MARK_DIRTY(parent);
@@ -780,41 +804,15 @@ merge_nodes(BPlusTree &tree, BTreeNode *left, BTreeNode *right, BTreeNode *paren
 
 	// Delete the now-empty right node
 	destroy_node(right);
-}
 
-// Perform merge with an available sibling
-static BTreeNode *
-perform_merge_with_sibling(BPlusTree &tree, BTreeNode *node)
-{
-	BTreeNode *parent = GET_PARENT(node);
-	uint32_t   child_index = find_child_index(tree, parent, node);
-
-	// Prefer merging with right sibling (consistent strategy)
-	if (child_index < parent->num_keys)
-	{
-		BTreeNode *right = GET_CHILD(parent, child_index + 1);
-		merge_nodes(tree, node, right, parent, child_index);
-		return parent;
-	}
-
-	// We're the rightmost child, merge with left sibling
-	if (child_index > 0)
-	{
-		BTreeNode *left = GET_CHILD(parent, child_index - 1);
-		merge_nodes(tree, left, node, parent, child_index - 1);
-		return parent;
-	}
-
-	// Should never happen - non-root node must have siblings
-	ASSERT_PRINT(false, &tree);
-	return nullptr;
+	return parent;
 }
 
 // === MAIN REPAIR FUNCTION ===
 
 // Fix an underflowing node after deletion
 static void
-repair_underflow(BPlusTree &tree, BTreeNode *node)
+repair_underflow(BTree &tree, BTreeNode *node)
 {
 	// Step 1: Check if repair is needed
 	if (!IS_UNDERFLOWING(node))
@@ -855,9 +853,9 @@ repair_underflow(BPlusTree &tree, BTreeNode *node)
 
 // Delete an entry from a leaf node
 static void
-do_delete(BPlusTree &tree, BTreeNode *node, const uint8_t *key, uint32_t index)
+do_delete(BTree &tree, BTreeNode *node, void *key, uint32_t index)
 {
-	ASSERT_PRINT(IS_LEAF(node), &tree);
+	assert(IS_LEAF(node));
 
 	// Special case: deleting last entry from root leaf
 	if (IS_ROOT(node) && node->num_keys == 1)
@@ -880,7 +878,7 @@ do_delete(BPlusTree &tree, BTreeNode *node, const uint8_t *key, uint32_t index)
 }
 
 void
-clear_recurse(BPlusTree &tree, BTreeNode *node)
+clear_recurse(BTree &tree, BTreeNode *node)
 {
 	if (IS_LEAF(node))
 	{
@@ -900,7 +898,7 @@ clear_recurse(BPlusTree &tree, BTreeNode *node)
 }
 
 bool
-bplustree_clear(BPlusTree *tree)
+btree_clear(BTree *tree)
 {
 	if (0 == tree->root_page_index)
 	{
@@ -914,18 +912,18 @@ bplustree_clear(BPlusTree *tree)
    */
 
 static void
-cursor_clear(BPtCursor *cursor)
+cursor_clear(BtCursor *cursor)
 {
 	cursor->leaf_page = 0;
 	cursor->leaf_index = 0;
-	cursor->state = BPT_CURSOR_INVALID;
+	cursor->state = BT_CURSOR_INVALID;
 }
 
 static bool
-cursor_move_in_subtree(BPtCursor *cursor, BTreeNode *root, bool left)
+cursor_move_in_subtree(BtCursor *cursor, BTreeNode *root, bool left)
 {
 	BTreeNode *current = root;
-	BPlusTree &tree = *cursor->tree;
+	BTree	  &tree = *cursor->tree;
 
 	while (!IS_LEAF(current))
 	{
@@ -938,7 +936,7 @@ cursor_move_in_subtree(BPtCursor *cursor, BTreeNode *root, bool left)
 			uint32_t child_pos = current->num_keys;
 
 			current = GET_CHILD(current, child_pos);
-			ASSERT_PRINT(current, cursor->tree);
+			assert(current);
 		}
 	}
 
@@ -952,21 +950,21 @@ cursor_move_in_subtree(BPtCursor *cursor, BTreeNode *root, bool left)
 		cursor->leaf_page = current->index;
 		cursor->leaf_index = current->num_keys - 1;
 	}
-	cursor->state = BPT_CURSOR_VALID;
+	cursor->state = BT_CURSOR_VALID;
 	return true;
 }
 
 static bool
-cursor_move_end(BPtCursor *cursor, bool first)
+cursor_move_end(BtCursor *cursor, bool first)
 {
 
-	BPlusTree &tree = *cursor->tree;
+	BTree &tree = *cursor->tree;
 	cursor_clear(cursor);
 
 	BTreeNode *root = GET_ROOT();
 	if (!root || root->num_keys == 0)
 	{
-		cursor->state = BPT_CURSOR_INVALID;
+		cursor->state = BT_CURSOR_INVALID;
 		return false;
 	}
 
@@ -974,62 +972,97 @@ cursor_move_end(BPtCursor *cursor, bool first)
 }
 
 bool
-seek_find(BPtCursor *cursor, const void *key);
-bool
-bplustree_cursor_seek(BPtCursor *cursor, const void *key, CompareOp op)
+btree_cursor_seek(BtCursor *cursor, void *key, CompareOp op)
 {
-	bool exact_match_ok = (op == GE || op == LE);
-	bool forward = (op == GE || op == GT);
+	BTree &tree = *cursor->tree;
+	cursor_clear(cursor);
 
-	bool exact = seek_find(cursor, key);
-
-	if (op == EQ)
+	if (!cursor->tree->root_page_index)
 	{
-		return exact;
+		cursor->state = BT_CURSOR_INVALID;
+		return false;
 	}
 
+	// Find the leaf and position
+	BTreeNode *leaf = find_leaf_for_key(*cursor->tree, key);
+	uint32_t   index = binary_search(*cursor->tree, leaf, key);
+
+	cursor->leaf_page = leaf->index;
+
+	// Check for exact match
+	bool exact = index < leaf->num_keys && type_equals(cursor->tree->node_key_type, GET_KEY_AT(leaf, index), key);
+
+	// Handle EQ case immediately
+	if (op == EQ)
+	{
+		if (exact)
+		{
+			cursor->leaf_index = index;
+			cursor->state = BT_CURSOR_VALID;
+			return true;
+		}
+		cursor->state = BT_CURSOR_INVALID;
+		return false;
+	}
+
+	// Position cursor for iteration
+	if (index >= leaf->num_keys)
+	{
+		cursor->leaf_index = leaf->num_keys - 1;
+	}
+	else
+	{
+		cursor->leaf_index = index;
+	}
+	cursor->state = BT_CURSOR_VALID;
+
+	// For exact match cases with GE/LE
+	bool exact_match_ok = (op == GE || op == LE);
 	if (exact && exact_match_ok)
 	{
 		return true;
 	}
 
+	// Need to find the right position for GT/LT/GE/LE
+	bool forward = (op == GE || op == GT);
+
 	do
 	{
-		const uint8_t *current_key = bplustree_cursor_key(cursor);
+		void *current_key = btree_cursor_key(cursor);
 		if (!current_key)
 		{
 			continue;
 		}
 
-		const uint8_t *key_bytes = reinterpret_cast<const uint8_t *>(key);
+		bool satisfied = (op == GE && type_greater_equal(cursor->tree->node_key_type, current_key, key)) ||
+						 (op == GT && type_greater_than(cursor->tree->node_key_type, current_key, key)) ||
+						 (op == LE && type_less_equal(cursor->tree->node_key_type, current_key, key)) ||
+						 (op == LT && type_less_than(cursor->tree->node_key_type, current_key, key));
 
-		bool satisfied = (op == GE && type_greater_equal(cursor->tree->node_key_type, current_key, key_bytes)) ||
-						 (op == GT && type_greater_than(cursor->tree->node_key_type, current_key, key_bytes)) ||
-						 (op == LE && type_less_equal(cursor->tree->node_key_type, current_key, key_bytes)) ||
-						 (op == LT && type_less_than(cursor->tree->node_key_type, current_key, key_bytes));
 		if (satisfied)
 		{
 			return true;
 		}
 
-	} while (forward ? bplustree_cursor_next(cursor) : bplustree_cursor_previous(cursor));
+	} while (forward ? btree_cursor_next(cursor) : btree_cursor_previous(cursor));
 
+	cursor->state = BT_CURSOR_INVALID;
 	return false;
 }
 
 // Public cursor functions
 bool
-bplustree_cursor_is_valid(BPtCursor *cursor)
+btree_cursor_is_valid(BtCursor *cursor)
 {
-	return cursor->state == BPT_CURSOR_VALID;
+	return cursor->state == BT_CURSOR_VALID;
 }
 
-uint8_t *
-bplustree_cursor_key(BPtCursor *cursor)
+void *
+btree_cursor_key(BtCursor *cursor)
 {
 
-	BPlusTree &tree = *cursor->tree;
-	if (cursor->state != BPT_CURSOR_VALID)
+	BTree &tree = *cursor->tree;
+	if (cursor->state != BT_CURSOR_VALID)
 	{
 		return nullptr;
 	}
@@ -1043,12 +1076,12 @@ bplustree_cursor_key(BPtCursor *cursor)
 	return GET_KEY_AT(node, cursor->leaf_index);
 }
 
-uint8_t *
-bplustree_cursor_record(BPtCursor *cursor)
+void *
+btree_cursor_record(BtCursor *cursor)
 {
 
-	BPlusTree &tree = *cursor->tree;
-	if (cursor->state != BPT_CURSOR_VALID)
+	BTree &tree = *cursor->tree;
+	if (cursor->state != BT_CURSOR_VALID)
 	{
 		return nullptr;
 	}
@@ -1063,52 +1096,14 @@ bplustree_cursor_record(BPtCursor *cursor)
 }
 
 bool
-seek_find(BPtCursor *cursor, const void *key)
+btree_cursor_delete(BtCursor *cursor)
 {
-
-	BPlusTree &tree = *cursor->tree;
-	cursor_clear(cursor);
-
-	if (!cursor->tree->root_page_index)
-	{
-		cursor->state = BPT_CURSOR_INVALID;
-		// Empty tree - cursor remains INVALID
-		return false;
-	}
-
-	BTreeNode *leaf = find_leaf_for_key(*cursor->tree, (uint8_t *)key);
-	uint32_t   index = binary_search(*cursor->tree, leaf, (uint8_t *)key);
-
-	cursor->leaf_page = leaf->index;
-
-	// Check for exact match
-	bool found =
-		index < leaf->num_keys && type_equals(cursor->tree->node_key_type, GET_KEY_AT(leaf, index), (uint8_t *)key);
-
-	// Clamp index to valid range for iteration
-	if (index >= leaf->num_keys)
-	{
-		cursor->leaf_index = leaf->num_keys - 1; // Position at last key
-	}
-	else
-	{
-		cursor->leaf_index = index; // Either exact match or insertion point
-	}
-
-	cursor->state = BPT_CURSOR_VALID;
-
-	return found;
-}
-
-bool
-bplustree_cursor_delete(BPtCursor *cursor)
-{
-	if (cursor->state != BPT_CURSOR_VALID)
+	if (cursor->state != BT_CURSOR_VALID)
 	{
 		return false;
 	}
 
-	const uint8_t *key = bplustree_cursor_key(cursor);
+	void *key = btree_cursor_key(cursor);
 	if (!key)
 	{
 		return false;
@@ -1121,7 +1116,7 @@ bplustree_cursor_delete(BPtCursor *cursor)
 
 	// node will survive
 	node = GET_NODE(cursor->leaf_page);
-	ASSERT_PRINT(node, cursor->tree);
+	assert(node);
 
 	if (cursor->leaf_index >= node->num_keys)
 	{
@@ -1131,7 +1126,7 @@ bplustree_cursor_delete(BPtCursor *cursor)
 		}
 		else
 		{
-			cursor->state = BPT_CURSOR_INVALID;
+			cursor->state = BT_CURSOR_INVALID;
 		}
 	}
 
@@ -1139,46 +1134,46 @@ bplustree_cursor_delete(BPtCursor *cursor)
 }
 
 bool
-bplustree_cursor_insert(BPtCursor *cursor, const void *key, const uint8_t *record)
+btree_cursor_insert(BtCursor *cursor, void *key, void *record)
 {
 
-	if (bplustree_cursor_seek(cursor, key))
+	if (btree_cursor_seek(cursor, key))
 	{
 		return false;
 	}
 
-	insert_element(*cursor->tree, const_cast<void *>(key), record);
+	insert_element(*cursor->tree, key, record);
 	return true;
 }
 
 bool
-bplustree_cursor_update(BPtCursor *cursor, const uint8_t *record)
+btree_cursor_update(BtCursor *cursor, void *record)
 {
-	if (cursor->state != BPT_CURSOR_VALID)
+	if (cursor->state != BT_CURSOR_VALID)
 	{
 		return false;
 	}
 	pager_mark_dirty(cursor->leaf_page);
-	uint8_t *data = bplustree_cursor_record(cursor);
+	void *data = btree_cursor_record(cursor);
 	memcpy(data, record, cursor->tree->record_size);
 	return true;
 }
 bool
-bplustree_cursor_first(BPtCursor *cursor)
+btree_cursor_first(BtCursor *cursor)
 {
 	return cursor_move_end(cursor, true);
 }
 
 bool
-bplustree_cursor_last(BPtCursor *cursor)
+btree_cursor_last(BtCursor *cursor)
 {
 	return cursor_move_end(cursor, false);
 }
 
 bool
-bplustree_cursor_next(BPtCursor *cursor)
+btree_cursor_next(BtCursor *cursor)
 {
-	if (cursor->state != BPT_CURSOR_VALID)
+	if (cursor->state != BT_CURSOR_VALID)
 	{
 		return false;
 	}
@@ -1186,7 +1181,7 @@ bplustree_cursor_next(BPtCursor *cursor)
 	BTreeNode *node = GET_NODE(cursor->leaf_page);
 	if (!node)
 	{
-		cursor->state = BPT_CURSOR_FAULT;
+		cursor->state = BT_CURSOR_INVALID;
 		return false;
 	}
 
@@ -1211,9 +1206,9 @@ bplustree_cursor_next(BPtCursor *cursor)
 }
 
 bool
-bplustree_cursor_previous(BPtCursor *cursor)
+btree_cursor_previous(BtCursor *cursor)
 {
-	if (cursor->state != BPT_CURSOR_VALID)
+	if (cursor->state != BT_CURSOR_VALID)
 	{
 		return false;
 	}
@@ -1221,7 +1216,7 @@ bplustree_cursor_previous(BPtCursor *cursor)
 	BTreeNode *node = GET_NODE(cursor->leaf_page);
 	if (!node)
 	{
-		cursor->state = BPT_CURSOR_FAULT;
+		cursor->state = BT_CURSOR_INVALID;
 		return false;
 	}
 
@@ -1247,22 +1242,22 @@ bplustree_cursor_previous(BPtCursor *cursor)
 }
 
 bool
-bplustree_cursor_has_next(BPtCursor *cursor)
+btree_cursor_has_next(BtCursor *cursor)
 {
-	if (bplustree_cursor_next(cursor))
+	if (btree_cursor_next(cursor))
 	{
-		bplustree_cursor_previous(cursor);
+		btree_cursor_previous(cursor);
 		return true;
 	}
 	return false;
 }
 
 bool
-bplustree_cursor_has_previous(BPtCursor *cursor)
+btree_cursor_has_previous(BtCursor *cursor)
 {
-	if (bplustree_cursor_previous(cursor))
+	if (btree_cursor_previous(cursor))
 	{
-		bplustree_cursor_next(cursor);
+		btree_cursor_next(cursor);
 		return true;
 	}
 	return false;
@@ -1270,6 +1265,13 @@ bplustree_cursor_has_previous(BPtCursor *cursor)
 /*NOCOVER_START*/
 
 #include <unordered_set>
+
+#define ASSERT_PRINT(condition, tree)                                                                                  \
+	if (!(condition))                                                                                                  \
+	{                                                                                                                  \
+		btree_print(tree);                                                                                             \
+		assert(condition);                                                                                             \
+	}
 
 // Validation result structure to pass information up the recursion
 struct ValidationResult
@@ -1283,15 +1285,15 @@ struct ValidationResult
 
 // Forward declaration
 static ValidationResult
-validate_node_recursive(BPlusTree &tree, BTreeNode *node, uint32_t expected_parent, uint8_t *parent_min_bound,
-						uint8_t *parent_max_bound, std::unordered_set<uint32_t> &visited);
+validate_node_recursive(BTree &tree, BTreeNode *node, uint32_t expected_parent, void *parent_min_bound,
+						void *parent_max_bound, std::unordered_set<uint32_t> &visited);
 
 // Main validation function
 void
-bplustree_validate(BPlusTree *tree_ptr)
+btree_validate(BTree *tree_ptr)
 {
 
-	BPlusTree &tree = *tree_ptr;
+	BTree &tree = *tree_ptr;
 	ASSERT_PRINT(tree_ptr != nullptr, tree_ptr);
 
 	// Empty tree is valid
@@ -1351,8 +1353,8 @@ bplustree_validate(BPlusTree *tree_ptr)
 	}
 }
 static ValidationResult
-validate_node_recursive(BPlusTree &tree, BTreeNode *node, uint32_t expected_parent, uint8_t *parent_min_bound,
-						uint8_t *parent_max_bound, std::unordered_set<uint32_t> &visited)
+validate_node_recursive(BTree &tree, BTreeNode *node, uint32_t expected_parent, void *parent_min_bound,
+						void *parent_max_bound, std::unordered_set<uint32_t> &visited)
 {
 	ASSERT_PRINT(node != nullptr, &tree);
 
@@ -1384,13 +1386,13 @@ validate_node_recursive(BPlusTree &tree, BTreeNode *node, uint32_t expected_pare
 	}
 
 	// Validate key ordering and bounds
-	uint8_t *prev_key = nullptr;
-	uint8_t *first_key = nullptr;
-	uint8_t *last_key = nullptr;
+	void *prev_key = nullptr;
+	void *first_key = nullptr;
+	void *last_key = nullptr;
 
 	for (uint32_t i = 0; i < node->num_keys; i++)
 	{
-		uint8_t *current_key = GET_KEY_AT(node, i);
+		void *current_key = GET_KEY_AT(node, i);
 
 		if (i == 0)
 		{
@@ -1419,8 +1421,8 @@ validate_node_recursive(BPlusTree &tree, BTreeNode *node, uint32_t expected_pare
 	}
 
 	ValidationResult result;
-	result.min_key = first_key;
-	result.max_key = last_key;
+	result.min_key = (uint8_t*)first_key;
+	result.max_key = (uint8_t*)last_key;
 
 	if (IS_LEAF(node))
 	{
@@ -1429,7 +1431,7 @@ validate_node_recursive(BPlusTree &tree, BTreeNode *node, uint32_t expected_pare
 		result.rightmost_leaf = node;
 
 		// Validate leaf data exists
-		uint8_t *records = GET_RECORD_DATA(node);
+		void *records = GET_RECORD_DATA(node);
 		ASSERT_PRINT(records != nullptr, &tree);
 
 		// Verify leaf chain pointers are valid page indices or 0
@@ -1468,8 +1470,8 @@ validate_node_recursive(BPlusTree &tree, BTreeNode *node, uint32_t expected_pare
 			ASSERT_PRINT(child != nullptr, &tree);
 
 			// Determine bounds for this child
-			uint8_t *child_min = (i == 0) ? parent_min_bound : GET_KEY_AT(node, i - 1);
-			uint8_t *child_max = (i == node->num_keys) ? parent_max_bound : GET_KEY_AT(node, i);
+			void *child_min = (i == 0) ? parent_min_bound : GET_KEY_AT(node, i - 1);
+			void *child_max = (i == node->num_keys) ? parent_max_bound : GET_KEY_AT(node, i);
 
 			ValidationResult child_result =
 				validate_node_recursive(tree, child, node->index, child_min, child_max, visited);
@@ -1492,13 +1494,13 @@ validate_node_recursive(BPlusTree &tree, BTreeNode *node, uint32_t expected_pare
 			if (child_result.min_key && i > 0)
 			{
 				// First key in child >= separator key before it
-				uint8_t *separator = GET_KEY_AT(node, i - 1);
+				void *separator = GET_KEY_AT(node, i - 1);
 				ASSERT_PRINT(type_greater_equal(tree.node_key_type, child_result.min_key, separator), &tree);
 			}
 			if (child_result.max_key && i < node->num_keys)
 			{
 				// Last key in child < separator key after it
-				uint8_t *separator = GET_KEY_AT(node, i);
+				void *separator = GET_KEY_AT(node, i);
 				ASSERT_PRINT(type_less_equal(tree.node_key_type, child_result.max_key, separator), &tree);
 			}
 		}
@@ -1522,7 +1524,7 @@ validate_node_recursive(BPlusTree &tree, BTreeNode *node, uint32_t expected_pare
 
 // Helper to print a single key based on type
 static void
-print_key(BPlusTree &tree, uint8_t *key)
+print_key(BTree &tree, void *key)
 {
 	if (!key)
 	{
@@ -1534,9 +1536,9 @@ print_key(BPlusTree &tree, uint8_t *key)
 
 // Main B+Tree print function
 void
-bplustree_print(BPlusTree *tree_ptr)
+btree_print(BTree *tree_ptr)
 {
-	BPlusTree &tree = *tree_ptr;
+	BTree &tree = *tree_ptr;
 	if (!tree_ptr || tree_ptr->root_page_index == 0)
 	{
 		printf("B+Tree: EMPTY\n");
@@ -1683,9 +1685,9 @@ bplustree_print(BPlusTree *tree_ptr)
 
 // Compact tree printer (single line per node)
 void
-bplustree_print_compact(BPlusTree *tree_ptr)
+btree_print_compact(BTree *tree_ptr)
 {
-	BPlusTree &tree = *tree_ptr;
+	BTree &tree = *tree_ptr;
 	if (!tree_ptr || tree_ptr->root_page_index == 0)
 	{
 		printf("B+Tree: EMPTY\n");

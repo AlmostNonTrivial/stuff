@@ -274,12 +274,12 @@ inline bool type_is_dual(DataType type) {
 
 // Type comparison - unified for scalar and dual
 __attribute__((always_inline))
-inline int type_compare(DataType type, const uint8_t* a, const uint8_t* b) {
+inline int type_compare(DataType type, const void* a, const void* b) {
     uint8_t tid = type_id(type);
 
     // Scalar type comparison
     switch(tid) {
-        case TYPE_ID_U8:  { uint8_t  av = *a, bv = *b; return (av > bv) - (av < bv); }
+        case TYPE_ID_U8:  { uint8_t  av = *(uint8_t*)a, bv = *(uint8_t*)b; return (av > bv) - (av < bv); }
         case TYPE_ID_U16: { uint16_t av = *(uint16_t*)a, bv = *(uint16_t*)b; return (av > bv) - (av < bv); }
         case TYPE_ID_U32: { uint32_t av = *(uint32_t*)a, bv = *(uint32_t*)b; return (av > bv) - (av < bv); }
         case TYPE_ID_U64: { uint64_t av = *(uint64_t*)a, bv = *(uint64_t*)b; return (av > bv) - (av < bv); }
@@ -305,7 +305,7 @@ inline int type_compare(DataType type, const uint8_t* a, const uint8_t* b) {
             // Compare second component if first is equal
             DataType type2 = dual_component_type(type, 1);
             uint32_t offset = dual_size_1(type);
-            return type_compare(type2, a + offset, b + offset);
+            return type_compare(type2, (char*)a + offset, (char*)b + offset);
         }
 
         default: return 0;
@@ -313,32 +313,32 @@ inline int type_compare(DataType type, const uint8_t* a, const uint8_t* b) {
 }
 
 __attribute__((always_inline))
-inline bool type_greater_than(DataType type, const uint8_t* a, const uint8_t* b) {
+inline bool type_greater_than(DataType type, const void* a, const void* b) {
     return type_compare(type, a, b) > 0;
 }
 
 __attribute__((always_inline))
-inline bool type_greater_equal(DataType type, const uint8_t* a, const uint8_t* b) {
+inline bool type_greater_equal(DataType type, const void* a, const void* b) {
     return type_compare(type, a, b) >= 0;
 }
 
 __attribute__((always_inline))
-inline bool type_less_than(DataType type, const uint8_t* a, const uint8_t* b) {
+inline bool type_less_than(DataType type, const void* a, const void* b) {
     return type_compare(type, a, b) < 0;
 }
 
 __attribute__((always_inline))
-inline bool type_less_equal(DataType type, const uint8_t* a, const uint8_t* b) {
+inline bool type_less_equal(DataType type, const void* a, const void* b) {
     return type_compare(type, a, b) <= 0;
 }
 
 __attribute__((always_inline))
-inline bool type_equals(DataType type, const uint8_t* a, const uint8_t* b) {
+inline bool type_equals(DataType type, const void* a, const void* b) {
     return type_compare(type, a, b) == 0;
 }
 
 __attribute__((always_inline))
-inline bool type_not_equals(DataType type, const uint8_t* a, const uint8_t* b) {
+inline bool type_not_equals(DataType type, const void* a, const void* b) {
     return type_compare(type, a, b) != 0;
 }
 
@@ -347,7 +347,7 @@ inline bool type_not_equals(DataType type, const uint8_t* a, const uint8_t* b) {
 // ============================================================================
 
 __attribute__((always_inline))
-inline void type_add(DataType type, uint8_t* dst, const uint8_t* a, const uint8_t* b) {
+inline void type_add(DataType type, void* dst, const void* a, const void* b) {
     switch(type_id(type)) {
         case TYPE_ID_U8:  *(uint8_t*)dst  = *(uint8_t*)a  + *(uint8_t*)b;  break;
         case TYPE_ID_U16: *(uint16_t*)dst = *(uint16_t*)a + *(uint16_t*)b; break;
@@ -365,7 +365,7 @@ inline void type_add(DataType type, uint8_t* dst, const uint8_t* a, const uint8_
 }
 
 __attribute__((always_inline))
-inline void type_sub(DataType type, uint8_t* dst, const uint8_t* a, const uint8_t* b) {
+inline void type_sub(DataType type, void* dst, const void* a, const void* b) {
     switch(type_id(type)) {
         case TYPE_ID_U8:  *(uint8_t*)dst  = *(uint8_t*)a  - *(uint8_t*)b;  break;
         case TYPE_ID_U16: *(uint16_t*)dst = *(uint16_t*)a - *(uint16_t*)b; break;
@@ -383,7 +383,7 @@ inline void type_sub(DataType type, uint8_t* dst, const uint8_t* a, const uint8_
 }
 
 __attribute__((always_inline))
-inline void type_mul(DataType type, uint8_t* dst, const uint8_t* a, const uint8_t* b) {
+inline void type_mul(DataType type, void* dst, const void* a, const void* b) {
     switch(type_id(type)) {
         case TYPE_ID_U8:  *(uint8_t*)dst  = *(uint8_t*)a  * *(uint8_t*)b;  break;
         case TYPE_ID_U16: *(uint16_t*)dst = *(uint16_t*)a * *(uint16_t*)b; break;
@@ -401,7 +401,7 @@ inline void type_mul(DataType type, uint8_t* dst, const uint8_t* a, const uint8_
 }
 
 __attribute__((always_inline))
-inline void type_div(DataType type, uint8_t* dst, const uint8_t* a, const uint8_t* b) {
+inline void type_div(DataType type, void* dst, const void* a, const void* b) {
     switch(type_id(type)) {
         case TYPE_ID_U8:  *(uint8_t*)dst  = *(uint8_t*)a  / *(uint8_t*)b;  break;
         case TYPE_ID_U16: *(uint16_t*)dst = *(uint16_t*)a / *(uint16_t*)b; break;
@@ -419,7 +419,7 @@ inline void type_div(DataType type, uint8_t* dst, const uint8_t* a, const uint8_
 }
 
 __attribute__((always_inline))
-inline void type_mod(DataType type, uint8_t* dst, const uint8_t* a, const uint8_t* b) {
+inline void type_mod(DataType type, void* dst, const void* a, const void* b) {
     switch(type_id(type)) {
         case TYPE_ID_U8:  *(uint8_t*)dst  = *(uint8_t*)a  % *(uint8_t*)b;  break;
         case TYPE_ID_U16: *(uint16_t*)dst = *(uint16_t*)a % *(uint16_t*)b; break;
@@ -438,23 +438,23 @@ inline void type_mod(DataType type, uint8_t* dst, const uint8_t* a, const uint8_
 // ============================================================================
 
 __attribute__((always_inline))
-inline void type_copy(DataType type, uint8_t* dst, const uint8_t* src) {
+inline void type_copy(DataType type, void* dst, const void* src) {
     uint32_t size = type_size(type);
 
     // Common sizes get optimized paths
     switch(size) {
         case 0: break;  // NULL type
-        case 1: *dst = *src; break;
+        case 1: *(uint8_t*)dst = *(uint8_t*)src; break;
         case 2: *(uint16_t*)dst = *(uint16_t*)src; break;
         case 4: *(uint32_t*)dst = *(uint32_t*)src; break;
         case 8: *(uint64_t*)dst = *(uint64_t*)src; break;
         case 12: // Common for dual u32+u64
             *(uint64_t*)dst = *(uint64_t*)src;
-            *(uint32_t*)(dst + 8) = *(uint32_t*)(src + 8);
+            *(uint32_t*)((char*)dst + 8) = *(uint32_t*)((char*)src + 8);
             break;
         case 16: // Common for dual u64+u64
             *(uint64_t*)dst = *(uint64_t*)src;
-            *(uint64_t*)(dst + 8) = *(uint64_t*)(src + 8);
+            *(uint64_t*)((char*)dst + 8) = *(uint64_t*)((char*)src + 8);
             break;
         default:
             // For strings and other sizes
@@ -468,23 +468,23 @@ inline void type_copy(DataType type, uint8_t* dst, const uint8_t* src) {
 }
 
 __attribute__((always_inline))
-inline void type_zero(DataType type, uint8_t* dst) {
+inline void type_zero(DataType type, void* dst) {
     uint32_t size = type_size(type);
 
     switch(size) {
         case 0: break;  // NULL type
-        case 1: *dst = 0; break;
+        case 1: *(uint8_t*)dst = 0; break;
         case 2: *(uint16_t*)dst = 0; break;
         case 4: *(uint32_t*)dst = 0; break;
         case 8: *(uint64_t*)dst = 0; break;
-        case 12: *(uint64_t*)dst = 0; *(uint32_t*)(dst + 8) = 0; break;
-        case 16: *(uint64_t*)dst = 0; *(uint64_t*)(dst + 8) = 0; break;
+        case 12: *(uint64_t*)dst = 0; *(uint32_t*)((char*)dst + 8) = 0; break;
+        case 16: *(uint64_t*)dst = 0; *(uint64_t*)((char*)dst + 8) = 0; break;
         default: memset(dst, 0, size); break;
     }
 }
 
 __attribute__((always_inline))
-inline uint64_t type_hash(DataType type, const uint8_t* data) {
+inline uint64_t type_hash(DataType type, const void* data) {
     uint64_t hash = 0xcbf29ce484222325ull;
 
     if (type_is_string(type)) {
@@ -502,7 +502,7 @@ inline uint64_t type_hash(DataType type, const uint8_t* data) {
 
         // Hash second component
         DataType type2 = dual_component_type(type, 1);
-        uint64_t hash2 = type_hash(type2, data + dual_size_1(type));
+        uint64_t hash2 = type_hash(type2, (char*)data + dual_size_1(type));
 
         // Combine hashes
         return hash1 ^ (hash2 * 0x100000001b3ull);
@@ -511,7 +511,7 @@ inline uint64_t type_hash(DataType type, const uint8_t* data) {
     // Numeric types - hash based on size
     uint32_t size = type_size(type);
     switch(size) {
-        case 1: return hash ^ *data;
+        case 1: return hash ^ *(uint8_t*)data;
         case 2: return hash ^ *(uint16_t*)data;
         case 4: return hash ^ *(uint32_t*)data;
         case 8: return hash ^ *(uint64_t*)data;
@@ -520,7 +520,7 @@ inline uint64_t type_hash(DataType type, const uint8_t* data) {
 }
 
 __attribute__((always_inline))
-inline void type_print(DataType type, const uint8_t* data) {
+inline void type_print(DataType type, const void* data) {
     switch(type_id(type)) {
         case TYPE_ID_NULL: printf("NULL"); break;
 
@@ -557,7 +557,7 @@ inline void type_print(DataType type, const uint8_t* data) {
 
             // Print second component
             DataType type2 = dual_component_type(type, 1);
-            type_print(type2, data + dual_size_1(type));
+            type_print(type2, (char*)data + dual_size_1(type));
 
             printf(")");
             break;
@@ -613,20 +613,20 @@ inline const char* type_name(DataType type) {
 // ============================================================================
 
 __attribute__((always_inline))
-inline void pack_dual(uint8_t* dest, DataType type1, const uint8_t* data1,
-                      DataType type2, const uint8_t* data2) {
+inline void pack_dual(void* dest, DataType type1, const void* data1,
+                      DataType type2, const void* data2) {
     type_copy(type1, dest, data1);
-    type_copy(type2, dest + type_size(type1), data2);
+    type_copy(type2, (char*)dest + type_size(type1), data2);
 }
 
 __attribute__((always_inline))
-inline void unpack_dual(DataType dual_type, const uint8_t* src,
-                        uint8_t* data1, uint8_t* data2) {
+inline void unpack_dual(DataType dual_type, const void* src,
+                        void* data1, void* data2) {
     DataType type1 = dual_component_type(dual_type, 0);
     DataType type2 = dual_component_type(dual_type, 1);
 
     type_copy(type1, data1, src);
-    type_copy(type2, data2, src + dual_size_1(dual_type));
+    type_copy(type2, data2, (char*)src + dual_size_1(dual_type));
 }
 
 // ============================================================================
@@ -634,7 +634,7 @@ inline void unpack_dual(DataType dual_type, const uint8_t* src,
 // ============================================================================
 
 struct TypedValue {
-    uint8_t* data;
+    void* data;
     DataType type;
 
     // Property accessors
@@ -654,7 +654,7 @@ struct TypedValue {
     inline void set_varchar(const char* str, uint32_t len = 0) {
         len = len ? len : strlen(str);
         type = TYPE_VARCHAR(len);
-        data = (uint8_t*)str;
+        data = (void*)str;
     }
 
     // Comparison operators - work seamlessly with dual types
@@ -706,7 +706,7 @@ struct TypedValue {
 
     // Factory methods
     static TypedValue make(DataType type, void* data = nullptr) {
-        return { (uint8_t*)data, type};
+        return { data, type};
     }
 
     // Casting to unsigned integer types

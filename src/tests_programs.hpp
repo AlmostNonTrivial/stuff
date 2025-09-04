@@ -187,7 +187,7 @@ vmfunc_create_structure(TypedValue *result, TypedValue *args, uint32_t arg_count
 {
 	auto table_name = args->as_char();
 	auto structure = catalog[table_name].to_layout();
-	catalog[table_name].storage.btree = bplustree_create(structure.layout.at(0), structure.record_size, true);
+	catalog[table_name].storage.btree = btree_create(structure.layout.at(0), structure.record_size, true);
 	return true;
 }
 

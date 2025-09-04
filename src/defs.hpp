@@ -49,7 +49,7 @@ struct MemoryContext
 };
 
 inline void
-arithmetic(ArithOp op, DataType type, uint8_t *dst, uint8_t *a, uint8_t *b)
+arithmetic(ArithOp op, DataType type, void*dst, void*a, void*b)
 {
 	switch (op)
 	{

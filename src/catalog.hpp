@@ -48,7 +48,7 @@ struct Structure
 {
 	const char *name;
 	union {
-		BPlusTree btree;
+		BTree btree;
 	} storage;
 	std::vector<Column> columns;
 
