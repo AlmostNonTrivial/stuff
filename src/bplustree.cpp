@@ -38,8 +38,8 @@ struct BTreeNode
 static_assert(sizeof(BTreeNode) == PAGE_SIZE, "BTreeNode must be exactly PAGE_SIZE");
 
 // Internal function declarations
-static void
-repair_after_delete(BPlusTree &tree, BTreeNode *node);
+
+
 
 // ============================================================================
 // ACCESSOR MACROS - Direct memory layout access
@@ -75,6 +75,7 @@ repair_after_delete(BPlusTree &tree, BTreeNode *node);
 // Node state checks
 #define NODE_IS_FULL(node)	  ((node)->num_keys >= GET_MAX_KEYS(node))
 #define NODE_IS_MINIMAL(node) ((node)->num_keys <= GET_MIN_KEYS(node))
+#define IS_UNDERFLOWING(node) ((node->num_keys < GET_MIN_KEYS(node)))
 #define NODE_CAN_SPARE(node)  ((node)->num_keys > GET_MIN_KEYS(node))
 
 // Utility macros
@@ -577,263 +578,278 @@ insert_element(BPlusTree &tree, void *key, const uint8_t *data)
 	leaf->num_keys++;
 }
 
-static void
-do_delete(BPlusTree &tree, BTreeNode *node, const uint8_t *key, uint32_t index)
-{
-	if (IS_ROOT(node) && node->num_keys <= 1 && IS_LEAF(node))
-	{
-		MARK_DIRTY(node);
-		node->num_keys = 0;
-		return;
-	}
 
-	ASSERT_PRINT(IS_LEAF(node), &tree);
+// ============================================================================
+// DELETE AND REPAIR OPERATIONS - Clear strategy and flow
+// ============================================================================
 
-	MARK_DIRTY(node);
+// Helper predicates for clarity
 
-	uint8_t *record_data = GET_RECORD_DATA(node);
-	uint32_t shift_count = node->num_keys - index - 1;
 
-	// Shift remaining entries left
-	shift_keys_left(tree, node, index, shift_count);
-	shift_records_left(tree, node, index, shift_count);
+// Collapse root when it becomes empty (has only one child)
+static void collapse_empty_root(BPlusTree &tree, BTreeNode *root) {
+    ASSERT_PRINT(root->num_keys == 0, &tree);
+    ASSERT_PRINT(IS_INTERNAL(root), &tree);
 
-	node->num_keys--;
+    // The root has only one child - make it the new root
+    BTreeNode *only_child = GET_CHILD(root, 0);
 
-	repair_after_delete(tree, node);
+    // Swap contents: only_child becomes root, root gets child's data
+    swap_with_root(tree, root, only_child);
+
+    // Delete the old root (now at only_child's position)
+    destroy_node(only_child);
 }
 
-static BTreeNode *
-steal_from_right(BPlusTree &tree, BTreeNode *node, uint32_t parent_index)
-{
-	BTreeNode *parent_node = GET_PARENT(node);
-	BTreeNode *right_sibling = GET_CHILD(parent_node, parent_index + 1);
+// === BORROWING OPERATIONS (non-destructive repair) ===
 
-	MARK_DIRTY(node);
-	MARK_DIRTY(parent_node);
-	MARK_DIRTY(right_sibling);
+static void borrow_from_left_sibling(BPlusTree &tree, BTreeNode *node,
+                                     BTreeNode *left_sibling, uint32_t separator_index) {
+    BTreeNode *parent = GET_PARENT(node);
 
-	if (IS_LEAF(node))
-	{
-		// Copy first entry from right sibling to end of node
-		copy_key(tree, GET_KEY_AT(node, node->num_keys), GET_KEY_AT(right_sibling, 0));
+    MARK_DIRTY(node);
+    MARK_DIRTY(left_sibling);
+    MARK_DIRTY(parent);
 
-		uint8_t *node_records = GET_RECORD_DATA(node);
-		uint8_t *sibling_records = GET_RECORD_DATA(right_sibling);
-		copy_record(tree, node_records + node->num_keys * tree.record_size, sibling_records);
+    // Make room at the beginning of node
+    shift_keys_right(tree, node, 0, node->num_keys);
 
-		// Shift remaining entries in right sibling left
-		uint32_t shift_count = right_sibling->num_keys - 1;
-		shift_keys_left(tree, right_sibling, 0, shift_count);
-		shift_records_left(tree, right_sibling, 0, shift_count);
+    if (IS_LEAF(node)) {
+        // For leaves: move last entry from left to first of node
+        shift_records_right(tree, node, 0, node->num_keys);
 
-		// Update parent separator
-		copy_key(tree, GET_KEY_AT(parent_node, parent_index), GET_KEY_AT(right_sibling, 0));
-	}
-	else
-	{
-		// Copy separator from parent to end of node
-		copy_key(tree, GET_KEY_AT(node, node->num_keys), GET_KEY_AT(parent_node, parent_index));
+        // Copy entry from left's end to node's beginning
+        copy_key(tree, GET_KEY_AT(node, 0),
+                GET_KEY_AT(left_sibling, left_sibling->num_keys - 1));
+        copy_record(tree, GET_RECORD_AT(node, 0),
+                   GET_RECORD_AT(left_sibling, left_sibling->num_keys - 1));
 
-		// Move first key from right sibling to parent
-		copy_key(tree, GET_KEY_AT(parent_node, parent_index), GET_KEY_AT(right_sibling, 0));
+        // Update parent separator to be the new first key of node
+        copy_key(tree, GET_KEY_AT(parent, separator_index), GET_KEY_AT(node, 0));
+    } else {
+        // For internals: rotate through parent
+        // Parent separator moves down to node
+        copy_key(tree, GET_KEY_AT(node, 0), GET_KEY_AT(parent, separator_index));
 
-		// Shift remaining keys in right sibling left
-		uint32_t shift_count = right_sibling->num_keys - 1;
-		shift_keys_left(tree, right_sibling, 0, shift_count);
+        // Left's last key moves up to parent
+        copy_key(tree, GET_KEY_AT(parent, separator_index),
+                GET_KEY_AT(left_sibling, left_sibling->num_keys - 1));
 
-		uint32_t *node_children = GET_CHILDREN(node);
-		uint32_t *sibling_children = GET_CHILDREN(right_sibling);
+        // Move corresponding child pointer
+        uint32_t *node_children = GET_CHILDREN(node);
+        uint32_t *left_children = GET_CHILDREN(left_sibling);
 
-		// Move first child from right sibling to node
-		set_child(tree, node, node->num_keys + 1, sibling_children[0]);
+        // Shift node's children right and add left's last child as first
+        for (uint32_t i = node->num_keys + 1; i > 0; i--) {
+            set_child(tree, node, i, node_children[i - 1]);
+        }
+        set_child(tree, node, 0, left_children[left_sibling->num_keys]);
+    }
 
-		// Shift remaining children in right sibling left
-		for (uint32_t i = 0; i < right_sibling->num_keys; i++)
-		{
-			set_child(tree, right_sibling, i, sibling_children[i + 1]);
-		}
-	}
-
-	node->num_keys++;
-	right_sibling->num_keys--;
-
-	return parent_node;
+    node->num_keys++;
+    left_sibling->num_keys--;
 }
 
-static BTreeNode *
-merge_right(BPlusTree &tree, BTreeNode *node)
-{
-	BTreeNode *parent = GET_PARENT(node);
-	ASSERT_PRINT(parent, &tree);
+static void borrow_from_right_sibling(BPlusTree &tree, BTreeNode *node,
+                                      BTreeNode *right_sibling, uint32_t separator_index) {
+    BTreeNode *parent = GET_PARENT(node);
 
-	uint32_t node_index = find_child_index(tree, parent, node);
+    MARK_DIRTY(node);
+    MARK_DIRTY(right_sibling);
+    MARK_DIRTY(parent);
 
-	BTreeNode *right_sibling = GET_CHILD(parent, node_index + 1);
-	ASSERT_PRINT(right_sibling, &tree);
+    if (IS_LEAF(node)) {
+        // For leaves: move first entry from right to end of node
+        copy_key(tree, GET_KEY_AT(node, node->num_keys), GET_KEY_AT(right_sibling, 0));
+        copy_record(tree, GET_RECORD_AT(node, node->num_keys),
+                   GET_RECORD_AT(right_sibling, 0));
 
-	MARK_DIRTY(node);
-	MARK_DIRTY(parent);
+        // Shift right sibling's entries left
+        shift_keys_left(tree, right_sibling, 0, right_sibling->num_keys - 1);
+        shift_records_left(tree, right_sibling, 0, right_sibling->num_keys - 1);
 
-	if (IS_LEAF(node))
-	{
-		// Copy all entries from right sibling to node
-		copy_keys(tree, right_sibling, 0, node, node->num_keys, right_sibling->num_keys);
-		copy_records(tree, right_sibling, 0, node, node->num_keys, right_sibling->num_keys);
+        // Update parent separator to be the new first key of right
+        copy_key(tree, GET_KEY_AT(parent, separator_index), GET_KEY_AT(right_sibling, 0));
+    } else {
+        // For internals: rotate through parent
+        // Parent separator moves down to node
+        copy_key(tree, GET_KEY_AT(node, node->num_keys), GET_KEY_AT(parent, separator_index));
 
-		node->num_keys += right_sibling->num_keys;
+        // Right's first key moves up to parent
+        copy_key(tree, GET_KEY_AT(parent, separator_index), GET_KEY_AT(right_sibling, 0));
 
-		// Update leaf chain - node now points to what right_sibling pointed to
-		link_leaf_nodes(node, GET_NEXT(right_sibling));
-	}
-	else
-	{
-		// Copy separator from parent
-		copy_key(tree, GET_KEY_AT(node, node->num_keys), GET_KEY_AT(parent, node_index));
+        // Move corresponding child pointer
+        uint32_t *right_children = GET_CHILDREN(right_sibling);
+        set_child(tree, node, node->num_keys + 1, right_children[0]);
 
-		// Copy all keys from right sibling
-		copy_keys(tree, right_sibling, 0, node, node->num_keys + 1, right_sibling->num_keys);
+        // Shift right's keys and children left
+        shift_keys_left(tree, right_sibling, 0, right_sibling->num_keys - 1);
+        for (uint32_t i = 0; i < right_sibling->num_keys; i++) {
+            set_child(tree, right_sibling, i, right_children[i + 1]);
+        }
+    }
 
-		uint32_t *node_children = GET_CHILDREN(node);
-		uint32_t *sibling_children = GET_CHILDREN(right_sibling);
-
-		// Move all children from right sibling
-		for (uint32_t i = 0; i <= right_sibling->num_keys; i++)
-		{
-			set_child(tree, node, node->num_keys + 1 + i, sibling_children[i]);
-		}
-
-		node->num_keys += 1 + right_sibling->num_keys;
-	}
-
-	// Remove separator from parent
-	uint32_t shift_count = parent->num_keys - node_index - 1;
-	shift_keys_left(tree, parent, node_index, shift_count);
-	shift_children_left(tree, parent, node_index + 1, shift_count);
-
-	parent->num_keys--;
-
-	destroy_node(right_sibling);
-
-	if (NODE_IS_MINIMAL(parent))
-	{
-		if (IS_ROOT(parent) && parent->num_keys == 0)
-		{
-			swap_with_root(tree, parent, node);
-			// parent = node after swap, so delete node
-			destroy_node(node);
-			return node;
-		}
-		else
-		{
-			repair_after_delete(tree, parent);
-		}
-	}
-
-	return node;
+    node->num_keys++;
+    right_sibling->num_keys--;
 }
 
-static BTreeNode *
-steal_from_left(BPlusTree &tree, BTreeNode *node, uint32_t parent_index)
-{
-	BTreeNode *parent_node = GET_PARENT(node);
-	BTreeNode *left_sibling = GET_CHILD(parent_node, parent_index - 1);
+// Try to borrow from either sibling
+static bool try_borrow_from_siblings(BPlusTree &tree, BTreeNode *node) {
+    BTreeNode *parent = GET_PARENT(node);
+    uint32_t child_index = find_child_index(tree, parent, node);
 
-	MARK_DIRTY(node);
-	MARK_DIRTY(parent_node);
-	MARK_DIRTY(left_sibling);
+    // Try left sibling first (consistent strategy)
+    if (child_index > 0) {
+        BTreeNode *left = GET_CHILD(parent, child_index - 1);
+        if (NODE_CAN_SPARE(left)) {
+            borrow_from_left_sibling(tree, node, left, child_index - 1);
+            return true;
+        }
+    }
 
-	// Make room at beginning of node
-	shift_keys_right(tree, node, 0, node->num_keys);
+    // Try right sibling
+    if (child_index < parent->num_keys) {
+        BTreeNode *right = GET_CHILD(parent, child_index + 1);
+        if (NODE_CAN_SPARE(right)) {
+            borrow_from_right_sibling(tree, node, right, child_index);
+            return true;
+        }
+    }
 
-	if (IS_LEAF(node))
-	{
-		// Copy last entry from left sibling to beginning of node
-		copy_key(tree, GET_KEY_AT(node, 0), GET_KEY_AT(left_sibling, left_sibling->num_keys - 1));
-
-		uint8_t *node_records = GET_RECORD_DATA(node);
-		uint8_t *sibling_records = GET_RECORD_DATA(left_sibling);
-
-		shift_records_right(tree, node, 0, node->num_keys);
-		copy_record(tree, node_records, sibling_records + (left_sibling->num_keys - 1) * tree.record_size);
-
-		// Update parent separator
-		copy_key(tree, GET_KEY_AT(parent_node, parent_index - 1), GET_KEY_AT(node, 0));
-	}
-	else
-	{
-		// Copy separator from parent to beginning of node
-		copy_key(tree, GET_KEY_AT(node, 0), GET_KEY_AT(parent_node, parent_index - 1));
-
-		// Move last key from left sibling to parent
-		copy_key(tree, GET_KEY_AT(parent_node, parent_index - 1), GET_KEY_AT(left_sibling, left_sibling->num_keys - 1));
-
-		uint32_t *node_children = GET_CHILDREN(node);
-		uint32_t *sibling_children = GET_CHILDREN(left_sibling);
-
-		// Shift children right and move last child from left sibling
-		for (uint32_t i = node->num_keys + 1; i > 0; i--)
-		{
-			set_child(tree, node, i, node_children[i - 1]);
-		}
-		set_child(tree, node, 0, sibling_children[left_sibling->num_keys]);
-	}
-
-	node->num_keys++;
-	left_sibling->num_keys--;
-
-	return parent_node;
+    return false;
 }
 
-static void
-repair_after_delete(BPlusTree &tree, BTreeNode *node)
-{
-	if (!NODE_IS_MINIMAL(node))
-	{
-		return;
-	}
+// === MERGE OPERATION (destructive repair) ===
 
-	if (IS_ROOT(node))
-	{
-		return;
-	}
+// Always merges right node into left node
+static void merge_nodes(BPlusTree &tree, BTreeNode *left, BTreeNode *right,
+                       BTreeNode *parent, uint32_t separator_index) {
+    ASSERT_PRINT(left->index == GET_CHILDREN(parent)[separator_index], &tree);
+    ASSERT_PRINT(right->index == GET_CHILDREN(parent)[separator_index + 1], &tree);
 
-	BTreeNode *parent = GET_PARENT(node);
-	uint32_t   node_index = find_child_index(tree, parent, node);
+    MARK_DIRTY(left);
+    MARK_DIRTY(parent);
 
-	if (node_index > 0)
-	{
-		BTreeNode *left_sibling = GET_CHILD(parent, node_index - 1);
-		if (left_sibling && NODE_CAN_SPARE(left_sibling))
-		{
-			steal_from_left(tree, node, node_index);
-			return;
-		}
-	}
+    if (IS_LEAF(left)) {
+        // For leaves: concatenate all entries
+        copy_keys(tree, right, 0, left, left->num_keys, right->num_keys);
+        copy_records(tree, right, 0, left, left->num_keys, right->num_keys);
+        left->num_keys += right->num_keys;
 
-	if (node_index < parent->num_keys)
-	{
-		BTreeNode *right_sibling = GET_CHILD(parent, node_index + 1);
-		if (right_sibling && NODE_CAN_SPARE(right_sibling))
-		{
-			steal_from_right(tree, node, node_index);
-			return;
-		}
-	}
+        // Update leaf chain
+        link_leaf_nodes(left, GET_NEXT(right));
+    } else {
+        // For internals: bring down separator and concatenate
+        // Copy separator from parent into left
+        copy_key(tree, GET_KEY_AT(left, left->num_keys),
+                GET_KEY_AT(parent, separator_index));
 
-	if (node_index < parent->num_keys)
-	{
-		merge_right(tree, node);
-	}
-	else if (node_index > 0)
-	{
-		BTreeNode *left_sibling = GET_CHILD(parent, node_index - 1);
-		if (left_sibling)
-		{
-			merge_right(tree, left_sibling);
-		}
-	}
+        // Copy all keys from right
+        copy_keys(tree, right, 0, left, left->num_keys + 1, right->num_keys);
+
+        // Move all children from right
+        uint32_t *right_children = GET_CHILDREN(right);
+        for (uint32_t i = 0; i <= right->num_keys; i++) {
+            set_child(tree, left, left->num_keys + 1 + i, right_children[i]);
+        }
+
+        left->num_keys += 1 + right->num_keys;
+    }
+
+    // Remove separator and right child from parent
+    shift_keys_left(tree, parent, separator_index, parent->num_keys - separator_index - 1);
+    shift_children_left(tree, parent, separator_index + 1, parent->num_keys - separator_index - 1);
+    parent->num_keys--;
+
+    // Delete the now-empty right node
+    destroy_node(right);
 }
+
+// Perform merge with an available sibling
+static BTreeNode* perform_merge_with_sibling(BPlusTree &tree, BTreeNode *node) {
+    BTreeNode *parent = GET_PARENT(node);
+    uint32_t child_index = find_child_index(tree, parent, node);
+
+    // Prefer merging with right sibling (consistent strategy)
+    if (child_index < parent->num_keys) {
+        BTreeNode *right = GET_CHILD(parent, child_index + 1);
+        merge_nodes(tree, node, right, parent, child_index);
+        return parent;
+    }
+
+    // We're the rightmost child, merge with left sibling
+    if (child_index > 0) {
+        BTreeNode *left = GET_CHILD(parent, child_index - 1);
+        merge_nodes(tree, left, node, parent, child_index - 1);
+        return parent;
+    }
+
+    // Should never happen - non-root node must have siblings
+    ASSERT_PRINT(false, &tree);
+    return nullptr;
+}
+
+// === MAIN REPAIR FUNCTION ===
+
+// Fix an underflowing node after deletion
+static void repair_underflow(BPlusTree &tree, BTreeNode *node) {
+    // Step 1: Check if repair is needed
+    if (!IS_UNDERFLOWING(node)) {
+        return;
+    }
+
+    // Root is allowed to have fewer keys
+    if (IS_ROOT(node)) {
+        return;
+    }
+
+    // Step 2: Try non-destructive fix (borrow from sibling)
+    if (try_borrow_from_siblings(tree, node)) {
+        return;
+    }
+
+    // Step 3: Destructive fix (merge with sibling)
+    BTreeNode *parent = perform_merge_with_sibling(tree, node);
+
+    // Step 4: Check if parent needs repair (cascade)
+    if (parent && IS_UNDERFLOWING(parent)) {
+        if (IS_ROOT(parent) && parent->num_keys == 0) {
+            collapse_empty_root(tree, parent);
+        } else {
+            repair_underflow(tree, parent);  // Recursive
+        }
+    }
+}
+
+// === PUBLIC DELETE FUNCTION ===
+
+// Delete an entry from a leaf node
+static void do_delete(BPlusTree &tree, BTreeNode *node, const uint8_t *key, uint32_t index) {
+    ASSERT_PRINT(IS_LEAF(node), &tree);
+
+    // Special case: deleting last entry from root leaf
+    if (IS_ROOT(node) && node->num_keys == 1) {
+        MARK_DIRTY(node);
+        node->num_keys = 0;
+        return;
+    }
+
+    MARK_DIRTY(node);
+
+    // Remove the entry by shifting remaining entries left
+    uint32_t entries_to_shift = node->num_keys - index - 1;
+    shift_keys_left(tree, node, index, entries_to_shift);
+    shift_records_left(tree, node, index, entries_to_shift);
+    node->num_keys--;
+
+    // Fix underflow if necessary
+    repair_underflow(tree, node);
+}
+
+
+
+
+
 
 void
 clear_recurse(BPlusTree &tree, BTreeNode *node)
