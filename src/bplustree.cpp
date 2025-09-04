@@ -600,27 +600,7 @@ insert_element(BPlusTree &tree, void *key, const uint8_t *data)
 	}
 }
 
-static void
-update_parent_keys(BPlusTree &tree, BTreeNode *node, const uint8_t *deleted_key)
-{
-	BTreeNode *parent_node = GET_PARENT(node);
-	uint32_t   parent_index = find_child_index(tree, parent_node, node);
 
-	// Node should never be empty due to immediate repair_after_delete
-	ASSERT_PRINT(node->num_keys > 0, &tree);
-
-	BTreeNode *current_parent = parent_node;
-	while (current_parent)
-	{
-		// we actually don't need to update the seperator key in the internal node, as it's just guiding.
-		BTreeNode *grandparent = GET_PARENT(current_parent);
-		if (grandparent)
-		{
-			parent_index = find_child_index(tree, grandparent, current_parent);
-		}
-		current_parent = grandparent;
-	}
-}
 
 static void
 do_delete(BPlusTree &tree, BTreeNode *node, const uint8_t *key, uint32_t index)
@@ -645,10 +625,6 @@ do_delete(BPlusTree &tree, BTreeNode *node, const uint8_t *key, uint32_t index)
 
 	node->num_keys--;
 
-	if (index == 0 && node->parent != 0)
-	{
-		update_parent_keys(tree, node, key);
-	}
 
 	repair_after_delete(tree, node);
 }
@@ -918,6 +894,8 @@ bplustree_clear(BPlusTree *tree)
 	clear_recurse(*tree, GET_NODE(tree->root_page_index));
 	return true;
 }
+
+
 
 /* ------ CURSOR -----------
  */
