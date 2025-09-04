@@ -216,7 +216,83 @@ copy_record(BPlusTree &tree, uint8_t *dst, uint8_t *src)
 }
 
 // ============================================================================
-// END MEMORY OPERATION HELPERS
+// PATTERN EXTRACTIONS
+// ============================================================================
+
+// Find a child's index in its parent's children array
+static uint32_t
+find_child_index(BPlusTree &tree, BTreeNode *parent, BTreeNode *child)
+{
+	uint32_t *children = get_children(tree, parent);
+	for (uint32_t i = 0; i <= parent->num_keys; i++) {
+		if (children[i] == child->index) {
+			return i;
+		}
+	}
+	ASSERT_PRINT(false, &tree);  // Should never happen
+	return 0;
+}
+
+
+static void
+set_next(BTreeNode *node, uint32_t index)
+{
+	mark_dirty(node);
+	node->next = index;
+}
+
+static void
+set_prev(BTreeNode *node, uint32_t index)
+{
+	mark_dirty(node);
+	node->previous = index;
+}
+
+static BTreeNode *
+get_next(BTreeNode *node)
+{
+	return get_node(node->next);
+}
+
+static BTreeNode *
+get_prev(BTreeNode *node)
+{
+	return get_node(node->previous);
+}
+
+// Link two leaf nodes together in the chain
+static void
+link_leaf_nodes(BTreeNode *left, BTreeNode *right)
+{
+	if (left) {
+		set_next(left, right ? right->index : 0);
+	}
+	if (right) {
+		set_prev(right, left ? left->index : 0);
+	}
+}
+
+// Remove a leaf node from the chain, updating its neighbors
+static void
+unlink_leaf_node(BTreeNode *node)
+{
+	if (!node->is_leaf) return;
+
+	BTreeNode *prev_node = nullptr;
+	BTreeNode *next_node = nullptr;
+
+	if (node->previous != 0) {
+		prev_node = get_prev(node);
+	}
+	if (node->next != 0) {
+		next_node = get_next(node);
+	}
+
+	link_leaf_nodes(prev_node, next_node);
+}
+
+// ============================================================================
+// END PATTERN EXTRACTIONS
 // ============================================================================
 
 static uint32_t
@@ -314,19 +390,6 @@ bplustree_create(DataType key, uint32_t record_size, bool init = false)
 	return tree;
 }
 
-static void
-set_next(BTreeNode *node, uint32_t index)
-{
-	mark_dirty(node);
-	node->next = index;
-}
-
-static void
-set_prev(BTreeNode *node, uint32_t index)
-{
-	mark_dirty(node);
-	node->previous = index;
-}
 
 static BTreeNode *
 get_parent(BTreeNode *node)
@@ -345,19 +408,6 @@ get_child(BPlusTree &tree, BTreeNode *node, uint32_t index)
 	uint32_t *children = get_children(tree, node);
 	return get_node(children[index]);
 }
-
-static BTreeNode *
-get_next(BTreeNode *node)
-{
-	return get_node(node->next);
-}
-
-static BTreeNode *
-get_prev(BTreeNode *node)
-{
-	return get_node(node->previous);
-}
-
 static void
 set_parent(BTreeNode *node, uint32_t parent_index)
 {
@@ -430,27 +480,7 @@ swap_with_root(BPlusTree &tree, BTreeNode *root, BTreeNode *other)
 static void
 destroy_node(BTreeNode *node)
 {
-	if (node->is_leaf)
-	{
-		if (node->previous != 0)
-		{
-			BTreeNode *prev_node = get_prev(node);
-			if (prev_node)
-			{
-				set_next(prev_node, node->next);
-			}
-		}
-
-		if (node->next != 0)
-		{
-			BTreeNode *next_node = get_next(node);
-			if (next_node)
-			{
-				set_prev(next_node, node->previous);
-			}
-		}
-	}
-
+	unlink_leaf_node(node);
 	pager_delete(node->index);
 }
 
@@ -500,9 +530,7 @@ split(BPlusTree &tree, BTreeNode *node)
 	{
 		mark_dirty(parent);
 
-		uint32_t *parent_children = get_children(tree, parent);
-		while (parent_children[parent_index] != node->index)
-			parent_index++;
+		parent_index = find_child_index(tree, parent, node);
 
 		// Shift parent's children right
 		shift_children_right(tree, parent, parent_index + 1, parent->num_keys - parent_index);
@@ -524,15 +552,9 @@ split(BPlusTree &tree, BTreeNode *node)
 		copy_keys(tree, node, split_index, right_node, 0, right_node->num_keys);
 		copy_records(tree, node, split_index, right_node, 0, right_node->num_keys);
 
-		right_node->next = node->next;
-		right_node->previous = node->index;
-		if (node->next != 0)
-		{
-			BTreeNode *next = get_next(node);
-			if (next)
-				set_prev(next, right_node->index);
-		}
-		node->next = right_node->index;
+		// Update leaf chain
+		link_leaf_nodes(right_node, get_next(node));
+		link_leaf_nodes(node, right_node);
 	}
 	else
 	{
@@ -649,12 +671,7 @@ static void
 update_parent_keys(BPlusTree &tree, BTreeNode *node, const uint8_t *deleted_key)
 {
 	BTreeNode *parent_node = get_parent(node);
-
-	uint32_t *parent_children = get_children(tree, parent_node);
-	uint32_t  parent_index;
-
-	for (parent_index = 0; parent_children[parent_index] != node->index; parent_index++)
-		;
+	uint32_t parent_index = find_child_index(tree, parent_node, node);
 
 	// Node should never be empty due to immediate repair_after_delete
 	ASSERT_PRINT(node->num_keys > 0, &tree);
@@ -666,9 +683,7 @@ update_parent_keys(BPlusTree &tree, BTreeNode *node, const uint8_t *deleted_key)
 		BTreeNode *grandparent = get_parent(current_parent);
 		if (grandparent)
 		{
-			uint32_t *grandparent_children = get_children(tree, grandparent);
-			for (parent_index = 0; grandparent_children[parent_index] != current_parent->index; parent_index++)
-				;
+			parent_index = find_child_index(tree, grandparent, current_parent);
 		}
 		current_parent = grandparent;
 	}
@@ -768,16 +783,8 @@ merge_right(BPlusTree &tree, BTreeNode *node)
 {
 	BTreeNode *parent = get_parent(node);
 	ASSERT_PRINT(parent, &tree);
-	uint32_t *parent_children = get_children(tree, parent);
 
-	uint32_t node_index = 0;
-	for (; node_index <= parent->num_keys; node_index++)
-	{
-		if (parent_children[node_index] == node->index)
-		{
-			break;
-		}
-	}
+	uint32_t node_index = find_child_index(tree, parent, node);
 
 	BTreeNode *right_sibling = get_child(tree, parent, node_index + 1);
 	ASSERT_PRINT(right_sibling, &tree);
@@ -793,15 +800,8 @@ merge_right(BPlusTree &tree, BTreeNode *node)
 
 		node->num_keys += right_sibling->num_keys;
 
-		set_next(node, right_sibling->next);
-		if (right_sibling->next != 0)
-		{
-			BTreeNode *next_node = get_next(right_sibling);
-			if (next_node)
-			{
-				set_prev(next_node, node->index);
-			}
-		}
+		// Update leaf chain - node now points to what right_sibling pointed to
+		link_leaf_nodes(node, get_next(right_sibling));
 	}
 	else
 	{
@@ -919,16 +919,7 @@ repair_after_delete(BPlusTree &tree, BTreeNode *node)
 	}
 
 	BTreeNode *parent = get_parent(node);
-	uint32_t  *parent_children = get_children(tree, parent);
-
-	uint32_t node_index = 0;
-	for (; node_index <= parent->num_keys; node_index++)
-	{
-		if (parent_children[node_index] == node->index)
-		{
-			break;
-		}
-	}
+	uint32_t node_index = find_child_index(tree, parent, node);
 
 	if (node_index > 0)
 	{
@@ -996,6 +987,8 @@ bplustree_clear(BPlusTree *tree)
 	clear_recurse(*tree, get_node(tree->root_page_index));
 	return true;
 }
+
+
 
 
 
