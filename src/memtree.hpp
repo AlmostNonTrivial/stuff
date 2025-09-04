@@ -57,24 +57,24 @@ struct et_cursor
 // ============================================================================
 
 ephemeral_tree
-ephemeral_tree_create(DataType key_type, uint32_t record_size, uint8_t flags = 0b11000000);
+et_create(DataType key_type, uint32_t record_size, uint8_t flags = 0b11000000);
 
 
 void
-ephemeral_tree_clear(ephemeral_tree *tree);
+et_clear(ephemeral_tree *tree);
 
 // ============================================================================
 // Tree Operations
 // ============================================================================
 
 bool
-ephemeral_tree_insert(ephemeral_tree *tree, void*key, void*record, MemoryContext *ctx);
+et_insert(ephemeral_tree *tree, void*key, void*record, MemoryContext *ctx);
 
 bool
-ephemeral_tree_delete(ephemeral_tree *tree, void*key);
+et_delete(ephemeral_tree *tree, void*key);
 
 bool
-ephemeral_tree_delete_exact(ephemeral_tree *tree, void*key, void*record);
+et_delete_exact(ephemeral_tree *tree, void*key, void*record);
 
 // ============================================================================
 // Cursor Operations - Matching BPlusTree cursor interface
@@ -139,4 +139,4 @@ void
 et_validate(const ephemeral_tree *tree);
 
 void
-ephemeral_tree_print(const ephemeral_tree *tree);
+et_print(const ephemeral_tree *tree);

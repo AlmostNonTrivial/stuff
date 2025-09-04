@@ -1,4 +1,4 @@
-// memtree.cpp - Refactored for tighter implementation
+// ephemeral_tree.cpp - Red-Black tree implementation for temporary storage
 #include "memtree.hpp"
 #include <cstdint>
 #include <queue>
@@ -36,7 +36,9 @@ node_compare_full(const ephemeral_tree *tree, ephemeral_tree_node *a, ephemeral_
 {
 	int cmp = type_compare(tree->key_type, a->data, b->data);
 	if (cmp != 0 || !tree->allow_duplicates || tree->record_size == 0)
+	{
 		return cmp;
+	}
 	return memcmp(a->data + tree->key_size, b->data + tree->key_size, tree->record_size);
 }
 
@@ -69,7 +71,9 @@ static ephemeral_tree_node *
 tree_minimum(ephemeral_tree_node *node)
 {
 	while (node && node->left)
+	{
 		node = node->left;
+	}
 	return node;
 }
 
@@ -77,7 +81,9 @@ static ephemeral_tree_node *
 tree_maximum(ephemeral_tree_node *node)
 {
 	while (node && node->right)
+	{
 		node = node->right;
+	}
 	return node;
 }
 
@@ -85,7 +91,9 @@ static ephemeral_tree_node *
 tree_successor(ephemeral_tree_node *node)
 {
 	if (node->right)
+	{
 		return tree_minimum(node->right);
+	}
 
 	ephemeral_tree_node *parent = node->parent;
 	while (parent && node == parent->right)
@@ -100,7 +108,9 @@ static ephemeral_tree_node *
 tree_predecessor(ephemeral_tree_node *node)
 {
 	if (node->left)
+	{
 		return tree_maximum(node->left);
+	}
 
 	ephemeral_tree_node *parent = node->parent;
 	while (parent && node == parent->left)
@@ -121,15 +131,23 @@ rotate_left(ephemeral_tree *tree, ephemeral_tree_node *x)
 	ephemeral_tree_node *y = x->right;
 	x->right = y->left;
 	if (y->left)
+	{
 		y->left->parent = x;
+	}
 
 	y->parent = x->parent;
 	if (!x->parent)
+	{
 		tree->root = y;
+	}
 	else if (x == x->parent->left)
+	{
 		x->parent->left = y;
+	}
 	else
+	{
 		x->parent->right = y;
+	}
 
 	y->left = x;
 	x->parent = y;
@@ -141,15 +159,23 @@ rotate_right(ephemeral_tree *tree, ephemeral_tree_node *x)
 	ephemeral_tree_node *y = x->left;
 	x->left = y->right;
 	if (y->right)
+	{
 		y->right->parent = x;
+	}
 
 	y->parent = x->parent;
 	if (!x->parent)
+	{
 		tree->root = y;
+	}
 	else if (x == x->parent->right)
+	{
 		x->parent->right = y;
+	}
 	else
+	{
 		x->parent->left = y;
+	}
 
 	y->right = x;
 	x->parent = y;
@@ -212,14 +238,22 @@ static void
 transplant(ephemeral_tree *tree, ephemeral_tree_node *u, ephemeral_tree_node *v)
 {
 	if (!u->parent)
+	{
 		tree->root = v;
+	}
 	else if (u == u->parent->left)
+	{
 		u->parent->left = v;
+	}
 	else
+	{
 		u->parent->right = v;
+	}
 
 	if (v)
+	{
 		v->parent = u->parent;
+	}
 }
 
 // Consolidated delete fixup
@@ -239,7 +273,14 @@ delete_fixup(ephemeral_tree *tree, ephemeral_tree_node *x, ephemeral_tree_node *
 		{
 			sibling->color = BLACK;
 			x_parent->color = RED;
-			is_left ? rotate_left(tree, x_parent) : rotate_right(tree, x_parent);
+			if (is_left)
+			{
+				rotate_left(tree, x_parent);
+			}
+			else
+			{
+				rotate_right(tree, x_parent);
+			}
 			sibling = is_left ? x_parent->right : x_parent->left;
 		}
 
@@ -259,7 +300,9 @@ delete_fixup(ephemeral_tree *tree, ephemeral_tree_node *x, ephemeral_tree_node *
 				if (right_black)
 				{
 					if (sibling->left)
+					{
 						sibling->left->color = BLACK;
+					}
 					sibling->color = RED;
 					rotate_right(tree, sibling);
 					sibling = x_parent->right;
@@ -267,7 +310,9 @@ delete_fixup(ephemeral_tree *tree, ephemeral_tree_node *x, ephemeral_tree_node *
 				sibling->color = x_parent->color;
 				x_parent->color = BLACK;
 				if (sibling->right)
+				{
 					sibling->right->color = BLACK;
+				}
 				rotate_left(tree, x_parent);
 			}
 			else
@@ -275,7 +320,9 @@ delete_fixup(ephemeral_tree *tree, ephemeral_tree_node *x, ephemeral_tree_node *
 				if (left_black)
 				{
 					if (sibling->right)
+					{
 						sibling->right->color = BLACK;
+					}
 					sibling->color = RED;
 					rotate_left(tree, sibling);
 					sibling = x_parent->left;
@@ -283,14 +330,18 @@ delete_fixup(ephemeral_tree *tree, ephemeral_tree_node *x, ephemeral_tree_node *
 				sibling->color = x_parent->color;
 				x_parent->color = BLACK;
 				if (sibling->left)
+				{
 					sibling->left->color = BLACK;
+				}
 				rotate_right(tree, x_parent);
 			}
 			x = tree->root;
 		}
 	}
 	if (x)
+	{
 		x->color = BLACK;
+	}
 }
 
 // Single internal delete function
@@ -298,7 +349,9 @@ static bool
 delete_node(ephemeral_tree *tree, ephemeral_tree_node *z)
 {
 	if (!z)
+	{
 		return false;
+	}
 
 	ephemeral_tree_node *y = z;
 	ephemeral_tree_node *x = nullptr;
@@ -488,7 +541,7 @@ seek_lt(ephemeral_tree *tree, void *key)
 // ============================================================================
 
 ephemeral_tree
-ephemeral_tree_create(DataType key_type, uint32_t record_size, uint8_t flags)
+et_create(DataType key_type, uint32_t record_size, uint8_t flags)
 {
 	ephemeral_tree tree = {};
 	tree.key_type = key_type;
@@ -501,14 +554,14 @@ ephemeral_tree_create(DataType key_type, uint32_t record_size, uint8_t flags)
 }
 
 void
-ephemeral_tree_clear(ephemeral_tree *tree)
+et_clear(ephemeral_tree *tree)
 {
 	tree->root = nullptr;
 	tree->node_count = 0;
 }
 
 bool
-ephemeral_tree_insert(ephemeral_tree *tree, void *key, void *record, MemoryContext *ctx)
+et_insert(ephemeral_tree *tree, void *key, void *record, MemoryContext *ctx)
 {
 	// Find insertion point
 	ephemeral_tree_node *parent = nullptr, *current = tree->root;
@@ -561,11 +614,25 @@ ephemeral_tree_insert(ephemeral_tree *tree, void *key, void *record, MemoryConte
 		{
 			// Compare records for placement
 			int rec_cmp = memcmp(record, node_record(parent, tree->key_size), tree->record_size);
-			(rec_cmp < 0 ? parent->left : parent->right) = node;
+			if (rec_cmp < 0)
+			{
+				parent->left = node;
+			}
+			else
+			{
+				parent->right = node;
+			}
 		}
 		else
 		{
-			(cmp < 0 ? parent->left : parent->right) = node;
+			if (cmp < 0)
+			{
+				parent->left = node;
+			}
+			else
+			{
+				parent->right = node;
+			}
 		}
 	}
 
@@ -574,7 +641,7 @@ ephemeral_tree_insert(ephemeral_tree *tree, void *key, void *record, MemoryConte
 }
 
 bool
-ephemeral_tree_delete(ephemeral_tree *tree, void *key)
+et_delete(ephemeral_tree *tree, void *key)
 {
 	ephemeral_tree_node *current = tree->root;
 
@@ -582,7 +649,9 @@ ephemeral_tree_delete(ephemeral_tree *tree, void *key)
 	{
 		int cmp = node_compare_key(tree, key, current);
 		if (cmp == 0)
+		{
 			return delete_node(tree, current);
+		}
 		current = (cmp < 0) ? current->left : current->right;
 	}
 
@@ -590,7 +659,7 @@ ephemeral_tree_delete(ephemeral_tree *tree, void *key)
 }
 
 bool
-ephemeral_tree_delete_exact(ephemeral_tree *tree, void *key, void *record)
+et_delete_exact(ephemeral_tree *tree, void *key, void *record)
 {
 	ephemeral_tree_node *current = tree->root;
 
@@ -608,7 +677,9 @@ ephemeral_tree_delete_exact(ephemeral_tree *tree, void *key, void *record)
 
 			int rec_cmp = memcmp(record, node_record(current, tree->key_size), tree->record_size);
 			if (rec_cmp == 0)
+			{
 				return delete_node(tree, current);
+			}
 			current = (rec_cmp < 0) ? current->left : current->right;
 		}
 		else
@@ -656,11 +727,15 @@ bool
 et_cursor_next(et_cursor *cursor)
 {
 	if (cursor->state != et_cursor::VALID)
+	{
 		return false;
+	}
 
 	cursor->current = tree_successor(cursor->current);
 	if (cursor->current)
+	{
 		return true;
+	}
 
 	cursor->state = et_cursor::AT_END;
 	return false;
@@ -670,11 +745,15 @@ bool
 et_cursor_previous(et_cursor *cursor)
 {
 	if (cursor->state != et_cursor::VALID)
+	{
 		return false;
+	}
 
 	cursor->current = tree_predecessor(cursor->current);
 	if (cursor->current)
+	{
 		return true;
+	}
 
 	cursor->state = et_cursor::AT_END;
 	return false;
@@ -684,7 +763,9 @@ bool
 et_cursor_has_next(et_cursor *cursor)
 {
 	if (cursor->state != et_cursor::VALID)
+	{
 		return false;
+	}
 	return tree_successor(cursor->current) != nullptr;
 }
 
@@ -692,7 +773,9 @@ bool
 et_cursor_has_previous(et_cursor *cursor)
 {
 	if (cursor->state != et_cursor::VALID)
+	{
 		return false;
+	}
 	return tree_predecessor(cursor->current) != nullptr;
 }
 
@@ -739,7 +822,9 @@ void *
 et_cursor_key(et_cursor *cursor)
 {
 	if (cursor->state != et_cursor::VALID)
+	{
 		return nullptr;
+	}
 	return node_key(cursor->current);
 }
 
@@ -747,7 +832,9 @@ void *
 et_cursor_record(et_cursor *cursor)
 {
 	if (cursor->state != et_cursor::VALID)
+	{
 		return nullptr;
+	}
 	return node_record(cursor->current, cursor->tree.key_size);
 }
 
@@ -760,14 +847,16 @@ et_cursor_is_valid(et_cursor *cursor)
 bool
 et_cursor_insert(et_cursor *cursor, void *key, void *record)
 {
-	return ephemeral_tree_insert(&cursor->tree, (void *)key, record, cursor->ctx);
+	return et_insert(&cursor->tree, (void *)key, record, cursor->ctx);
 }
 
 bool
 et_cursor_delete(et_cursor *cursor)
 {
 	if (cursor->state != et_cursor::VALID)
+	{
 		return false;
+	}
 
 	// Save next position
 	ephemeral_tree_node *next = tree_successor(cursor->current);
@@ -915,12 +1004,16 @@ static void
 print_inorder_recursive(const ephemeral_tree *tree, ephemeral_tree_node *node, bool &first)
 {
 	if (!node)
+	{
 		return;
+	}
 
 	print_inorder_recursive(tree, node->left, first);
 
 	if (!first)
+	{
 		printf(", ");
+	}
 	first = false;
 	printf("[");
 	type_print(tree->key_type, node_key(node));
@@ -934,7 +1027,9 @@ print_inorder_recursive(const ephemeral_tree *tree, ephemeral_tree_node *node, b
 			printf("%02x", rec[i]);
 		}
 		if (tree->record_size > 4)
+		{
 			printf("...");
+		}
 	}
 	printf("]");
 
@@ -946,7 +1041,9 @@ static void
 print_tree_visual_helper(const ephemeral_tree *tree, ephemeral_tree_node *node, const std::string &prefix, bool is_tail)
 {
 	if (!node)
+	{
 		return;
+	}
 
 	printf("%s", prefix.c_str());
 	printf("%s", is_tail ? "└── " : "├── ");
@@ -964,7 +1061,9 @@ print_tree_visual_helper(const ephemeral_tree *tree, ephemeral_tree_node *node, 
 			printf("%02x", rec[i]);
 		}
 		if (tree->record_size > 4)
+		{
 			printf("...");
+		}
 	}
 	printf("\n");
 
@@ -986,16 +1085,16 @@ print_tree_visual_helper(const ephemeral_tree *tree, ephemeral_tree_node *node, 
 
 // Main print function with BFS level-order traversal
 void
-et_tree_print(const ephemeral_tree *tree)
+et_print(const ephemeral_tree *tree)
 {
 	if (!tree || !tree->root)
 	{
-		printf("MemTree: EMPTY\n");
+		printf("Ephemeral Tree: EMPTY\n");
 		return;
 	}
 
 	printf("====================================\n");
-	printf("MemTree Structure (Red-Black Tree)\n");
+	printf("Ephemeral Tree Structure (Red-Black Tree)\n");
 	printf("====================================\n");
 	printf("Key type: %s, Key size: %u bytes\n", type_name(tree->key_type), tree->key_size);
 	printf("Record size: %u bytes\n", tree->record_size);
@@ -1036,7 +1135,9 @@ et_tree_print(const ephemeral_tree *tree)
 
 		// Print node info
 		if (nodes_in_level > 0)
+		{
 			printf("  ");
+		}
 		printf("[");
 		type_print(tree->key_type, node_key(nl.node));
 		printf("]");
