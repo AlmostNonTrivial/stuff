@@ -64,9 +64,8 @@ os_file_open(const char *filename, bool read_write, bool create)
 	DWORD creation = create ? OPEN_ALWAYS : OPEN_EXISTING;
 
 	/* Allow shared reading and writing for database concurrency */
-	HANDLE handle = CreateFileA(filename, access,
-		FILE_SHARE_READ | FILE_SHARE_WRITE,
-		NULL, creation, FILE_ATTRIBUTE_NORMAL, NULL);
+	HANDLE handle =
+		CreateFileA(filename, access, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, creation, FILE_ATTRIBUTE_NORMAL, NULL);
 
 	return (os_file_handle_t)handle;
 }
@@ -74,7 +73,8 @@ os_file_open(const char *filename, bool read_write, bool create)
 void
 os_file_close(os_file_handle_t handle)
 {
-	if (handle != OS_INVALID_HANDLE) {
+	if (handle != OS_INVALID_HANDLE)
+	{
 		CloseHandle((HANDLE)handle);
 	}
 }
@@ -157,7 +157,8 @@ os_file_handle_t
 os_file_open(const char *filename, bool read_write, bool create)
 {
 	int flags = read_write ? O_RDWR : O_RDONLY;
-	if (create) flags |= O_CREAT;
+	if (create)
+		flags |= O_CREAT;
 
 	/* Mode 0644 = owner read/write, group/other read only */
 	return open(filename, flags, 0644);
@@ -166,7 +167,8 @@ os_file_open(const char *filename, bool read_write, bool create)
 void
 os_file_close(os_file_handle_t handle)
 {
-	if (handle != OS_INVALID_HANDLE) {
+	if (handle != OS_INVALID_HANDLE)
+	{
 		close(handle);
 	}
 }
@@ -214,7 +216,8 @@ os_file_offset_t
 os_file_size(os_file_handle_t handle)
 {
 	struct stat st;
-	if (fstat(handle, &st) == 0) {
+	if (fstat(handle, &st) == 0)
+	{
 		return (os_file_offset_t)st.st_size;
 	}
 	return 0;
@@ -259,8 +262,7 @@ os_file_truncate(os_file_handle_t handle, os_file_offset_t size)
 */
 
 #include "arena.hpp"
-#include <algorithm>
-#include <cstring>
+
 
 /* Define invalid handle for memory filesystem */
 #ifndef OS_INVALID_HANDLE
@@ -275,9 +277,9 @@ os_file_truncate(os_file_handle_t handle, os_file_offset_t size)
 */
 struct file_handle
 {
-	char  *filepath;    /* Path to file (owned by arena) */
-	size_t position;    /* Current read/write position */
-	bool   read_write;  /* true if opened for writing */
+	char  *filepath;   /* Path to file (owned by arena) */
+	size_t position;   /* Current read/write position */
+	bool   read_write; /* true if opened for writing */
 };
 
 /*
@@ -305,8 +307,10 @@ os_file_open(const char *filename, bool read_write, bool create)
 	/* Check if file exists */
 	auto *file_data = stringmap_get(&g_filesystem.files, filename);
 
-	if (!file_data) {
-		if (!create) {
+	if (!file_data)
+	{
+		if (!create)
+		{
 			return OS_INVALID_HANDLE;
 		}
 
@@ -334,9 +338,11 @@ os_file_open(const char *filename, bool read_write, bool create)
 void
 os_file_close(os_file_handle_t handle)
 {
-	if (handle != OS_INVALID_HANDLE) {
+	if (handle != OS_INVALID_HANDLE)
+	{
 		auto *fh = hashmap_get(&g_filesystem.handles, handle);
-		if (fh) {
+		if (fh)
+		{
 			/* Attempt to reclaim filepath memory (may be no-op for arena) */
 			size_t len = strlen(fh->filepath) + 1;
 			arena::reclaim<global_arena>(fh->filepath, len);
@@ -356,9 +362,9 @@ os_file_delete(const char *filename)
 {
 	/* Get the file data to reclaim its memory */
 	auto *file_data = stringmap_get(&g_filesystem.files, filename);
-	if (file_data && file_data->data) {
-		arena::reclaim<global_arena>(file_data->data,
-			file_data->capacity * sizeof(uint8_t));
+	if (file_data && file_data->data)
+	{
+		arena::reclaim<global_arena>(file_data->data, file_data->capacity * sizeof(uint8_t));
 	}
 
 	/* Delete from the map */
@@ -369,17 +375,21 @@ os_file_delete(const char *filename)
 	array<os_file_handle_t> handles_to_close;
 	array_reserve(&handles_to_close, g_filesystem.handles.size);
 
-	for (uint32_t i = 0; i < g_filesystem.handles.capacity; i++) {
+	for (uint32_t i = 0; i < g_filesystem.handles.capacity; i++)
+	{
 		auto &entry = g_filesystem.handles.entries[i];
-		if (entry.state == hash_map<os_file_handle_t, file_handle>::Entry::OCCUPIED) {
-			if (strcmp(entry.value.filepath, filename) == 0) {
+		if (entry.state == hash_map<os_file_handle_t, file_handle>::Entry::OCCUPIED)
+		{
+			if (strcmp(entry.value.filepath, filename) == 0)
+			{
 				array_push(&handles_to_close, entry.key);
 			}
 		}
 	}
 
 	/* Now close the collected handles */
-	for (uint32_t i = 0; i < handles_to_close.size; i++) {
+	for (uint32_t i = 0; i < handles_to_close.size; i++)
+	{
 		os_file_close(handles_to_close.data[i]);
 	}
 }
@@ -388,20 +398,26 @@ os_file_size_t
 os_file_read(os_file_handle_t handle, void *buffer, os_file_size_t size)
 {
 	auto *handle_data = hashmap_get(&g_filesystem.handles, handle);
-	if (!handle_data) {
+	if (!handle_data)
+	{
 		return 0;
 	}
 
 	auto *file_data = stringmap_get(&g_filesystem.files, handle_data->filepath);
-	if (!file_data) {
+	if (!file_data)
+	{
 		return 0;
 	}
 
-	size_t &position = handle_data->position;
-	os_file_size_t bytes_to_read = std::min(size,
-		(os_file_size_t)(file_data->size - position));
+	size_t		  &position = handle_data->position;
+	os_file_size_t bytes_to_read = (os_file_size_t)(file_data->size - position);
+	if (size < bytes_to_read)
+	{
+		bytes_to_read = size;
+	}
 
-	if (bytes_to_read > 0) {
+	if (bytes_to_read > 0)
+	{
 		memcpy(buffer, file_data->data + position, bytes_to_read);
 		position += bytes_to_read;
 	}
@@ -413,17 +429,19 @@ os_file_size_t
 os_file_write(os_file_handle_t handle, const void *buffer, os_file_size_t size)
 {
 	auto *handle_data = hashmap_get(&g_filesystem.handles, handle);
-	if (!handle_data || !handle_data->read_write) {
+	if (!handle_data || !handle_data->read_write)
+	{
 		return 0;
 	}
 
 	auto *file_data = stringmap_get(&g_filesystem.files, handle_data->filepath);
-	if (!file_data) {
+	if (!file_data)
+	{
 		return 0;
 	}
 
 	size_t &position = handle_data->position;
-	size_t required_size = position + size;
+	size_t	required_size = position + size;
 
 	/*
 	** SPARSE FILE HANDLING
@@ -432,20 +450,24 @@ os_file_write(os_file_handle_t handle, const void *buffer, os_file_size_t size)
 	** POSIX sparse file behavior. This is critical for database
 	** correctness as uninitialized pages must read as zeros.
 	*/
-	if (position > file_data->size) {
+	if (position > file_data->size)
+	{
 		/* Writing past EOF - need to zero-fill the gap */
-		if (file_data->capacity < required_size) {
+		if (file_data->capacity < required_size)
+		{
 			array_reserve(file_data, required_size);
 		}
 
 		/* Zero-fill from current size to write position */
-		memset(file_data->data + file_data->size, 0,
-			position - file_data->size);
+		memset(file_data->data + file_data->size, 0, position - file_data->size);
 
 		file_data->size = required_size;
-	} else if (required_size > file_data->size) {
+	}
+	else if (required_size > file_data->size)
+	{
 		/* Writing extends the file but no gap */
-		if (file_data->capacity < required_size) {
+		if (file_data->capacity < required_size)
+		{
 			array_reserve(file_data, required_size);
 		}
 		file_data->size = required_size;
@@ -469,7 +491,8 @@ void
 os_file_seek(os_file_handle_t handle, os_file_offset_t offset)
 {
 	auto *handle_data = hashmap_get(&g_filesystem.handles, handle);
-	if (!handle_data) {
+	if (!handle_data)
+	{
 		return;
 	}
 
@@ -481,12 +504,14 @@ os_file_offset_t
 os_file_size(os_file_handle_t handle)
 {
 	auto *handle_data = hashmap_get(&g_filesystem.handles, handle);
-	if (!handle_data) {
+	if (!handle_data)
+	{
 		return 0;
 	}
 
 	auto *file_data = stringmap_get(&g_filesystem.files, handle_data->filepath);
-	if (!file_data) {
+	if (!file_data)
+	{
 		return 0;
 	}
 
@@ -497,30 +522,34 @@ void
 os_file_truncate(os_file_handle_t handle, os_file_offset_t size)
 {
 	auto *handle_data = hashmap_get(&g_filesystem.handles, handle);
-	if (!handle_data || !handle_data->read_write) {
+	if (!handle_data || !handle_data->read_write)
+	{
 		return;
 	}
 
 	auto *file_data = stringmap_get(&g_filesystem.files, handle_data->filepath);
-	if (!file_data) {
+	if (!file_data)
+	{
 		return;
 	}
 
 	/* Resize the file */
-	if ((size_t)size > file_data->size) {
+	if ((size_t)size > file_data->size)
+	{
 		/* Extending - need to zero-fill */
-		if (file_data->capacity < (size_t)size) {
+		if (file_data->capacity < (size_t)size)
+		{
 			array_reserve(file_data, (size_t)size);
 		}
 		/* Zero-fill the new bytes */
-		memset(file_data->data + file_data->size, 0,
-			(size_t)size - file_data->size);
+		memset(file_data->data + file_data->size, 0, (size_t)size - file_data->size);
 	}
 
 	file_data->size = (size_t)size;
 
 	/* Adjust position if it's beyond new size */
-	if (handle_data->position > (size_t)size) {
+	if (handle_data->position > (size_t)size)
+	{
 		handle_data->position = (size_t)size;
 	}
 }
