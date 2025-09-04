@@ -762,6 +762,71 @@ test_subquery_pattern()
 	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
 }
 
+
+
+inline void
+test_composite_index_range_query()
+{
+    printf("\n=== COMPOSITE INDEX RANGE QUERY ===\n");
+    printf("Query: Find orders for user_id = 11 where order_id > 5\n\n");
+
+    ProgramBuilder prog;
+
+    auto index_ctx = from_structure(catalog[ORDERS_BY_USER]);
+    prog.open_cursor(0, &index_ctx);
+
+    {
+        prog.regs.push_scope();
+
+        // Target: user_id = 2, order_id > 5
+        uint32_t target_user = 11;
+        uint32_t min_order_id = 6; // > 5 means >= 6
+
+        int user_reg = prog.load(TYPE_U32, prog.alloc_value(target_user));
+        int order_threshold = prog.load(TYPE_U32, prog.alloc_value(min_order_id));
+
+        // Create composite seek key: (2, 6)
+        int seek_key = prog.pack2(user_reg, order_threshold);
+
+        // Seek to first entry >= (2, 6)
+        int found = prog.seek(0, seek_key, GE);
+
+        auto scan_loop = prog.begin_while(found);
+        {
+            // Get and unpack composite key
+            int composite = prog.get_column(0, 0);
+
+            // Allocate space for unpacked values before unpacking
+            int unpacked_start = prog.regs.allocate_range(2);
+            prog.unpack2(composite, unpacked_start);
+
+            // Now we know exactly where the values are
+            int current_user = unpacked_start;
+            int current_order = unpacked_start + 1;
+
+            // Check if still same user
+            int same_user = prog.eq(current_user, user_reg);
+            auto if_ctx = prog.begin_if(same_user);
+            prog.result(unpacked_start, 2);
+            prog.end_if(if_ctx);
+            prog.jumpif_zero(same_user, "done");
+
+
+            prog.next(0, found);
+        }
+        prog.end_while(scan_loop);
+
+        prog.label("done");
+        prog.regs.pop_scope();
+    }
+
+    prog.close_cursor(0);
+    prog.halt();
+
+    prog.resolve_labels();
+    vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+}
+
 inline void
 test_create_composite_index()
 {
@@ -1327,10 +1392,9 @@ test_programs()
 
 	// test_many_to_many_query();
 
-	_debug = true;
 	test_create_composite_index();
-
-
+	_debug = true;
+	test_composite_index_range_query();
 	// test_subquery_pattern();
 	// _debug = true;
 	// test_nested_loop_join();

@@ -13,6 +13,9 @@
 #include <iterator>
 #include <sys/types.h>
 
+static void
+print_key(BPlusTree &tree, uint8_t *key);
+
 // Constants
 #define NODE_HEADER_SIZE 24
 #define NODE_DATA_SIZE	 PAGE_SIZE - NODE_HEADER_SIZE
@@ -1522,12 +1525,7 @@ print_key(BPlusTree &tree, uint8_t *key)
 		printf("NULL");
 		return;
 	}
-
-
-
-	// default:
-		printf("?");
-	// }
+	type_print(tree.node_key_type, key);
 }
 
 // Main B+Tree print function
