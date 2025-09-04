@@ -1,5 +1,5 @@
 #pragma once
-#include "memtree.hpp"
+#include "ephemeral.hpp"
 #include "arena.hpp"
 #include <algorithm>
 #include <cassert>
@@ -24,7 +24,7 @@ inline void test_ephemeral_tree_sequential_ops() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    et_cursor cursor = {.tree = ephemeral_tree_create(TYPE_U32, sizeof(uint32_t), false), .ctx = &ctx};
+    et_cursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint32_t), false), .ctx = &ctx};
     ephemeral_tree &tree = cursor.tree;
     const int COUNT = 1000;
 
@@ -33,7 +33,7 @@ inline void test_ephemeral_tree_sequential_ops() {
     for (int i = 0; i < COUNT; i++) {
         uint32_t key = i;
         uint32_t value = i * 100;
-        assert(ephemeral_tree_insert(&tree, (uint8_t*)&key, (uint8_t*)&value, &ctx));
+        assert(et_insert(&tree, (uint8_t*)&key, (uint8_t*)&value, &ctx));
     }
     std::cout << " OK (" << tree.node_count << " nodes)\n";
 
@@ -49,7 +49,7 @@ inline void test_ephemeral_tree_sequential_ops() {
     std::cout << "Forward sequential delete..." << std::flush;
     for (int i = 0; i < COUNT / 2; i++) {
         uint32_t key = i;
-        assert(ephemeral_tree_delete(&tree, (uint8_t*)&key));
+        assert(et_delete(&tree, (uint8_t*)&key));
     }
     std::cout << " OK (remaining: " << tree.node_count << ")\n";
 
@@ -69,7 +69,7 @@ inline void test_ephemeral_tree_sequential_ops() {
     std::cout << "Backward sequential delete..." << std::flush;
     for (int i = COUNT - 1; i >= COUNT / 2; i--) {
         uint32_t key = i;
-        assert(ephemeral_tree_delete(&tree, (uint8_t*)&key));
+        assert(et_delete(&tree, (uint8_t*)&key));
     }
     std::cout << " OK\n";
 
@@ -85,7 +85,7 @@ inline void test_ephemeral_tree_random_ops() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    et_cursor cursor = {.tree = ephemeral_tree_create(TYPE_U32, sizeof(uint64_t), false), .ctx = &ctx};
+    et_cursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint64_t), false), .ctx = &ctx};
     ephemeral_tree &tree = cursor.tree;
 
     const int COUNT = 1000;
@@ -103,7 +103,7 @@ inline void test_ephemeral_tree_random_ops() {
     // Random insertions
     std::cout << "Random insert..." << std::flush;
     for (auto& [key, value] : data) {
-        assert(ephemeral_tree_insert(&tree, (uint8_t*)&key, (uint8_t*)&value, &ctx));
+        assert(et_insert(&tree, (uint8_t*)&key, (uint8_t*)&value, &ctx));
     }
     std::cout << " OK (" << COUNT << " unique keys)\n";
 
@@ -128,7 +128,7 @@ inline void test_ephemeral_tree_random_ops() {
     std::set<uint32_t> deleted_keys;
     for (int i = 0; i < delete_count; i++) {
         uint32_t key = keys_to_delete[i];
-        assert(ephemeral_tree_delete(&tree, (uint8_t*)&key));
+        assert(et_delete(&tree, (uint8_t*)&key));
         deleted_keys.insert(key);
     }
     std::cout << " OK (deleted: " << delete_count << ")\n";
@@ -153,7 +153,7 @@ inline void test_ephemeral_tree_random_ops() {
 //     arena::init<QueryArena>();
 //     TestContext ctx;
 
-//     MemCursor cursor = {.tree = ephemeral_tree_create(TYPE_U32, sizeof(uint32_t), true), .ctx = &ctx};
+//     MemCursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint32_t), true), .ctx = &ctx};
 //     MemTree &tree = cursor.tree;
 
 //     // Insert multiple records with same key
@@ -161,7 +161,7 @@ inline void test_ephemeral_tree_random_ops() {
 //     uint32_t key = 42;
 //     for (uint32_t i = 0; i < 10; i++) {
 //         uint32_t record = i * 100;
-//         assert(ephemeral_tree_insert(&tree, (uint8_t*)&key, (uint8_t*)&record, &ctx));
+//         assert(et_insert(&tree, (uint8_t*)&key, (uint8_t*)&record, &ctx));
 //     }
 //     std::cout << " OK (10 duplicates)\n";
 
@@ -187,14 +187,14 @@ inline void test_ephemeral_tree_random_ops() {
 //     // Delete specific duplicate
 //     std::cout << "Delete exact duplicate..." << std::flush;
 //     uint32_t target_record = 500;
-//     assert(ephemeral_tree_delete_exact(&tree, (uint8_t*)&key, (uint8_t*)&target_record));
+//     assert(et_delete_exact(&tree, (uint8_t*)&key, (uint8_t*)&target_record));
 //     count = et_cursor_count_duplicates(&cursor, &key);
 //     assert(count == 9);
 //     std::cout << " OK\n";
 
 //     // Delete first occurrence
 //     std::cout << "Delete first occurrence..." << std::flush;
-//     assert(ephemeral_tree_delete(&tree, (uint8_t*)&key));
+//     assert(et_delete(&tree, (uint8_t*)&key));
 //     count = et_cursor_count_duplicates(&cursor, &key);
 //     assert(count == 8);
 //     std::cout << " OK\n";
@@ -225,7 +225,7 @@ inline void test_ephemeral_tree_composite_keys() {
         return (uint32_t)(key & 0xFFFFFFFF);
     };
 
-    et_cursor cursor = {.tree = ephemeral_tree_create(TYPE_U64, sizeof(uint64_t), false), .ctx = &ctx};
+    et_cursor cursor = {.tree = et_create(TYPE_U64, sizeof(uint64_t), false), .ctx = &ctx};
     ephemeral_tree &tree = cursor.tree;
 
     // Insert composite keys
@@ -234,7 +234,7 @@ inline void test_ephemeral_tree_composite_keys() {
         for (uint32_t time = 100; time <= 110; time++) {
             uint64_t key = make_composite_key(user, time);
             uint64_t value = key; // Just use key as value for simplicity
-            assert(ephemeral_tree_insert(&tree, (uint8_t*)&key, (uint8_t*)&value, &ctx));
+            assert(et_insert(&tree, (uint8_t*)&key, (uint8_t*)&value, &ctx));
         }
     }
     std::cout << " OK (110 keys)\n";
@@ -269,7 +269,7 @@ inline void test_ephemeral_tree_cursor_operations() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    et_cursor cursor = {.tree = ephemeral_tree_create(TYPE_U32, sizeof(uint32_t), false), .ctx = &ctx};
+    et_cursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint32_t), false), .ctx = &ctx};
     ephemeral_tree &tree = cursor.tree;
 
     // Insert test data
@@ -343,7 +343,7 @@ inline void test_ephemeral_tree_edge_cases() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    et_cursor cursor = {.tree = ephemeral_tree_create(TYPE_U32, sizeof(uint32_t), false), .ctx = &ctx};
+    et_cursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint32_t), false), .ctx = &ctx};
     ephemeral_tree &tree = cursor.tree;
 
     // Empty tree operations
@@ -352,18 +352,18 @@ inline void test_ephemeral_tree_edge_cases() {
     assert(!et_cursor_first(&cursor));
     assert(!et_cursor_last(&cursor));
     uint32_t key = 42;
-    assert(!ephemeral_tree_delete(&tree, (uint8_t*)&key));
+    assert(!et_delete(&tree, (uint8_t*)&key));
     std::cout << " OK\n";
 
     // Single element
     std::cout << "Single element..." << std::flush;
     uint32_t value = 100;
-    assert(ephemeral_tree_insert(&tree, (uint8_t*)&key, (uint8_t*)&value, &ctx));
+    assert(et_insert(&tree, (uint8_t*)&key, (uint8_t*)&value, &ctx));
     assert(!et_is_empty(&tree));
     assert(et_cursor_first(&cursor));
     assert(et_cursor_last(&cursor));
     assert(*(uint32_t*)et_cursor_key(&cursor) == 42);
-    assert(ephemeral_tree_delete(&tree, (uint8_t*)&key));
+    assert(et_delete(&tree, (uint8_t*)&key));
     assert(et_is_empty(&tree));
     std::cout << " OK\n";
 
@@ -372,8 +372,8 @@ inline void test_ephemeral_tree_edge_cases() {
     uint32_t min_key = 0;
     uint32_t max_key = UINT32_MAX;
 
-    assert(ephemeral_tree_insert(&tree, (uint8_t*)&min_key, (uint8_t*)&value, &ctx));
-    assert(ephemeral_tree_insert(&tree, (uint8_t*)&max_key, (uint8_t*)&value, &ctx));
+    assert(et_insert(&tree, (uint8_t*)&min_key, (uint8_t*)&value, &ctx));
+    assert(et_insert(&tree, (uint8_t*)&max_key, (uint8_t*)&value, &ctx));
 
     assert(et_cursor_first(&cursor));
     assert(*(uint32_t*)et_cursor_key(&cursor) == 0);
@@ -385,7 +385,7 @@ inline void test_ephemeral_tree_edge_cases() {
 
     // Clear tree
     std::cout << "Clear tree..." << std::flush;
-    ephemeral_tree_clear(&tree);
+    et_clear(&tree);
     assert(et_is_empty(&tree));
     std::cout << " OK\n";
 
@@ -398,7 +398,7 @@ inline void test_ephemeral_tree_varchar_keys() {
     arena::init<QueryArena>();
     TestContext ctx;
 
-    et_cursor cursor = {.tree = ephemeral_tree_create(TYPE_CHAR32, sizeof(uint32_t), false), .ctx = &ctx};
+    et_cursor cursor = {.tree = et_create(TYPE_CHAR32, sizeof(uint32_t), false), .ctx = &ctx};
     ephemeral_tree &tree = cursor.tree;
 
     const char* test_strings[] = {
@@ -412,7 +412,7 @@ inline void test_ephemeral_tree_varchar_keys() {
         char key[32] = {0};
         strncpy(key, test_strings[i], 31);
         uint32_t value = i;
-        assert(ephemeral_tree_insert(&tree, (uint8_t*)key, (uint8_t*)&value, &ctx));
+        assert(et_insert(&tree, (uint8_t*)key, (uint8_t*)&value, &ctx));
     }
     std::cout << " OK\n";
 

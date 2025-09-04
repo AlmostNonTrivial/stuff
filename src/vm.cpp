@@ -8,7 +8,7 @@
 #include "arena.hpp"
 #include "blob.hpp"
 #include "btree.hpp"
-#include "memtree.hpp"
+#include "ephemeral.hpp"
 #include "catalog.hpp"
 #include <cstdint>
 #include <cstdio>
@@ -96,7 +96,7 @@ vmcursor_open(VmCursor *cursor, CursorContext *context, MemoryContext *ctx)
 		cur->layout = context->layout;
 		DataType key_type = cur->layout.layout[0];
 		bool	 allow_duplicates = (bool)context->flags;
-		cur->cursor.mem.tree = ephemeral_tree_create(key_type, cur->layout.record_size, allow_duplicates);
+		cur->cursor.mem.tree = et_create(key_type, cur->layout.record_size, allow_duplicates);
 		cur->cursor.mem.state = et_cursor::INVALID;
 		cur->cursor.mem.ctx = ctx;
 		break;
