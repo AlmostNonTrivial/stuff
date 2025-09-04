@@ -426,88 +426,92 @@ destroy_node(BTreeNode *node)
 	pager_delete(node->index);
 }
 
-static BTreeNode *
-split(BPlusTree &tree, BTreeNode *node)
-{
-	BTreeNode *right_node = create_node(tree, IS_LEAF(node));
-	uint32_t   split_index = GET_SPLIT_INDEX(node);
+// Split a full node into two nodes, promoting a key to the parent
+// Returns the parent node (which may need splitting if it's now full)
+static BTreeNode* split(BPlusTree &tree, BTreeNode *node) {
+    // === PREPARATION ===
+    uint32_t split_point = GET_SPLIT_INDEX(node);
+    BTreeNode *new_right = create_node(tree, IS_LEAF(node));
 
-	// Save the rising key VALUE before any modifications
-	uint8_t rising_key_value[256]; // Max possible key size
-	copy_key(tree, rising_key_value, GET_KEY_AT(node, split_index));
+    // Save the key that will be promoted to parent
+    // (for leaves, this is a copy; for internals, it moves up)
+    uint8_t promoted_key[256];
+    copy_key(tree, promoted_key, GET_KEY_AT(node, split_point));
 
-	MARK_DIRTY(right_node);
-	MARK_DIRTY(node);
+    MARK_DIRTY(node);
+    MARK_DIRTY(new_right);
 
-	BTreeNode *parent = GET_PARENT(node);
-	uint32_t   parent_index = 0;
+    // === ENSURE PARENT EXISTS ===
+    BTreeNode *parent = GET_PARENT(node);
+    uint32_t position_in_parent = 0;
 
-	if (!parent)
-	{
-		auto new_internal = create_node(tree, false);
-		auto root = GET_NODE(tree.root_page_index);
-		// After swap: root contains empty internal node, new_internal contains old root data
-		swap_with_root(tree, root, new_internal);
+    if (!parent) {
+        // Special case: splitting root requires creating new root above it
+        // 1. Create new node for the internal
+        BTreeNode *new_node = create_node(tree, false);
+        // 2. Get current root
+        BTreeNode *root = GET_NODE(tree.root_page_index);
+        // 3. Swap contents: root becomes empty, new_node gets old root data
+        swap_with_root(tree, root, new_node);
+        // 4. Make the old root data (now in new_node) a child of the new root
+        set_child(tree, root, 0, new_node->index);
 
-		set_child(tree, root, 0, new_internal->index);
+        parent = root;          // New root is the parent
+        node = new_node;        // Continue with relocated node
+        position_in_parent = 0; // It's child 0 of the new root
+    } else {
+        // Normal case: find our position in existing parent
+        position_in_parent = find_child_index(tree, parent, node);
 
-		parent = root; // Continue with root as the parent
-		node = new_internal;
-	}
-	else
-	{
-		MARK_DIRTY(parent);
+        // Make room for new key and child in parent
+        shift_children_right(tree, parent, position_in_parent + 1,
+                           parent->num_keys - position_in_parent);
+        shift_keys_right(tree, parent, position_in_parent,
+                       parent->num_keys - position_in_parent);
+    }
 
-		parent_index = find_child_index(tree, parent, node);
+    // === INSERT PROMOTED KEY INTO PARENT ===
+    MARK_DIRTY(parent);
+    copy_key(tree, GET_KEY_AT(parent, position_in_parent), promoted_key);
+    set_child(tree, parent, position_in_parent + 1, new_right->index);
+    parent->num_keys++;
 
-		// Shift parent's children right
-		shift_children_right(tree, parent, parent_index + 1, parent->num_keys - parent_index);
+    // === SPLIT NODE'S DATA ===
+    if (IS_LEAF(node)) {
+        // Leaf: Split keys and records evenly
+        // Right gets everything from split_point onwards
+        new_right->num_keys = node->num_keys - split_point;
+        copy_keys(tree, node, split_point, new_right, 0, new_right->num_keys);
+        copy_records(tree, node, split_point, new_right, 0, new_right->num_keys);
 
-		// Shift parent's keys right
-		shift_keys_right(tree, parent, parent_index, parent->num_keys - parent_index);
-	}
+        // Maintain leaf chain
+        link_leaf_nodes(new_right, GET_NEXT(node));
+        link_leaf_nodes(node, new_right);
 
-	// Use the saved rising key value for parent
-	copy_key(tree, GET_KEY_AT(parent, parent_index), rising_key_value);
-	set_child(tree, parent, parent_index + 1, right_node->index);
-	parent->num_keys++;
+        // Left keeps first split_point entries
+        node->num_keys = split_point;
 
-	if (IS_LEAF(node))
-	{
-		right_node->num_keys = node->num_keys - split_index;
+    } else {
+        // Internal: The promoted key goes up, doesn't stay in either node
+        // Right gets keys after the promoted key
+        new_right->num_keys = node->num_keys - split_point - 1;
+        copy_keys(tree, node, split_point + 1, new_right, 0, new_right->num_keys);
 
-		// Copy keys and records to right node
-		copy_keys(tree, node, split_index, right_node, 0, right_node->num_keys);
-		copy_records(tree, node, split_index, right_node, 0, right_node->num_keys);
+        // Move children [split_point+1..end] to right node
+        uint32_t *left_children = GET_CHILDREN(node);
+        for (uint32_t i = 0; i <= new_right->num_keys; i++) {
+            uint32_t child = left_children[split_point + 1 + i];
+            if (child) {
+                set_child(tree, new_right, i, child);
+                left_children[split_point + 1 + i] = 0; // Clear from left
+            }
+        }
 
-		// Update leaf chain
-		link_leaf_nodes(right_node, GET_NEXT(node));
-		link_leaf_nodes(node, right_node);
-	}
-	else
-	{
-		right_node->num_keys = node->num_keys - split_index - 1;
+        // Left keeps first split_point keys
+        node->num_keys = split_point;
+    }
 
-		// Copy keys to right node
-		copy_keys(tree, node, split_index + 1, right_node, 0, right_node->num_keys);
-
-		if (IS_INTERNAL(node))
-		{
-			uint32_t *src_children = GET_CHILDREN(node);
-			for (uint32_t i = 0; i <= right_node->num_keys; i++)
-			{
-				uint32_t child = src_children[split_index + 1 + i];
-				if (child)
-				{
-					set_child(tree, right_node, i, child);
-					src_children[split_index + 1 + i] = 0;
-				}
-			}
-		}
-	}
-
-	node->num_keys = split_index;
-	return parent;
+    return parent; // Parent might now be full and need splitting
 }
 
 // Just find the leaf - no insertion
