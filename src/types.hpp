@@ -1,4 +1,3 @@
-
 #pragma once
 #include <cstdint>
 #include <stdint.h>
@@ -10,9 +9,9 @@
 #define likely(x)   __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
-// 64-bit type encoding:
+// 64-bit uniform encoding - size ALWAYS in bits 0-23:
 // Single types: [type_id:8][reserved:32][size:24]
-// Dual types:   [TYPE_ID_DUAL:8][type1_id:8][type2_id:8][reserved:8][size1:12][size2:12][total_size:24]
+// Dual types:   [TYPE_ID_DUAL:8][type1_id:8][type2_id:8][size1:8][size2:8][total_size:24]
 typedef uint64_t DataType;
 
 // Type IDs - each type gets unique ID
@@ -38,17 +37,17 @@ enum TypeId : uint8_t {
     TYPE_ID_NULL = 0xFF
 };
 
-// Uniform encoding - size always in bits 0-23
+// Helper for single types - size ALWAYS in bits 0-23
 #define MAKE_TYPE(id, size) \
     (((uint64_t)(id) << 56) | ((uint64_t)(size) & 0xFFFFFF))
 
-// Dual type: [TYPE_ID_DUAL:8][type1_id:8][type2_id:8][reserved:8][size1:12][size2:12][total_size:24]
+// Helper for dual types - total size STILL in bits 0-23
 #define MAKE_DUAL_TYPE(type1_id, type2_id, size1, size2) \
     (((uint64_t)(TYPE_ID_DUAL) << 56) | \
      ((uint64_t)(type1_id) << 48) | \
      ((uint64_t)(type2_id) << 40) | \
-     ((uint64_t)((size1) & 0xFFF) << 28) | \
-     ((uint64_t)((size2) & 0xFFF) << 16) | \
+     ((uint64_t)(size1) << 32) | \
+     ((uint64_t)(size2) << 24) | \
      ((uint64_t)((size1) + (size2)) & 0xFFFFFF))
 
 // Scalar type definitions
@@ -76,7 +75,7 @@ enum TypeId : uint8_t {
 // Null type
 #define TYPE_NULL MAKE_TYPE(TYPE_ID_NULL, 0)
 
-// VARCHAR with runtime size (up to 16MB)
+// VARCHAR with runtime size
 #define TYPE_VARCHAR(len) MAKE_TYPE(TYPE_ID_VARCHAR, (len))
 
 // Factory method defines
@@ -114,21 +113,22 @@ inline DataType make_varchar(uint32_t size) {
 }
 
 // ============================================================================
-// Type property extraction
+// Type property extraction - BRANCHLESS!
 // ============================================================================
 
-// BRANCHLESS - size always in bits 0-23
+// BRANCHLESS - size ALWAYS in bits 0-23, no exceptions
 __attribute__((always_inline))
 inline uint32_t type_size(DataType type) {
     return type & 0xFFFFFF;
 }
 
+// BRANCHLESS - type ID always in bits 56-63
 __attribute__((always_inline))
 inline uint8_t type_id(DataType type) {
     return type >> 56;
 }
 
-// Dual type specific extractors
+// Dual type specific extractors (only called when we know it's dual)
 __attribute__((always_inline))
 inline uint8_t dual_type_id_1(DataType type) {
     return (type >> 48) & 0xFF;
@@ -140,13 +140,13 @@ inline uint8_t dual_type_id_2(DataType type) {
 }
 
 __attribute__((always_inline))
-inline uint16_t dual_size_1(DataType type) {
-    return (type >> 28) & 0xFFF;
+inline uint8_t dual_size_1(DataType type) {
+    return (type >> 32) & 0xFF;
 }
 
 __attribute__((always_inline))
-inline uint16_t dual_size_2(DataType type) {
-    return (type >> 16) & 0xFFF;
+inline uint8_t dual_size_2(DataType type) {
+    return (type >> 24) & 0xFF;
 }
 
 // Reconstruct full DataType from component ID and size
@@ -269,9 +269,10 @@ inline bool type_is_dual(DataType type) {
 }
 
 // ============================================================================
-// Type comparison - unified for scalar and dual
+// Everything below here should remain unchanged since it uses the above functions
 // ============================================================================
 
+// Type comparison - unified for scalar and dual
 __attribute__((always_inline))
 inline int type_compare(DataType type, const uint8_t* a, const uint8_t* b) {
     uint8_t tid = type_id(type);

@@ -40,6 +40,9 @@
 #define STOCK	   "stock"
 #define BRAND	   "brand"
 
+#define ORDERS_BY_USER "idx_orders_by_user"
+#define INDEX_KEY "key"
+
 #define ORDERS		   "orders"
 #define ORDER_ID	   "order_id"
 #define TOTAL		   "total"
@@ -209,6 +212,8 @@ std::vector<Column> comments = {Column{COMMENT_ID, TYPE_U32}, Column{POST_ID, TY
 								Column{BODY, TYPE_CHAR32}, Column{LIKES, TYPE_U32}};
 
 std::vector<Column> tags = {Column{TAG_ID, TYPE_U32}, Column{TAG_NAME, TYPE_CHAR16}};
+
+std::vector<Column> orders_by_user_index = {Column{INDEX_KEY, make_dual(TYPE_U32, TYPE_U32)}};
 
 std::vector<Column> post_tags = {
 	Column{POST_ID, TYPE_U32}, // Composite PK/FK to posts
@@ -763,6 +768,7 @@ test_create_composite_index()
 	printf("\n=== CREATING COMPOSITE INDEX ON ORDERS ===\n");
 	printf("Index: idx_orders_by_user (user_id, order_id) -> order_id\n\n");
 
+	catalog[ORDERS_BY_USER] = Structure::from(ORDERS_BY_USER, orders_by_user_index);
 	ProgramBuilder prog;
 	prog.begin_transaction();
 
@@ -773,7 +779,7 @@ test_create_composite_index()
 		// Composite key type: DUAL(u32, u32)
 		DataType composite_type = make_dual(TYPE_U32, TYPE_U32);
 
-		int name_reg = prog.load(TYPE_CHAR32, prog.alloc_string("idx_orders_by_user", 32));
+		int name_reg = prog.load(TYPE_CHAR32, prog.alloc_string(ORDERS_BY_USER, 32));
 		int key_type_reg = prog.load(TYPE_U64, prog.alloc_value((uint64_t)composite_type));
 		int record_size = prog.load(TYPE_U32, prog.alloc_value(0));
 		int unique = prog.load(TYPE_U32, prog.alloc_value(0U)); // non-unique
@@ -785,7 +791,7 @@ test_create_composite_index()
 	// Populate from orders table
 	auto orders_ctx = from_structure(catalog[ORDERS]);
 
-	auto index_ctx = from_structure(catalog["idx_order_by_user"]);
+	auto index_ctx = from_structure(catalog[ORDERS_BY_USER]);
 
 	prog.open_cursor(0, &orders_ctx);
 	prog.open_cursor(1, &index_ctx);
@@ -1313,13 +1319,17 @@ test_programs()
 	{
 		load_all_data();
 	}
-	test_select_with_validation();
+	// test_select_with_validation();
 	// _debug = true;
 	// Run test queries
 	// test_select();
 	// test_select_order_by();
 
 	// test_many_to_many_query();
+
+	_debug = true;
+	test_create_composite_index();
+
 
 	// test_subquery_pattern();
 	// _debug = true;
