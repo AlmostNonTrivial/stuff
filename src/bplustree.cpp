@@ -510,24 +510,6 @@ split(BPlusTree &tree, BTreeNode *node)
 	return parent;
 }
 
-static void
-insert_repair(BPlusTree &tree, BTreeNode *node)
-{
-	if (!NODE_IS_FULL(node))
-	{
-		return;
-	}
-	else if (IS_ROOT(node))
-	{
-		split(tree, node);
-	}
-	else
-	{
-		BTreeNode *new_node = split(tree, node);
-		insert_repair(tree, new_node);
-	}
-}
-
 // Just find the leaf - no insertion
 static BTreeNode *
 find_leaf_for_key(BPlusTree &tree, uint8_t *key)
