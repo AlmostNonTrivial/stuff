@@ -28,7 +28,7 @@ struct VmCursor
 	union {
 		bt_cursor  bptree;
 		et_cursor  mem;
-		BlobCursor blob;
+
 	} cursor;
 };
 
@@ -98,13 +98,13 @@ vmcursor_open(VmCursor *cursor, CursorContext *context, MemoryContext *ctx)
 		bool	 allow_duplicates = (bool)context->flags;
 		cur->cursor.mem.tree = et_create(key_type, cur->layout.record_size, allow_duplicates);
 		cur->cursor.mem.state = et_cursor::INVALID;
-		cur->cursor.mem.ctx = ctx;
+		// cur->cursor.mem.ctx = ctx;
 		break;
 	}
 	case CursorType::BLOB: {
 
-		cur->type = CursorType::BLOB;
-		cur->cursor.blob.ctx = ctx;
+		// cur->type = CursorType::BLOB;
+		// cur->cursor.blob.ctx = ctx;
 		break;
 	}
 	}
@@ -120,7 +120,6 @@ vmcursor_rewind(VmCursor *cur, bool to_end)
 		return to_end ? et_cursor_last(&cur->cursor.mem) : et_cursor_first(&cur->cursor.mem);
 	case CursorType::BPLUS:
 		return to_end ? btree_cursor_last(&cur->cursor.bptree) : btree_cursor_first(&cur->cursor.bptree);
-	case CursorType::BLOB:
 	default:
 		return false;
 	}
@@ -135,7 +134,6 @@ vmcursor_step(VmCursor *cur, bool forward)
 		return forward ? et_cursor_next(&cur->cursor.mem) : et_cursor_previous(&cur->cursor.mem);
 	case CursorType::BPLUS:
 		return forward ? btree_cursor_next(&cur->cursor.bptree) : btree_cursor_previous(&cur->cursor.bptree);
-	case CursorType::BLOB:
 	default:
 		return false;
 	}
@@ -151,7 +149,7 @@ vmcursor_clear(VmCursor *cursor)
 		break;
 	}
 	case CursorType::BLOB: {
-		blob_cursor_delete(&cursor->cursor.blob);
+		// blob_cursor_delete(&cursor->cursor.blob);
 		break;
 	}
 	}
@@ -167,7 +165,7 @@ vmcursor_seek(VmCursor *cur, CompareOp op, uint8_t *key)
 	case CursorType::BPLUS:
 		return btree_cursor_seek(&cur->cursor.bptree, key, op);
 	case CursorType::BLOB:
-		return blob_cursor_seek(&cur->cursor.blob, *(uint32_t *)key);
+		// return blob_cursor_seek(&cur->cursor.blob, *(uint32_t *)key);
 	default:
 		return false;
 	}
@@ -215,7 +213,7 @@ vmcursor_get_record(VmCursor *cur)
 	case CursorType::BPLUS:
 		return (uint8_t*)btree_cursor_record(&cur->cursor.bptree);
 	case CursorType::BLOB:
-		return (uint8_t *)blob_cursor_record(&cur->cursor.blob).ptr;
+		// return (uint8_t *)blob_cursor_record(&cur->cursor.blob).ptr;
 	default:
 		return nullptr;
 	}
@@ -249,7 +247,7 @@ vmcursor_insert(VmCursor *cur, uint8_t *key, uint8_t *record, uint32_t size)
 	case CursorType::BPLUS:
 		return btree_cursor_insert(&cur->cursor.bptree, key, record);
 	case CursorType::BLOB:
-		return blob_cursor_insert(&cur->cursor.blob, record, size);
+		// return blob_cursor_insert(&cur->cursor.blob, record, size);
 	default:
 		return false;
 	}
@@ -280,7 +278,7 @@ vmcursor_remove(VmCursor *cur)
 	case CursorType::BPLUS:
 		return btree_cursor_delete(&cur->cursor.bptree);
 	case CursorType::BLOB:
-		return blob_cursor_delete(&cur->cursor.blob);
+		// return blob_cursor_delete(&cur->cursor.blob);
 	default:
 		return false;
 	}

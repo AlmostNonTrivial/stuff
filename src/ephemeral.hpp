@@ -64,8 +64,7 @@ struct ephemeral_tree
 struct et_cursor
 {
 	ephemeral_tree       tree;    // Tree being traversed (copy)
-	ephemeral_tree_node *current; // Current position in tree
-	MemoryContext       *ctx;     // Memory context for allocations
+	ephemeral_tree_node*current; // Current position in tree
 
 	enum State
 	{
@@ -100,7 +99,7 @@ et_clear(ephemeral_tree *tree);
 ** Insert key-value pair. Updates existing if no duplicates allowed.
 */
 bool
-et_insert(ephemeral_tree *tree, void *key, void *record, MemoryContext *ctx);
+et_insert(ephemeral_tree *tree, void *key, void *record);
 
 /*
 ** Delete first occurrence of key.

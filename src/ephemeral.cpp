@@ -30,7 +30,7 @@
 **
 ** IMPLEMENTATION NOTES
 **
-** Memory Management: All nodes allocated through MemoryContext, enabling
+** Memory Management: All nodes allocated through asdasdas, enabling
 ** bulk deallocation and transaction support. The tree itself maintains
 ** no memory ownership - the context handles lifecycle.
 **
@@ -47,6 +47,8 @@
 #include <cstdio>
 #include <cstring>
 #include <unordered_set>
+#include "arena.hpp"
+
 
 // ============================================================================
 // NODE ACCESS MACROS
@@ -119,10 +121,10 @@ node_compare_full(const ephemeral_tree *tree, ephemeral_tree_node *a, ephemeral_
 ** the node structure in memory.
 */
 static ephemeral_tree_node *
-alloc_node(ephemeral_tree *tree, void *key, void *record, MemoryContext *ctx)
+alloc_node(ephemeral_tree *tree, void *key, void *record)
 {
 	size_t total_size = sizeof(ephemeral_tree_node) + tree->data_size;
-	auto  *node = (ephemeral_tree_node *)ctx->alloc(total_size);
+	auto  *node = (ephemeral_tree_node *)arena::alloc<QueryArena>(total_size);
 	node->data = (uint8_t *)(node + 1); // Data follows immediately after node
 
 	memcpy(GET_KEY(node), key, tree->key_size);
@@ -750,7 +752,7 @@ et_create(DataType key_type, uint32_t record_size, uint8_t flags)
 /*
 ** Clear all nodes from the tree.
 **
-** Note: Does not free memory - that's handled by MemoryContext.
+** Note: Does not free memory
 */
 void
 et_clear(ephemeral_tree *tree)
@@ -768,7 +770,7 @@ et_clear(ephemeral_tree *tree)
 ** Returns: true (always succeeds with sufficient memory)
 */
 bool
-et_insert(ephemeral_tree *tree, void *key, void *record, MemoryContext *ctx)
+et_insert(ephemeral_tree *tree, void *key, void *record)
 {
 	// Find insertion point
 	ephemeral_tree_node *parent = nullptr, *current = tree->root;
@@ -807,7 +809,7 @@ et_insert(ephemeral_tree *tree, void *key, void *record, MemoryContext *ctx)
 	}
 
 	// Insert new node
-	ephemeral_tree_node *node = alloc_node(tree, key, record, ctx);
+	ephemeral_tree_node *node = alloc_node(tree, key, record);
 	node->parent = parent;
 
 	if (!parent)
@@ -1101,7 +1103,7 @@ et_cursor_is_valid(et_cursor *cursor)
 bool
 et_cursor_insert(et_cursor *cursor, void *key, void *record)
 {
-	return et_insert(&cursor->tree, key, record, cursor->ctx);
+	return et_insert(&cursor->tree, key, record);
 }
 
 /*

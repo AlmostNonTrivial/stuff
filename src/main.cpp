@@ -5,7 +5,7 @@
 // #include "tests_pager.hpp"
 // #include "tests_ephemeral.hpp"
 // #include "tests_btree.hpp"
-// #include "tests_blob.hpp"
+#include "tests_blob.hpp"
 // #include "tests_integration.hpp"
 
 
@@ -19,14 +19,14 @@ main()
 	// test_types();
 
 	// test_btree();
-	test_memtree();
+	// test_memtree();
 	// test_blob();
 	// test_memtree();
 	// test_parser();
 	// test_pager();
 	// test_integration();
 	// test_programs();
-
+	test_blob();
 
 	// test_programs();
 
