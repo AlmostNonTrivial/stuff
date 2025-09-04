@@ -83,11 +83,12 @@ from_structure(Structure &structure)
 }
 
 CursorContext
-red_black(Layout &layout)
+red_black(Layout &layout, bool allow_duplicates = true)
 {
 	CursorContext cctx;
 	cctx.type = CursorType::RED_BLACK;
 	cctx.layout = layout;
+	cctx.flags = allow_duplicates;
 	return cctx;
 }
 

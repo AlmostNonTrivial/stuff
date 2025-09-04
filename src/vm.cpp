@@ -95,7 +95,8 @@ vmcursor_open(VmCursor *cursor, CursorContext *context, MemoryContext *ctx)
 		cur->type = CursorType::RED_BLACK;
 		cur->layout = context->layout;
 		DataType key_type = cur->layout.layout[0];
-		cur->cursor.mem.tree = memtree_create(key_type, cur->layout.record_size, true);
+		bool allow_duplicates = (bool)context->flags;
+		cur->cursor.mem.tree = memtree_create(key_type, cur->layout.record_size, allow_duplicates);
 		cur->cursor.mem.state = MemCursor::INVALID;
 		cur->cursor.mem.ctx = ctx;
 		break;
