@@ -1,22 +1,22 @@
 
 // #include "tests_programs.hpp"
 // #include "tests_types.hpp"
-// #include "tests_parser.hpp"
-#include "tests_pager.hpp"
+#include "tests/tests_parser.hpp"
+// #include "tests_pager.hpp"
 // #include "tests_ephemeral.hpp"
 // #include "tests_btree.hpp"
-#include "tests_blob.hpp"
+// #include "tests_blob.hpp"
 // #include "tests_integration.hpp"
 
-#include "tests_btree.hpp"
-#include "tests_ephemeral.hpp"
+// #include "tests_btree.hpp"
+// #include "tests_ephemeral.hpp"
 int
 main()
 {
 
 	// test_types();
-
-	test_btree();
+	test_parser();
+	// test_btree();
 	// test_memtree();
 	// test_blob();
 	// test_memtree();

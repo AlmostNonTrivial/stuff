@@ -1,4 +1,4 @@
-#include "parser.hpp"
+#include "../parser.hpp"
 #include <cassert>
 #include <cstring>
 #include <cstdio>
@@ -691,9 +691,9 @@ inline static void test_create_table() {
     Parser parser;
     parser_init(&parser,
         "CREATE TABLE users ("
-        "  id BIGINT PRIMARY KEY,"
-        "  name VARCHAR(100) NOT NULL,"
-        "  email VARCHAR(255),"
+        "  id U64 PRIMARY KEY,"
+        "  name CHAR32 NOT NULL,"
+        "  email CHAR256,"
         "  age INT"
         ")");
 
@@ -713,7 +713,7 @@ inline static void test_create_table() {
 
     // Check name column
     assert(str_eq(create->columns->data[1]->name, "name"));
-    assert(create->columns->data[1]->type == TYPE_CHAR256);
+    assert(create->columns->data[1]->type == TYPE_CHAR32);
     assert(!create->columns->data[1]->is_primary_key);
     assert(create->columns->data[1]->is_not_null);
 

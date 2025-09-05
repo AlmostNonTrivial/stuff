@@ -4,6 +4,9 @@
 #include <cstdint>
 #include <cstring>
 
+// Forward declaration for semantic resolution
+struct Structure;
+
 // Parser arena tag
 struct ParserArena
 {
@@ -138,12 +141,26 @@ struct ColumnDef
 	DataType	type;
 	bool		is_primary_key;
 	bool		is_not_null;
+	struct
+	{
+		bool is_blob_ref = false;
+	} sem;
 };
 
 // Expression node
 struct Expr
 {
 	ExprType type;
+
+	// Semantic resolution fields
+	struct
+	{
+		DataType   resolved_type = TYPE_NULL;
+		int32_t	   column_index = -1;	 // For EXPR_COLUMN
+		Structure *table = nullptr;		 // For EXPR_COLUMN
+		bool	   is_aggregate = false; // For aggregate functions
+		bool	   is_resolved = false;	 // Has semantic pass run
+	} sem;
 
 	union {
 		// EXPR_LITERAL
@@ -201,6 +218,12 @@ struct TableRef
 {
 	const char *table_name;
 	const char *alias;
+
+	// Semantic resolution
+	struct
+	{
+		Structure *resolved = nullptr; // Points to catalog/shadow catalog entry
+	} sem;
 };
 
 // Join clause
@@ -209,6 +232,12 @@ struct JoinClause
 	JoinType  type;
 	TableRef *table;
 	Expr	 *condition;
+
+	// Semantic resolution
+	struct
+	{
+		bool is_resolved = false;
+	} sem;
 };
 
 // Order by clause
@@ -216,6 +245,12 @@ struct OrderByClause
 {
 	Expr	*expr;
 	OrderDir dir;
+
+	// Semantic resolution
+	struct
+	{
+		bool is_resolved = false;
+	} sem;
 };
 
 // SELECT statement
@@ -231,6 +266,15 @@ struct SelectStmt
 	int64_t								 limit;
 	int64_t								 offset;
 	bool								 is_distinct;
+
+	// Semantic resolution
+	struct
+	{
+		array<DataType, ParserArena>	 *output_types = nullptr;
+		array<const char *, ParserArena> *output_names = nullptr;
+		bool							  has_aggregates = false;
+		bool							  is_resolved = false;
+	} sem;
 };
 
 // INSERT statement
@@ -239,6 +283,14 @@ struct InsertStmt
 	const char										 *table_name;
 	array<const char *, ParserArena>				 *columns;
 	array<array<Expr *, ParserArena> *, ParserArena> *values;
+
+	// Semantic resolution
+	struct
+	{
+		Structure					*table = nullptr;
+		array<int32_t, ParserArena> *column_indices = nullptr; // Maps columns to table indices
+		bool						 is_resolved = false;
+	} sem;
 };
 
 // UPDATE statement
@@ -248,6 +300,14 @@ struct UpdateStmt
 	array<const char *, ParserArena> *columns;
 	array<Expr *, ParserArena>		 *values;
 	Expr							 *where_clause;
+
+	// Semantic resolution
+	struct
+	{
+		Structure					*table = nullptr;
+		array<int32_t, ParserArena> *column_indices = nullptr; // For SET clauses
+		bool						 is_resolved = false;
+	} sem;
 };
 
 // DELETE statement
@@ -255,6 +315,13 @@ struct DeleteStmt
 {
 	const char *table_name;
 	Expr	   *where_clause;
+
+	// Semantic resolution
+	struct
+	{
+		Structure *table = nullptr;
+		bool	   is_resolved = false;
+	} sem;
 };
 
 // CREATE TABLE statement
@@ -263,6 +330,13 @@ struct CreateTableStmt
 	const char						*table_name;
 	array<ColumnDef *, ParserArena> *columns;
 	bool							 if_not_exists;
+
+	// Semantic resolution
+	struct
+	{
+		Structure *created_structure = nullptr; // Built structure for shadow catalog
+		bool	   is_resolved = false;
+	} sem;
 };
 
 struct CreateIndexStmt
@@ -272,6 +346,14 @@ struct CreateIndexStmt
 	array<const char *, ParserArena> *columns;
 	bool							  is_unique;
 	bool							  if_not_exists;
+
+	// Semantic resolution
+	struct
+	{
+		Structure					*table = nullptr;
+		array<int32_t, ParserArena> *column_indices = nullptr;
+		bool						 is_resolved = false;
+	} sem;
 };
 
 // DROP TABLE statement
@@ -279,12 +361,27 @@ struct DropTableStmt
 {
 	const char *table_name;
 	bool		if_exists;
+
+	// Semantic resolution
+	struct
+	{
+		Structure *table = nullptr; // Existing table being dropped
+		bool	   is_resolved = false;
+	} sem;
 };
+
 struct DropIndexStmt
 {
 	const char *index_name;
 	const char *table_name; // Optional - some SQL dialects support ON table_name
 	bool		if_exists;
+
+	// Semantic resolution
+	struct
+	{
+		Structure *table = nullptr; // If table_name specified
+		bool	   is_resolved = false;
+	} sem;
 };
 
 // Transaction statements
@@ -302,6 +399,14 @@ struct RollbackStmt
 struct Statement
 {
 	StmtType type;
+
+	// Semantic resolution
+	struct
+	{
+		bool is_resolved = false;
+		bool has_errors = false;
+	} sem;
+
 	union {
 		SelectStmt		*select_stmt;
 		InsertStmt		*insert_stmt;
@@ -400,4 +505,5 @@ parser_parse_statements(Parser *parser);
 array<Statement *, ParserArena> *
 parse_sql(const char *sql);
 
-void print_ast(Statement* stmt);
+void
+print_ast(Statement *stmt);
