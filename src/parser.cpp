@@ -26,7 +26,7 @@ intern_string(const char *str, uint32_t length)
 {
 
     string<ParserArena> s;
-    s.set(str);
+    s.set(str, length);
     return s;
 }
 
