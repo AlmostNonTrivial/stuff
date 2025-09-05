@@ -34,12 +34,13 @@
  */
 
 #include "blob.hpp"
+#include "common.hpp"
 #include "pager.hpp"
 #include "arena.hpp"
 #include <cstring>
 
 #define BLOB_HEADER_SIZE 12
-#define BLOB_DATA_SIZE   (PAGE_SIZE - BLOB_HEADER_SIZE)
+#define BLOB_DATA_SIZE	 (PAGE_SIZE - BLOB_HEADER_SIZE)
 
 // ============================================================================
 // Internal Page Structure
@@ -49,12 +50,13 @@
  * Internal representation of a blob page.
  * Not exposed in public API - accessed only through blob functions.
  */
-struct blob_node {
-    uint32_t index;  // Page index of this node
-    uint32_t next;   // Next page in chain (0 if last)
-    uint16_t size;   // Size of data in this node
-    uint16_t flags;  // Reserved for future use
-    uint8_t  data[BLOB_DATA_SIZE];
+struct blob_node
+{
+	uint32_t index; // Page index of this node
+	uint32_t next;	// Next page in chain (0 if last)
+	uint16_t size;	// Size of data in this node
+	uint16_t flags; // Reserved for future use
+	uint8_t	 data[BLOB_DATA_SIZE];
 };
 
 // ============================================================================
@@ -65,24 +67,26 @@ struct blob_node {
  * Get blob node from page index.
  * Returns nullptr for index 0 (invalid page).
  */
-#define GET_BLOB_NODE(index) (reinterpret_cast<blob_node*>(pager_get(index)))
+#define GET_BLOB_NODE(index) (reinterpret_cast<blob_node *>(pager_get(index)))
 
 /**
  * Allocate and initialize a new blob page.
  * Sets all header fields to initial values and marks page dirty.
  */
-inline static blob_node* allocate_blob_node() {
-    uint32_t page_index = pager_new();
-    blob_node* node = GET_BLOB_NODE(page_index);
+inline static blob_node *
+allocate_blob_node()
+{
+	uint32_t   page_index = pager_new();
+	blob_node *node = GET_BLOB_NODE(page_index);
 
-    // Initialize the node
-    node->index = page_index;
-    node->next = 0;
-    node->size = 0;
-    node->flags = 0;
+	// Initialize the node
+	node->index = page_index;
+	node->next = 0;
+	node->size = 0;
+	node->flags = 0;
 
-    pager_mark_dirty(page_index);
-    return node;
+	pager_mark_dirty(page_index);
+	return node;
 }
 
 // ============================================================================
@@ -99,37 +103,44 @@ inline static blob_node* allocate_blob_node() {
  * @param size Size of data in bytes
  * @return First page index of blob chain, or 0 on failure
  */
-uint32_t blob_create(void* data, uint32_t size) {
-    if (!data || size == 0) {
-        return 0;
-    }
+uint32_t
+blob_create(void *data, uint32_t size)
+{
+	if (!data || size == 0)
+	{
+		return 0;
+	}
 
-    int nodes_required = (size + BLOB_DATA_SIZE - 1) / BLOB_DATA_SIZE;
+	int nodes_required = (size + BLOB_DATA_SIZE - 1) / BLOB_DATA_SIZE;
 
-    uint32_t first_page = 0;
-    uint32_t prev_page = 0;
-    uint32_t remaining = size;
-    uint8_t* current_data = (uint8_t*)data;
+	uint32_t first_page = 0;
+	uint32_t prev_page = 0;
+	uint32_t remaining = size;
+	uint8_t *current_data = (uint8_t *)data;
 
-    for (int i = 0; i < nodes_required; i++) {
-        blob_node* node = allocate_blob_node();
-        node->size = remaining < (uint32_t)BLOB_DATA_SIZE ? remaining : BLOB_DATA_SIZE;
+	for (int i = 0; i < nodes_required; i++)
+	{
+		blob_node *node = allocate_blob_node();
+		node->size = remaining < (uint32_t)BLOB_DATA_SIZE ? remaining : BLOB_DATA_SIZE;
 
-        memcpy(node->data, current_data, node->size);
+		memcpy(node->data, current_data, node->size);
 
-        if (i == 0) {
-            first_page = node->index;
-        } else {
-            blob_node* prev = GET_BLOB_NODE(prev_page);
-            prev->next = node->index;
-        }
+		if (i == 0)
+		{
+			first_page = node->index;
+		}
+		else
+		{
+			blob_node *prev = GET_BLOB_NODE(prev_page);
+			prev->next = node->index;
+		}
 
-        current_data += node->size;
-        remaining -= node->size;
-        prev_page = node->index;
-    }
+		current_data += node->size;
+		remaining -= node->size;
+		prev_page = node->index;
+	}
 
-    return first_page;
+	return first_page;
 }
 
 /**
@@ -140,19 +151,23 @@ uint32_t blob_create(void* data, uint32_t size) {
  *
  * @param first_page First page index of blob chain
  */
-void blob_delete(uint32_t first_page) {
-    uint32_t current = first_page;
+void
+blob_delete(uint32_t first_page)
+{
+	uint32_t current = first_page;
 
-    while (current) {
-        blob_node* node = GET_BLOB_NODE(current);
-        if (!node) {
-            break;
-        }
+	while (current)
+	{
+		blob_node *node = GET_BLOB_NODE(current);
+		if (!node)
+		{
+			break;
+		}
 
-        uint32_t next = node->next;
-        pager_delete(current);
-        current = next;
-    }
+		uint32_t next = node->next;
+		pager_delete(current);
+		current = next;
+	}
 }
 
 /**
@@ -164,17 +179,20 @@ void blob_delete(uint32_t first_page) {
  * @param page_index Index of page to read
  * @return Page descriptor with data pointer and metadata
  */
-blob_page blob_read_page(uint32_t page_index) {
-    blob_page page = {0, 0, nullptr};
+blob_page
+blob_read_page(uint32_t page_index)
+{
+	blob_page page = {0, 0, nullptr};
 
-    blob_node* node = GET_BLOB_NODE(page_index);
-    if (node) {
-        page.next = node->next;
-        page.size = node->size;
-        page.data = node->data;
-    }
+	blob_node *node = GET_BLOB_NODE(page_index);
+	if (node)
+	{
+		page.next = node->next;
+		page.size = node->size;
+		page.data = node->data;
+	}
 
-    return page;
+	return page;
 }
 
 /**
@@ -186,21 +204,25 @@ blob_page blob_read_page(uint32_t page_index) {
  * @param first_page First page index of blob chain
  * @return Total size in bytes, or 0 if invalid
  */
-uint32_t blob_get_size(uint32_t first_page) {
-    uint32_t total_size = 0;
-    uint32_t current = first_page;
+uint32_t
+blob_get_size(uint32_t first_page)
+{
+	uint32_t total_size = 0;
+	uint32_t current = first_page;
 
-    while (current) {
-        blob_node* node = GET_BLOB_NODE(current);
-        if (!node) {
-            break;
-        }
+	while (current)
+	{
+		blob_node *node = GET_BLOB_NODE(current);
+		if (!node)
+		{
+			break;
+		}
 
-        total_size += node->size;
-        current = node->next;
-    }
+		total_size += node->size;
+		current = node->next;
+	}
 
-    return total_size;
+	return total_size;
 }
 
 /**
@@ -212,23 +234,28 @@ uint32_t blob_get_size(uint32_t first_page) {
  * @param first_page First page index of blob chain
  * @return Buffer with complete blob data, or {nullptr, 0} on failure
  */
-Buffer blob_read_full(uint32_t first_page) {
-    auto stream = arena::stream_begin<QueryArena>(BLOB_DATA_SIZE);
+void *
+blob_read_full(uint32_t first_page, uint64_t size)
+{
+	auto stream = arena::stream_begin<query_arena>(BLOB_DATA_SIZE);
 
-    uint32_t current = first_page;
-    while (current) {
-        blob_node* node = GET_BLOB_NODE(current);
-        if (!node) {
-            arena::stream_abandon(&stream);
-            return {nullptr, 0};
-        }
+	uint32_t current = first_page;
+	while (current)
+	{
+		blob_node *node = GET_BLOB_NODE(current);
+		if (!node)
+		{
+			arena::stream_abandon(&stream);
+			size = 0;
+			return nullptr;
+		}
 
-        arena::stream_write(&stream, node->data, node->size);
-        current = node->next;
-    }
+		arena::stream_write(&stream, node->data, node->size);
+		current = node->next;
+	}
 
-    auto size = arena::stream_size<QueryArena>(&stream);
-    auto data = arena::stream_finish(&stream);
+	size = arena::stream_size<query_arena>(&stream);
 
-    return {data, size};
+	auto data = arena::stream_finish(&stream);
+	return data;
 }

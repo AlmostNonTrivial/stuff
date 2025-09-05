@@ -1,7 +1,7 @@
 // vm.cpp
 #include "vm.hpp"
 #include "cassert"
-#include "defs.hpp"
+#include "common.hpp"
 #include "pager.hpp"
 #include "types.hpp"
 #include "blob.hpp"
@@ -22,12 +22,12 @@ bool _debug = false;
 // POD struct - data only
 struct VmCursor
 {
-	CursorType type;
-	Layout	   layout;
+	storage_type type;
+	Layout		 layout;
 
 	union {
-		bt_cursor  bptree;
-		et_cursor  mem;
+		bt_cursor bptree;
+		et_cursor mem;
 
 	} cursor;
 };
@@ -39,72 +39,64 @@ void
 vm_debug_print_instruction(const VMInstruction *inst, int pc);
 
 const char *
-debug_compare_op_name(CompareOp op)
+debug_compare_op_name(comparison_op op)
 {
 	static const char *names[] = {"==", "!=", "<", "<=", ">", ">="};
 	return (op >= EQ && op <= GE) ? names[op] : "UNKNOWN";
 }
 
 const char *
-debug_arith_op_name(ArithOp op)
+debug_arith_op_name(arith_op op)
 {
 	static const char *names[] = {"+", "-", "*", "/", "%"};
 	return (op >= ARITH_ADD && op <= ARITH_MOD) ? names[op] : "UNKNOWN";
 }
 
 const char *
-debug_logic_op_name(LogicOp op)
+debug_logic_op_name(logic_op op)
 {
 	static const char *names[] = {"AND", "OR"};
 	return (op >= LOGIC_AND && op <= LOGIC_OR) ? names[op] : "UNKNOWN";
 }
 
 const char *
-debug_cursor_type_name(CursorType type)
+debug_cursor_type_name(storage_type type)
 {
 	switch (type)
 	{
-	case CursorType::BPLUS:
+	case BPLUS:
 		return "BPLUS";
-	case CursorType::RED_BLACK:
+	case RED_BLACK:
 		return "RED_BLACK";
-	case CursorType::BLOB:
-		return "BLOB";
 	default:
 		return "UNKNOWN";
 	}
 }
 
 void
-vmcursor_open(VmCursor *cursor, CursorContext *context, MemoryContext *ctx)
+vmcursor_open(VmCursor *cursor, CursorContext *context)
 {
 
 	auto cur = cursor;
 	switch (context->type)
 	{
-	case CursorType::BPLUS: {
+	case BPLUS: {
 
-		cur->type = CursorType::BPLUS;
+		cur->type = BPLUS;
 		cur->layout = context->layout;
 		cur->cursor.bptree.tree = context->storage.tree;
 		cur->cursor.bptree.state = BT_CURSOR_INVALID;
 		break;
 	}
-	case CursorType::RED_BLACK: {
+	case RED_BLACK: {
 
-		cur->type = CursorType::RED_BLACK;
+		cur->type = RED_BLACK;
 		cur->layout = context->layout;
 		DataType key_type = cur->layout.layout[0];
 		bool	 allow_duplicates = (bool)context->flags;
 		cur->cursor.mem.tree = et_create(key_type, cur->layout.record_size, allow_duplicates);
 		cur->cursor.mem.state = et_cursor::INVALID;
 		// cur->cursor.mem.ctx = ctx;
-		break;
-	}
-	case CursorType::BLOB: {
-
-		// cur->type = CursorType::BLOB;
-		// cur->cursor.blob.ctx = ctx;
 		break;
 	}
 	}
@@ -116,10 +108,10 @@ vmcursor_rewind(VmCursor *cur, bool to_end)
 {
 	switch (cur->type)
 	{
-	case CursorType::RED_BLACK:
+	case RED_BLACK:
 		return to_end ? et_cursor_last(&cur->cursor.mem) : et_cursor_first(&cur->cursor.mem);
-	case CursorType::BPLUS:
-		return to_end ? btree_cursor_last(&cur->cursor.bptree) : btree_cursor_first(&cur->cursor.bptree);
+	case BPLUS:
+		return to_end ? bt_cursorlast(&cur->cursor.bptree) : bt_cursorfirst(&cur->cursor.bptree);
 	default:
 		return false;
 	}
@@ -130,10 +122,10 @@ vmcursor_step(VmCursor *cur, bool forward)
 {
 	switch (cur->type)
 	{
-	case CursorType::RED_BLACK:
+	case RED_BLACK:
 		return forward ? et_cursor_next(&cur->cursor.mem) : et_cursor_previous(&cur->cursor.mem);
-	case CursorType::BPLUS:
-		return forward ? btree_cursor_next(&cur->cursor.bptree) : btree_cursor_previous(&cur->cursor.bptree);
+	case BPLUS:
+		return forward ? bt_cursornext(&cur->cursor.bptree) : bt_cursorprevious(&cur->cursor.bptree);
 	default:
 		return false;
 	}
@@ -144,28 +136,26 @@ vmcursor_clear(VmCursor *cursor)
 {
 	switch (cursor->type)
 	{
-	case CursorType::BPLUS: {
-		btree_clear(cursor->cursor.bptree.tree);
+	case BPLUS: {
+		bt_clear(cursor->cursor.bptree.tree);
+		break;
+	case RED_BLACK: {
+		et_clear(&cursor->cursor.mem.tree);
 		break;
 	}
-	case CursorType::BLOB: {
-		// blob_cursor_delete(&cursor->cursor.blob);
-		break;
 	}
 	}
 }
 
 bool
-vmcursor_seek(VmCursor *cur, CompareOp op, uint8_t *key)
+vmcursor_seek(VmCursor *cur, comparison_op op, uint8_t *key)
 {
 	switch (cur->type)
 	{
-	case CursorType::RED_BLACK:
+	case RED_BLACK:
 		return et_cursor_seek(&cur->cursor.mem, key, op);
-	case CursorType::BPLUS:
-		return btree_cursor_seek(&cur->cursor.bptree, key, op);
-	case CursorType::BLOB:
-		// return blob_cursor_seek(&cur->cursor.blob, *(uint32_t *)key);
+	case BPLUS:
+		return bt_cursorseek(&cur->cursor.bptree, key, op);
 	default:
 		return false;
 	}
@@ -176,15 +166,12 @@ vmcursor_is_valid(VmCursor *cur)
 {
 	switch (cur->type)
 	{
-	case CursorType::RED_BLACK:
+	case RED_BLACK:
 		return et_cursor_is_valid(&cur->cursor.mem);
-
-	case CursorType::BPLUS:
-		return btree_cursor_is_valid(&cur->cursor.bptree);
-	case CursorType::BLOB:
-	default:
-		return false;
+	case BPLUS:
+		return bt_cursoris_valid(&cur->cursor.bptree);
 	}
+	return false;
 }
 
 // Data access functions
@@ -193,14 +180,12 @@ vmcursor_get_key(VmCursor *cur)
 {
 	switch (cur->type)
 	{
-	case CursorType::RED_BLACK:
-		return (uint8_t*)et_cursor_key(&cur->cursor.mem);
-	case CursorType::BPLUS:
-		return (uint8_t*)btree_cursor_key(&cur->cursor.bptree);
-	case CursorType::BLOB:
-	default:
-		return nullptr;
+	case RED_BLACK:
+		return (uint8_t *)et_cursor_key(&cur->cursor.mem);
+	case BPLUS:
+		return (uint8_t *)bt_cursorkey(&cur->cursor.bptree);
 	}
+	return nullptr;
 }
 
 uint8_t *
@@ -208,15 +193,12 @@ vmcursor_get_record(VmCursor *cur)
 {
 	switch (cur->type)
 	{
-	case CursorType::RED_BLACK:
-		return (uint8_t*)et_cursor_record(&cur->cursor.mem);
-	case CursorType::BPLUS:
-		return (uint8_t*)btree_cursor_record(&cur->cursor.bptree);
-	case CursorType::BLOB:
-		// return (uint8_t *)blob_cursor_record(&cur->cursor.blob).ptr;
-	default:
-		return nullptr;
+	case RED_BLACK:
+		return (uint8_t *)et_cursor_record(&cur->cursor.mem);
+	case BPLUS:
+		return (uint8_t *)bt_cursorrecord(&cur->cursor.bptree);
 	}
+	return nullptr;
 }
 
 uint8_t *
@@ -242,12 +224,10 @@ vmcursor_insert(VmCursor *cur, uint8_t *key, uint8_t *record, uint32_t size)
 {
 	switch (cur->type)
 	{
-	case CursorType::RED_BLACK:
-		return et_cursor_insert(&cur->cursor.mem, (void*)key, (void*)record);
-	case CursorType::BPLUS:
-		return btree_cursor_insert(&cur->cursor.bptree, key, record);
-	case CursorType::BLOB:
-		// return blob_cursor_insert(&cur->cursor.blob, record, size);
+	case RED_BLACK:
+		return et_cursor_insert(&cur->cursor.mem, (void *)key, (void *)record);
+	case BPLUS:
+		return bt_cursorinsert(&cur->cursor.bptree, key, record);
 	default:
 		return false;
 	}
@@ -258,11 +238,10 @@ vmcursor_update(VmCursor *cur, uint8_t *record)
 {
 	switch (cur->type)
 	{
-	case CursorType::RED_BLACK:
+	case RED_BLACK:
 		return et_cursor_update(&cur->cursor.mem, record);
-	case CursorType::BPLUS:
-		return btree_cursor_update(&cur->cursor.bptree, record);
-	case CursorType::BLOB:
+	case BPLUS:
+		return bt_cursorupdate(&cur->cursor.bptree, record);
 	default:
 		return false;
 	}
@@ -273,12 +252,10 @@ vmcursor_remove(VmCursor *cur)
 {
 	switch (cur->type)
 	{
-	case CursorType::RED_BLACK:
+	case RED_BLACK:
 		return et_cursor_delete(&cur->cursor.mem);
-	case CursorType::BPLUS:
-		return btree_cursor_delete(&cur->cursor.bptree);
-	case CursorType::BLOB:
-		// return blob_cursor_delete(&cur->cursor.blob);
+	case BPLUS:
+		return bt_cursordelete(&cur->cursor.bptree);
 	default:
 		return false;
 	}
@@ -290,11 +267,11 @@ vmcursor_type_name(VmCursor *cur)
 {
 	switch (cur->type)
 	{
-	case CursorType::RED_BLACK:
+	case RED_BLACK:
 		return "RED_BLACK";
-	case CursorType::BPLUS:
+	case BPLUS:
 		return "BPLUS";
-	case CursorType::BLOB:
+	case BLOB:
 		return "BLOB";
 	}
 	return "UNKNOWN";
@@ -322,7 +299,6 @@ vmcursor_print_current(VmCursor *cur)
 // ============================================================================
 static struct
 {
-	MemoryContext *ctx;
 	VMInstruction *program;
 	int			   program_size;
 	uint32_t	   pc;
@@ -340,12 +316,12 @@ set_register(TypedValue *dest, uint8_t *src, DataType type)
 {
 	if (dest->get_size() < type_size(type))
 	{
-		VM.ctx->free(dest->data, type_size(dest->type));
-		dest->data = (uint8_t *)VM.ctx->alloc(type_size(type));
+		arena::reclaim<query_arena>(dest->data, type_size(dest->type));
+		dest->data = (uint8_t *)arena::alloc<query_arena>(type_size(type));
 	}
 	else if (nullptr == dest->data)
 	{
-		dest->data = (uint8_t *)VM.ctx->alloc(type_size(type));
+		dest->data = (uint8_t *)arena::alloc<query_arena>(type_size(type));
 	}
 
 	dest->type = type;
@@ -355,7 +331,7 @@ set_register(TypedValue *dest, uint8_t *src, DataType type)
 static void
 set_register(TypedValue *dest, TypedValue *src)
 {
-	set_register(dest, (uint8_t*)src->data, src->type);
+	set_register(dest, (uint8_t *)src->data, src->type);
 }
 
 static void
@@ -383,7 +359,6 @@ reset()
 	}
 	VM.program = nullptr;
 	VM.program_size = 0;
-	VM.ctx = nullptr;
 }
 
 void
@@ -496,14 +471,14 @@ step()
 		return OK;
 	}
 	case OP_Test: {
-		int32_t		dest = TEST_DEST_REG(*inst);
-		int32_t		left = TEST_LEFT_REG(*inst);
-		int32_t		right = TEST_RIGHT_REG(*inst);
-		CompareOp	op = TEST_OP(*inst);
-		TypedValue *a = &VM.registers[left];
-		TypedValue *b = &VM.registers[right];
-		int			cmp_result = type_compare(a->type, a->data, b->data);
-		uint32_t	test_result = false;
+		int32_t		  dest = TEST_DEST_REG(*inst);
+		int32_t		  left = TEST_LEFT_REG(*inst);
+		int32_t		  right = TEST_RIGHT_REG(*inst);
+		comparison_op op = TEST_OP(*inst);
+		TypedValue	 *a = &VM.registers[left];
+		TypedValue	 *b = &VM.registers[right];
+		int			  cmp_result = type_compare(a->type, a->data, b->data);
+		uint32_t	  test_result = false;
 
 		switch (op)
 		{
@@ -568,7 +543,7 @@ step()
 		}
 
 		// Pass registers directly as array
-		bool success = fn(&VM.registers[dest], &VM.registers[first_arg], count, VM.ctx);
+		bool success = fn(&VM.registers[dest], &VM.registers[first_arg], count);
 
 		if (!success)
 		{
@@ -608,9 +583,9 @@ step()
 		int32_t	   dest = LOGIC_DEST_REG(*inst);
 		int32_t	   left = LOGIC_LEFT_REG(*inst);
 		int32_t	   right = LOGIC_RIGHT_REG(*inst);
-		LogicOp	   op = LOGIC_OP(*inst);
+		logic_op   op = LOGIC_OP(*inst);
 		TypedValue result = TypedValue::make(TYPE_U32);
-		result.data = (uint8_t *)VM.ctx->alloc(type_size(TYPE_U32));
+		result.data = (uint8_t *)arena::alloc<query_arena>(type_size(TYPE_U32));
 		uint32_t a = *(uint32_t *)VM.registers[left].data;
 		uint32_t b = *(uint32_t *)VM.registers[right].data;
 		uint32_t res_val;
@@ -664,13 +639,13 @@ step()
 		}
 
 		// Allocate output array using the context's allocator
-		TypedValue *values = (TypedValue *)VM.ctx->alloc(sizeof(TypedValue) * reg_count);
+		TypedValue *values = (TypedValue *)arena::alloc<query_arena>(sizeof(TypedValue) * reg_count);
 
 		for (int i = 0; i < reg_count; i++)
 		{
 			TypedValue *val = &VM.registers[first_reg + i];
 			values[i].type = val->type;
-			values[i].data = (uint8_t *)VM.ctx->alloc(type_size(val->type));
+			values[i].data = (uint8_t *)arena::alloc<query_arena>(type_size(val->type));
 			memcpy(values[i].data, val->data, type_size(val->type));
 		}
 
@@ -682,15 +657,33 @@ step()
 		int32_t		dest = ARITHMETIC_DEST_REG(*inst);
 		int32_t		left = ARITHMETIC_LEFT_REG(*inst);
 		int32_t		right = ARITHMETIC_RIGHT_REG(*inst);
-		ArithOp		op = ARITHMETIC_OP(*inst);
+		arith_op	op = ARITHMETIC_OP(*inst);
 		TypedValue *a = &VM.registers[left];
 		TypedValue *b = &VM.registers[right];
 
 		TypedValue result = {.type = (a->type > b->type) ? a->type : b->type};
-		result.data = (uint8_t *)VM.ctx->alloc(type_size(result.type));
+		result.data = (uint8_t *)arena::alloc<query_arena>(type_size(result.type));
 
 		bool success = true;
-		arithmetic(op, result.type, result.data, a->data, b->data);
+
+		switch (op)
+		{
+		case ARITH_ADD:
+			type_add(result.type, result.data, a->data, b->data);
+			break;
+		case ARITH_SUB:
+			type_sub(result.type, result.data, a->data, b->data);
+			break;
+		case ARITH_MUL:
+			type_mul(result.type, result.data, a->data, b->data);
+			break;
+		case ARITH_DIV:
+			type_div(result.type, result.data, a->data, b->data);
+			break;
+		case ARITH_MOD:
+			type_mod(result.type, result.data, a->data, b->data);
+			break;
+		}
 
 		if (_debug)
 		{
@@ -729,7 +722,7 @@ step()
 			printf("=> Opening cursor %d type=%s\n", cursor_id, debug_cursor_type_name(context->type));
 		}
 
-		vmcursor_open(cursor, context, VM.ctx);
+		vmcursor_open(cursor, context);
 
 		VM.pc++;
 		return OK;
@@ -780,14 +773,14 @@ step()
 		return OK;
 	}
 	case OP_Seek: {
-		int32_t		cursor_id = SEEK_CURSOR_ID(*inst);
-		int32_t		key_reg = SEEK_KEY_REG(*inst);
-		int32_t		result_reg = SEEK_RESULT_REG(*inst);
-		CompareOp	op = SEEK_OP(*inst);
-		VmCursor   *cursor = &VM.cursors[cursor_id];
-		TypedValue *key = &VM.registers[key_reg];
-		bool		found = vmcursor_seek(cursor, op, (uint8_t*)key->data);
-		uint32_t	result_val = found ? 1 : 0;
+		int32_t		  cursor_id = SEEK_CURSOR_ID(*inst);
+		int32_t		  key_reg = SEEK_KEY_REG(*inst);
+		int32_t		  result_reg = SEEK_RESULT_REG(*inst);
+		comparison_op op = SEEK_OP(*inst);
+		VmCursor	 *cursor = &VM.cursors[cursor_id];
+		TypedValue	 *key = &VM.registers[key_reg];
+		bool		  found = vmcursor_seek(cursor, op, (uint8_t *)key->data);
+		uint32_t	  result_val = found ? 1 : 0;
 
 		if (_debug)
 		{
@@ -872,7 +865,7 @@ step()
 			build_record(data, key_reg + 1, count);
 		}
 
-		success = vmcursor_insert(cursor, (uint8_t*)first->data, data, cursor->layout.record_size);
+		success = vmcursor_insert(cursor, (uint8_t *)first->data, data, cursor->layout.record_size);
 
 		if (_debug)
 		{

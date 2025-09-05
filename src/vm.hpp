@@ -1,20 +1,19 @@
 // vm.hpp
 #pragma once
-#include "arena.hpp"
 #include "btree.hpp"
 #include "catalog.hpp"
-#include "defs.hpp"
+#include "common.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 
 typedef bool (*VMFunction)(TypedValue	 *result,	 // Output register
 						   TypedValue	 *args,		 // Input registers array
-						   uint32_t		  arg_count, // Number of arguments
-						   MemoryContext *ctx		 // For allocation if needed
+						   uint32_t		  arg_count // Number of arguments
 );
 
-enum class CursorType : uint8_t
+
+enum storage_type : uint8_t
 {
 	BPLUS,
 	RED_BLACK,
@@ -23,7 +22,7 @@ enum class CursorType : uint8_t
 
 struct CursorContext
 {
-	CursorType type;
+	storage_type type;
 	Layout	   layout;
 	union {
 		btree *tree;
@@ -83,7 +82,7 @@ enum OpCode : uint8_t
 #define SEEK_CURSOR_ID(inst)						   ((inst).p1)
 #define SEEK_KEY_REG(inst)							   ((inst).p2)
 #define SEEK_RESULT_REG(inst)						   ((inst).p3)
-#define SEEK_OP(inst)								   ((CompareOp)((inst).p5))
+#define SEEK_OP(inst)								   ((comparison_op)((inst).p5))
 #define SEEK_DEBUG_PRINT(inst)                                                                                         \
 	printf("SEEK cursor=%d key=R[%d] op=%s -> R[%d]", SEEK_CURSOR_ID(inst), SEEK_KEY_REG(inst),                  \
 		   debug_compare_op_name(SEEK_OP(inst)), SEEK_RESULT_REG(inst))
@@ -151,7 +150,7 @@ enum OpCode : uint8_t
 #define ARITHMETIC_DEST_REG(inst)  ((inst).p1)
 #define ARITHMETIC_LEFT_REG(inst)  ((inst).p2)
 #define ARITHMETIC_RIGHT_REG(inst) ((inst).p3)
-#define ARITHMETIC_OP(inst)		   ((ArithOp)((inst).p5))
+#define ARITHMETIC_OP(inst)		   ((arith_op)((inst).p5))
 #define ARITHMETIC_DEBUG_PRINT(inst)                                                                                   \
 	printf("ARITHMETIC R[%d] <- R[%d] %s R[%d]", ARITHMETIC_DEST_REG(inst), ARITHMETIC_LEFT_REG(inst),                 \
 		   debug_arith_op_name(ARITHMETIC_OP(inst)), ARITHMETIC_RIGHT_REG(inst))
@@ -170,7 +169,7 @@ enum OpCode : uint8_t
 #define LOGIC_DEST_REG(inst)						  ((inst).p1)
 #define LOGIC_LEFT_REG(inst)						  ((inst).p2)
 #define LOGIC_RIGHT_REG(inst)						  ((inst).p3)
-#define LOGIC_OP(inst)								  ((LogicOp)((inst).p5))
+#define LOGIC_OP(inst)								  ((logic_op)((inst).p5))
 #define LOGIC_DEBUG_PRINT(inst)                                                                                        \
 	printf("LOGIC R[%d] <- R[%d] %s R[%d]", LOGIC_DEST_REG(inst), LOGIC_LEFT_REG(inst),                                \
 		   debug_logic_op_name(LOGIC_OP(inst)), LOGIC_RIGHT_REG(inst))
@@ -188,7 +187,7 @@ enum OpCode : uint8_t
 #define TEST_DEST_REG(inst)							 ((inst).p1)
 #define TEST_LEFT_REG(inst)							 ((inst).p2)
 #define TEST_RIGHT_REG(inst)						 ((inst).p3)
-#define TEST_OP(inst)								 ((CompareOp)((inst).p5))
+#define TEST_OP(inst)								 ((comparison_op)((inst).p5))
 #define TEST_DEBUG_PRINT(inst)                                                                                         \
 	printf("TEST R[%d] <- R[%d] %s R[%d]", TEST_DEST_REG(inst), TEST_LEFT_REG(inst),                                   \
 		   debug_compare_op_name(TEST_OP(inst)), TEST_RIGHT_REG(inst))
@@ -256,7 +255,7 @@ enum VM_RESULT : uint8_t
 
 // VM Functions
 VM_RESULT
-vm_execute(VMInstruction *instructions, int instruction_count, MemoryContext *ctx);
+vm_execute(VMInstruction *instructions, int instruction_count);
 
 void
 vm_debug_print_all_registers();
@@ -267,13 +266,13 @@ vm_debug_print_program(VMInstruction *instructions, int count);
 
 // Debug helper functions for operation names
 const char *
-debug_compare_op_name(CompareOp op);
+debug_compare_op_name(comparison_op op);
 const char *
-debug_arith_op_name(ArithOp op);
+debug_arith_op_name(arith_op op);
 const char *
-debug_logic_op_name(LogicOp op);
+debug_logic_op_name(logic_op op);
 const char *
-debug_cursor_type_name(CursorType type);
+debug_cursor_type_name(storage_type type);
 
 // VM Runtime Definitions
 #define REGISTERS 40

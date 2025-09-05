@@ -42,7 +42,7 @@
 #include "ephemeral.hpp"
 #include <cstdint>
 #include <queue>
-#include "defs.hpp"
+#include "common.hpp"
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -124,7 +124,7 @@ static ephemeral_tree_node *
 alloc_node(ephemeral_tree *tree, void *key, void *record)
 {
 	size_t total_size = sizeof(ephemeral_tree_node) + tree->data_size;
-	auto  *node = (ephemeral_tree_node *)arena::alloc<QueryArena>(total_size);
+	auto  *node = (ephemeral_tree_node *)arena::alloc<query_arena>(total_size);
 	node->data = (uint8_t *)(node + 1); // Data follows immediately after node
 
 	memcpy(GET_KEY(node), key, tree->key_size);
@@ -1024,7 +1024,7 @@ et_cursor_has_previous(et_cursor *cursor)
 ** Supports: EQ (exact), GE, GT, LE, LT
 */
 bool
-et_cursor_seek(et_cursor *cursor, const void *key, CompareOp op)
+et_cursor_seek(et_cursor *cursor, const void *key, comparison_op op)
 {
 	void *key_bytes = (void *)key;
 	ephemeral_tree_node *result = nullptr;

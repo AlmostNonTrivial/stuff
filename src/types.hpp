@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <inttypes.h>
+#include "common.hpp"
 
 #define likely(x)   __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
@@ -342,6 +343,21 @@ inline bool type_not_equals(DataType type, const void* a, const void* b) {
     return type_compare(type, a, b) != 0;
 }
 
+
+
+// Then add one function to unify all comparisons:
+inline bool type_compare_op(comparison_op op, DataType type, const void* a, const void* b) {
+    switch(op) {
+        case EQ: return type_equals(type, a, b);
+        case NE: return type_not_equals(type, a, b);
+        case LT: return type_less_than(type, a, b);
+        case LE: return type_less_equal(type, a, b);
+        case GT: return type_greater_than(type, a, b);
+        case GE: return type_greater_equal(type, a, b);
+    }
+    return false;
+}
+
 // ============================================================================
 // Arithmetic operations
 // ============================================================================
@@ -431,6 +447,31 @@ inline void type_mod(DataType type, void* dst, const void* a, const void* b) {
         case TYPE_ID_I32: *(int32_t*)dst = *(int32_t*)a % *(int32_t*)b; break;
         case TYPE_ID_I64: *(int64_t*)dst = *(int64_t*)a % *(int64_t*)b; break;
     }
+}
+
+
+
+inline void
+type_arithmetic(arith_op op, DataType type, void*dst, void*a, void*b)
+{
+	switch (op)
+	{
+	case ARITH_ADD:
+		type_add(type, dst, a, b);
+		break;
+	case ARITH_SUB:
+		type_sub(type, dst, a, b);
+		break;
+	case ARITH_MUL:
+		type_mul(type, dst, a, b);
+		break;
+	case ARITH_DIV:
+		type_div(type, dst, a, b);
+		break;
+	case ARITH_MOD:
+		type_mod(type, dst, a, b);
+		break;
+	}
 }
 
 // ============================================================================

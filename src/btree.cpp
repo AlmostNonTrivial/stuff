@@ -41,8 +41,7 @@
 */
 
 #include "btree.hpp"
-#include "arena.hpp"
-#include "defs.hpp"
+#include "common.hpp"
 #include "types.hpp"
 #include "pager.hpp"
 #include <cassert>
@@ -1202,7 +1201,7 @@ clear_recurse(btree *tree, btree_node *node)
 ** The tree structure itself remains valid for future use.
 */
 bool
-btree_clear(btree *tree)
+bt_clear(btree *tree)
 {
 	if (0 == tree->root_page_index)
 	{
@@ -1316,7 +1315,7 @@ cursor_clear(bt_cursor *cursor)
 /*
 ** Move cursor to first or last entry in the tree.
 **
-** Helper for btree_cursor_first/last. Handles empty tree case.
+** Helper for bt_cursorfirst/last. Handles empty tree case.
 */
 static bool
 cursor_move_end(bt_cursor *cursor, bool left)
@@ -1377,7 +1376,7 @@ cursor_move_end(bt_cursor *cursor, bool left)
 ** Returns: true if a matching key was found, false otherwise
 */
 bool
-btree_cursor_seek(bt_cursor *cursor, void *key, CompareOp op)
+bt_cursorseek(bt_cursor *cursor, void *key, comparison_op op)
 {
 	btree *tree = cursor->tree;
 	cursor_clear(cursor);
@@ -1433,7 +1432,7 @@ btree_cursor_seek(bt_cursor *cursor, void *key, CompareOp op)
 
 	do
 	{
-		void *current_key = btree_cursor_key(cursor);
+		void *current_key = bt_cursorkey(cursor);
 		if (!current_key)
 		{
 			continue;
@@ -1449,7 +1448,7 @@ btree_cursor_seek(bt_cursor *cursor, void *key, CompareOp op)
 			return true;
 		}
 
-	} while (forward ? btree_cursor_next(cursor) : btree_cursor_previous(cursor));
+	} while (forward ? bt_cursornext(cursor) : bt_cursorprevious(cursor));
 
 	cursor->state = BT_CURSOR_INVALID;
 	return false;
@@ -1463,7 +1462,7 @@ btree_cursor_seek(bt_cursor *cursor, void *key, CompareOp op)
 ** Check if cursor points to a valid position.
 */
 bool
-btree_cursor_is_valid(bt_cursor *cursor)
+bt_cursoris_valid(bt_cursor *cursor)
 {
 	return cursor->state == BT_CURSOR_VALID;
 }
@@ -1475,7 +1474,7 @@ btree_cursor_is_valid(bt_cursor *cursor)
 ** Note: Pointer becomes invalid after any tree modification
 */
 void *
-btree_cursor_key(bt_cursor *cursor)
+bt_cursorkey(bt_cursor *cursor)
 {
 
 	btree *tree = cursor->tree;
@@ -1500,7 +1499,7 @@ btree_cursor_key(bt_cursor *cursor)
 ** Note: Pointer becomes invalid after any tree modification
 */
 void *
-btree_cursor_record(bt_cursor *cursor)
+bt_cursorrecord(bt_cursor *cursor)
 {
 
 	btree *tree = cursor->tree;
@@ -1526,14 +1525,14 @@ btree_cursor_record(bt_cursor *cursor)
 ** contains the next entry due to shifting).
 */
 bool
-btree_cursor_delete(bt_cursor *cursor)
+bt_cursordelete(bt_cursor *cursor)
 {
 	if (cursor->state != BT_CURSOR_VALID)
 	{
 		return false;
 	}
 
-	void *key = btree_cursor_key(cursor);
+	void *key = bt_cursorkey(cursor);
 	if (!key)
 	{
 		return false;
@@ -1570,10 +1569,10 @@ btree_cursor_delete(bt_cursor *cursor)
 ** Cursor position becomes undefined after insertion.
 */
 bool
-btree_cursor_insert(bt_cursor *cursor, void *key, void *record)
+bt_cursorinsert(bt_cursor *cursor, void *key, void *record)
 {
 
-	if (btree_cursor_seek(cursor, key))
+	if (bt_cursorseek(cursor, key))
 	{
 		return false;
 	}
@@ -1589,14 +1588,14 @@ btree_cursor_insert(bt_cursor *cursor, void *key, void *record)
 ** position remains valid after update.
 */
 bool
-btree_cursor_update(bt_cursor *cursor, void *record)
+bt_cursorupdate(bt_cursor *cursor, void *record)
 {
 	if (cursor->state != BT_CURSOR_VALID)
 	{
 		return false;
 	}
 	pager_mark_dirty(cursor->leaf_page);
-	void *data = btree_cursor_record(cursor);
+	void *data = bt_cursorrecord(cursor);
 	memcpy(data, record, cursor->tree->record_size);
 	return true;
 }
@@ -1605,7 +1604,7 @@ btree_cursor_update(bt_cursor *cursor, void *record)
 ** Move cursor to first entry in tree.
 */
 bool
-btree_cursor_first(bt_cursor *cursor)
+bt_cursorfirst(bt_cursor *cursor)
 {
 	return cursor_move_end(cursor, true);
 }
@@ -1614,7 +1613,7 @@ btree_cursor_first(bt_cursor *cursor)
 ** Move cursor to last entry in tree.
 */
 bool
-btree_cursor_last(bt_cursor *cursor)
+bt_cursorlast(bt_cursor *cursor)
 {
 	return cursor_move_end(cursor, false);
 }
@@ -1626,7 +1625,7 @@ btree_cursor_last(bt_cursor *cursor)
 ** to parent nodes. Returns false at end of tree.
 */
 bool
-btree_cursor_next(bt_cursor *cursor)
+bt_cursornext(bt_cursor *cursor)
 {
 	if (cursor->state != BT_CURSOR_VALID)
 	{
@@ -1667,7 +1666,7 @@ btree_cursor_next(bt_cursor *cursor)
 ** Returns false at beginning of tree.
 */
 bool
-btree_cursor_previous(bt_cursor *cursor)
+bt_cursorprevious(bt_cursor *cursor)
 {
 	if (cursor->state != BT_CURSOR_VALID)
 	{
@@ -1706,11 +1705,11 @@ btree_cursor_previous(bt_cursor *cursor)
 ** Check if cursor can move forward without changing position.
 */
 bool
-btree_cursor_has_next(bt_cursor *cursor)
+bt_cursorhas_next(bt_cursor *cursor)
 {
-	if (btree_cursor_next(cursor))
+	if (bt_cursornext(cursor))
 	{
-		btree_cursor_previous(cursor);
+		bt_cursorprevious(cursor);
 		return true;
 	}
 	return false;
@@ -1720,11 +1719,11 @@ btree_cursor_has_next(bt_cursor *cursor)
 ** Check if cursor can move backward without changing position.
 */
 bool
-btree_cursor_has_previous(bt_cursor *cursor)
+bt_cursorhas_previous(bt_cursor *cursor)
 {
-	if (btree_cursor_previous(cursor))
+	if (bt_cursorprevious(cursor))
 	{
-		btree_cursor_next(cursor);
+		bt_cursornext(cursor);
 		return true;
 	}
 	return false;

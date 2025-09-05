@@ -21,14 +21,14 @@
 **   BtCursor cursor = {&tree, 0, 0, BT_CURSOR_INVALID};
 **   int key = 42;
 **   char record[100] = "example data";
-**   btree_cursor_insert(&cursor, &key, record);
+**   bt_cursorinsert(&cursor, &key, record);
 **
 **   // Range query
 **   int start = 10;
-**   if (btree_cursor_seek(&cursor, &start, GE)) {
-**       while (btree_cursor_is_valid(&cursor)) {
-**           process_record(btree_cursor_record(&cursor));
-**           btree_cursor_next(&cursor);
+**   if (bt_cursorseek(&cursor, &start, GE)) {
+**       while (bt_cursoris_valid(&cursor)) {
+**           process_record(bt_cursorrecord(&cursor));
+**           bt_cursornext(&cursor);
 **       }
 **   }
 **   ```
@@ -45,7 +45,6 @@
 
 #pragma once
 
-#include "defs.hpp"
 #include "types.hpp"
 #include <cstdint>
 
@@ -136,7 +135,7 @@ btree_create(DataType key, uint32_t record_size, bool init);
 ** that cannot be undone except by transaction rollback.
 */
 bool
-btree_clear(btree *tree);
+bt_clear(btree *tree);
 
 /* ============================================================================
 ** CURSOR STATE MANAGEMENT
@@ -209,7 +208,7 @@ struct bt_cursor
 **   - seek(cursor, &k, LT): Find last key < k
 */
 bool
-btree_cursor_seek(bt_cursor *cursor, void *key, CompareOp op = EQ);
+bt_cursorseek(bt_cursor *cursor, void *key, comparison_op op = EQ);
 
 /*
 ** Move cursor to the previous key in sort order.
@@ -220,7 +219,7 @@ btree_cursor_seek(bt_cursor *cursor, void *key, CompareOp op = EQ);
 ** NOTE: Cursor becomes invalid if it moves before the first key.
 */
 bool
-btree_cursor_previous(bt_cursor *cursor);
+bt_cursorprevious(bt_cursor *cursor);
 
 /*
 ** Move cursor to the next key in sort order.
@@ -231,7 +230,7 @@ btree_cursor_previous(bt_cursor *cursor);
 ** NOTE: Cursor becomes invalid if it moves past the last key.
 */
 bool
-btree_cursor_next(bt_cursor *cursor);
+bt_cursornext(bt_cursor *cursor);
 
 /*
 ** Position cursor at the last key in the tree.
@@ -240,7 +239,7 @@ btree_cursor_next(bt_cursor *cursor);
 **   true if tree is non-empty, false if tree is empty
 */
 bool
-btree_cursor_last(bt_cursor *cursor);
+bt_cursorlast(bt_cursor *cursor);
 
 /*
 ** Position cursor at the first key in the tree.
@@ -249,7 +248,7 @@ btree_cursor_last(bt_cursor *cursor);
 **   true if tree is non-empty, false if tree is empty
 */
 bool
-btree_cursor_first(bt_cursor *cursor);
+bt_cursorfirst(bt_cursor *cursor);
 
 /* ============================================================================
 ** DATA MODIFICATION OPERATIONS
@@ -274,7 +273,7 @@ btree_cursor_first(bt_cursor *cursor);
 ** NOTE: Requires active transaction. Marks page as dirty.
 */
 bool
-btree_cursor_update(bt_cursor *cursor, void *record);
+bt_cursorupdate(bt_cursor *cursor, void *record);
 
 /*
 ** Insert a new key-value pair.
@@ -296,7 +295,7 @@ btree_cursor_update(bt_cursor *cursor, void *record);
 **   - Cursor position after insert is undefined
 */
 bool
-btree_cursor_insert(bt_cursor *cursor, void *key, void *record);
+bt_cursorinsert(bt_cursor *cursor, void *key, void *record);
 
 /*
 ** Delete entry at cursor position.
@@ -316,7 +315,7 @@ btree_cursor_insert(bt_cursor *cursor, void *key, void *record);
 **   - Cursor may become invalid if tree becomes empty
 */
 bool
-btree_cursor_delete(bt_cursor *cursor);
+bt_cursordelete(bt_cursor *cursor);
 
 /* ============================================================================
 ** DATA ACCESS OPERATIONS
@@ -335,7 +334,7 @@ btree_cursor_delete(bt_cursor *cursor);
 ** Callers should copy data if persistence is needed.
 */
 void *
-btree_cursor_key(bt_cursor *cursor);
+bt_cursorkey(bt_cursor *cursor);
 
 /*
 ** Get pointer to record at cursor position.
@@ -347,7 +346,7 @@ btree_cursor_key(bt_cursor *cursor);
 ** Callers should copy data if persistence is needed.
 */
 void *
-btree_cursor_record(bt_cursor *cursor);
+bt_cursorrecord(bt_cursor *cursor);
 
 /* ============================================================================
 ** CURSOR STATE QUERIES
@@ -362,29 +361,29 @@ btree_cursor_record(bt_cursor *cursor);
 **   true if cursor points to valid data, false otherwise
 */
 bool
-btree_cursor_is_valid(bt_cursor *cursor);
+bt_cursoris_valid(bt_cursor *cursor);
 
 /*
 ** Check if cursor can move to next entry.
 **
 ** Returns:
-**   true if btree_cursor_next() would succeed, false otherwise
+**   true if bt_cursornext() would succeed, false otherwise
 **
 ** NOTE: Does not actually move the cursor.
 */
 bool
-btree_cursor_has_next(bt_cursor *cursor);
+bt_cursorhas_next(bt_cursor *cursor);
 
 /*
 ** Check if cursor can move to previous entry.
 **
 ** Returns:
-**   true if btree_cursor_previous() would succeed, false otherwise
+**   true if bt_cursorprevious() would succeed, false otherwise
 **
 ** NOTE: Does not actually move the cursor.
 */
 bool
-btree_cursor_has_previous(bt_cursor *cursor);
+bt_cursorhas_previous(bt_cursor *cursor);
 
 /* ============================================================================
 ** DEBUG AND VALIDATION OPERATIONS

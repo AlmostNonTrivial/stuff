@@ -8,7 +8,8 @@
 */
 
 #pragma once
-#include "defs.hpp"
+#include "common.hpp"
+#include "types.hpp"
 #include <cstdint>
 #include <cstring>
 
@@ -118,7 +119,7 @@ et_delete_exact(ephemeral_tree *tree, void *key, void *record);
 // ============================================================================
 
 // Cursor positioning
-bool et_cursor_seek(et_cursor *cursor, const void *key, CompareOp op = EQ);
+bool et_cursor_seek(et_cursor *cursor, const void *key, comparison_op op = EQ);
 bool et_cursor_first(et_cursor *cursor);
 bool et_cursor_last(et_cursor *cursor);
 

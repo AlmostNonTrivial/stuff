@@ -50,7 +50,7 @@ test_btree_sequential_ops()
 	{
 		uint32_t key = i;
 		uint32_t value = i * 100;
-		btree_cursor_insert(&cursor, &key, (void *)&value);
+		bt_cursorinsert(&cursor, &key, (void *)&value);
 		btree_validate(&tree);
 	}
 	std::cout << " OK\n";
@@ -59,8 +59,8 @@ test_btree_sequential_ops()
 	for (int i = 0; i < COUNT; i++)
 	{
 		uint32_t key = i;
-		assert(btree_cursor_seek(&cursor, &key));
-		uint32_t *val = (uint32_t *)btree_cursor_record(&cursor);
+		assert(bt_cursorseek(&cursor, &key));
+		uint32_t *val = (uint32_t *)bt_cursorrecord(&cursor);
 		assert(*val == i * 100);
 	}
 
@@ -69,8 +69,8 @@ test_btree_sequential_ops()
 	for (int i = 0; i < COUNT / 2; i++)
 	{
 		uint32_t key = i;
-		assert(btree_cursor_seek(&cursor, &key));
-		btree_cursor_delete(&cursor);
+		assert(bt_cursorseek(&cursor, &key));
+		bt_cursordelete(&cursor);
 		btree_validate(&tree);
 	}
 	std::cout << " OK\n";
@@ -79,14 +79,14 @@ test_btree_sequential_ops()
 	for (int i = 0; i < COUNT / 2; i++)
 	{
 		uint32_t key = i;
-		assert(!btree_cursor_seek(&cursor, (uint8_t*)&key));
+		assert(!bt_cursorseek(&cursor, (uint8_t*)&key));
 	}
 
 	// Verify remaining keys exist
 	for (int i = COUNT / 2; i < COUNT; i++)
 	{
 		uint32_t key = i;
-		assert(btree_cursor_seek(&cursor, &key));
+		assert(bt_cursorseek(&cursor, &key));
 	}
 
 	// Backward sequential deletion
@@ -94,14 +94,14 @@ test_btree_sequential_ops()
 	for (int i = COUNT - 1; i >= COUNT / 2; i--)
 	{
 		uint32_t key = i;
-		assert(btree_cursor_seek(&cursor, &key));
-		btree_cursor_delete(&cursor);
+		assert(bt_cursorseek(&cursor, &key));
+		bt_cursordelete(&cursor);
 		btree_validate(&tree);
 	}
 	std::cout << " OK\n";
 
 	// Tree should be empty
-	assert(!btree_cursor_first(&cursor));
+	assert(!bt_cursorfirst(&cursor));
 
 	pager_rollback();
 	pager_close();
@@ -136,7 +136,7 @@ test_btree_random_ops()
 	std::cout << "Random insert..." << std::flush;
 	for (auto &[key, value] : data)
 	{
-		btree_cursor_insert(&cursor, &key, (void *)&value);
+		bt_cursorinsert(&cursor, &key, (void *)&value);
 		btree_validate(&tree);
 	}
 	std::cout << " OK (" << COUNT << " unique keys)\n";
@@ -144,8 +144,8 @@ test_btree_random_ops()
 	// Verify all entries
 	for (auto &[key, value] : data)
 	{
-		assert(btree_cursor_seek(&cursor, &key));
-		uint64_t *val = (uint64_t *)btree_cursor_record(&cursor);
+		assert(bt_cursorseek(&cursor, &key));
+		uint64_t *val = (uint64_t *)bt_cursorrecord(&cursor);
 		assert(*val == value);
 	}
 
@@ -165,8 +165,8 @@ test_btree_random_ops()
 	for (int i = 0; i < delete_count; i++)
 	{
 		uint32_t key = keys_to_delete[i];
-		assert(btree_cursor_seek(&cursor, &key));
-		btree_cursor_delete(&cursor);
+		assert(bt_cursorseek(&cursor, &key));
+		bt_cursordelete(&cursor);
 		btree_validate(&tree);
 		deleted_keys.insert(key);
 	}
@@ -178,14 +178,14 @@ test_btree_random_ops()
 		if (deleted_keys.find(key) == deleted_keys.end())
 		{
 			// Should exist
-			assert(btree_cursor_seek(&cursor, &key));
-			uint64_t *val = (uint64_t *)btree_cursor_record(&cursor);
+			assert(bt_cursorseek(&cursor, &key));
+			uint64_t *val = (uint64_t *)bt_cursorrecord(&cursor);
 			assert(*val == value);
 		}
 		else
 		{
 			// Should not exist
-			assert(!btree_cursor_seek(&cursor, &key));
+			assert(!bt_cursorseek(&cursor, &key));
 		}
 	}
 
@@ -194,14 +194,14 @@ test_btree_random_ops()
 	for (int i = delete_count; i < keys_to_delete.size(); i++)
 	{
 		uint32_t key = keys_to_delete[i];
-		assert(btree_cursor_seek(&cursor, &key));
-		btree_cursor_delete(&cursor);
+		assert(bt_cursorseek(&cursor, &key));
+		bt_cursordelete(&cursor);
 		btree_validate(&tree);
 	}
 	std::cout << " OK\n";
 
 	// Tree should be empty
-	assert(!btree_cursor_first(&cursor));
+	assert(!bt_cursorfirst(&cursor));
 
 	pager_rollback();
 	pager_close();
@@ -237,7 +237,7 @@ test_btree_mixed_ops()
 			uint64_t key = std::rand() % KEY_RANGE;
 			uint32_t value = key * 1000;
 
-			btree_cursor_insert(&cursor, &key, (void *)&value);
+			bt_cursorinsert(&cursor, &key, (void *)&value);
 			keys_in_tree.insert(key);
 			btree_validate(&tree);
 		}
@@ -248,8 +248,8 @@ test_btree_mixed_ops()
 			std::advance(it, std::rand() % keys_in_tree.size());
 			uint64_t key = *it;
 
-			assert(btree_cursor_seek(&cursor, &key));
-			btree_cursor_delete(&cursor);
+			assert(bt_cursorseek(&cursor, &key));
+			bt_cursordelete(&cursor);
 			keys_in_tree.erase(key);
 			btree_validate(&tree);
 		}
@@ -259,8 +259,8 @@ test_btree_mixed_ops()
 		{
 			for (uint64_t key : keys_in_tree)
 			{
-				assert(btree_cursor_seek(&cursor, &key));
-				uint32_t *val = (uint32_t *)btree_cursor_record(&cursor);
+				assert(bt_cursorseek(&cursor, &key));
+				uint32_t *val = (uint32_t *)bt_cursorrecord(&cursor);
 				assert(*val == key * 1000);
 			}
 		}
@@ -272,13 +272,13 @@ test_btree_mixed_ops()
 	std::cout << "Cleanup..." << std::flush;
 	for (uint64_t key : keys_in_tree)
 	{
-		assert(btree_cursor_seek(&cursor, &key));
-		btree_cursor_delete(&cursor);
+		assert(bt_cursorseek(&cursor, &key));
+		bt_cursordelete(&cursor);
 		btree_validate(&tree);
 	}
 	std::cout << " OK\n";
 
-	assert(!btree_cursor_first(&cursor));
+	assert(!bt_cursorfirst(&cursor));
 
 	pager_rollback();
 	pager_close();
@@ -299,20 +299,20 @@ test_btree_edge_cases()
 	// Delete from empty tree
 	std::cout << "Delete from empty..." << std::flush;
 	uint32_t key = 42;
-	assert(!btree_cursor_seek(&cursor, &key));
-	assert(!btree_cursor_delete(&cursor));
+	assert(!bt_cursorseek(&cursor, &key));
+	assert(!bt_cursordelete(&cursor));
 	btree_validate(&tree);
 	std::cout << " OK\n";
 
 	// Single element operations
 	std::cout << "Single element..." << std::flush;
 	uint32_t value = 100;
-	btree_cursor_insert(&cursor, &key, (void *)&value);
+	bt_cursorinsert(&cursor, &key, (void *)&value);
 	btree_validate(&tree);
-	assert(btree_cursor_seek(&cursor, &key));
-	btree_cursor_delete(&cursor);
+	assert(bt_cursorseek(&cursor, &key));
+	bt_cursordelete(&cursor);
 	btree_validate(&tree);
-	assert(!btree_cursor_first(&cursor));
+	assert(!bt_cursorfirst(&cursor));
 	std::cout << " OK\n";
 
 	// Boundary key values
@@ -320,18 +320,18 @@ test_btree_edge_cases()
 	uint32_t min_key = 0;
 	uint32_t max_key = UINT32_MAX;
 
-	btree_cursor_insert(&cursor, &min_key, (void *)&value);
+	bt_cursorinsert(&cursor, &min_key, (void *)&value);
 	btree_validate(&tree);
-	btree_cursor_insert(&cursor, &max_key, (void *)&value);
+	bt_cursorinsert(&cursor, &max_key, (void *)&value);
 	btree_validate(&tree);
 
-	assert(btree_cursor_seek(&cursor, &min_key));
-	assert(btree_cursor_seek(&cursor, &max_key));
+	assert(bt_cursorseek(&cursor, &min_key));
+	assert(bt_cursorseek(&cursor, &max_key));
 
-	btree_cursor_delete(&cursor);
+	bt_cursordelete(&cursor);
 	btree_validate(&tree);
-	assert(btree_cursor_seek(&cursor, &min_key));
-	btree_cursor_delete(&cursor);
+	assert(bt_cursorseek(&cursor, &min_key));
+	bt_cursordelete(&cursor);
 	btree_validate(&tree);
 
 	std::cout << " OK\n";
@@ -382,7 +382,7 @@ inline void test_btree_u32_u64() {
     for (uint32_t user = 1; user <= 5; user++) {
         for (uint64_t time = 100; time <= 103; time++) {
             pack_dual(key_data, TYPE_U32, &user, TYPE_U64, &time);
-            assert(btree_cursor_insert(&cursor, key_data, &empty_value));
+            assert(bt_cursorinsert(&cursor, key_data, &empty_value));
         }
     }
 
@@ -392,17 +392,17 @@ inline void test_btree_u32_u64() {
     uint64_t  b = 0;
     pack_dual(key_data, TYPE_U32, &a, TYPE_U64, &b);
 
-    assert(btree_cursor_seek(&cursor, key_data, GE));
+    assert(bt_cursorseek(&cursor, key_data, GE));
 
     int count = 0;
     do {
-        void* found = btree_cursor_key(&cursor);
+        void* found = bt_cursorkey(&cursor);
         uint32_t a;
         uint64_t b;
         unpack_dual(key_type, found, &a, &b);
         if (a != 3) break;
         count++;
-    } while (btree_cursor_next(&cursor));
+    } while (bt_cursornext(&cursor));
 
     assert(count == 4);
     printf("  Found %d entries for user 3\n", count);
@@ -428,20 +428,20 @@ inline void test_btree_u32_u64() {
 //     for (uint16_t dept = 10; dept <= 12; dept++) {
 //         for (uint16_t emp = 1000; emp <= 1002; emp++) {
 //             pack_u16_u16(key_data, dept, emp);
-//             assert(btree_cursor_insert(&cursor, key_data, &empty_value));
+//             assert(bt_cursorinsert(&cursor, key_data, &empty_value));
 //         }
 //     }
 
 //     pack_u16_u16(key_data, 11, 0);
-//     assert(btree_cursor_seek(&cursor, key_data, GE));
+//     assert(bt_cursorseek(&cursor, key_data, GE));
 
 //     int count = 0;
 //     do {
-//         uint8_t* found = btree_cursor_key(&cursor);
+//         uint8_t* found = bt_cursorkey(&cursor);
 //         uint16_t found_dept = extract_u16_at(found, 0);
 //         if (found_dept != 11) break;
 //         count++;
-//     } while (btree_cursor_next(&cursor));
+//     } while (bt_cursornext(&cursor));
 
 //     assert(count == 3);
 //     printf("  Found %d entries for dept 11\n", count);
@@ -467,20 +467,20 @@ inline void test_btree_u32_u64() {
 //     for (uint8_t cat = 1; cat <= 3; cat++) {
 //         for (uint8_t pri = 10; pri <= 12; pri++) {
 //             pack_u8_u8(key_data, cat, pri);
-//             assert(btree_cursor_insert(&cursor, key_data, &empty_value));
+//             assert(bt_cursorinsert(&cursor, key_data, &empty_value));
 //         }
 //     }
 
 //     // Verify lexicographic ordering
-//     assert(btree_cursor_first(&cursor));
+//     assert(bt_cursorfirst(&cursor));
 
 //     uint8_t expected[][2] = {{1,10}, {1,11}, {1,12}, {2,10}, {2,11}, {2,12}, {3,10}, {3,11}, {3,12}};
 
 //     for (int i = 0; i < 9; i++) {
-//         uint8_t* found = btree_cursor_key(&cursor);
+//         uint8_t* found = bt_cursorkey(&cursor);
 //         assert(extract_u8_at(found, 0) == expected[i][0]);
 //         assert(extract_u8_at(found, 1) == expected[i][1]);
-//         if (i < 8) assert(btree_cursor_next(&cursor));
+//         if (i < 8) assert(bt_cursornext(&cursor));
 //     }
 
 //     printf("  Verified lexicographic ordering for 9 entries\n");
@@ -506,7 +506,7 @@ inline void test_btree_u32_u64() {
 //     for (uint32_t order = 100; order <= 102; order++) {
 //         for (uint64_t ts = 1000000000000ULL; ts <= 1000000000002ULL; ts++) {
 //             pack_dual(key_data, TYPE_U32, &order, TYPE_U64, &ts);
-//             assert(btree_cursor_insert(&cursor, key_data, &empty_value));
+//             assert(bt_cursorinsert(&cursor, key_data, &empty_value));
 //         }
 //     }
 
@@ -547,15 +547,15 @@ test_btree_large_records()
 	for (uint32_t i = 0; i < 30; i++)
 	{
 		memset(large_data, i, LARGE_RECORD);
-		assert(btree_cursor_insert(&cursor, &i, large_data));
+		assert(bt_cursorinsert(&cursor, &i, large_data));
 		btree_validate(&tree);
 	}
 
 	// Verify data integrity
 	for (uint32_t i = 0; i < 30; i++)
 	{
-		assert(btree_cursor_seek(&cursor, &i));
-		uint8_t*data = (uint8_t*)btree_cursor_record(&cursor);
+		assert(bt_cursorseek(&cursor, &i));
+		uint8_t*data = (uint8_t*)bt_cursorrecord(&cursor);
 		assert(data[0] == i && data[LARGE_RECORD - 1] == i);
 	}
 
@@ -584,32 +584,32 @@ test_btree_multiple_cursors()
 	for (uint32_t i = 0; i < 100; i++)
 	{
 		uint32_t value = i * 100;
-		assert(btree_cursor_insert(&cursor1, &i, (void *)&value));
+		assert(bt_cursorinsert(&cursor1, &i, (void *)&value));
 	}
 
 	// Position cursors at different locations
-	assert(btree_cursor_first(&cursor1));
+	assert(bt_cursorfirst(&cursor1));
 
 	uint32_t key = 50;
-	assert(btree_cursor_seek(&cursor2, &key));
+	assert(bt_cursorseek(&cursor2, &key));
 
-	assert(btree_cursor_last(&cursor3));
+	assert(bt_cursorlast(&cursor3));
 
 	// Verify each cursor maintains independent position
-	uint32_t *key1 = (uint32_t *)btree_cursor_key(&cursor1);
-	uint32_t *key2 = (uint32_t *)btree_cursor_key(&cursor2);
-	uint32_t *key3 = (uint32_t *)btree_cursor_key(&cursor3);
+	uint32_t *key1 = (uint32_t *)bt_cursorkey(&cursor1);
+	uint32_t *key2 = (uint32_t *)bt_cursorkey(&cursor2);
+	uint32_t *key3 = (uint32_t *)bt_cursorkey(&cursor3);
 
 	assert(*key1 == 0);
 	assert(*key2 == 50);
 	assert(*key3 == 99);
 
 	// Navigate cursors independently
-	assert(btree_cursor_next(&cursor1));
-	assert(btree_cursor_previous(&cursor3));
+	assert(bt_cursornext(&cursor1));
+	assert(bt_cursorprevious(&cursor3));
 
-	key1 = (uint32_t *)btree_cursor_key(&cursor1);
-	key3 = (uint32_t *)btree_cursor_key(&cursor3);
+	key1 = (uint32_t *)bt_cursorkey(&cursor1);
+	key3 = (uint32_t *)bt_cursorkey(&cursor3);
 
 	assert(*key1 == 1);
 	assert(*key3 == 98);
@@ -643,33 +643,33 @@ test_btree_page_eviction()
 	for (uint32_t i = 0; i < 1000; i++)
 	{
 		uint32_t value = i;
-		assert(btree_cursor_insert(&cursor, &i, (void *)&value));
+		assert(bt_cursorinsert(&cursor, &i, (void *)&value));
 	}
 
 	// Force cache thrashing by accessing in pattern
 	for (int iter = 0; iter < 3; iter++)
 	{
 		// Forward scan
-		assert(btree_cursor_first(&cursor));
+		assert(bt_cursorfirst(&cursor));
 		int count = 0;
 		do
 		{
 			count++;
-		} while (btree_cursor_next(&cursor) && count < 100);
+		} while (bt_cursornext(&cursor) && count < 100);
 
 		// Backward scan
-		assert(btree_cursor_last(&cursor));
+		assert(bt_cursorlast(&cursor));
 		count = 0;
 		do
 		{
 			count++;
-		} while (btree_cursor_previous(&cursor) && count < 100);
+		} while (bt_cursorprevious(&cursor) && count < 100);
 
 		// Random access
 		for (int i = 0; i < 50; i++)
 		{
 			uint32_t key = (i * 37) % 1000;
-			assert(btree_cursor_seek(&cursor, &key));
+			assert(bt_cursorseek(&cursor, &key));
 		}
 	}
 
@@ -723,18 +723,18 @@ test_btree_varchar_collation()
 		char key[32] = {0};
 		strncpy(key, test_strings[i], 31);
 		uint32_t value = i;
-		btree_cursor_insert(&cursor, key, (void *)&value);
+		bt_cursorinsert(&cursor, key, (void *)&value);
 	}
 
 	// Collect sorted order from tree
 	std::vector<std::string> tree_order;
-	if (btree_cursor_first(&cursor))
+	if (bt_cursorfirst(&cursor))
 	{
 		do
 		{
-			char *key = (char *)btree_cursor_key(&cursor);
+			char *key = (char *)bt_cursorkey(&cursor);
 			tree_order.push_back(std::string(key, strnlen(key, 32)));
-		} while (btree_cursor_next(&cursor));
+		} while (bt_cursornext(&cursor));
 	}
 
 	// Verify ordering is consistent
@@ -783,14 +783,14 @@ test_update_parent_keys_condition()
 	for (int i = 0; i < COUNT; i++)
 	{
 		keys.push_back(i);
-		btree_cursor_insert(&cursor, &i, (void *)&i);
+		bt_cursorinsert(&cursor, &i, (void *)&i);
 	}
 
 	uint32_t key = 150;
-	btree_cursor_seek(&cursor, &key);
+	bt_cursorseek(&cursor, &key);
 	for (int i = 0; i < 182 - 150; i++)
 	{
-		btree_cursor_delete(&cursor);
+		bt_cursordelete(&cursor);
 	}
 
 	// btree_print(&tree);
@@ -818,18 +818,18 @@ test_merge_empty_root()
 	std::cout << "Forward sequential insert..." << std::flush;
 	for (int i = 0; i < COUNT; i++)
 	{
-		btree_cursor_insert(&cursor, &i, (void *)&i);
+		bt_cursorinsert(&cursor, &i, (void *)&i);
 	}
 	uint32_t key = 30;
-	// btree_print(&tree);
-	btree_cursor_seek(&cursor, &key);
-	btree_cursor_delete(&cursor);
+	btree_print(&tree);
+	bt_cursorseek(&cursor, &key);
+	bt_cursordelete(&cursor);
 
 	// uint32_t key = 150;
-	// btree_cursor_seek(&cursor, &key);
+	// bt_cursorseek(&cursor, &key);
 	// for (int i = 0; i < 182 - 150; i++)
 	// {
-	// 	btree_cursor_delete(&cursor);
+	// 	bt_cursordelete(&cursor);
 	// }
 
 	// // btree_print(&tree);
@@ -860,15 +860,15 @@ test_btree_single_key_leaf_delete()
 	for (uint32_t i = 0; i <= tree.leaf_max_keys; i++)
 	{
 		uint32_t value = i;
-		btree_cursor_insert(&cursor, &i, (void *)&value);
+		bt_cursorinsert(&cursor, &i, (void *)&value);
 	}
 
 	// Now we have an internal root with 2 leaf children
 	// Delete all but one key from the left leaf
 	for (uint32_t i = 1; i < tree.leaf_min_keys; i++)
 	{
-		assert(btree_cursor_seek(&cursor, &i));
-		btree_cursor_delete(&cursor);
+		assert(bt_cursorseek(&cursor, &i));
+		bt_cursordelete(&cursor);
 	}
 
 	// The left leaf should now have exactly min_keys
@@ -876,15 +876,15 @@ test_btree_single_key_leaf_delete()
 	uint32_t key_to_delete = tree.leaf_min_keys - 1;
 	if (key_to_delete > 0)
 	{
-		assert(btree_cursor_seek(&cursor, &key_to_delete));
-		btree_cursor_delete(&cursor);
+		assert(bt_cursorseek(&cursor, &key_to_delete));
+		bt_cursordelete(&cursor);
 	}
 
 	// Now delete the first key (index 0) from a leaf with 1 key
 	// This should trigger if_43 in update_parent_keys
 	uint32_t first_key = 0;
-	assert(btree_cursor_seek(&cursor, &first_key));
-	btree_cursor_delete(&cursor);
+	assert(bt_cursorseek(&cursor, &first_key));
+	bt_cursordelete(&cursor);
 
 	btree_validate(&tree);
 
@@ -907,14 +907,14 @@ test_btree_collapse_root()
 	// Insert just enough to create a 2-level tree
 	for (uint32_t i = 0; i <= tree.leaf_max_keys; i++)
 	{
-		btree_cursor_insert(&cursor, &i, (void *)&i);
+		bt_cursorinsert(&cursor, &i, (void *)&i);
 	}
 
 	// Now delete everything to collapse the tree
 	for (uint32_t i = 0; i <= tree.leaf_max_keys; i++)
 	{
-		assert(btree_cursor_seek(&cursor, &i));
-		btree_cursor_delete(&cursor);
+		assert(bt_cursorseek(&cursor, &i));
+		bt_cursordelete(&cursor);
 		btree_validate(&tree);
 	}
 
@@ -947,27 +947,27 @@ test_btree_deep_tree_coverage()
 	{
 		uint32_t key = i;
 		memset(record_data, i % 256, RECORD_SIZE);
-		assert(btree_cursor_insert(&cursor, &key, record_data));
+		assert(bt_cursorinsert(&cursor, &key, record_data));
 	}
 	std::cout << " OK\n";
 
 	// Test cursor has_next and has_previous (if_100, if_101)
 	std::cout << "Testing cursor helpers..." << std::flush;
-	assert(btree_cursor_first(&cursor));
-	assert(btree_cursor_has_next(&cursor));		 // Should hit if_100
-	assert(!btree_cursor_has_previous(&cursor)); // Should test if_101
+	assert(bt_cursorfirst(&cursor));
+	assert(bt_cursorhas_next(&cursor));		 // Should hit if_100
+	assert(!bt_cursorhas_previous(&cursor)); // Should test if_101
 
-	assert(btree_cursor_last(&cursor));
-	assert(!btree_cursor_has_next(&cursor));
-	assert(btree_cursor_has_previous(&cursor)); // Should hit if_101
+	assert(bt_cursorlast(&cursor));
+	assert(!bt_cursorhas_next(&cursor));
+	assert(bt_cursorhas_previous(&cursor)); // Should hit if_101
 	std::cout << " OK\n";
 
 	// Navigate to trigger previous leaf movement (if_98, if_99)
 	std::cout << "Testing leaf navigation..." << std::flush;
 	// Find a key that's at the start of a non-first leaf
 	uint32_t target_key = tree.leaf_max_keys; // Should be first key of second leaf
-	assert(btree_cursor_seek(&cursor, &target_key));
-	assert(btree_cursor_previous(&cursor)); // Should move to previous leaf (if_98, if_99)
+	assert(bt_cursorseek(&cursor, &target_key));
+	assert(bt_cursorprevious(&cursor)); // Should move to previous leaf (if_98, if_99)
 	std::cout << " OK\n";
 
 	// Trigger if_37: Delete first key of a non-leftmost leaf
@@ -976,11 +976,11 @@ test_btree_deep_tree_coverage()
 
 	// Navigate to second leaf's first key
 	target_key = tree.leaf_max_keys;
-	assert(btree_cursor_seek(&cursor, &target_key));
+	assert(bt_cursorseek(&cursor, &target_key));
 
 	// This key should be a separator in the parent
 	// Delete it to trigger parent key update
-	assert(btree_cursor_delete(&cursor));
+	assert(bt_cursordelete(&cursor));
 	btree_validate(&tree);
 	std::cout << " OK\n";
 
@@ -989,12 +989,12 @@ test_btree_deep_tree_coverage()
 	bt_cursor invalid_cursor = {.tree = &tree};
 	invalid_cursor.state = BT_CURSOR_INVALID;
 
-	assert(btree_cursor_key(&invalid_cursor) == nullptr);		// if_75
-	assert(btree_cursor_record(&invalid_cursor) == nullptr);	// if_77
-	assert(!btree_cursor_delete(&invalid_cursor));				// if_82
-	assert(!btree_cursor_update(&invalid_cursor, record_data)); // if_89
-	assert(!btree_cursor_next(&invalid_cursor));				// if_90
-	assert(!btree_cursor_previous(&invalid_cursor));			// if_95
+	assert(bt_cursorkey(&invalid_cursor) == nullptr);		// if_75
+	assert(bt_cursorrecord(&invalid_cursor) == nullptr);	// if_77
+	assert(!bt_cursordelete(&invalid_cursor));				// if_82
+	assert(!bt_cursorupdate(&invalid_cursor, record_data)); // if_89
+	assert(!bt_cursornext(&invalid_cursor));				// if_90
+	assert(!bt_cursorprevious(&invalid_cursor));			// if_95
 	std::cout << " OK\n";
 
 	// Test cursor on empty tree (if_79)
@@ -1002,17 +1002,17 @@ test_btree_deep_tree_coverage()
 	btree empty_tree = btree_create(TYPE_U32, sizeof(uint32_t), false); // Don't init
 	bt_cursor empty_cursor = {.tree = &empty_tree};
 	uint32_t  test_key = 42;
-	assert(!btree_cursor_seek(&empty_cursor, &test_key)); // if_79
+	assert(!bt_cursorseek(&empty_cursor, &test_key)); // if_79
 	std::cout << " OK\n";
 
 	// Test seek_cmp for coverage (if_72, if_73)
 	std::cout << "Testing seek_cmp..." << std::flush;
 	uint32_t cmp_key = 250;
-	assert(btree_cursor_seek(&cursor, &cmp_key, GE)); // if_72 for exact match case
+	assert(bt_cursorseek(&cursor, &cmp_key, GE)); // if_72 for exact match case
 
 	// Test with key that doesn't exist
 	uint32_t missing_key = KEY_COUNT + 100;
-	assert(btree_cursor_seek(&cursor, &missing_key, LE)); // Should iterate and hit if_73
+	assert(bt_cursorseek(&cursor, &missing_key, LE)); // Should iterate and hit if_73
 	std::cout << " OK\n";
 
 	// Test node fault conditions (if_91, if_96)
@@ -1022,17 +1022,17 @@ test_btree_deep_tree_coverage()
 	fault_cursor.leaf_page = 999999; // Invalid page
 	fault_cursor.leaf_index = 0;
 
-	assert(!btree_cursor_next(&fault_cursor));	   // if_91
+	assert(!bt_cursornext(&fault_cursor));	   // if_91
 	fault_cursor.state = BT_CURSOR_VALID;			   // Reset state
-	assert(!btree_cursor_previous(&fault_cursor)); // if_96
+	assert(!bt_cursorprevious(&fault_cursor)); // if_96
 	std::cout << " OK\n";
 
 	// Test cursor with out-of-bounds index (if_76, if_78)
 	std::cout << "Testing out-of-bounds cursor..." << std::flush;
-	assert(btree_cursor_first(&cursor));
+	assert(bt_cursorfirst(&cursor));
 	cursor.leaf_index = 999;							 // Way out of bounds
-	assert(btree_cursor_key(&cursor) == nullptr);	 // if_76
-	assert(btree_cursor_record(&cursor) == nullptr); // if_78
+	assert(bt_cursorkey(&cursor) == nullptr);	 // if_76
+	assert(bt_cursorrecord(&cursor) == nullptr); // if_78
 	std::cout << " OK\n";
 
 	// Test node changes after delete (if_84)
@@ -1047,14 +1047,14 @@ test_btree_deep_tree_coverage()
 	for (uint32_t i = 0; i <= small_tree.leaf_max_keys; i++)
 	{
 		uint32_t val = i;
-		btree_cursor_insert(&small_cursor, &i, (void *)&val);
+		bt_cursorinsert(&small_cursor, &i, (void *)&val);
 	}
 
 	// Delete to cause merge that changes node structure
 	for (uint32_t i = 1; i < small_tree.leaf_min_keys; i++)
 	{
-		assert(btree_cursor_seek(&small_cursor, &i));
-		btree_cursor_delete(&small_cursor);
+		assert(bt_cursorseek(&small_cursor, &i));
+		bt_cursordelete(&small_cursor);
 	}
 	std::cout << " OK\n";
 
@@ -1089,16 +1089,16 @@ test_btree_remaining_coverage()
 		for (uint32_t i = 0; i < 200; i++)
 		{
 			uint32_t val = i;
-			btree_cursor_insert(&cursor, &i, (void *)&val);
+			bt_cursorinsert(&cursor, &i, (void *)&val);
 		}
 
 		// Delete everything except keys that keep one subtree
 		// This should eventually collapse an internal root
 		for (uint32_t i = 0; i < 199; i++)
 		{
-			if (btree_cursor_seek(&cursor, &i))
+			if (bt_cursorseek(&cursor, &i))
 			{
-				btree_cursor_delete(&cursor);
+				bt_cursordelete(&cursor);
 				btree_validate(&tree);
 			}
 		}
@@ -1122,15 +1122,15 @@ test_btree_remaining_coverage()
 		// for (uint32_t i = 0; i < 100; i++)
 		// {
 		// 	uint32_t val = i * 10;
-		// 	btree_cursor_insert(&cursor, &i, (void *)&val);
+		// 	bt_cursorinsert(&cursor, &i, (void *)&val);
 		// }
 
 		// // Find the first key of the second leaf - this should be a separator
 		// uint32_t separator_key = tree.leaf_max_keys;
 
 		// // Delete this key to trigger parent update
-		// assert(btree_cursor_seek(&cursor, &separator_key));
-		// btree_cursor_delete(&cursor);
+		// assert(bt_cursorseek(&cursor, &separator_key));
+		// bt_cursordelete(&cursor);
 
 		// pager_rollback();
 		// pager_close();
@@ -1151,21 +1151,21 @@ test_btree_remaining_coverage()
 		for (uint32_t i = 0; i < tree.leaf_max_keys * 3; i++)
 		{
 			uint32_t val = i;
-			btree_cursor_insert(&cursor, &i, (void *)&val);
+			bt_cursorinsert(&cursor, &i, (void *)&val);
 		}
 
-		while (btree_cursor_previous(&cursor))
+		while (bt_cursorprevious(&cursor))
 			;
 
 		// Position at start of second leaf
 		uint32_t key = tree.leaf_max_keys;
-		assert(btree_cursor_seek(&cursor, &key));
+		assert(bt_cursorseek(&cursor, &key));
 
 		// Move to previous should cross leaf boundary
-		assert(btree_cursor_previous(&cursor)); // Should trigger if_98, if_99
+		assert(bt_cursorprevious(&cursor)); // Should trigger if_98, if_99
 
 		// Verify we're at the end of first leaf
-		uint32_t *current = (uint32_t *)btree_cursor_key(&cursor);
+		uint32_t *current = (uint32_t *)bt_cursorkey(&cursor);
 		assert(*current == tree.leaf_max_keys - 1);
 
 		pager_rollback();
@@ -1188,7 +1188,7 @@ test_btree_remaining_coverage()
 		for (int i = 0; i < 5; i++)
 		{
 			uint32_t val = keys[i];
-			btree_cursor_insert(&cursor, &keys[i], (void *)&val);
+			bt_cursorinsert(&cursor, &keys[i], (void *)&val);
 		}
 
 		// Seek with comparison to non-existent key
@@ -1198,7 +1198,7 @@ test_btree_remaining_coverage()
 		cursor.state = BT_CURSOR_INVALID;
 
 		// This should iterate and hit if_73 when cursor key returns null
-		assert(btree_cursor_seek(&cursor, &target, GE));
+		assert(bt_cursorseek(&cursor, &target, GE));
 
 		pager_rollback();
 		pager_close();
@@ -1217,7 +1217,7 @@ test_btree_remaining_coverage()
 		// Create a tree with internal nodes
 		bt_cursor cursor = {.tree = &tree};
 		uint32_t  i = 0;
-		btree_cursor_seek(&cursor, &i, GE);
+		bt_cursorseek(&cursor, &i, GE);
 
 		pager_rollback();
 		pager_close();
@@ -1238,25 +1238,25 @@ test_btree_remaining_coverage()
 		for (uint32_t i = 0; i <= tree.leaf_max_keys + 1; i++)
 		{
 			uint32_t val = i;
-			btree_cursor_insert(&cursor, &i, (void *)&val);
+			bt_cursorinsert(&cursor, &i, (void *)&val);
 		}
 
 		// Position cursor on a key in the right leaf
 		uint32_t target = tree.leaf_max_keys + 1;
-		assert(btree_cursor_seek(&cursor, &target));
+		assert(bt_cursorseek(&cursor, &target));
 
 		// Delete keys to force merge that will deallocate the node cursor is on
 		for (uint32_t i = 1; i < tree.leaf_max_keys; i++)
 		{
 			bt_cursor temp_cursor = {.tree = &tree};
-			if (btree_cursor_seek(&temp_cursor, &i))
+			if (bt_cursorseek(&temp_cursor, &i))
 			{
-				btree_cursor_delete(&temp_cursor);
+				bt_cursordelete(&temp_cursor);
 			}
 		}
 
 		// Now delete with our positioned cursor - node should change
-		btree_cursor_delete(&cursor);
+		bt_cursordelete(&cursor);
 		// assert(cursor.state == BPT_CURSOR_INVALID); // Should be invalid after node change
 
 		pager_rollback();

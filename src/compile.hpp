@@ -1,5 +1,7 @@
 #pragma once
 #include "types.hpp"
+#include "common.hpp"
+#include "arena.hpp"
 #include "vm.hpp"
 #include <cassert>
 #include <cstdint>
@@ -9,7 +11,7 @@
 struct RegisterAllocator
 {
 	int					   next_free = 0;
-	array<int, QueryArena> scope_stack;
+	array<int, query_arena> scope_stack;
 
 	// Allocate a single register (optionally specific one)
 	int
@@ -128,9 +130,9 @@ struct CondContext
 
 struct ProgramBuilder
 {
-	array<VMInstruction, QueryArena> instructions;
-	string_map<uint32_t, QueryArena> labels;
-	array<uint32_t, QueryArena>		 unresolved_jumps;
+	array<VMInstruction, query_arena> instructions;
+	string_map<uint32_t, query_arena> labels;
+	array<uint32_t, query_arena>		 unresolved_jumps;
 	RegisterAllocator				 regs;
 	int								 label_counter = 0;
 
@@ -144,7 +146,7 @@ struct ProgramBuilder
 	T *
 	alloc_value(T value)
 	{
-		T *ptr = (T *)arena::alloc<QueryArena>(sizeof(T));
+		T *ptr = (T *)arena::alloc<query_arena>(sizeof(T));
 		*ptr = value;
 		return ptr;
 	}
@@ -152,7 +154,7 @@ struct ProgramBuilder
 	char *
 	alloc_string(const char *str, size_t size)
 	{
-		char *ptr = (char *)arena::alloc<QueryArena>(size);
+		char *ptr = (char *)arena::alloc<query_arena>(size);
 		memset(ptr, 0, size); // Zero entire buffer
 		if (str)
 		{
@@ -186,7 +188,7 @@ struct ProgramBuilder
 	const char *
 	generate_label(const char *prefix = "L")
 	{
-		char *name = (char *)arena::alloc<QueryArena>(32);
+		char *name = (char *)arena::alloc<query_arena>(32);
 		snprintf(name, 32, "%s%d", prefix, label_counter++);
 		return name;
 	}
@@ -431,7 +433,7 @@ struct ProgramBuilder
 	// ========================================================================
 
 	int
-	arithmetic(int left_reg, int right_reg, ArithOp op, int dest_reg = -1)
+	arithmetic(int left_reg, int right_reg, arith_op op, int dest_reg = -1)
 	{
 		if (dest_reg == -1)
 		{
@@ -472,7 +474,7 @@ struct ProgramBuilder
 	}
 
 	int
-	test(int left_reg, int right_reg, CompareOp op, int dest_reg = -1)
+	test(int left_reg, int right_reg, comparison_op op, int dest_reg = -1)
 	{
 		if (dest_reg == -1)
 		{
@@ -519,7 +521,7 @@ struct ProgramBuilder
 	}
 
 	int
-	logic(int left_reg, int right_reg, LogicOp op, int dest_reg = -1)
+	logic(int left_reg, int right_reg, logic_op op, int dest_reg = -1)
 	{
 		if (dest_reg == -1)
 		{
@@ -605,7 +607,7 @@ struct ProgramBuilder
 	}
 
 	int
-	seek(int cursor_id, int key_reg, CompareOp op = EQ, int result_reg = -1)
+	seek(int cursor_id, int key_reg, comparison_op op = EQ, int result_reg = -1)
 	{
 		if (result_reg == -1)
 		{
@@ -746,3 +748,195 @@ struct ProgramBuilder
 		return *this;
 	}
 };
+
+
+// ============================================================================
+// Arena-allocated factory methods
+// ============================================================================
+
+// Allocate and initialize a value in the specified arena
+
+static TypedValue
+alloc(DataType type, const void *src = nullptr)
+{
+	uint32_t size = type_size(type);
+	uint8_t *data = (uint8_t *)arena::alloc<query_arena>(size);
+
+	if (src)
+	{
+		type_copy(type, data, (const uint8_t *)src);
+	}
+	else
+	{
+		type_zero(type, data);
+	}
+
+	return {data, type};
+}
+
+// Allocate scalar types
+template <typename query_arena, typename T>
+static TypedValue
+alloc_scalar(DataType type, T value)
+{
+	static_assert(sizeof(T) <= 8, "Scalar too large");
+	uint8_t *data = (uint8_t *)arena::alloc<query_arena>(sizeof(T));
+	*(T *)data = value;
+	return {data, type};
+}
+
+// Specialized allocators for common types
+
+static TypedValue
+alloc_u8(uint8_t val)
+{
+	return alloc_scalar<query_arena>(TYPE_U8, val);
+}
+
+static TypedValue
+alloc_u16(uint16_t val)
+{
+	return alloc_scalar<query_arena>(TYPE_U16, val);
+}
+
+static TypedValue
+alloc_u32(uint32_t val)
+{
+	return alloc_scalar<query_arena>(TYPE_U32, val);
+}
+
+static TypedValue
+alloc_u64(uint64_t val)
+{
+	return alloc_scalar<query_arena>(TYPE_U64, val);
+}
+
+static TypedValue
+alloc_i32(int32_t val)
+{
+	return alloc_scalar<query_arena>(TYPE_I32, val);
+}
+
+static TypedValue
+alloc_i64(int64_t val)
+{
+	return alloc_scalar<query_arena>(TYPE_I64, val);
+}
+
+static TypedValue
+alloc_f32(float val)
+{
+	return alloc_scalar<query_arena>(TYPE_F32, val);
+}
+
+static TypedValue
+alloc_f64(double val)
+{
+	return alloc_scalar<query_arena>(TYPE_F64, val);
+}
+
+// String allocators - handles proper null termination and sizing
+
+static TypedValue
+alloc_char(const char *str, uint32_t size)
+{
+
+	// mem
+	char *data = (char *)arena::alloc<query_arena>(size);
+	if (str)
+	{
+		strncpy(data, str, size - 1);
+	}
+	return {(uint8_t *)data, make_char(size)};
+}
+
+static TypedValue
+alloc_char8(const char *str)
+{
+	return alloc_char(str, 8);
+}
+
+static TypedValue
+alloc_char16(const char *str)
+{
+	return alloc_char(str, 16);
+}
+
+static TypedValue
+alloc_char32(const char *str)
+{
+	return alloc_char(str, 32);
+}
+
+static TypedValue
+alloc_char64(const char *str)
+{
+	return alloc_char(str, 64);
+}
+
+static TypedValue
+alloc_char128(const char *str)
+{
+	return alloc_char(str, 128);
+}
+
+static TypedValue
+alloc_char256(const char *str)
+{
+	return alloc_char(str, 256);
+}
+
+// VARCHAR - dynamically sized
+
+static TypedValue
+alloc_varchar(const char *str, size_t size)
+{
+	size_t len;
+	if (str)
+	{
+		if (size)
+		{
+			len = size;
+		}
+		else
+		{
+			len = strlen(str) + 1;
+		}
+	}
+	else
+	{
+		len = 1;
+	}
+
+	char *data = (char *)arena::alloc<query_arena>(len);
+	if (str)
+	{
+		strcpy(data, str);
+	}
+	else
+	{
+		data[0] = '\0';
+	}
+	return {(uint8_t *)data, TYPE_VARCHAR(len)};
+}
+
+// Null value
+
+static TypedValue
+alloc_null()
+{
+	return {nullptr, TYPE_NULL};
+}
+
+// Dual type allocator
+
+static TypedValue
+alloc_dual(DataType type1, const void *data1, DataType type2, const void *data2)
+{
+	DataType dual_type = make_dual(type1, type2);
+	uint32_t total_size = type_size(dual_type);
+	uint8_t *data = (uint8_t *)arena::alloc<query_arena>(total_size);
+
+	pack_dual(data, type1, (const uint8_t *)data1, type2, (const uint8_t *)data2);
+	return {data, dual_type};
+}

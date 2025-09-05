@@ -1049,7 +1049,7 @@ BTree btree_create(DataType key, uint32_t record_size, bool init) {
 **
 ** Supports: EQ (exact match), GE, GT, LE, LT
 */
-bool btree_cursor_seek(BtCursor* cursor, void* key, CompareOp op) {
+bool bt_cursorseek(BtCursor* cursor, void* key, CompareOp op) {
     BTree* tree = cursor->tree;
     cursor_clear(cursor);
 
@@ -1089,7 +1089,7 @@ bool btree_cursor_seek(BtCursor* cursor, void* key, CompareOp op) {
     bool forward = (op == GE || op == GT);
 
     while (cursor->state == BT_CURSOR_VALID) {
-        void* current_key = btree_cursor_key(cursor);
+        void* current_key = bt_cursorkey(cursor);
         if (!current_key) break;
 
         bool satisfied = false;
@@ -1107,8 +1107,8 @@ bool btree_cursor_seek(BtCursor* cursor, void* key, CompareOp op) {
 
         if (satisfied) return true;
 
-        if (!(forward ? btree_cursor_next(cursor) :
-                       btree_cursor_previous(cursor))) {
+        if (!(forward ? bt_cursornext(cursor) :
+                       bt_cursorprevious(cursor))) {
             break;
         }
     }
@@ -1120,7 +1120,7 @@ bool btree_cursor_seek(BtCursor* cursor, void* key, CompareOp op) {
 /*
 ** Move cursor to next position in key order.
 */
-bool btree_cursor_next(BtCursor* cursor) {
+bool bt_cursornext(BtCursor* cursor) {
     if (cursor->state != BT_CURSOR_VALID) {
         return false;
     }
@@ -1157,7 +1157,7 @@ bool btree_cursor_next(BtCursor* cursor) {
 /*
 ** Move cursor to previous position in key order.
 */
-bool btree_cursor_previous(BtCursor* cursor) {
+bool bt_cursorprevious(BtCursor* cursor) {
     if (cursor->state != BT_CURSOR_VALID) {
         return false;
     }
@@ -1194,23 +1194,23 @@ bool btree_cursor_previous(BtCursor* cursor) {
 
 /*
 ** Additional cursor operations follow the same patterns...
-** (btree_cursor_first, btree_cursor_last, btree_cursor_insert,
-**  btree_cursor_delete, btree_cursor_update, etc.)
+** (bt_cursorfirst, bt_cursorlast, bt_cursorinsert,
+**  bt_cursordelete, bt_cursorupdate, etc.)
 */
 
-bool btree_cursor_first(BtCursor* cursor) {
+bool bt_cursorfirst(BtCursor* cursor) {
     return cursor_move_end(cursor, true);
 }
 
-bool btree_cursor_last(BtCursor* cursor) {
+bool bt_cursorlast(BtCursor* cursor) {
     return cursor_move_end(cursor, false);
 }
 
-bool btree_cursor_is_valid(BtCursor* cursor) {
+bool bt_cursoris_valid(BtCursor* cursor) {
     return cursor->state == BT_CURSOR_VALID;
 }
 
-void* btree_cursor_key(BtCursor* cursor) {
+void* bt_cursorkey(BtCursor* cursor) {
     BTree* tree = cursor->tree;
     if (cursor->state != BT_CURSOR_VALID) return nullptr;
 
@@ -1220,7 +1220,7 @@ void* btree_cursor_key(BtCursor* cursor) {
     return GET_KEY_AT(node, cursor->leaf_index);
 }
 
-void* btree_cursor_record(BtCursor* cursor) {
+void* bt_cursorrecord(BtCursor* cursor) {
     BTree* tree = cursor->tree;
     if (cursor->state != BT_CURSOR_VALID) return nullptr;
 
@@ -1230,8 +1230,8 @@ void* btree_cursor_record(BtCursor* cursor) {
     return GET_RECORD_AT(node, cursor->leaf_index);
 }
 
-bool btree_cursor_insert(BtCursor* cursor, void* key, void* record) {
-    if (btree_cursor_seek(cursor, key, EQ)) {
+bool bt_cursorinsert(BtCursor* cursor, void* key, void* record) {
+    if (bt_cursorseek(cursor, key, EQ)) {
         return false;  /* Key already exists */
     }
 
@@ -1239,10 +1239,10 @@ bool btree_cursor_insert(BtCursor* cursor, void* key, void* record) {
     return true;
 }
 
-bool btree_cursor_delete(BtCursor* cursor) {
+bool bt_cursordelete(BtCursor* cursor) {
     if (cursor->state != BT_CURSOR_VALID) return false;
 
-    void* key = btree_cursor_key(cursor);
+    void* key = bt_cursorkey(cursor);
     if (!key) return false;
 
     BTreeNode* node = GET_NODE(cursor->leaf_page);
@@ -1266,31 +1266,31 @@ bool btree_cursor_delete(BtCursor* cursor) {
     return true;
 }
 
-bool btree_cursor_update(BtCursor* cursor, void* record) {
+bool bt_cursorupdate(BtCursor* cursor, void* record) {
     if (cursor->state != BT_CURSOR_VALID) return false;
 
     pager_mark_dirty(cursor->leaf_page);
-    void* data = btree_cursor_record(cursor);
+    void* data = bt_cursorrecord(cursor);
     memcpy(data, record, cursor->tree->record_size);
     return true;
 }
 bool
-btree_cursor_has_next(BtCursor *cursor)
+bt_cursorhas_next(BtCursor *cursor)
 {
-	if (btree_cursor_next(cursor))
+	if (bt_cursornext(cursor))
 	{
-		btree_cursor_previous(cursor);
+		bt_cursorprevious(cursor);
 		return true;
 	}
 	return false;
 }
 
 bool
-btree_cursor_has_previous(BtCursor *cursor)
+bt_cursorhas_previous(BtCursor *cursor)
 {
-	if (btree_cursor_previous(cursor))
+	if (bt_cursorprevious(cursor))
 	{
-		btree_cursor_next(cursor);
+		bt_cursornext(cursor);
 		return true;
 	}
 	return false;

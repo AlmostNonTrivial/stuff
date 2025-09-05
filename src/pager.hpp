@@ -1,10 +1,9 @@
 #pragma once
 #include <cstdint>
-#include "defs.hpp"
 
 #define PAGE_INVALID 0
-
-#define MAX_CACHE_ENTRIES 200
+#define MAX_CACHE_ENTRIES 100
+#define PAGE_SIZE 2048
 
 /*
 ** BASE PAGE STRUCTURE
