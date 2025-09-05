@@ -223,47 +223,6 @@ std::vector<Column> user_followers = {
 	Column{FOLLOWED_ID, TYPE_U32}  // FK to users
 };
 
-// Simple CSV parser
-struct CSVReader
-{
-	std::ifstream file;
-	std::string	  line;
-
-	CSVReader(const char *filename) : file(filename)
-	{
-		if (!file.is_open())
-		{
-			fprintf(stderr, "Failed to open CSV file: %s\n", filename);
-		}
-		// Skip header
-		std::getline(file, line);
-	}
-
-	bool
-	next_row(std::vector<std::string> &fields)
-	{
-		if (!std::getline(file, line))
-		{
-			return false;
-		}
-
-		// Remove carriage return if present
-		if (!line.empty() && line.back() == '\r')
-		{
-			line.pop_back();
-		}
-
-		fields.clear();
-		std::stringstream ss(line);
-		std::string		  field;
-
-		while (std::getline(ss, field, ','))
-		{
-			fields.push_back(field);
-		}
-		return true;
-	}
-};
 
 inline static void
 create_all_tables(bool create)

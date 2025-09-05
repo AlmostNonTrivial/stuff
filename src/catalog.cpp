@@ -45,6 +45,9 @@ Structure::from(const char *name, array<Column> cols)
 	return structure;
 }
 
+
+
+
 void
 bootstrap_master(bool create)
 {

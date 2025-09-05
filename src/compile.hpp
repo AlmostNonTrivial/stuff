@@ -1,4 +1,5 @@
 #pragma once
+#include "parser.hpp"
 #include "types.hpp"
 #include "common.hpp"
 #include "arena.hpp"
@@ -951,3 +952,7 @@ from_structure(Structure &structure)
 	cctx.layout = structure.to_layout();
 	return cctx;
 }
+
+
+
+array<VMInstruction, query_arena> compile_program(Statement*stmt);

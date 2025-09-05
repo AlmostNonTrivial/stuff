@@ -8,7 +8,7 @@
 struct Structure;
 
 // Parser arena tag
-struct ParserArena
+struct parser_arena
 {
 };
 
@@ -137,7 +137,7 @@ enum StmtType : uint8_t
 // Column definition for CREATE TABLE
 struct ColumnDef
 {
-	string<ParserArena> name;
+	string<parser_arena> name;
 	DataType			type;
 	bool				is_primary_key;
 	bool				is_not_null;
@@ -170,7 +170,7 @@ struct Expr
 			union {
 				int64_t				int_val;
 				double				float_val;
-				string<ParserArena> str_val;
+				string<parser_arena> str_val;
 			};
 		};
 		struct
@@ -181,8 +181,8 @@ struct Expr
 		// EXPR_COLUMN
 		struct
 		{
-			string<ParserArena> table_name; // Can be empty
-			string<ParserArena> column_name;
+			string<parser_arena> table_name; // Can be empty
+			string<parser_arena> column_name;
 		};
 
 		// EXPR_BINARY_OP
@@ -203,12 +203,12 @@ struct Expr
 		// EXPR_FUNCTION
 		struct
 		{
-			string<ParserArena>			  func_name;
-			array<Expr *, ParserArena>	  args;
+			string<parser_arena>			  func_name;
+			array<Expr *, parser_arena>	  args;
 		};
 		struct
 		{
-			array<Expr *, ParserArena> list_items;
+			array<Expr *, parser_arena> list_items;
 		};
 	};
 };
@@ -216,8 +216,8 @@ struct Expr
 // Table reference with optional alias
 struct TableRef
 {
-	string<ParserArena> table_name;
-	string<ParserArena> alias;
+	string<parser_arena> table_name;
+	string<parser_arena> alias;
 
 	// Semantic resolution
 	struct
@@ -256,13 +256,13 @@ struct OrderByClause
 // SELECT statement
 struct SelectStmt
 {
-	array<Expr *, ParserArena>			select_list;
+	array<Expr *, parser_arena>			select_list;
 	TableRef							*from_table;
-	array<JoinClause *, ParserArena>	joins;
+	array<JoinClause *, parser_arena>	joins;
 	Expr								*where_clause;
-	array<Expr *, ParserArena>			group_by;
+	array<Expr *, parser_arena>			group_by;
 	Expr								*having_clause;
-	array<OrderByClause *, ParserArena> order_by;
+	array<OrderByClause *, parser_arena> order_by;
 	int64_t								limit;
 	int64_t								offset;
 	bool								is_distinct;
@@ -270,8 +270,8 @@ struct SelectStmt
 	// Semantic resolution
 	struct
 	{
-		array<DataType, ParserArena>		 output_types;
-		array<string<ParserArena>, ParserArena> output_names;
+		array<DataType, parser_arena>		 output_types;
+		array<string<parser_arena>, parser_arena> output_names;
 		bool								 has_aggregates = false;
 		bool								 is_resolved = false;
 	} sem;
@@ -280,15 +280,15 @@ struct SelectStmt
 // INSERT statement
 struct InsertStmt
 {
-	string<ParserArena>									 table_name;
-	array<string<ParserArena>, ParserArena>				 columns;
-	array<array<Expr *, ParserArena> *, ParserArena>	 values;
+	string<parser_arena>									 table_name;
+	array<string<parser_arena>, parser_arena>				 columns;
+	array<array<Expr *, parser_arena> *, parser_arena>	 values;
 
 	// Semantic resolution
 	struct
 	{
 		Structure				   *table = nullptr;
-		array<int32_t, ParserArena> column_indices;
+		array<int32_t, parser_arena> column_indices;
 		bool						is_resolved = false;
 	} sem;
 };
@@ -296,16 +296,16 @@ struct InsertStmt
 // UPDATE statement
 struct UpdateStmt
 {
-	string<ParserArena>						 table_name;
-	array<string<ParserArena>, ParserArena>	 columns;
-	array<Expr *, ParserArena>				 values;
+	string<parser_arena>						 table_name;
+	array<string<parser_arena>, parser_arena>	 columns;
+	array<Expr *, parser_arena>				 values;
 	Expr									 *where_clause;
 
 	// Semantic resolution
 	struct
 	{
 		Structure				   *table = nullptr;
-		array<int32_t, ParserArena> column_indices;
+		array<int32_t, parser_arena> column_indices;
 		bool						is_resolved = false;
 	} sem;
 };
@@ -313,7 +313,7 @@ struct UpdateStmt
 // DELETE statement
 struct DeleteStmt
 {
-	string<ParserArena> table_name;
+	string<parser_arena> table_name;
 	Expr			   *where_clause;
 
 	// Semantic resolution
@@ -327,8 +327,8 @@ struct DeleteStmt
 // CREATE TABLE statement
 struct CreateTableStmt
 {
-	string<ParserArena>				table_name;
-	array<ColumnDef *, ParserArena> columns;
+	string<parser_arena>				table_name;
+	array<ColumnDef *, parser_arena> columns;
 	bool							if_not_exists;
 
 	// Semantic resolution
@@ -341,9 +341,9 @@ struct CreateTableStmt
 
 struct CreateIndexStmt
 {
-	string<ParserArena>						 index_name;
-	string<ParserArena>						 table_name;
-	array<string<ParserArena>, ParserArena>	 columns;
+	string<parser_arena>						 index_name;
+	string<parser_arena>						 table_name;
+	array<string<parser_arena>, parser_arena>	 columns;
 	bool									 is_unique;
 	bool									 if_not_exists;
 
@@ -351,7 +351,7 @@ struct CreateIndexStmt
 	struct
 	{
 		Structure				   *table = nullptr;
-		array<int32_t, ParserArena> column_indices;
+		array<int32_t, parser_arena> column_indices;
 		bool						is_resolved = false;
 	} sem;
 };
@@ -359,7 +359,7 @@ struct CreateIndexStmt
 // DROP TABLE statement
 struct DropTableStmt
 {
-	string<ParserArena> table_name;
+	string<parser_arena> table_name;
 	bool				if_exists;
 
 	// Semantic resolution
@@ -372,8 +372,8 @@ struct DropTableStmt
 
 struct DropIndexStmt
 {
-	string<ParserArena> index_name;
-	string<ParserArena> table_name; // Optional - some SQL dialects support ON table_name
+	string<parser_arena> index_name;
+	string<parser_arena> table_name; // Optional - some SQL dialects support ON table_name
 	bool				if_exists;
 
 	// Semantic resolution
@@ -426,7 +426,7 @@ struct Statement
 struct Parser
 {
 	Lexer								  *lexer;
-	hash_map<string<ParserArena>, bool, ParserArena> keywords; // Keyword lookup
+	hash_map<string<parser_arena>, bool, parser_arena> keywords; // Keyword lookup
 };
 
 // Lexer functions
@@ -499,9 +499,9 @@ token_type_to_string(TokenType type);
 
 DataType
 parse_data_type(Parser *parser);
-array<Statement *, ParserArena> *
+array<Statement *, parser_arena> *
 parser_parse_statements(Parser *parser);
-array<Statement *, ParserArena> *
+array<Statement *, parser_arena> *
 parse_sql(const char *sql);
 
 void

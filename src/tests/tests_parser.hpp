@@ -24,7 +24,7 @@ inline static void test_multiple_statements() {
         "DROP TABLE test;"
     );
 
-    array<Statement*, ParserArena>* statements = parser_parse_statements(&parser);
+    array<Statement*, parser_arena>* statements = parser_parse_statements(&parser);
     assert(statements != nullptr);
     assert(statements->size == 6);
 

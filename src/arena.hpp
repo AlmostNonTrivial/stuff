@@ -1013,22 +1013,22 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 	}
 
 	void
-	set(const char *cstr, size_t size = 0)
-	{
-		size_t len;
-		if (size != 0)
+set(const char *cstr, size_t len = 0)  // Renamed parameter
+{
+		size_t actual_len;
+		if (len != 0)
 		{
-			len = size;
+			actual_len = len;
 		}
 		else
 		{
-			len = strlen(cstr) + 1;
+			actual_len = strlen(cstr) + 1;
 		}
-		reserve(len);
-		memcpy(data, cstr, len);
-		size = len;
+		reserve(actual_len);
+		memcpy(data, cstr, actual_len);
+		size = actual_len;  // Now assigns to member variable
 		cached_hash = 0;
-	}
+}
 
 	// Set from string with different arena tag
 	template <typename OtherTag, uint32_t OtherSize>

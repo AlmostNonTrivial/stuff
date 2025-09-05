@@ -58,6 +58,7 @@ bool semantic_resolve_create_table(CreateTableStmt* stmt, SemanticContext* ctx) 
     // Add to shadow catalog
     // catalog stmt->table_name, new_structure;
 
+    catalog[stmt->table_name] = *new_structure;
     // Store in semantic info
     stmt->sem.created_structure = new_structure;
     stmt->sem.is_resolved = true;
