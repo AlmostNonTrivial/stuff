@@ -13,7 +13,7 @@ Structure::to_layout()
 	column_types.reserve(columns.size);
 	for (size_t i = 0; i < columns.size; i++)
 	{
-		column_types[i] = columns[i].type;
+		column_types.push(columns[i].type);
 	}
 	return Layout::create(column_types);
 }
@@ -40,7 +40,7 @@ Structure
 Structure::from(const char *name, array<Column> cols)
 {
 	Structure structure;
-	structure.columns = cols;
+	structure.columns.set( cols);
 	structure.name = name;
 	return structure;
 }
@@ -88,7 +88,5 @@ bootstrap_master(bool create)
 		structure.storage.btree.root_page_index = 1;
 	}
 
-	string<catalog_arena> s;
-	s.set(MASTER_CATALOG);
-	catalog[s] = structure;
+	catalog.insert(MASTER_CATALOG, structure);
 }

@@ -1013,8 +1013,8 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 	}
 
 	void
-set(const char *cstr, size_t len = 0)  // Renamed parameter
-{
+	set(const char *cstr, size_t len = 0) // Renamed parameter
+	{
 		size_t actual_len;
 		if (len != 0)
 		{
@@ -1026,9 +1026,9 @@ set(const char *cstr, size_t len = 0)  // Renamed parameter
 		}
 		reserve(actual_len);
 		memcpy(data, cstr, actual_len);
-		size = actual_len;  // Now assigns to member variable
+		size = actual_len; // Now assigns to member variable
 		cached_hash = 0;
-}
+	}
 
 	// Set from string with different arena tag
 	template <typename OtherTag, uint32_t OtherSize>
@@ -1429,6 +1429,205 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		{
 			return a == b;
 		}
+	}
+
+	// Add these methods to the hash_map class:
+
+	// Hash a C string directly (without allocation)
+	uint32_t
+	hash_cstr(const char *cstr) const
+	{
+		if (!cstr || !*cstr)
+			return 1; // Use 1 for empty string
+
+		// FNV-1a hash
+		uint32_t h = 2166136261u;
+		while (*cstr)
+		{
+			h ^= (uint8_t)*cstr++;
+			h *= 16777619u;
+		}
+
+		// Ensure hash is never 0
+		return h ? h : 1;
+	}
+
+	// Lookup with const char* (only enabled for string keys)
+	template <typename U = K>
+	typename std::enable_if<is_string<U>::value, V *>::type
+	get(const char *key)
+	{
+		if (!entries || size == 0 || !key)
+			return nullptr;
+
+		uint32_t hash = hash_cstr(key);
+		uint32_t mask = capacity - 1;
+		uint32_t idx = hash & mask;
+
+		while (true)
+		{
+			Entry &entry = entries[idx];
+
+			if (entry.state == Entry::EMPTY)
+				return nullptr;
+
+			if (entry.state == Entry::OCCUPIED && entry.hash == hash && entry.key.equals(key))
+			{
+				return &entry.value;
+			}
+
+			idx = (idx + 1) & mask;
+		}
+	}
+
+	// Const version
+	template <typename U = K>
+	typename std::enable_if<is_string<U>::value, const V *>::type
+	get(const char *key) const
+	{
+		return const_cast<hash_map *>(this)->get(key);
+	}
+
+	// Insert with const char* (only enabled for string keys)
+	template <typename U = K>
+	typename std::enable_if<is_string<U>::value, V *>::type
+	insert(const char *key, const V &value)
+	{
+		if (!key)
+			return nullptr;
+
+		if (!entries)
+			init();
+
+		if ((size + tombstones) * 4 >= capacity * 3)
+			grow();
+
+		uint32_t hash = hash_cstr(key);
+		uint32_t mask = capacity - 1;
+		uint32_t idx = hash & mask;
+		uint32_t first_deleted = (uint32_t)-1;
+
+		while (true)
+		{
+			Entry &entry = entries[idx];
+
+			if (entry.state == Entry::EMPTY)
+			{
+				if (first_deleted != (uint32_t)-1)
+				{
+					Entry &deleted_entry = entries[first_deleted];
+					deleted_entry.key.set(key);
+					deleted_entry.value = value;
+					deleted_entry.hash = hash;
+					deleted_entry.state = Entry::OCCUPIED;
+					tombstones--;
+					size++;
+					return &deleted_entry.value;
+				}
+				else
+				{
+					entry.key.set(key);
+					entry.value = value;
+					entry.hash = hash;
+					entry.state = Entry::OCCUPIED;
+					size++;
+					return &entry.value;
+				}
+			}
+
+			if (entry.state == Entry::DELETED)
+			{
+				if (first_deleted == (uint32_t)-1)
+					first_deleted = idx;
+			}
+			else if (entry.hash == hash && entry.key.equals(key))
+			{
+				entry.value = value;
+				return &entry.value;
+			}
+
+			idx = (idx + 1) & mask;
+		}
+	}
+
+	// Contains with const char*
+	template <typename U = K>
+	typename std::enable_if<is_string<U>::value, bool>::type
+	contains(const char *key) const
+	{
+		return const_cast<hash_map *>(this)->get(key) != nullptr;
+	}
+
+	// Remove with const char*
+	template <typename U = K>
+	typename std::enable_if<is_string<U>::value, bool>::type
+	remove(const char *key)
+	{
+		if (!entries || size == 0 || !key)
+			return false;
+
+		uint32_t hash = hash_cstr(key);
+		uint32_t mask = capacity - 1;
+		uint32_t idx = hash & mask;
+
+		while (true)
+		{
+			Entry &entry = entries[idx];
+
+			if (entry.state == Entry::EMPTY)
+				return false;
+
+			if (entry.state == Entry::OCCUPIED && entry.hash == hash && entry.key.equals(key))
+			{
+				entry.state = Entry::DELETED;
+				size--;
+				tombstones++;
+				return true;
+			}
+
+			idx = (idx + 1) & mask;
+		}
+	}
+
+	// Operator[] with const char*
+	template <typename U = K>
+	typename std::enable_if<is_string<U>::value, V &>::type
+	operator[](const char *key)
+	{
+		V *val = get(key);
+		if (val)
+			return *val;
+
+		// Insert default value
+		V default_val = {};
+		return *insert(key, default_val);
+	}
+
+	// ===== Similar additions for hash_set =====
+	// Add these methods to the hash_set class:
+
+	template <typename U = K>
+	typename std::enable_if<hash_map<U, uint8_t, ArenaTag>::template is_string<U>::value, bool>::type
+	insert(const char *key)
+	{
+		if (this->contains(key))
+			return false;
+		this->insert(key, 1);
+		return true;
+	}
+
+	template <typename U = K>
+	typename std::enable_if<hash_map<U, uint8_t, ArenaTag>::template is_string<U>::value, bool>::type
+	contains(const char *key) const
+	{
+		return this->contains(key);
+	}
+
+	template <typename U = K>
+	typename std::enable_if<hash_map<U, uint8_t, ArenaTag>::template is_string<U>::value, bool>::type
+	remove(const char *key)
+	{
+		return this->remove(key);
 	}
 
 	// Key comparison for string from different arena

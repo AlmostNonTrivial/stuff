@@ -53,6 +53,7 @@ bool semantic_resolve_create_table(CreateTableStmt* stmt, SemanticContext* ctx) 
     }
 
     Structure* new_structure = (Structure*)arena::alloc<query_arena>(sizeof(Structure));
+
     *new_structure = Structure::from(stmt->table_name, cols);
 
     // Add to shadow catalog

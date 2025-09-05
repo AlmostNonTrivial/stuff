@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <inttypes.h>
+#include <iostream>
+
 #include "common.hpp"
 
 #define likely(x)   __builtin_expect(!!(x), 1)
