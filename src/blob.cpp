@@ -235,7 +235,7 @@ blob_get_size(uint32_t first_page)
  * @return Buffer with complete blob data, or {nullptr, 0} on failure
  */
 void *
-blob_read_full(uint32_t first_page, uint64_t size)
+blob_read_full(uint32_t first_page, uint64_t *size)
 {
 	auto stream = arena::stream_begin<query_arena>(BLOB_DATA_SIZE);
 
@@ -254,7 +254,7 @@ blob_read_full(uint32_t first_page, uint64_t size)
 		current = node->next;
 	}
 
-	size = arena::stream_size<query_arena>(&stream);
+	*size = arena::stream_size<query_arena>(&stream);
 
 	auto data = arena::stream_finish(&stream);
 	return data;

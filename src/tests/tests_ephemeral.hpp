@@ -1,6 +1,6 @@
 #pragma once
-#include "ephemeral.hpp"
-#include "arena.hpp"
+#include "../ephemeral.hpp"
+#include "../arena.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -9,20 +9,14 @@
 #include <set>
 #include <vector>
 
-// Simple memory context for testing
-struct TestContext : MemoryContext {
-    TestContext() {
-        alloc = [](size_t size) -> void* {
-            return arena::alloc<QueryArena>(size);
-        };
-    }
-};
+
+
 
 inline void test_ephemeral_tree_sequential_ops() {
     std::cout << "\n=== MemTree Sequential Operations ===\n";
 
-    arena::init<QueryArena>();
-    TestContext ctx;
+    arena::init<query_arena>();
+
 
     et_cursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint32_t), false)};
     ephemeral_tree &tree = cursor.tree;
@@ -76,14 +70,14 @@ inline void test_ephemeral_tree_sequential_ops() {
     // Tree should be empty
     assert(et_is_empty(&tree));
 
-    arena::reset<QueryArena>();
+    arena::reset<query_arena>();
 }
 
 inline void test_ephemeral_tree_random_ops() {
     std::cout << "\n=== MemTree Random Operations ===\n";
 
-    arena::init<QueryArena>();
-    TestContext ctx;
+    arena::init<query_arena>();
+
 
     et_cursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint64_t), false)};
     ephemeral_tree &tree = cursor.tree;
@@ -144,14 +138,14 @@ inline void test_ephemeral_tree_random_ops() {
         }
     }
 
-    arena::reset<QueryArena>();
+    arena::reset<query_arena>();
 }
 
 // inline void test_ephemeral_tree_duplicates() {
 //     std::cout << "\n=== MemTree Duplicate Keys ===\n";
 
-//     arena::init<QueryArena>();
-//     TestContext ctx;
+//     arena::init<query_arena>();
+//
 
 //     MemCursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint32_t), true)};
 //     MemTree &tree = cursor.tree;
@@ -199,14 +193,14 @@ inline void test_ephemeral_tree_random_ops() {
 //     assert(count == 8);
 //     std::cout << " OK\n";
 
-//     arena::reset<QueryArena>();
+//     arena::reset<query_arena>();
 // }
 
 inline void test_ephemeral_tree_composite_keys() {
     std::cout << "\n=== MemTree Composite Keys ===\n";
 
-    arena::init<QueryArena>();
-    TestContext ctx;
+    arena::init<query_arena>();
+
 
     // For TYPE_U64 comparison to work correctly with composite keys,
     // we need to pack them into a uint64_t with the primary sort field
@@ -260,14 +254,14 @@ inline void test_ephemeral_tree_composite_keys() {
     assert(count == 11); // 11 timestamps for user 5
     std::cout << " OK\n";
 
-    arena::reset<QueryArena>();
+    arena::reset<query_arena>();
 }
 
 inline void test_ephemeral_tree_cursor_operations() {
     std::cout << "\n=== MemTree Cursor Operations ===\n";
 
-    arena::init<QueryArena>();
-    TestContext ctx;
+    arena::init<query_arena>();
+
 
     et_cursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint32_t), false)};
     ephemeral_tree &tree = cursor.tree;
@@ -334,14 +328,14 @@ inline void test_ephemeral_tree_cursor_operations() {
     assert(!et_cursor_seek(&cursor, &key));
     std::cout << " OK\n";
 
-    arena::reset<QueryArena>();
+    arena::reset<query_arena>();
 }
 
 inline void test_ephemeral_tree_edge_cases() {
     std::cout << "\n=== MemTree Edge Cases ===\n";
 
-    arena::init<QueryArena>();
-    TestContext ctx;
+    arena::init<query_arena>();
+
 
     et_cursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint32_t), false)};
     ephemeral_tree &tree = cursor.tree;
@@ -389,14 +383,14 @@ inline void test_ephemeral_tree_edge_cases() {
     assert(et_is_empty(&tree));
     std::cout << " OK\n";
 
-    arena::reset<QueryArena>();
+    arena::reset<query_arena>();
 }
 
 inline void test_ephemeral_tree_varchar_keys() {
     std::cout << "\n=== MemTree VARCHAR Keys ===\n";
 
-    arena::init<QueryArena>();
-    TestContext ctx;
+    arena::init<query_arena>();
+
 
     et_cursor cursor = {.tree = et_create(TYPE_CHAR32, sizeof(uint32_t), false)};
     ephemeral_tree &tree = cursor.tree;
@@ -432,7 +426,7 @@ inline void test_ephemeral_tree_varchar_keys() {
     }
     std::cout << " OK\n";
 
-    arena::reset<QueryArena>();
+    arena::reset<query_arena>();
 }
 
 inline void test_memtree() {

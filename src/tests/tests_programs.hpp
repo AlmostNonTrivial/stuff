@@ -1,27 +1,25 @@
 
 #pragma once
-#include "arena_types.hpp"
-#include "blob.hpp"
-#include "btree.hpp"
-#include "catalog.hpp"
-#include "compile.hpp"
-#include "defs.hpp"
-#include "os_layer.hpp"
-#include "pager.hpp"
-#include "types.hpp"
-#include "vm.hpp"
+#include "../types.hpp"
+#include <stdio.h>
+#include "../blob.hpp"
+#include "../btree.hpp"
+#include "../catalog.hpp"
+#include "../compile.hpp"
+#include "../common.hpp"
+#include "../os_layer.hpp"
+#include "../pager.hpp"
+#include "../types.hpp"
+#include "../vm.hpp"
+#include "../btree.hpp"
 #include <cstdint>
-
+#include <iostream>
 #include <fstream>
 #include <sstream>
-#include "btree.hpp"
-#include "catalog.hpp"
-#include "compile.hpp"
-#include "defs.hpp"
-#include "os_layer.hpp"
-#include "pager.hpp"
-#include "types.hpp"
-#include "vm.hpp"
+
+#include "../types.hpp"
+#include <cstring>
+
 #include <cstdint>
 
 // Table definitions matching the CSV structure
@@ -41,7 +39,7 @@
 #define BRAND	   "brand"
 
 #define ORDERS_BY_USER "idx_orders_by_user"
-#define INDEX_KEY "key"
+#define INDEX_KEY	   "key"
 
 #define ORDERS		   "orders"
 #define ORDER_ID	   "order_id"
@@ -77,7 +75,7 @@ from_structure(Structure &structure)
 {
 	CursorContext cctx;
 	cctx.storage.tree = &structure.storage.btree;
-	cctx.type = CursorType::BPLUS;
+	cctx.type = BPLUS;
 	cctx.layout = structure.to_layout();
 	return cctx;
 }
@@ -86,7 +84,7 @@ CursorContext
 red_black(Layout &layout, bool allow_duplicates = true)
 {
 	CursorContext cctx;
-	cctx.type = CursorType::RED_BLACK;
+	cctx.type = RED_BLACK;
 	cctx.layout = layout;
 	cctx.flags = allow_duplicates;
 	return cctx;
@@ -106,8 +104,6 @@ print_result_callback(TypedValue *result, size_t count)
 	std::cout << "\n";
 }
 
-MemoryContext ctx = {
-	.alloc = arena::alloc<QueryArena>, .free = arena::reclaim<QueryArena>, .emit_row = print_result_callback};
 static std::vector<std::vector<TypedValue>> last_results;
 
 inline static void
@@ -141,12 +137,13 @@ set_capture_mode(bool capture)
 	capture_mode = capture;
 	if (capture)
 	{
-		ctx.emit_row = capture_result_callback;
+		vm_set_result_callback(capture_result_callback);
 		last_results.clear();
 	}
 	else
 	{
-		ctx.emit_row = print_result_callback;
+
+		vm_set_result_callback(print_result_callback);
 	}
 }
 
@@ -183,7 +180,7 @@ clear_results()
 }
 
 bool
-vmfunc_create_structure(TypedValue *result, TypedValue *args, uint32_t arg_count, MemoryContext *ctx)
+vmfunc_create_structure(TypedValue *result, TypedValue *args, uint32_t arg_count)
 {
 	auto table_name = args->as_char();
 	auto structure = catalog[table_name].to_layout();
@@ -307,7 +304,7 @@ create_all_tables(bool create)
 	prog.commit_transaction();
 	prog.halt();
 
-	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	vm_execute(prog.instructions.data, prog.instructions.size);
 
 	printf("Created %zu tables\n", sizeof(tables) / sizeof(tables[0]));
 }
@@ -325,11 +322,11 @@ load_table_from_csv(const char *csv_file, const char *table_name)
 	prog.begin_transaction();
 
 	CursorContext cctx;
-	cctx.type = CursorType::BPLUS;
+	cctx.type = BPLUS;
 	cctx.storage.tree = &structure.storage.btree;
 	cctx.layout = layout;
 
-	prog.open_cursor(0, &cctx);
+	prog.open_cursor(&cctx);
 
 	int count = 0;
 
@@ -352,21 +349,21 @@ load_table_from_csv(const char *csv_file, const char *table_name)
 
 			if (type == TYPE_U32)
 			{
-				uint32_t *val = (uint32_t *)arena::alloc<QueryArena>(sizeof(uint32_t));
+				uint32_t *val = (uint32_t *)arena::alloc<query_arena>(sizeof(uint32_t));
 				*val = std::stoul(fields[i]);
 				data = val;
 			}
 			else if (type == TYPE_CHAR16)
 			{
 
-				// char *val = (char *)arena::alloc<QueryArena>(16);
+				// char *val = (char *)arena::alloc<query_arena>(16);
 				// memset(val, 0, 16);
 				// strncpy(val, fields[i].c_str(), 15);
 				data = prog.alloc_string(fields[i].c_str(), type_size(TYPE_CHAR16));
 			}
 			else if (type == TYPE_CHAR32)
 			{
-				char *val = (char *)arena::alloc<QueryArena>(32);
+				char *val = (char *)arena::alloc<query_arena>(32);
 				memset(val, 0, 32);
 				strncpy(val, fields[i].c_str(), 31);
 				data = val;
@@ -388,7 +385,7 @@ load_table_from_csv(const char *csv_file, const char *table_name)
 	prog.halt();
 
 	printf("Loaded %d records into %s\n", count, table_name);
-	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	vm_execute(prog.instructions.data, prog.instructions.size);
 }
 
 inline static void
@@ -416,18 +413,11 @@ load_all_data()
 
 	printf("\n✅ All data loaded successfully!\n");
 }
-
-// like_demo.cpp
-#include "compile.hpp"
-#include "vm.hpp"
-#include "types.hpp"
-#include <cstring>
-
 // VM Function: LIKE pattern matching with % wildcard
 // Args: [0] = text (CHAR32), [1] = pattern (CHAR32)
 // Result: U32 (1 = match, 0 = no match)
 bool
-vmfunc_like(TypedValue *result, TypedValue *args, uint32_t arg_count, MemoryContext *ctx)
+vmfunc_like(TypedValue *result, TypedValue *args, uint32_t arg_count)
 {
 	if (arg_count != 2)
 		return false;
@@ -472,7 +462,7 @@ vmfunc_like(TypedValue *result, TypedValue *args, uint32_t arg_count, MemoryCont
 
 	uint32_t match = (*p == '\0') ? 1 : 0;
 	result->type = TYPE_U32;
-	result->data = (uint8_t *)ctx->alloc(sizeof(uint32_t));
+	result->data = (uint8_t *)arena::alloc<query_arena>(sizeof(uint32_t));
 	*(uint32_t *)result->data = match;
 
 	return true;
@@ -488,7 +478,7 @@ test_like_pattern()
 
 	// Open products cursor
 	auto products_ctx = from_structure(catalog[PRODUCTS]);
-	prog.open_cursor(0, &products_ctx);
+	prog.open_cursor(&products_ctx);
 
 	// Load pattern "%Phone%" into register
 	int pattern_reg = prog.load(TYPE_CHAR32, prog.alloc_string("%Ess%", 32));
@@ -520,7 +510,7 @@ test_like_pattern()
 	prog.halt();
 
 	prog.resolve_labels();
-	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	vm_execute(prog.instructions.data, prog.instructions.size);
 }
 
 inline void
@@ -529,7 +519,7 @@ test_select()
 	ProgramBuilder prog;
 	int			   cursor = 0;
 	auto		   cctx = from_structure(catalog[USERS]);
-	prog.open_cursor(cursor, &cctx);
+	cursor = prog.open_cursor(&cctx);
 	int	 is_at_end = prog.rewind(cursor, false);
 	auto while_context = prog.begin_while(is_at_end);
 	int	 dest_reg = prog.get_columns(cursor, 0, cctx.layout.count());
@@ -540,21 +530,21 @@ test_select()
 	prog.halt();
 	prog.resolve_labels();
 
-	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	vm_execute(prog.instructions.data, prog.instructions.size);
 }
 
 inline void
 test_select_order_by()
 {
 	ProgramBuilder prog;
-	int			   cursor = 0;
-	int			   memcursor = 1;
+	int			   cursor;
+	int			   memcursor;
 	auto		   cctx = from_structure(catalog[USERS]);
 	Layout		   sorted_by_age = cctx.layout.reorder({3, 0, 1, 2, 4});
 	auto		   mem = red_black(sorted_by_age);
 
-	prog.open_cursor(cursor, &cctx);
-	prog.open_cursor(memcursor, &mem);
+	cursor = prog.open_cursor(&cctx);
+	memcursor = prog.open_cursor(&mem);
 
 	{
 		prog.regs.push_scope();
@@ -587,7 +577,7 @@ test_select_order_by()
 	prog.halt();
 	prog.resolve_labels();
 
-	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	vm_execute(prog.instructions.data, prog.instructions.size);
 }
 
 inline void
@@ -602,8 +592,8 @@ test_nested_loop_join()
 	auto users_ctx = from_structure(catalog[USERS]);
 	auto orders_ctx = from_structure(catalog[ORDERS]);
 
-	prog.open_cursor(0, &users_ctx);
-	prog.open_cursor(1, &orders_ctx);
+	prog.open_cursor(&users_ctx);
+	prog.open_cursor(&orders_ctx);
 
 	// Outer loop: scan users
 	{
@@ -649,7 +639,7 @@ test_nested_loop_join()
 	prog.halt();
 
 	prog.resolve_labels();
-	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	vm_execute(prog.instructions.data, prog.instructions.size);
 }
 
 inline void
@@ -669,8 +659,8 @@ test_subquery_pattern()
 	Layout temp_layout = users_ctx.layout;
 	auto   temp_ctx = red_black(temp_layout);
 
-	prog.open_cursor(0, &users_ctx);
-	prog.open_cursor(1, &temp_ctx);
+	prog.open_cursor(&users_ctx);
+	prog.open_cursor(&temp_ctx);
 
 	// ========================================================================
 	// PHASE 1: Scan users table, filter by age > 30, insert into temp tree
@@ -760,72 +750,69 @@ test_subquery_pattern()
 	prog.resolve_labels();
 
 	printf("Executing subquery pattern...\n");
-	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	vm_execute(prog.instructions.data, prog.instructions.size);
 }
-
-
 
 inline void
 test_composite_index_range_query()
 {
-    printf("\n=== COMPOSITE INDEX RANGE QUERY ===\n");
-    printf("Query: Find orders for user_id = 11 where order_id > 5\n\n");
+	printf("\n=== COMPOSITE INDEX RANGE QUERY ===\n");
+	printf("Query: Find orders for user_id = 11 where order_id > 5\n\n");
 
-    ProgramBuilder prog;
+	ProgramBuilder prog;
 
-    auto index_ctx = from_structure(catalog[ORDERS_BY_USER]);
-    prog.open_cursor(0, &index_ctx);
+	auto index_ctx = from_structure(catalog[ORDERS_BY_USER]);
+	prog.open_cursor(&index_ctx);
 
-    {
-        prog.regs.push_scope();
+	{
+		prog.regs.push_scope();
 
-        // Target: user_id = 2, order_id > 5
-        uint32_t target_user = 11;
-        uint32_t min_order_id = 6; // > 5 means >= 6
+		// Target: user_id = 2, order_id > 5
+		uint32_t target_user = 11;
+		uint32_t min_order_id = 6; // > 5 means >= 6
 
-        int user_reg = prog.load(TYPE_U32, prog.alloc_value(target_user));
-        int order_threshold = prog.load(TYPE_U32, prog.alloc_value(min_order_id));
+		int user_reg = prog.load(TYPE_U32, prog.alloc_value(target_user));
+		int order_threshold = prog.load(TYPE_U32, prog.alloc_value(min_order_id));
 
-        // Create composite seek key: (2, 6)
-        int seek_key = prog.pack2(user_reg, order_threshold);
+		// Create composite seek key: (2, 6)
+		int seek_key = prog.pack2(user_reg, order_threshold);
 
-        // Seek to first entry >= (2, 6)
-        int found = prog.seek(0, seek_key, GE);
+		// Seek to first entry >= (2, 6)
+		int found = prog.seek(0, seek_key, GE);
 
-        auto scan_loop = prog.begin_while(found);
-        {
-            // Get and unpack composite key
-            int composite = prog.get_column(0, 0);
+		auto scan_loop = prog.begin_while(found);
+		{
+			// Get and unpack composite key
+			int composite = prog.get_column(0, 0);
 
-            // Allocate space for unpacked values before unpacking
-            int unpacked_start = prog.regs.allocate_range(2);
-            prog.unpack2(composite, unpacked_start);
+			// Allocate space for unpacked values before unpacking
+			int unpacked_start = prog.regs.allocate_range(2);
+			prog.unpack2(composite, unpacked_start);
 
-            // Now we know exactly where the values are
-            int current_user = unpacked_start;
-            int current_order = unpacked_start + 1;
+			// Now we know exactly where the values are
+			int current_user = unpacked_start;
+			int current_order = unpacked_start + 1;
 
-            // Check if still same user
-            int same_user = prog.eq(current_user, user_reg);
-            auto if_ctx = prog.begin_if(same_user);
-            prog.result(unpacked_start, 2);
-            prog.end_if(if_ctx);
-            prog.jumpif_zero(same_user, "done");
+			// Check if still same user
+			int	 same_user = prog.eq(current_user, user_reg);
+			auto if_ctx = prog.begin_if(same_user);
+			prog.result(unpacked_start, 2);
+			prog.end_if(if_ctx);
+			prog.jumpif_zero(same_user, "done");
 
+			prog.next(0, found);
+		}
+		prog.end_while(scan_loop);
 
-            prog.next(0, found);
-        }
-        prog.end_while(scan_loop);
+		prog.label("done");
+		prog.regs.pop_scope();
+	}
 
-        prog.label("done");
-        prog.regs.pop_scope();
-    }
+	prog.close_cursor(0);
+	prog.halt();
 
-    prog.close_cursor(0);
-    prog.halt();
-
-    prog.resolve_labels();
-    vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	prog.resolve_labels();
+	vm_execute(prog.instructions.data, prog.instructions.size);
 }
 
 inline void
@@ -859,8 +846,8 @@ test_create_composite_index()
 
 	auto index_ctx = from_structure(catalog[ORDERS_BY_USER]);
 
-	prog.open_cursor(0, &orders_ctx);
-	prog.open_cursor(1, &index_ctx);
+	prog.open_cursor(&orders_ctx);
+	prog.open_cursor(&index_ctx);
 
 	{
 		prog.regs.push_scope();
@@ -891,7 +878,7 @@ test_create_composite_index()
 	prog.halt();
 
 	prog.resolve_labels();
-	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	vm_execute(prog.instructions.data, prog.instructions.size);
 }
 
 inline void
@@ -915,8 +902,8 @@ test_group_by_aggregate()
 	auto users_ctx = from_structure(catalog[USERS]);
 	auto agg_ctx = red_black(agg_layout);
 
-	prog.open_cursor(0, &users_ctx); // Users table
-	prog.open_cursor(1, &agg_ctx);	 // Aggregation tree
+	prog.open_cursor(&users_ctx); // Users table
+	prog.open_cursor(&agg_ctx);	  // Aggregation tree
 
 	// Phase 1: Scan users and build aggregates
 	{
@@ -995,12 +982,12 @@ test_group_by_aggregate()
 	prog.halt();
 
 	prog.resolve_labels();
-	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	vm_execute(prog.instructions.data, prog.instructions.size);
 }
 
 // Add these VM functions for blob operations
 bool
-vmfunc_write_blob(TypedValue *result, TypedValue *args, uint32_t arg_count, MemoryContext *ctx)
+vmfunc_write_blob(TypedValue *result, TypedValue *args, uint32_t arg_count)
 {
 	if (arg_count != 2)
 		return false;
@@ -1009,37 +996,32 @@ vmfunc_write_blob(TypedValue *result, TypedValue *args, uint32_t arg_count, Memo
 	void	*data = (void *)args[0].as_u64(); // Assuming we pass pointer as u64
 	uint32_t size = args[1].as_u32();
 
-	BlobCursor b;
-	// Write blob and get page index
-	uint32_t page_idx = blob_cursor_insert(&b, (uint8_t *)data, size);
+	uint32_t index = blob_create(data, size);
 
-	// Return page index
 	result->type = TYPE_U32;
-	result->data = (uint8_t *)ctx->alloc(sizeof(uint32_t));
-	*(uint32_t *)result->data = page_idx;
+	result->data = arena::alloc<query_arena>(sizeof(uint32_t));
+	*(uint32_t *)result->data = index;
 
 	return true;
 }
 
 bool
-vmfunc_read_blob(TypedValue *result, TypedValue *args, uint32_t arg_count, MemoryContext *ctx)
+vmfunc_read_blob(TypedValue *result, TypedValue *args, uint32_t arg_count)
 {
 	if (arg_count != 1)
 	{
 		return false;
 	}
 
-	// args[0] = page index
-	uint32_t   page_idx = args[0].as_u32();
-	BlobCursor b;
+	uint32_t page_idx = args[0].as_u32();
+	assert(0 != page_idx);
+	uint64_t size;
+	void	*data = blob_read_full(page_idx, &size);
 
-	// Read blob
-	assert(blob_cursor_seek(&b, page_idx));
-	auto blob = blob_cursor_record(&b);
+	assert(size > 0);
 
-	// For demo, return size as result (could return pointer)
-	result->type = TYPE_VARCHAR(blob.size);
-	result->data = (uint8_t*)blob.ptr;
+	result->type = TYPE_VARCHAR(size);
+	result->data = (uint8_t *)data;
 
 	return true;
 }
@@ -1051,9 +1033,7 @@ test_blob_storage()
 
 	// Define table structure and add to catalog FIRST
 	std::vector<Column> documents = {
-		Column{"doc_id", TYPE_U32},
-		Column{"title", TYPE_CHAR32},
-		Column{"blob_ref", TYPE_U32}  // Stores blob page index
+		Column{"doc_id", TYPE_U32}, Column{"title", TYPE_CHAR32}, Column{"blob_ref", TYPE_U32} // Stores blob page index
 	};
 	catalog["documents"] = Structure::from("documents", documents);
 
@@ -1068,7 +1048,7 @@ test_blob_storage()
 
 	// Open cursor to documents table
 	auto docs_ctx = from_structure(catalog["documents"]);
-	prog.open_cursor(0, &docs_ctx);
+	prog.open_cursor(&docs_ctx);
 
 	// Insert a document with blob
 	{
@@ -1104,9 +1084,7 @@ test_blob_storage()
 									"and keep only the page reference in the table..."
 									"and keep only the page reference in the table..."
 
-
-
-									;
+			;
 
 		// Write blob first and get page reference
 		int content_ptr = prog.load(TYPE_U64, prog.alloc_value((uint64_t)large_content));
@@ -1117,15 +1095,15 @@ test_blob_storage()
 		int row_start = prog.regs.allocate_range(3);
 
 		// Load all three values in contiguous registers
-		prog.load(TYPE_U32, prog.alloc_value(1U), row_start);                      // doc_id (key)
-		prog.load(TYPE_CHAR32, prog.alloc_string("Technical Manual", 32), row_start + 1);  // title
-		prog.move(blob_ref, row_start + 2);                                        // blob_ref
+		prog.load(TYPE_U32, prog.alloc_value(1U), row_start);							  // doc_id (key)
+		prog.load(TYPE_CHAR32, prog.alloc_string("Technical Manual", 32), row_start + 1); // title
+		prog.move(blob_ref, row_start + 2);												  // blob_ref
 
 		// Insert row with all 3 values
 		prog.insert_record(0, row_start, 3);
 
 		printf("Inserted document with ID=1, blob_ref=");
-		prog.result(row_start + 2, 1);  // Output just the blob_ref
+		prog.result(row_start + 2, 1); // Output just the blob_ref
 
 		prog.regs.pop_scope();
 	}
@@ -1139,18 +1117,17 @@ test_blob_storage()
 		int found = prog.first(0);
 		{
 			// Get all columns
-			int doc_id = prog.get_column(0, 0);    // doc_id
-			int title = prog.get_column(0, 1);     // title
-			int blob_ref = prog.get_column(0, 2);  // blob_ref
+			int doc_id = prog.get_column(0, 0);	  // doc_id
+			int title = prog.get_column(0, 1);	  // title
+			int blob_ref = prog.get_column(0, 2); // blob_ref
 
 			// Read blob using the reference
 			int blob_reg = prog.call_function(vmfunc_read_blob, blob_ref, 1);
 			prog.result(blob_reg);
 
-
 			// Output: doc_id, title, blob_ref, blob_size
 			printf("Retrieved document:\n");
-			prog.result(doc_id, 4);  // Output starting from doc_id for 4 values
+			prog.result(doc_id, 4); // Output starting from doc_id for 4 values
 		}
 
 		prog.regs.pop_scope();
@@ -1161,7 +1138,7 @@ test_blob_storage()
 	prog.halt();
 
 	prog.resolve_labels();
-	vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	vm_execute(prog.instructions.data, prog.instructions.size);
 }
 
 // Call this in test_programs() after loading data:
@@ -1173,200 +1150,213 @@ test_blob_storage()
 // Queue-based Validation System
 // ============================================================================
 
-struct ExpectedRow {
-    array<TypedValue, QueryArena> values;
+struct ExpectedRow
+{
+	array<TypedValue, query_arena> values;
 };
-static array<ExpectedRow, QueryArena> expected_queue;
-static uint32_t validation_failures = 0;
-static uint32_t validation_row_count = 0;
-static bool validation_active = false;
+static array<ExpectedRow, query_arena> expected_queue;
+static uint32_t						   validation_failures = 0;
+static uint32_t						   validation_row_count = 0;
+static bool							   validation_active = false;
 // Validation callback
-void validation_callback(TypedValue* result, size_t count) {
-    validation_row_count++;
+void
+validation_callback(TypedValue *result, size_t count)
+{
+	validation_row_count++;
 
-    if (expected_queue.size == 0) {
-        printf("❌ Row %u: Unexpected row (no more expected)\n", validation_row_count);
-        printf("   Got: ");
-        print_result_callback(result, count);
-        validation_failures++;
-        return;
-    }
+	if (expected_queue.size == 0)
+	{
+		printf("❌ Row %u: Unexpected row (no more expected)\n", validation_row_count);
+		printf("   Got: ");
+		print_result_callback(result, count);
+		validation_failures++;
+		return;
+	}
 
-    // Pop from front
-    ExpectedRow& expected = expected_queue.data[0];
+	// Pop from front
+	ExpectedRow &expected = expected_queue.data[0];
 
-    // Validate column count
-    if (expected.values.size != count) {
-        printf("❌ Row %u: Column count mismatch (expected %u, got %zu)\n",
-               validation_row_count, expected.values.size, count);
-        validation_failures++;
-    } else {
-        // Validate each column
-        bool row_matches = true;
-        for (size_t i = 0; i < count; i++) {
-            if (expected.values.data[i].type != result[i].type ||
-                type_compare(result[i].type, result[i].data, expected.values.data[i].data) != 0) {
+	// Validate column count
+	if (expected.values.size != count)
+	{
+		printf("❌ Row %u: Column count mismatch (expected %u, got %zu)\n", validation_row_count, expected.values.size,
+			   count);
+		validation_failures++;
+	}
+	else
+	{
+		// Validate each column
+		bool row_matches = true;
+		for (size_t i = 0; i < count; i++)
+		{
+			if (expected.values.data[i].type != result[i].type ||
+				type_compare(result[i].type, result[i].data, expected.values.data[i].data) != 0)
+			{
 
-                if (row_matches) { // First mismatch in this row
-                    printf("❌ Row %u: Value mismatch\n", validation_row_count);
-                    row_matches = false;
-                }
+				if (row_matches)
+				{ // First mismatch in this row
+					printf("❌ Row %u: Value mismatch\n", validation_row_count);
+					row_matches = false;
+				}
 
-                printf("   Column %zu: expected ", i);
-                type_print(expected.values.data[i].type, expected.values.data[i].data);
-                printf(" (%s), got ", type_name(expected.values.data[i].type));
-                type_print(result[i].type, result[i].data);
-                printf(" (%s)\n", type_name(result[i].type));
-            }
-        }
+				printf("   Column %zu: expected ", i);
+				type_print(expected.values.data[i].type, expected.values.data[i].data);
+				printf(" (%s), got ", type_name(expected.values.data[i].type));
+				type_print(result[i].type, result[i].data);
+				printf(" (%s)\n", type_name(result[i].type));
+			}
+		}
 
-        if (!row_matches) {
-            validation_failures++;
-        }
-    }
+		if (!row_matches)
+		{
+			validation_failures++;
+		}
+	}
 
-    // Remove from queue (shift array)
-    for (uint32_t i = 1; i < expected_queue.size; i++) {
-        expected_queue.data[i-1] = expected_queue.data[i];
-    }
-    expected_queue.size--;
+	// Remove from queue (shift array)
+	for (uint32_t i = 1; i < expected_queue.size; i++)
+	{
+		expected_queue.data[i - 1] = expected_queue.data[i];
+	}
+	expected_queue.size--;
 }
 
-
 // Clear validation state
-inline void validation_reset() {
-    array_clear(&expected_queue);
-    validation_failures = 0;
-    validation_row_count = 0;
-    validation_active = false;
+inline void
+validation_reset()
+{
+	array_clear(&expected_queue);
+	validation_failures = 0;
+	validation_row_count = 0;
+	validation_active = false;
 }
 
 // Start validation mode
-inline void validation_begin() {
-    validation_reset();
-    validation_active = true;
-    ctx.emit_row = validation_callback;
+inline void
+validation_begin()
+{
+	validation_reset();
+	validation_active = true;
+
+	vm_set_result_callback(validation_callback);
 }
 
 // End validation and report
-inline bool validation_end() {
-    validation_active = false;
-    ctx.emit_row = print_result_callback;
+inline bool
+validation_end()
+{
+	validation_active = false;
 
-    bool success = (validation_failures == 0);
+	vm_set_result_callback(print_result_callback);
 
-    if (expected_queue.size > 0) {
-        printf("❌ %u expected rows were not emitted\n", expected_queue.size);
-        for (uint32_t i = 0; i < expected_queue.size; i++) {
-            printf("   Missing row %u: ", validation_row_count + i + 1);
-            for (uint32_t j = 0; j < expected_queue.data[i].values.size; j++) {
-                if (j > 0) printf(", ");
-                type_print(expected_queue.data[i].values.data[j].type,
-                          expected_queue.data[i].values.data[j].data);
-            }
-            printf("\n");
-        }
-        success = false;
-    }
+	bool success = (validation_failures == 0);
 
-    if (success) {
-        printf("✅ All %u rows validated successfully\n", validation_row_count);
-    } else {
-        printf("❌ Validation failed: %u mismatches\n", validation_failures);
-    }
+	if (expected_queue.size > 0)
+	{
+		printf("❌ %u expected rows were not emitted\n", expected_queue.size);
+		for (uint32_t i = 0; i < expected_queue.size; i++)
+		{
+			printf("   Missing row %u: ", validation_row_count + i + 1);
+			for (uint32_t j = 0; j < expected_queue.data[i].values.size; j++)
+			{
+				if (j > 0)
+					printf(", ");
+				type_print(expected_queue.data[i].values.data[j].type, expected_queue.data[i].values.data[j].data);
+			}
+			printf("\n");
+		}
+		success = false;
+	}
 
-    return success;
+	if (success)
+	{
+		printf("✅ All %u rows validated successfully\n", validation_row_count);
+	}
+	else
+	{
+		printf("❌ Validation failed: %u mismatches\n", validation_failures);
+	}
+
+	return success;
 }
 
 // Add expected row with TypedValues
-inline void expect_row_values(std::initializer_list<TypedValue> values) {
-    ExpectedRow row;
-    array_reserve(&row.values, values.size());
+inline void
+expect_row_values(std::initializer_list<TypedValue> values)
+{
+	ExpectedRow row;
+	array_reserve(&row.values, values.size());
 
-    for (const auto& val : values) {
-        // Deep copy the value
-        uint32_t size = type_size(val.type);
-        uint8_t* data = (uint8_t*)arena::alloc<QueryArena>(size);
-        type_copy(val.type, data, val.data);
-        array_push(&row.values, TypedValue::make(val.type, data));
-    }
+	for (const auto &val : values)
+	{
+		// Deep copy the value
+		uint32_t size = type_size(val.type);
+		uint8_t *data = (uint8_t *)arena::alloc<query_arena>(size);
+		type_copy(val.type, data, val.data);
+		array_push(&row.values, TypedValue::make(val.type, data));
+	}
 
-    array_push(&expected_queue, row);
+	array_push(&expected_queue, row);
 }
-
-
 
 // ============================================================================
 // Example test using validation queue
 // ============================================================================
 
-inline void test_select_with_validation() {
-    printf("\n=== SELECT with Queue Validation ===\n");
+inline void
+test_select_with_validation()
+{
+	printf("\n=== SELECT with Queue Validation ===\n");
 
-    // Setup expected results BEFORE execution
-    validation_begin();
-    expect_row_values({
-        alloc_u32(1),
-        alloc_char16("emilys"),
-        alloc_char32("emily.johnson@x.dummyjson.com"),
-        alloc_u32(28),
-        alloc_char16("Phoenix")
-    });
+	// Setup expected results BEFORE execution
+	validation_begin();
+	expect_row_values({alloc_u32(1), alloc_char16("emilys"), alloc_char32("emily.johnson@x.dummyjson.com"),
+					   alloc_u32(28), alloc_char16("Phoenix")});
 
-    expect_row_values({
-        alloc_u32(2),
-        alloc_char16("michaelw"),
-        alloc_char32("michael.williams@x.dummyjson.com"),
-        alloc_u32(35),
-        alloc_char16("Houston")
-    });
+	expect_row_values({alloc_u32(2), alloc_char16("michaelw"), alloc_char32("michael.williams@x.dummyjson.com"),
+					   alloc_u32(35), alloc_char16("Houston")});
 
-    expect_row_values({
-        alloc_u32(3),
-        alloc_char16("sophiab"),
-        alloc_char32("sophia.brown@x.dummyjson.com"),
-        alloc_u32(42),
-        alloc_char16("Washington")
-    });
+	expect_row_values({alloc_u32(3), alloc_char16("sophiab"), alloc_char32("sophia.brown@x.dummyjson.com"),
+					   alloc_u32(42), alloc_char16("Washington")});
 
-    // Build and execute program
-    ProgramBuilder prog;
-    auto cctx = from_structure(catalog[USERS]);
-    prog.open_cursor(0, &cctx);
+	// Build and execute program
+	ProgramBuilder prog;
+	auto		   cctx = from_structure(catalog[USERS]);
+	prog.open_cursor(&cctx);
 
-    // Only get first 3 rows for this test
-    int count = 0;
-    int three = prog.load(TYPE_U32, prog.alloc_value(3U));
-    int counter = prog.load(TYPE_U32, prog.alloc_value(0U));
+	// Only get first 3 rows for this test
+	int count = 0;
+	int three = prog.load(TYPE_U32, prog.alloc_value(3U));
+	int counter = prog.load(TYPE_U32, prog.alloc_value(0U));
 
-    int at_end = prog.first(0);
-    auto while_ctx = prog.begin_while(at_end);
-    {
-        int row = prog.get_columns(0, 0, 5);
-        prog.result(row, 5);
+	int	 at_end = prog.first(0);
+	auto while_ctx = prog.begin_while(at_end);
+	{
+		int row = prog.get_columns(0, 0, 5);
+		prog.result(row, 5);
 
-        // Increment counter
-        int one = prog.load(TYPE_U32, prog.alloc_value(1U));
-        prog.add(counter, one, counter);
+		// Increment counter
+		int one = prog.load(TYPE_U32, prog.alloc_value(1U));
+		prog.add(counter, one, counter);
 
-        // Check if we've done 3 rows
-        int done = prog.ge(counter, three);
-        prog.jumpif_true(done, "exit");
+		// Check if we've done 3 rows
+		int done = prog.ge(counter, three);
+		prog.jumpif_true(done, "exit");
 
-        prog.next(0, at_end);
-    }
-    prog.end_while(while_ctx);
+		prog.next(0, at_end);
+	}
+	prog.end_while(while_ctx);
 
-    prog.label("exit");
-    prog.close_cursor(0);
-    prog.halt();
-    prog.resolve_labels();
+	prog.label("exit");
+	prog.close_cursor(0);
+	prog.halt();
+	prog.resolve_labels();
 
-    // Execute with validation active
-    vm_execute(prog.instructions.data, prog.instructions.size, &ctx);
+	// Execute with validation active
+	vm_execute(prog.instructions.data, prog.instructions.size);
 
-    // Check results
-    validation_end();
+	// Check results
+	validation_end();
 }
 
 // Macro for quick row expectations
@@ -1376,7 +1366,7 @@ inline void test_select_with_validation() {
 inline void
 test_programs()
 {
-	arena::init<QueryArena>();
+	arena::init<query_arena>();
 	bool existed = pager_open("relational_test.db");
 
 	printf("=== Setting up relational database ===\n\n");

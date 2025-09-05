@@ -1,5 +1,5 @@
 #pragma once
-#include "btree.hpp"
+#include "../btree.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -10,12 +10,12 @@
 #include <thread>
 #include <vector>
 #include <algorithm>
-#include "defs.hpp"
-#include "os_layer.hpp"
-#include "pager.hpp"
+#include "../common.hpp"
+#include "../os_layer.hpp"
+#include "../pager.hpp"
 #include "test_utils.hpp"
-#include "types.hpp"
-#include "vm.hpp"
+#include "../types.hpp"
+
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -1060,9 +1060,9 @@ test_btree_deep_tree_coverage()
 
 	// Clear the trees (if_64, if_65)
 	std::cout << "Testing tree clear..." << std::flush;
-	assert(btree_clear(&tree));		  // if_64 (recursive clear)
-	assert(btree_clear(&empty_tree)); // if_65 (empty tree clear)
-	assert(btree_clear(&small_tree));
+	assert(bt_clear(&tree));		  // if_64 (recursive clear)
+	assert(bt_clear(&empty_tree)); // if_65 (empty tree clear)
+	assert(bt_clear(&small_tree));
 	std::cout << " OK\n";
 
 	std::cout << "All coverage paths tested!\n";

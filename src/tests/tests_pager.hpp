@@ -1,9 +1,9 @@
 #pragma once
-#include "arena.hpp"
-#include "pager.hpp"
+#include "../arena.hpp"
+#include "../pager.hpp"
 // #include "test_utils.hpp"
 #include <cassert>
-#include "os_layer.hpp"
+#include "../os_layer.hpp"
 #include <cstdlib>
 #include <ctime>
 #include <iostream>

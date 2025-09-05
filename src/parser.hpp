@@ -1,6 +1,6 @@
 #pragma once
 #include "arena.hpp"
-#include "defs.hpp"
+#include "types.hpp"
 #include <cstdint>
 #include <cstring>
 

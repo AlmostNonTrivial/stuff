@@ -1,8 +1,8 @@
 // type_system_tests.h - Updated for 64-bit DataType with composite support
 #pragma once
-#include "types.hpp"
-#include "btree.hpp"
-#include "pager.hpp"
+#include "../types.hpp"
+#include "../btree.hpp"
+#include "../pager.hpp"
 #include <cassert>
 #include <cstdint>
 #include <cstring>

@@ -1,8 +1,8 @@
 // test_blob.cpp
-#include "blob.hpp"
-#include "defs.hpp"
-#include "pager.hpp"
-#include "arena.hpp"
+#include "../blob.hpp"
+#include "../common.hpp"
+#include "../pager.hpp"
+#include "../arena.hpp"
 #include <cassert>
 #include <cstring>
 #include <iostream>

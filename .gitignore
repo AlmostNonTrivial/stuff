@@ -1,3 +1,4 @@
 /build
 temp
+/fake_sql_data.txt
 /.idea

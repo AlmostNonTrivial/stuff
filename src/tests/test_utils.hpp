@@ -1,8 +1,8 @@
 #pragma once
 #include <random>
 #include <cstdint>
-#include "defs.hpp"
-#include "os_layer.hpp"
+#include "../common.hpp"
+#include "../os_layer.hpp"
 
 inline uint32_t
 random_number(uint32_t min = 0, uint32_t max = UINT32_MAX)
@@ -26,4 +26,3 @@ random_range(uint32_t *buffer, size_t count, uint32_t min = 0, uint32_t max = UI
 		buffer[i] = dist(rng);
 	}
 }
-

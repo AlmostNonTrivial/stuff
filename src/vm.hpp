@@ -274,6 +274,9 @@ debug_logic_op_name(logic_op op);
 const char *
 debug_cursor_type_name(storage_type type);
 
+void
+vm_set_result_callback(ResultCallback callback);
+
 // VM Runtime Definitions
 #define REGISTERS 40
 

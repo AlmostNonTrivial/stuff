@@ -1065,7 +1065,7 @@ vm_execute(VMInstruction *instructions, int instruction_count)
 }
 
 void
-set_result_callback(ResultCallback callback)
+vm_set_result_callback(ResultCallback callback)
 {
 	VM.emit_row = callback;
 }
