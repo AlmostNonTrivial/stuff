@@ -659,158 +659,171 @@ stream_size(const StreamAlloc<Tag> *stream)
 
 } // namespace arena
 
+// Array class - data-oriented style without constructors/destructors
 template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8> struct array
 {
+	// Public data members - direct access
 	T		*data = nullptr;
 	uint32_t size = 0;
 	uint32_t capacity = 0;
+
+	// Member functions instead of free functions
+
+	void
+	reserve(uint32_t min_capacity)
+	{
+		if (capacity >= min_capacity)
+			return;
+
+		// Lazy init if needed
+		if (!data)
+		{
+			capacity = min_capacity > InitialSize ? min_capacity : InitialSize;
+			data = (T *)Arena<ArenaTag>::alloc(capacity * sizeof(T));
+			return;
+		}
+
+		// Save old data for reclamation
+		T		*old_data = data;
+		uint32_t old_capacity = capacity;
+
+		// Calculate new capacity (at least double, but ensure we meet min_capacity)
+		uint32_t new_cap = capacity * 2;
+		if (new_cap < min_capacity)
+			new_cap = min_capacity;
+
+		// Allocate and copy
+		T *new_data = (T *)Arena<ArenaTag>::alloc(new_cap * sizeof(T));
+		memcpy(new_data, data, size * sizeof(T));
+
+		data = new_data;
+		capacity = new_cap;
+
+		// Automatically reclaim old memory
+		Arena<ArenaTag>::reclaim(old_data, old_capacity * sizeof(T));
+	}
+
+	uint32_t
+	push(const T &value)
+	{
+		reserve(size + 1);
+		data[size] = value;
+		return size++;
+	}
+
+	T *
+	push_n(const T *values, uint32_t count)
+	{
+		reserve(size + count);
+		T *dest = data + size;
+		memcpy(dest, values, count * sizeof(T));
+		size += count;
+		return dest;
+	}
+
+	void
+	clear()
+	{
+		if (data)
+			memset(data, 0, sizeof(T) * size);
+		size = 0;
+	}
+
+	void
+	resize(uint32_t new_size)
+	{
+		reserve(new_size);
+
+		// Zero out new elements if growing
+		if (new_size > size)
+			memset(data + size, 0, (new_size - size) * sizeof(T));
+
+		size = new_size;
+	}
+
+	void
+	shrink_to_fit()
+	{
+		if (size == capacity || size == 0)
+			return;
+
+		T		*old_data = data;
+		uint32_t old_capacity = capacity;
+
+		// Allocate exact size needed
+		data = (T *)Arena<ArenaTag>::alloc(size * sizeof(T));
+		memcpy(data, old_data, size * sizeof(T));
+		capacity = size;
+
+		// Reclaim old memory
+		Arena<ArenaTag>::reclaim(old_data, old_capacity * sizeof(T));
+	}
+
+	// Set contents from another array
+	template <typename OtherTag>
+	void
+	set(const array<T, OtherTag> &other)
+	{
+		clear();
+		reserve(other.size);
+
+		if (other.size > 0)
+		{
+			memcpy(data, other.data, other.size * sizeof(T));
+			size = other.size;
+		}
+	}
+
+	// Element access
+	T &
+	operator[](uint32_t index)
+	{
+		return data[index];
+	}
+	const T &
+	operator[](uint32_t index) const
+	{
+		return data[index];
+	}
+
+	T *
+	begin()
+	{
+		return data;
+	}
+	T *
+	end()
+	{
+		return data + size;
+	}
+	const T *
+	begin() const
+	{
+		return data;
+	}
+	const T *
+	end() const
+	{
+		return data + size;
+	}
+
+	bool
+	empty() const
+	{
+		return size == 0;
+	}
+
+	// Static factory function for heap allocation (replaces array_create)
+	static array *
+	create()
+	{
+		auto *arr = (array *)Arena<ArenaTag>::alloc(sizeof(array));
+		arr->data = nullptr;
+		arr->size = 0;
+		arr->capacity = 0;
+		return arr;
+	}
 };
-
-// Set array contents from another array (potentially from a different arena)
-template <typename T, typename Tag, uint32_t InitSize, typename OtherTag>
-void
-array_set(array<T, Tag, InitSize> *arr, const array<T, OtherTag> &other)
-{
-	// Clear existing contents
-	array_clear(arr);
-
-	// Reserve space for the new contents
-	array_reserve(arr, other.size);
-
-	// Copy the data
-	if (other.size > 0)
-	{
-		memcpy(arr->data, other.data, other.size * sizeof(T));
-		arr->size = other.size;
-	}
-}
-
-// Ensure array has at least 'min_capacity' slots
-template <typename T, typename Tag, uint32_t InitSize>
-inline void
-array_reserve(array<T, Tag, InitSize> *arr, uint32_t min_capacity)
-{
-	// Already have enough capacity
-	if (arr->capacity >= min_capacity)
-	{
-		return;
-	}
-
-	// Lazy init if needed
-	if (!arr->data)
-	{
-		arr->capacity = min_capacity > InitSize ? min_capacity : InitSize;
-		arr->data = (T *)Arena<Tag>::alloc(arr->capacity * sizeof(T));
-		return;
-	}
-
-	// Save old data for reclamation
-	T		*old_data = arr->data;
-	uint32_t old_capacity = arr->capacity;
-
-	// Calculate new capacity (at least double, but ensure we meet min_capacity)
-	uint32_t new_cap = arr->capacity * 2;
-	if (new_cap < min_capacity)
-	{
-		new_cap = min_capacity;
-	}
-
-	// Allocate and copy
-	T *new_data = (T *)Arena<Tag>::alloc(new_cap * sizeof(T));
-	memcpy(new_data, arr->data, arr->size * sizeof(T));
-
-	arr->data = new_data;
-	arr->capacity = new_cap;
-
-	// Automatically reclaim old memory
-	Arena<Tag>::reclaim(old_data, old_capacity * sizeof(T));
-}
-
-template <typename T, typename Tag, uint32_t InitSize>
-uint32_t
-array_push(array<T, Tag, InitSize> *arr, const T &value)
-{
-	// Ensure we have room for one more element
-	array_reserve(arr, arr->size + 1);
-
-	arr->data[arr->size] = value;
-	// return index
-	return arr->size++;
-}
-
-template <typename T, typename Tag, uint32_t InitSize>
-void
-array_clear(array<T, Tag, InitSize> *arr)
-{
-	if (arr->data)
-	{
-		memset(arr->data, 0, sizeof(T) * arr->size);
-	}
-	arr->size = 0;
-}
-
-template <typename T, typename Tag = global_arena>
-array<T, Tag> *
-array_create()
-{
-	auto *arr = (array<T, Tag> *)Arena<Tag>::alloc(sizeof(array<T, Tag>));
-	arr->data = nullptr;
-	arr->size = 0;
-	arr->capacity = 0;
-	return arr;
-}
-
-// Resize array to exact size (useful for pre-allocating known sizes)
-template <typename T, typename Tag, uint32_t InitSize>
-void
-array_resize(array<T, Tag, InitSize> *arr, uint32_t new_size)
-{
-	array_reserve(arr, new_size);
-
-	// Zero out new elements if growing
-	if (new_size > arr->size)
-	{
-		memset(arr->data + arr->size, 0, (new_size - arr->size) * sizeof(T));
-	}
-
-	arr->size = new_size;
-}
-
-// Push multiple elements at once
-template <typename T, typename Tag, uint32_t InitSize>
-T *
-array_push_n(array<T, Tag, InitSize> *arr, const T *values, uint32_t count)
-{
-	array_reserve(arr, arr->size + count);
-
-	T *dest = arr->data + arr->size;
-	memcpy(dest, values, count * sizeof(T));
-	arr->size += count;
-
-	return dest;
-}
-
-// Shrink array to fit (reclaim excess capacity)
-template <typename T, typename Tag, uint32_t InitSize>
-void
-array_shrink_to_fit(array<T, Tag, InitSize> *arr)
-{
-	if (arr->size == arr->capacity || arr->size == 0)
-	{
-		return;
-	}
-
-	T		*old_data = arr->data;
-	uint32_t old_capacity = arr->capacity;
-
-	// Allocate exact size needed
-	arr->data = (T *)Arena<Tag>::alloc(arr->size * sizeof(T));
-	memcpy(arr->data, old_data, arr->size * sizeof(T));
-	arr->capacity = arr->size;
-
-	// Reclaim old memory
-	Arena<Tag>::reclaim(old_data, old_capacity * sizeof(T));
-}
 
 // Generic hash functions for different integer sizes
 inline uint32_t
@@ -851,672 +864,318 @@ hash_int(T x)
 	}
 }
 
-// Generic HashMap for any integer key type
-template <typename K, typename V, typename Tag = global_arena> struct hash_map
+
+// String class with hash support
+template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct string
 {
-	static_assert(std::is_integral<K>::value, "Key must be an integer type");
-
-	struct Entry
-	{
-		K key;
-		V value;
-		enum State : uint8_t
-		{
-			EMPTY = 0,
-			OCCUPIED = 1,
-			DELETED = 2
-		};
-		State state;
-	};
-
-	Entry	*entries = nullptr;
+	// String is backed by char array
+	char	*data = nullptr;
+	uint32_t size = 0; // Includes null terminator when present
 	uint32_t capacity = 0;
-	uint32_t size = 0;
-	uint32_t tombstones = 0;
-};
 
-template <typename K, typename V, typename Tag>
-static void
-hashmap_init(hash_map<K, V, Tag> *m, uint32_t initial_capacity = 16)
+	// Cached hash - 0 means not computed, actual hash is never 0 (we'll ensure that)
+	mutable uint32_t cached_hash = 0;
+
+	// Assignment from C string
+string& operator=(const char* cstr)
 {
-	initial_capacity--;
-	initial_capacity |= initial_capacity >> 1;
-	initial_capacity |= initial_capacity >> 2;
-	initial_capacity |= initial_capacity >> 4;
-	initial_capacity |= initial_capacity >> 8;
-	initial_capacity |= initial_capacity >> 16;
-	initial_capacity++;
-
-	m->capacity = initial_capacity;
-	m->entries = (typename hash_map<K, V, Tag>::Entry *)Arena<Tag>::alloc(initial_capacity *
-																		  sizeof(typename hash_map<K, V, Tag>::Entry));
-	memset(m->entries, 0, initial_capacity * sizeof(typename hash_map<K, V, Tag>::Entry));
-	m->size = 0;
-	m->tombstones = 0;
+    if (cstr)
+    {
+        set(cstr);
+    }
+    else
+    {
+        clear();
+    }
+    return *this;
 }
 
-template <typename K, typename V, typename Tag>
-static V *
-hashmap_insert_internal(hash_map<K, V, Tag> *m, K key, V value)
+// Assignment from another string (same arena tag)
+string& operator=(const string& other)
 {
-	uint32_t mask = m->capacity - 1;
-	uint32_t idx = hash_int(key) & mask;
-
-	while (true)
-	{
-		auto &entry = m->entries[idx];
-
-		if (entry.state != hash_map<K, V, Tag>::Entry::OCCUPIED)
-		{
-			entry.key = key;
-			entry.value = value;
-			entry.state = hash_map<K, V, Tag>::Entry::OCCUPIED;
-			m->size++;
-			return &entry.value;
-		}
-
-		if (entry.key == key)
-		{
-			entry.value = value;
-			return &entry.value;
-		}
-
-		idx = (idx + 1) & mask;
-	}
+    if (this != &other)
+    {
+        if (other.empty())
+        {
+            clear();
+        }
+        else
+        {
+            set(other.c_str());
+        }
+    }
+    return *this;
 }
 
-template <typename K, typename V, typename Tag>
-static void
-hashmap_grow(hash_map<K, V, Tag> *m)
+// Assignment from string with different arena tag
+template<typename OtherTag, uint32_t OtherSize>
+string& operator=(const string<OtherTag, OtherSize>& other)
 {
-	uint32_t old_capacity = m->capacity;
-	auto	*old_entries = m->entries;
-
-	m->capacity = old_capacity * 2;
-	m->entries = (typename hash_map<K, V, Tag>::Entry *)Arena<Tag>::alloc(m->capacity *
-																		  sizeof(typename hash_map<K, V, Tag>::Entry));
-	memset(m->entries, 0, m->capacity * sizeof(typename hash_map<K, V, Tag>::Entry));
-
-	uint32_t old_size = m->size;
-	m->size = 0;
-	m->tombstones = 0;
-
-	for (uint32_t i = 0; i < old_capacity; i++)
-	{
-		if (old_entries[i].state == hash_map<K, V, Tag>::Entry::OCCUPIED)
-		{
-			hashmap_insert_internal(m, old_entries[i].key, old_entries[i].value);
-		}
-	}
+    if (other.empty())
+    {
+        clear();
+    }
+    else
+    {
+        set(other.c_str());
+    }
+    return *this;
 }
 
-template <typename K, typename V, typename Tag>
-V *
-hashmap_insert(hash_map<K, V, Tag> *m, K key, V value)
-{
-	if (!m->entries)
+	void
+	reserve(uint32_t min_capacity)
 	{
-		hashmap_init(m);
+		if (capacity >= min_capacity)
+			return;
+
+		if (!data)
+		{
+			capacity = min_capacity > InitialSize ? min_capacity : InitialSize;
+			data = (char *)Arena<ArenaTag>::alloc(capacity);
+			return;
+		}
+
+		char	*old_data = data;
+		uint32_t old_capacity = capacity;
+
+		uint32_t new_cap = capacity * 2;
+		if (new_cap < min_capacity)
+			new_cap = min_capacity;
+
+		char *new_data = (char *)Arena<ArenaTag>::alloc(new_cap);
+		memcpy(new_data, data, size);
+
+		data = new_data;
+		capacity = new_cap;
+		cached_hash = 0; // Invalidate hash cache
+
+		Arena<ArenaTag>::reclaim(old_data, old_capacity);
 	}
 
-	if ((m->size + m->tombstones) * 4 >= m->capacity * 3)
+	void
+	set(const char *cstr)
 	{
-		hashmap_grow(m);
+		size_t len = strlen(cstr) + 1;
+		reserve(len);
+		memcpy(data, cstr, len);
+		size = len;
+		cached_hash = 0;
 	}
 
-	uint32_t mask = m->capacity - 1;
-	uint32_t idx = hash_int(key) & mask;
-	uint32_t first_deleted = (uint32_t)-1;
-
-	while (true)
+	void
+	append(const char *cstr)
 	{
-		auto &entry = m->entries[idx];
+		if (size > 0 && data[size - 1] == '\0')
+			size--; // Remove old null terminator
 
-		if (entry.state == hash_map<K, V, Tag>::Entry::EMPTY)
-		{
-			if (first_deleted != (uint32_t)-1)
-			{
-				auto &deleted_entry = m->entries[first_deleted];
-				deleted_entry.key = key;
-				deleted_entry.value = value;
-				deleted_entry.state = hash_map<K, V, Tag>::Entry::OCCUPIED;
-				m->tombstones--;
-				m->size++;
-				return &deleted_entry.value;
-			}
-			else
-			{
-				entry.key = key;
-				entry.value = value;
-				entry.state = hash_map<K, V, Tag>::Entry::OCCUPIED;
-				m->size++;
-				return &entry.value;
-			}
-		}
+		size_t len = strlen(cstr);
+		reserve(size + len + 1);
 
-		if (entry.state == hash_map<K, V, Tag>::Entry::DELETED)
-		{
-			if (first_deleted == (uint32_t)-1)
-			{
-				first_deleted = idx;
-			}
-		}
-		else if (entry.key == key)
-		{
-			entry.value = value;
-			return &entry.value;
-		}
-
-		idx = (idx + 1) & mask;
+		memcpy(data + size, cstr, len);
+		size += len;
+		data[size++] = '\0';
+		cached_hash = 0;
 	}
-}
 
-template <typename K, typename V, typename Tag>
-V *
-hashmap_get(hash_map<K, V, Tag> *m, K key)
-{
-	if (!m->entries || m->size == 0)
-		return nullptr;
-
-	uint32_t mask = m->capacity - 1;
-	uint32_t idx = hash_int(key) & mask;
-
-	while (true)
+	void
+	append(const string &other)
 	{
-		auto &entry = m->entries[idx];
+		if (other.empty())
+			return;
 
-		if (entry.state == hash_map<K, V, Tag>::Entry::EMPTY)
-		{
-			return nullptr;
-		}
+		if (size > 0 && data[size - 1] == '\0')
+			size--;
 
-		if (entry.state == hash_map<K, V, Tag>::Entry::OCCUPIED && entry.key == key)
-		{
-			return &entry.value;
-		}
+		size_t copy_len = other.size;
+		if (other.data[other.size - 1] == '\0')
+			copy_len--; // Don't copy their null terminator
 
-		idx = (idx + 1) & mask;
+		reserve(size + copy_len + 1);
+		memcpy(data + size, other.data, copy_len);
+		size += copy_len;
+		data[size++] = '\0';
+		cached_hash = 0;
 	}
-}
 
-template <typename K, typename V, typename Tag>
-bool
-hashmap_delete(hash_map<K, V, Tag> *m, K key)
-{
-	if (!m->entries || m->size == 0)
-		return false;
-
-	uint32_t mask = m->capacity - 1;
-	uint32_t idx = hash_int(key) & mask;
-
-	while (true)
+	void
+	clear()
 	{
-		auto &entry = m->entries[idx];
+		if (data)
+			memset(data, 0, size);
+		size = 0;
+		cached_hash = 0;
+	}
 
-		if (entry.state == hash_map<K, V, Tag>::Entry::EMPTY)
+	// Get C string (ensures null termination)
+	const char *
+	c_str() const
+	{
+		if (!data || size == 0)
+			return "";
+
+		// Ensure null terminated
+		if (data[size - 1] != '\0')
 		{
+			// This is a bit hacky but maintains const-ness for the user
+			const_cast<string *>(this)->reserve(size + 1);
+			const_cast<string *>(this)->data[size] = '\0';
+			const_cast<string *>(this)->size++;
+		}
+		return data;
+	}
+
+	// Compute hash - cached for efficiency
+	uint32_t
+	hash() const
+	{
+		if (cached_hash != 0)
+			return cached_hash;
+
+		if (!data || size == 0)
+		{
+			cached_hash = 1; // Use 1 for empty string so 0 means "not computed"
+			return cached_hash;
+		}
+
+		// FNV-1a hash
+		uint32_t h = 2166136261u;
+		for (uint32_t i = 0; i < size && data[i] != '\0'; i++)
+		{
+			h ^= (uint8_t)data[i];
+			h *= 16777619u;
+		}
+
+		// Ensure hash is never 0 (so we can use 0 as "not computed")
+		cached_hash = h ? h : 1;
+		return cached_hash;
+	}
+
+	// Length without null terminator
+	uint32_t
+	length() const
+	{
+		if (!data || size == 0)
+			return 0;
+
+		// If we have a null terminator, don't count it
+		if (data[size - 1] == '\0')
+			return size - 1;
+		return size;
+	}
+
+	bool
+	equals(const char *cstr) const
+	{
+		if (!data || !cstr)
+			return !data && !cstr;
+		return strcmp(c_str(), cstr) == 0;
+	}
+
+	bool
+	equals(const string &other) const
+	{
+		if (!data || !other.data)
+			return !data && !other.data;
+
+		// Quick hash check first
+		if (hash() != other.hash())
 			return false;
-		}
 
-		if (entry.state == hash_map<K, V, Tag>::Entry::OCCUPIED && entry.key == key)
+		return strcmp(c_str(), other.c_str()) == 0;
+	}
+
+	// Split string by delimiter
+	template <typename ArrayTag = ArenaTag>
+	void
+	split(char delimiter, array<string<ArenaTag>, ArrayTag> *result) const
+	{
+		result->clear();
+
+		if (!data || size == 0)
+			return;
+
+		const char *start = data;
+		const char *end = data;
+		const char *limit = data + length(); // Don't include null terminator
+
+		while (end < limit)
 		{
-			entry.state = hash_map<K, V, Tag>::Entry::DELETED;
-			m->size--;
-			m->tombstones++;
-			return true;
-		}
-
-		idx = (idx + 1) & mask;
-	}
-}
-
-template <typename K, typename V, typename Tag>
-void
-hashmap_clear(hash_map<K, V, Tag> *m)
-{
-	if (m->entries)
-	{
-		memset(m->entries, 0, m->capacity * sizeof(typename hash_map<K, V, Tag>::Entry));
-	}
-	m->size = 0;
-	m->tombstones = 0;
-}
-
-// HashSet reuses HashMap
-template <typename K, typename Tag = global_arena> using hash_set = hash_map<K, uint8_t, Tag>;
-
-// HashSet implementation
-template <typename K, typename Tag>
-bool
-hashset_insert(hash_set<K, Tag> *set, K key)
-{
-	auto *existing = hashmap_get(set, key);
-	if (existing)
-		return false;
-
-	hashmap_insert(set, key, uint8_t(1));
-	return true;
-}
-
-template <typename K, typename Tag>
-bool
-hashset_contains(hash_set<K, Tag> *set, K key)
-{
-	return hashmap_get(set, key) != nullptr;
-}
-
-template <typename K, typename Tag>
-bool
-hashset_delete(hash_set<K, Tag> *set, K key)
-{
-	return hashmap_delete(set, key);
-}
-
-template <typename K, typename Tag>
-void
-hashset_clear(hash_set<K, Tag> *set)
-{
-	hashmap_clear(set);
-}
-
-// String is just an array of chars
-template <typename Tag = global_arena, uint32_t InitSize = 0> using string = array<char, Tag, InitSize>;
-
-// Copy a C string
-template <typename Tag, uint32_t InitSize>
-void
-string_set(string<Tag, InitSize> *s, const char *cstr)
-{
-	int length = strlen(cstr) + 1;
-	if (length > s->capacity)
-	{
-		array_reserve(s, length);
-	}
-	strcpy(s->data, cstr);
-	s->size = length;
-	s->capacity = length;
-}
-
-template <typename Tag = global_arena, uint32_t InitSize = 0>
-void
-string_split(const char *str, char delimiter, array<string<Tag>, Tag> *result)
-{
-	// Clear the result array
-	array_clear(result);
-
-	const char *start = str;
-	const char *end = str;
-
-	while (*end)
-	{
-		if (*end == delimiter)
-		{
-			// Create substring from start to current position
-			string<Tag> substr;
-			size_t		len = end - start + 1;
-			array_reserve(&substr, len);
-			memcpy(substr.data, start, len - 1);
-			substr.data[len - 1] = '\0';
-			substr.size = len;
-			array_push(result, substr);
-			start = end + 1;
-		}
-		end++;
-	}
-
-	// Add the last substring (if any)
-	if (start < end)
-	{
-		string<Tag> substr;
-		size_t		len = end - start + 1;
-		array_reserve(&substr, len);
-		memcpy(substr.data, start, len - 1);
-		substr.data[len - 1] = '\0';
-		substr.size = len;
-		array_push(result, substr);
-	}
-}
-
-// Append to string
-template <typename Tag, uint32_t InitSize>
-void
-string_append(string<Tag, InitSize> *s, const char *cstr)
-{
-	if (s->size > 0 && s->data[s->size - 1] == '\0')
-	{
-		s->size--; // Remove old null terminator
-	}
-	while (*cstr)
-	{
-		array_push(s, *cstr++);
-	}
-	array_push(s, '\0');
-}
-
-// String hashing and string_map implementation
-// Add this to your header file after the existing hash_map implementation
-
-// FNV-1a hash for strings
-inline uint32_t
-hash_string(const char *str)
-{
-	uint32_t hash = 2166136261u;
-	while (*str)
-	{
-		hash ^= (uint8_t)*str++;
-		hash *= 16777619u;
-	}
-	return hash;
-}
-
-// Helper to allocate and copy string
-template <typename Tag = global_arena>
-inline char *
-string_dup(const char *str)
-{
-	size_t len = strlen(str) + 1;
-	char  *copy = (char *)Arena<Tag>::alloc(len);
-	memcpy(copy, str, len);
-	return copy;
-}
-
-// String map - similar structure to hash_map but with string keys
-template <typename V, typename Tag = global_arena> struct string_map
-{
-	struct Entry
-	{
-		char	*key; // nullptr means empty
-		V		 value;
-		uint32_t hash; // cached hash value
-		enum State : uint8_t
-		{
-			EMPTY = 0,
-			OCCUPIED = 1,
-			DELETED = 2
-		};
-		State state;
-	};
-
-	Entry	*entries = nullptr;
-	uint32_t capacity = 0;
-	uint32_t size = 0;
-	uint32_t tombstones = 0;
-};
-
-template <typename V, typename Tag>
-static void
-stringmap_init(string_map<V, Tag> *m, uint32_t initial_capacity = 16)
-{
-	initial_capacity--;
-	initial_capacity |= initial_capacity >> 1;
-	initial_capacity |= initial_capacity >> 2;
-	initial_capacity |= initial_capacity >> 4;
-	initial_capacity |= initial_capacity >> 8;
-	initial_capacity |= initial_capacity >> 16;
-	initial_capacity++;
-
-	m->capacity = initial_capacity;
-	m->entries = (typename string_map<V, Tag>::Entry *)Arena<Tag>::alloc(initial_capacity *
-																		 sizeof(typename string_map<V, Tag>::Entry));
-	memset(m->entries, 0, initial_capacity * sizeof(typename string_map<V, Tag>::Entry));
-	m->size = 0;
-	m->tombstones = 0;
-}
-
-template <typename V, typename Tag>
-static V *
-stringmap_insert_internal(string_map<V, Tag> *m, const char *key, uint32_t hash, V value)
-{
-	uint32_t mask = m->capacity - 1;
-	uint32_t idx = hash & mask;
-
-	while (true)
-	{
-		auto &entry = m->entries[idx];
-
-		if (entry.state != string_map<V, Tag>::Entry::OCCUPIED)
-		{
-			// Found empty or deleted slot
-			if (entry.state == string_map<V, Tag>::Entry::DELETED)
+			if (*end == delimiter)
 			{
-				m->tombstones--;
-			}
-
-			// Reclaim old string if it exists (from deleted entry)
-			if (entry.key)
-			{
-				size_t old_len = strlen(entry.key) + 1;
-				Arena<Tag>::reclaim(entry.key, old_len);
-			}
-
-			entry.key = string_dup<Tag>(key);
-			entry.hash = hash;
-			entry.value = value;
-			entry.state = string_map<V, Tag>::Entry::OCCUPIED;
-			m->size++;
-			return &entry.value;
-		}
-
-		// Check if key matches
-		if (entry.hash == hash && strcmp(entry.key, key) == 0)
-		{
-			entry.value = value;
-			return &entry.value;
-		}
-
-		idx = (idx + 1) & mask;
-	}
-}
-
-template <typename V, typename Tag>
-static void
-stringmap_grow(string_map<V, Tag> *m)
-{
-	uint32_t old_capacity = m->capacity;
-	auto	*old_entries = m->entries;
-
-	m->capacity = old_capacity * 2;
-	m->entries = (typename string_map<V, Tag>::Entry *)Arena<Tag>::alloc(m->capacity *
-																		 sizeof(typename string_map<V, Tag>::Entry));
-	memset(m->entries, 0, m->capacity * sizeof(typename string_map<V, Tag>::Entry));
-
-	uint32_t old_size = m->size;
-	m->size = 0;
-	m->tombstones = 0;
-
-	for (uint32_t i = 0; i < old_capacity; i++)
-	{
-		if (old_entries[i].state == string_map<V, Tag>::Entry::OCCUPIED)
-		{
-			// Reuse existing string allocation - no need to duplicate again
-			uint32_t mask = m->capacity - 1;
-			uint32_t idx = old_entries[i].hash & mask;
-
-			while (m->entries[idx].state == string_map<V, Tag>::Entry::OCCUPIED)
-			{
-				idx = (idx + 1) & mask;
-			}
-
-			m->entries[idx] = old_entries[i];
-			m->size++;
-		}
-		else if (old_entries[i].state == string_map<V, Tag>::Entry::DELETED && old_entries[i].key)
-		{
-			// Reclaim deleted entry's string
-			size_t len = strlen(old_entries[i].key) + 1;
-			Arena<Tag>::reclaim(old_entries[i].key, len);
-		}
-	}
-
-	// Reclaim old backing array
-	Arena<Tag>::reclaim(old_entries, old_capacity * sizeof(typename string_map<V, Tag>::Entry));
-}
-
-template <typename V, typename Tag>
-V *
-stringmap_insert(string_map<V, Tag> *m, const char *key, V value)
-{
-	if (!m->entries)
-	{
-		stringmap_init(m);
-	}
-
-	if ((m->size + m->tombstones) * 4 >= m->capacity * 3)
-	{
-		stringmap_grow(m);
-	}
-
-	uint32_t hash = hash_string(key);
-	uint32_t mask = m->capacity - 1;
-	uint32_t idx = hash & mask;
-	uint32_t first_deleted = (uint32_t)-1;
-
-	while (true)
-	{
-		auto &entry = m->entries[idx];
-
-		if (entry.state == string_map<V, Tag>::Entry::EMPTY)
-		{
-			if (first_deleted != (uint32_t)-1)
-			{
-				auto &deleted_entry = m->entries[first_deleted];
-
-				// Reclaim old string if exists
-				if (deleted_entry.key)
+				string<ArenaTag> substr;
+				size_t			 len = end - start;
+				if (len > 0)
 				{
-					size_t old_len = strlen(deleted_entry.key) + 1;
-					Arena<Tag>::reclaim(deleted_entry.key, old_len);
+					substr.reserve(len + 1);
+					memcpy(substr.data, start, len);
+					substr.data[len] = '\0';
+					substr.size = len + 1;
 				}
-
-				deleted_entry.key = string_dup<Tag>(key);
-				deleted_entry.hash = hash;
-				deleted_entry.value = value;
-				deleted_entry.state = string_map<V, Tag>::Entry::OCCUPIED;
-				m->tombstones--;
-				m->size++;
-				return &deleted_entry.value;
+				result->push(substr);
+				start = end + 1;
 			}
-			else
-			{
-				entry.key = string_dup<Tag>(key);
-				entry.hash = hash;
-				entry.value = value;
-				entry.state = string_map<V, Tag>::Entry::OCCUPIED;
-				m->size++;
-				return &entry.value;
-			}
+			end++;
 		}
 
-		if (entry.state == string_map<V, Tag>::Entry::DELETED)
+		// Add the last substring
+		if (start < end)
 		{
-			if (first_deleted == (uint32_t)-1)
-			{
-				first_deleted = idx;
-			}
+			string<ArenaTag> substr;
+			size_t			 len = end - start;
+			substr.reserve(len + 1);
+			memcpy(substr.data, start, len);
+			substr.data[len] = '\0';
+			substr.size = len + 1;
+			result->push(substr);
 		}
-		else if (entry.hash == hash && strcmp(entry.key, key) == 0)
-		{
-			entry.value = value;
-			return &entry.value;
-		}
-
-		idx = (idx + 1) & mask;
 	}
-}
 
-template <typename V, typename Tag>
-V *
-stringmap_get(string_map<V, Tag> *m, const char *key)
-{
-	if (!m->entries || m->size == 0)
-		return nullptr;
-
-	uint32_t hash = hash_string(key);
-	uint32_t mask = m->capacity - 1;
-	uint32_t idx = hash & mask;
-
-	while (true)
+	bool
+	empty() const
 	{
-		auto &entry = m->entries[idx];
-
-		if (entry.state == string_map<V, Tag>::Entry::EMPTY)
-		{
-			return nullptr;
-		}
-
-		if (entry.state == string_map<V, Tag>::Entry::OCCUPIED && entry.hash == hash && strcmp(entry.key, key) == 0)
-		{
-			return &entry.value;
-		}
-
-		idx = (idx + 1) & mask;
+		return size == 0 || (size == 1 && data[0] == '\0');
 	}
-}
 
-template <typename V, typename Tag>
-bool
-stringmap_delete(string_map<V, Tag> *m, const char *key)
-{
-	if (!m->entries || m->size == 0)
-		return false;
-
-	uint32_t hash = hash_string(key);
-	uint32_t mask = m->capacity - 1;
-	uint32_t idx = hash & mask;
-
-	while (true)
+	// Operator overloads for convenience
+	char &
+	operator[](uint32_t index)
 	{
-		auto &entry = m->entries[idx];
-
-		if (entry.state == string_map<V, Tag>::Entry::EMPTY)
-		{
-			return false;
-		}
-
-		if (entry.state == string_map<V, Tag>::Entry::OCCUPIED && entry.hash == hash && strcmp(entry.key, key) == 0)
-		{
-			// Reclaim string memory
-			size_t len = strlen(entry.key) + 1;
-			Arena<Tag>::reclaim(entry.key, len);
-
-			entry.key = nullptr;
-			entry.state = string_map<V, Tag>::Entry::DELETED;
-			m->size--;
-			m->tombstones++;
-			return true;
-		}
-
-		idx = (idx + 1) & mask;
+		return data[index];
 	}
-}
-
-template <typename V, typename Tag>
-void
-stringmap_clear(string_map<V, Tag> *m)
-{
-	if (m->entries)
+	const char &
+	operator[](uint32_t index) const
 	{
-		// Reclaim all string memory
-		for (uint32_t i = 0; i < m->capacity; i++)
-		{
-			if (m->entries[i].state == string_map<V, Tag>::Entry::OCCUPIED && m->entries[i].key)
-			{
-				size_t len = strlen(m->entries[i].key) + 1;
-				Arena<Tag>::reclaim(m->entries[i].key, len);
-			}
-			else if (m->entries[i].state == string_map<V, Tag>::Entry::DELETED && m->entries[i].key)
-			{
-				// Also reclaim deleted entries that still have strings
-				size_t len = strlen(m->entries[i].key) + 1;
-				Arena<Tag>::reclaim(m->entries[i].key, len);
-			}
-		}
-
-		memset(m->entries, 0, m->capacity * sizeof(typename string_map<V, Tag>::Entry));
+		return data[index];
 	}
-	m->size = 0;
-	m->tombstones = 0;
-}
+
+	// Implicit conversion to C string for convenience
+	operator const char *() const
+	{
+		return c_str();
+	}
+
+	// Static factory for heap allocation
+	static string *
+	create()
+	{
+		auto *str = (string *)Arena<ArenaTag>::alloc(sizeof(string));
+		str->data = nullptr;
+		str->size = 0;
+		str->capacity = 0;
+		str->cached_hash = 0;
+		return str;
+	}
+
+	// Static helper to duplicate a C string
+	static string
+	make(const char *cstr)
+	{
+		string s;
+		s.set(cstr);
+		return s;
+	}
+};
+
 // Pair structure
 template <typename K, typename V> struct pair
 {
@@ -1524,46 +1183,413 @@ template <typename K, typename V> struct pair
 	V value;
 };
 
-// Collect all entries from string_map
-template <typename V, typename TagIn, typename TagOut>
-void
-stringmap_collect(string_map<V, TagIn> *m, array<pair<const char *, V>, TagOut> *out)
+// HashMap class - supports primitives and string keys
+template <typename K, typename V, typename ArenaTag = global_arena>
+struct hash_map
 {
-	array_clear(out);
-	if (!m || !m->entries || m->size == 0)
-		return;
+    struct Entry
+    {
+        K key;
+        V value;
+        uint32_t hash;  // Store hash for all types (for strings, avoids recomputing)
+        enum State : uint8_t
+        {
+            EMPTY = 0,
+            OCCUPIED = 1,
+            DELETED = 2
+        };
+        State state;
+    };
 
-	array_reserve(out, m->size);
+    Entry    *entries = nullptr;
+    uint32_t  capacity = 0;
+    uint32_t  size = 0;
+    uint32_t  tombstones = 0;
 
-	for (uint32_t i = 0; i < m->capacity; i++)
-	{
-		auto &entry = m->entries[i];
-		if (entry.state == string_map<V, TagIn>::Entry::OCCUPIED)
-		{
-			pair<const char *, V> p = {entry.key, entry.value};
-			array_push(out, p);
-		}
-	}
-}
+    // Type trait to check if K is a string type
+    template<typename T>
+    struct is_string : std::false_type {};
 
-// Collect all entries from hash_map
-template <typename K, typename V, typename TagIn, typename TagOut>
-void
-hashmap_collect(hash_map<K, V, TagIn> *m, array<pair<K, V>, TagOut> *out)
+    template<typename Tag, uint32_t Size>
+    struct is_string<string<Tag, Size>> : std::true_type {};
+
+    // Hash function - picks the right implementation
+    uint32_t hash_key(const K &key) const
+    {
+        if constexpr (is_string<K>::value)
+        {
+            return key.hash();
+        }
+        else if constexpr (std::is_integral<K>::value)
+        {
+            return hash_int(key);
+        }
+        else
+        {
+            static_assert(std::is_integral<K>::value || is_string<K>::value,
+                         "Key must be an integer or string type");
+        }
+    }
+
+    // Key comparison
+    bool keys_equal(const K &a, const K &b) const
+    {
+        if constexpr (is_string<K>::value)
+        {
+            return a.equals(b);
+        }
+        else
+        {
+            return a == b;
+        }
+    }
+
+    // Initialize with initial capacity
+    void init(uint32_t initial_capacity = 16)
+    {
+        if (entries)
+            return;
+
+        // Round up to power of 2
+        initial_capacity--;
+        initial_capacity |= initial_capacity >> 1;
+        initial_capacity |= initial_capacity >> 2;
+        initial_capacity |= initial_capacity >> 4;
+        initial_capacity |= initial_capacity >> 8;
+        initial_capacity |= initial_capacity >> 16;
+        initial_capacity++;
+
+        capacity = initial_capacity;
+        entries = (Entry *)Arena<ArenaTag>::alloc(capacity * sizeof(Entry));
+        memset(entries, 0, capacity * sizeof(Entry));
+        size = 0;
+        tombstones = 0;
+    }
+
+    // Internal insert (used during growth)
+    V* insert_internal(const K &key, uint32_t hash, const V &value)
+    {
+        uint32_t mask = capacity - 1;
+        uint32_t idx = hash & mask;
+
+        while (true)
+        {
+            Entry &entry = entries[idx];
+
+            if (entry.state != Entry::OCCUPIED)
+            {
+                entry.key = key;
+                entry.value = value;
+                entry.hash = hash;
+                entry.state = Entry::OCCUPIED;
+                size++;
+                return &entry.value;
+            }
+
+            if (entry.hash == hash && keys_equal(entry.key, key))
+            {
+                entry.value = value;
+                return &entry.value;
+            }
+
+            idx = (idx + 1) & mask;
+        }
+    }
+
+    // Grow the table
+    void grow()
+    {
+        uint32_t old_capacity = capacity;
+        Entry   *old_entries = entries;
+
+        capacity = old_capacity * 2;
+        entries = (Entry *)Arena<ArenaTag>::alloc(capacity * sizeof(Entry));
+        memset(entries, 0, capacity * sizeof(Entry));
+
+        uint32_t old_size = size;
+        size = 0;
+        tombstones = 0;
+
+        for (uint32_t i = 0; i < old_capacity; i++)
+        {
+            if (old_entries[i].state == Entry::OCCUPIED)
+            {
+                insert_internal(old_entries[i].key, old_entries[i].hash, old_entries[i].value);
+            }
+        }
+
+        // Reclaim old backing array
+        Arena<ArenaTag>::reclaim(old_entries, old_capacity * sizeof(Entry));
+    }
+
+    // Insert or update
+    V* insert(const K &key, const V &value)
+    {
+        if (!entries)
+            init();
+
+        if ((size + tombstones) * 4 >= capacity * 3)
+            grow();
+
+        uint32_t hash = hash_key(key);
+        uint32_t mask = capacity - 1;
+        uint32_t idx = hash & mask;
+        uint32_t first_deleted = (uint32_t)-1;
+
+        while (true)
+        {
+            Entry &entry = entries[idx];
+
+            if (entry.state == Entry::EMPTY)
+            {
+                if (first_deleted != (uint32_t)-1)
+                {
+                    Entry &deleted_entry = entries[first_deleted];
+                    deleted_entry.key = key;
+                    deleted_entry.value = value;
+                    deleted_entry.hash = hash;
+                    deleted_entry.state = Entry::OCCUPIED;
+                    tombstones--;
+                    size++;
+                    return &deleted_entry.value;
+                }
+                else
+                {
+                    entry.key = key;
+                    entry.value = value;
+                    entry.hash = hash;
+                    entry.state = Entry::OCCUPIED;
+                    size++;
+                    return &entry.value;
+                }
+            }
+
+            if (entry.state == Entry::DELETED)
+            {
+                if (first_deleted == (uint32_t)-1)
+                    first_deleted = idx;
+            }
+            else if (entry.hash == hash && keys_equal(entry.key, key))
+            {
+                entry.value = value;
+                return &entry.value;
+            }
+
+            idx = (idx + 1) & mask;
+        }
+    }
+
+    // Lookup
+    V* get(const K &key)
+    {
+        if (!entries || size == 0)
+            return nullptr;
+
+        uint32_t hash = hash_key(key);
+        uint32_t mask = capacity - 1;
+        uint32_t idx = hash & mask;
+
+        while (true)
+        {
+            Entry &entry = entries[idx];
+
+            if (entry.state == Entry::EMPTY)
+                return nullptr;
+
+            if (entry.state == Entry::OCCUPIED &&
+                entry.hash == hash &&
+                keys_equal(entry.key, key))
+            {
+                return &entry.value;
+            }
+
+            idx = (idx + 1) & mask;
+        }
+    }
+
+    // Const lookup
+    const V* get(const K &key) const
+    {
+        return const_cast<hash_map*>(this)->get(key);
+    }
+
+    // Check if key exists
+    bool contains(const K &key) const
+    {
+        return const_cast<hash_map*>(this)->get(key) != nullptr;
+    }
+
+    // Delete entry
+    bool remove(const K &key)
+    {
+        if (!entries || size == 0)
+            return false;
+
+        uint32_t hash = hash_key(key);
+        uint32_t mask = capacity - 1;
+        uint32_t idx = hash & mask;
+
+        while (true)
+        {
+            Entry &entry = entries[idx];
+
+            if (entry.state == Entry::EMPTY)
+                return false;
+
+            if (entry.state == Entry::OCCUPIED &&
+                entry.hash == hash &&
+                keys_equal(entry.key, key))
+            {
+                entry.state = Entry::DELETED;
+                size--;
+                tombstones++;
+                return true;
+            }
+
+            idx = (idx + 1) & mask;
+        }
+    }
+
+    // Clear all entries
+    void clear()
+    {
+        if (entries)
+            memset(entries, 0, capacity * sizeof(Entry));
+        size = 0;
+        tombstones = 0;
+    }
+
+    // Collect all key-value pairs into an array
+    template <typename ArrayTag = ArenaTag>
+    void collect(array<pair<K, V>, ArrayTag> *out) const
+    {
+        out->clear();
+        if (!entries || size == 0)
+            return;
+
+        out->reserve(size);
+
+        for (uint32_t i = 0; i < capacity; i++)
+        {
+            const Entry &entry = entries[i];
+            if (entry.state == Entry::OCCUPIED)
+            {
+                pair<K, V> p = {entry.key, entry.value};
+                out->push(p);
+            }
+        }
+    }
+
+    // Iterator support for range-based for loops
+    struct iterator
+    {
+        Entry    *entries;
+        uint32_t  capacity;
+        uint32_t  idx;
+
+        iterator(Entry *e, uint32_t cap, uint32_t i)
+            : entries(e), capacity(cap), idx(i)
+        {
+            // Skip to first occupied entry
+            while (idx < capacity && entries[idx].state != Entry::OCCUPIED)
+                idx++;
+        }
+
+        pair<K&, V&> operator*()
+        {
+            return {entries[idx].key, entries[idx].value};
+        }
+
+        iterator& operator++()
+        {
+            idx++;
+            while (idx < capacity && entries[idx].state != Entry::OCCUPIED)
+                idx++;
+            return *this;
+        }
+
+        bool operator!=(const iterator &other) const
+        {
+            return idx != other.idx;
+        }
+    };
+
+    iterator begin() { return iterator(entries, capacity, 0); }
+    iterator end() { return iterator(entries, capacity, capacity); }
+
+    // Convenience operator[] for insertion/access
+    V& operator[](const K &key)
+    {
+        V *val = get(key);
+        if (val)
+            return *val;
+
+        // Insert default value
+        V default_val = {};
+        return *insert(key, default_val);
+    }
+
+    bool empty() const { return size == 0; }
+
+    // Static factory for heap allocation
+    static hash_map* create(uint32_t initial_capacity = 16)
+    {
+        auto *m = (hash_map*)Arena<ArenaTag>::alloc(sizeof(hash_map));
+        m->entries = nullptr;
+        m->capacity = 0;
+        m->size = 0;
+        m->tombstones = 0;
+        m->init(initial_capacity);
+        return m;
+    }
+};
+
+// HashSet using HashMap
+template <typename K, typename ArenaTag = global_arena>
+struct hash_set
 {
-	array_clear(out);
-	if (!m || !m->entries || m->size == 0)
-		return;
+    hash_map<K, uint8_t, ArenaTag> map;
 
-	array_reserve(out, m->size);
+    void init(uint32_t initial_capacity = 16)
+    {
+        map.init(initial_capacity);
+    }
 
-	for (uint32_t i = 0; i < m->capacity; i++)
-	{
-		auto &entry = m->entries[i];
-		if (entry.state == hash_map<K, V, TagIn>::Entry::OCCUPIED)
-		{
-			pair<K, V> p = {entry.key, entry.value};
-			array_push(out, p);
-		}
-	}
-}
+    bool insert(const K &key)
+    {
+        if (map.contains(key))
+            return false;
+        map.insert(key, 1);
+        return true;
+    }
+
+    bool contains(const K &key) const
+    {
+        return map.contains(key);
+    }
+
+    bool remove(const K &key)
+    {
+        return map.remove(key);
+    }
+
+    void clear()
+    {
+        map.clear();
+    }
+
+    uint32_t size() const { return map.size; }
+    bool empty() const { return map.empty(); }
+
+    // Static factory
+    static hash_set* create(uint32_t initial_capacity = 16)
+    {
+        auto *s = (hash_set*)Arena<ArenaTag>::alloc(sizeof(hash_set));
+        s->map.entries = nullptr;
+        s->map.capacity = 0;
+        s->map.size = 0;
+        s->map.tombstones = 0;
+        s->map.init(initial_capacity);
+        return s;
+    }
+};
