@@ -30,15 +30,47 @@ print_result_callback(TypedValue *result, size_t count)
 	}
 	std::cout << "\n";
 }
+
+void
+bootstrap_catalog_from_master()
+{
+	// Set the callback
+	vm_set_result_callback(catalog_bootstrap_callback);
+
+	// Run your existing master table scan
+	ProgramBuilder prog;
+	auto		   cctx = from_structure(catalog[MASTER_CATALOG]);
+	int			   cursor = prog.open_cursor(&cctx);
+	int			   is_at_end = prog.rewind(cursor, false);
+	auto		   while_context = prog.begin_while(is_at_end);
+	int			   dest_reg = prog.get_columns(cursor, 0, cctx.layout.count());
+	prog.result(dest_reg, cctx.layout.count());
+	prog.next(cursor, is_at_end);
+	prog.end_while(while_context);
+	prog.close_cursor(cursor);
+	prog.halt();
+	prog.resolve_labels();
+
+	vm_execute(prog.instructions.data, prog.instructions.size);
+
+	// Restore normal callback
+	vm_set_result_callback(print_result_callback);
+}
 int
 main()
 {
 
+	bool go = false;
+label:
 	arena::init<global_arena>();
 	arena::init<catalog_arena>();
 	arena::init<parser_arena>();
 	bool existed = pager_open("test.db");
 	bootstrap_master(!existed);
+	if (existed)
+	{
+		bootstrap_catalog_from_master();
+	}
 
 	const char *stm = "CREATE TABLE X (id INT);";
 	Parser		p;
@@ -63,25 +95,18 @@ main()
 	// 	std::cout << "error\n";
 	// }
 
-	vm_set_result_callback(print_result_callback);
+	// vm_set_result_callback(print_result_callback);
 
-	// for(auto [a,b] : catalog) {
-	//     std::cout << a.c_str() << ",";
-	// }
+	pager_close();
+	if (!go)
+	{
+		go = true;
+		catalog.clear();
+		goto label;
+	}
 
-	ProgramBuilder prog;
-	int			   cursor = 0;
-	auto		   cctx = from_structure(catalog[MASTER_CATALOG]);
-	cursor = prog.open_cursor(&cctx);
-	int	 is_at_end = prog.rewind(cursor, false);
-	auto while_context = prog.begin_while(is_at_end);
-	int	 dest_reg = prog.get_columns(cursor, 0, cctx.layout.count());
-	prog.result(dest_reg, cctx.layout.count());
-	prog.next(cursor, is_at_end);
-	prog.end_while(while_context);
-	prog.close_cursor(cursor);
-	prog.halt();
-	prog.resolve_labels();
-// _debug  = true;
-	vm_execute(prog.instructions.data, prog.instructions.size);
+	for (auto [a, b] : catalog)
+	{
+		std::cout << a.c_str() << ",";
+	}
 }

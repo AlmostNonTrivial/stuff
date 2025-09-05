@@ -87,3 +87,6 @@ extern hash_map<string<catalog_arena>, Structure, catalog_arena> catalog;
 #define MC_TYPE_INDEX "index"
 void
 bootstrap_master(bool create);
+
+void
+catalog_bootstrap_callback(TypedValue *result, size_t count);

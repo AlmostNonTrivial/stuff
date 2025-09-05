@@ -1,6 +1,7 @@
 #include "catalog.hpp"
 #include "arena.hpp"
 #include "pager.hpp"
+#include "parser.hpp"
 #include "types.hpp"
 #include <cassert>
 
@@ -40,11 +41,10 @@ Structure
 Structure::from(const char *name, array<Column> cols)
 {
 	Structure structure;
-	structure.columns.set( cols);
+	structure.columns.set(cols);
 	structure.name = name;
 	return structure;
 }
-
 
 
 
@@ -89,4 +89,74 @@ bootstrap_master(bool create)
 	}
 
 	catalog.insert(MASTER_CATALOG, structure);
+}
+
+// Parse CREATE TABLE SQL to extract columns
+array<Column>
+parse_create_sql_for_columns(const char *sql)
+{
+	array<Column> columns;
+
+	// For now, a simple parser - could use your existing parser
+	// This is a minimal implementation
+	Parser parser;
+	parser_init(&parser, sql);
+
+	Statement *stmt = parser_parse_statement(&parser);
+	if (!stmt || stmt->type != STMT_CREATE_TABLE)
+	{
+		printf("Failed to parse CREATE TABLE: %s\n", sql);
+		return columns;
+	}
+
+	CreateTableStmt *create_stmt = stmt->create_table_stmt;
+	columns.reserve(create_stmt->columns.size);
+
+	for (uint32_t i = 0; i < create_stmt->columns.size; i++)
+	{
+		ColumnDef *col_def = create_stmt->columns[i];
+		Column	   col = {col_def->name.c_str(), col_def->type};
+		columns.push(col);
+	}
+
+	return columns;
+}
+
+// In catalog.cpp or a new bootstrap file
+
+// Result callback for catalog bootstrap
+void
+catalog_bootstrap_callback(TypedValue *result, size_t count)
+{
+	// Master catalog layout: type, name, tbl_name, rootpage, sql
+	if (count != 5)
+		return;
+
+	const char *type = result[0].as_char();
+	const char *name = result[1].as_char();
+	const char *tbl_name = result[2].as_char();
+	uint32_t	rootpage = result[3].as_u32();
+	const char *sql = result[4].as_char();
+
+	// Only handle tables for now (could extend for indexes)
+	if (strcmp(type, "table") != 0)
+		return;
+
+	// Skip the master catalog itself to avoid recursion
+	if (strcmp(name, MASTER_CATALOG) == 0)
+		return;
+
+	printf("Bootstrapping table: %s (root page: %u)\n", name, rootpage);
+
+	// Parse the SQL to reconstruct columns
+	array<Column> columns = parse_create_sql_for_columns(sql);
+
+	// Create the structure
+	Structure structure = Structure::from(name, columns);
+
+	// Set up the btree with the existing root page (don't create new)
+	structure.storage.btree = btree_create(structure.to_layout().key_type(), structure.to_layout().record_size, false);
+
+	// Add to catalog
+	catalog.insert(name, structure);
 }
