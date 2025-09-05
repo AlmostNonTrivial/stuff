@@ -1358,7 +1358,6 @@ template <typename K, typename V> struct pair
 	K key;
 	V value;
 };
-
 // HashMap class - supports primitives and string keys
 template <typename K, typename V, typename ArenaTag = global_arena> struct hash_map
 {
@@ -1417,6 +1416,25 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		return key.hash();
 	}
 
+	// Hash function for C string
+	uint32_t
+	hash_cstr(const char *cstr) const
+	{
+		if (!cstr) return 1;
+
+		// FNV-1a hash (same as string::hash())
+		uint32_t h = 2166136261u;
+		while (*cstr)
+		{
+			h ^= (uint8_t)*cstr;
+			h *= 16777619u;
+			cstr++;
+		}
+
+		// Ensure hash is never 0
+		return h ? h : 1;
+	}
+
 	// Key comparison
 	bool
 	keys_equal(const K &a, const K &b) const
@@ -1444,6 +1462,20 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		{
 			static_assert(std::is_integral<K>::value, "Key must be an integer or string type");
 			return false; // Cannot compare non-string K with string
+		}
+	}
+
+	// Key comparison for string key vs char*
+	bool
+	keys_equal_cstr(const K &a, const char *b) const
+	{
+		if constexpr (is_string<K>::value)
+		{
+			return a.equals(b);
+		}
+		else
+		{
+			return false; // Cannot compare non-string K with char*
 		}
 	}
 
@@ -1646,6 +1678,67 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		}
 	}
 
+	// Insert with char* key (only enabled when K is a string type)
+	template <typename U = K, typename = std::enable_if_t<is_string<U>::value>>
+	V *
+	insert(const char *key, const V &value)
+	{
+		if (!key) return nullptr;
+
+		if (!entries)
+			init();
+
+		if ((size + tombstones) * 4 >= capacity * 3)
+			grow();
+
+		uint32_t hash = hash_cstr(key);
+		uint32_t mask = capacity - 1;
+		uint32_t idx = hash & mask;
+		uint32_t first_deleted = (uint32_t)-1;
+
+		while (true)
+		{
+			Entry &entry = entries[idx];
+
+			if (entry.state == Entry::EMPTY)
+			{
+				if (first_deleted != (uint32_t)-1)
+				{
+					Entry &deleted_entry = entries[first_deleted];
+					deleted_entry.key.set(key);
+					deleted_entry.value = value;
+					deleted_entry.hash = hash;
+					deleted_entry.state = Entry::OCCUPIED;
+					tombstones--;
+					size++;
+					return &deleted_entry.value;
+				}
+				else
+				{
+					entry.key.set(key);
+					entry.value = value;
+					entry.hash = hash;
+					entry.state = Entry::OCCUPIED;
+					size++;
+					return &entry.value;
+				}
+			}
+
+			if (entry.state == Entry::DELETED)
+			{
+				if (first_deleted == (uint32_t)-1)
+					first_deleted = idx;
+			}
+			else if (entry.hash == hash && keys_equal_cstr(entry.key, key))
+			{
+				entry.value = value;
+				return &entry.value;
+			}
+
+			idx = (idx + 1) & mask;
+		}
+	}
+
 	// Lookup
 	V *
 	get(const K &key)
@@ -1702,6 +1795,36 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		}
 	}
 
+	// Lookup with char* (only enabled when K is a string type)
+	template <typename U = K, typename = std::enable_if_t<is_string<U>::value>>
+	V *
+	get(const char *key)
+	{
+		if (!entries || size == 0 || !key)
+			return nullptr;
+
+		uint32_t hash = hash_cstr(key);
+		uint32_t mask = capacity - 1;
+		uint32_t idx = hash & mask;
+
+		while (true)
+		{
+			Entry &entry = entries[idx];
+
+			if (entry.state == Entry::EMPTY)
+				return nullptr;
+
+			if (entry.state == Entry::OCCUPIED &&
+				entry.hash == hash &&
+				keys_equal_cstr(entry.key, key))
+			{
+				return &entry.value;
+			}
+
+			idx = (idx + 1) & mask;
+		}
+	}
+
 	// Const lookup
 	const V *
 	get(const K &key) const
@@ -1717,6 +1840,14 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		return const_cast<hash_map *>(this)->get(key);
 	}
 
+	// Const lookup with char*
+	template <typename U = K, typename = std::enable_if_t<is_string<U>::value>>
+	const V *
+	get(const char *key) const
+	{
+		return const_cast<hash_map *>(this)->get(key);
+	}
+
 	// Check if key exists
 	bool
 	contains(const K &key) const
@@ -1728,6 +1859,14 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	template <typename OtherTag, uint32_t OtherSize>
 	bool
 	contains(const string<OtherTag, OtherSize> &key) const
+	{
+		return const_cast<hash_map *>(this)->get(key) != nullptr;
+	}
+
+	// Contains with char*
+	template <typename U = K, typename = std::enable_if_t<is_string<U>::value>>
+	bool
+	contains(const char *key) const
 	{
 		return const_cast<hash_map *>(this)->get(key) != nullptr;
 	}
@@ -1783,6 +1922,39 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 				return false;
 
 			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
+			{
+				entry.state = Entry::DELETED;
+				size--;
+				tombstones++;
+				return true;
+			}
+
+			idx = (idx + 1) & mask;
+		}
+	}
+
+	// Remove with char*
+	template <typename U = K, typename = std::enable_if_t<is_string<U>::value>>
+	bool
+	remove(const char *key)
+	{
+		if (!entries || size == 0 || !key)
+			return false;
+
+		uint32_t hash = hash_cstr(key);
+		uint32_t mask = capacity - 1;
+		uint32_t idx = hash & mask;
+
+		while (true)
+		{
+			Entry &entry = entries[idx];
+
+			if (entry.state == Entry::EMPTY)
+				return false;
+
+			if (entry.state == Entry::OCCUPIED &&
+				entry.hash == hash &&
+				keys_equal_cstr(entry.key, key))
 			{
 				entry.state = Entry::DELETED;
 				size--;
@@ -1901,6 +2073,25 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		return *insert(key, default_val);
 	}
 
+	// Operator[] for char*
+	template <typename U = K, typename = std::enable_if_t<is_string<U>::value>>
+	V &
+	operator[](const char *key)
+	{
+		if (!key)
+		{
+			static V dummy{};
+			return dummy;
+		}
+
+		V *val = get(key);
+		if (val) return *val;
+
+		// Insert default value
+		V default_val = {};
+		return *insert(key, default_val);
+	}
+
 	bool
 	empty() const
 	{
@@ -1919,9 +2110,10 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		m->init(initial_capacity);
 		return m;
 	}
-};
+};// HashSet using HashMap
 
-// HashSet using HashMap
+
+
 template <typename K, typename ArenaTag = global_arena> struct hash_set
 {
 	hash_map<K, uint8_t, ArenaTag> map;

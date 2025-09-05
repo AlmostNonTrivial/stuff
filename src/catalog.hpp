@@ -73,3 +73,17 @@ struct Structure
 };
 
 extern hash_map<string<catalog_arena>, Structure, catalog_arena> catalog;
+#define MASTER_CATALOG "sqlite_master"
+
+// Column names for master catalog
+#define MC_TYPE		"type"
+#define MC_NAME		"name"
+#define MC_TBL_NAME "tbl_name"
+#define MC_ROOTPAGE "rootpage"
+#define MC_SQL		"sql"
+
+// Object types stored in master catalog
+#define MC_TYPE_TABLE "table"
+#define MC_TYPE_INDEX "index"
+void
+bootstrap_master(bool create);

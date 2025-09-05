@@ -25,7 +25,7 @@ struct CursorAllocator
 	void
 	free(int cursor_id)
 	{
-		array_push(&free_list, cursor_id);
+		free_list.push(cursor_id);
 	}
 };
 
@@ -82,7 +82,7 @@ struct RegisterAllocator
 	void
 	push_scope()
 	{
-		array_push(&scope_stack, next_free);
+		scope_stack.push(next_free);
 	}
 
 	void
@@ -116,7 +116,7 @@ struct RegisterAllocator
 	reset()
 	{
 		next_free = 0;
-		array_clear(&scope_stack);
+		scope_stack.clear();
 	}
 };
 
@@ -146,7 +146,7 @@ struct CondContext
 struct ProgramBuilder
 {
 	array<VMInstruction, query_arena> instructions;
-	string_map<uint32_t, query_arena> labels;
+	hash_map<string<query_arena>, uint32_t, query_arena> labels;
 	array<uint32_t, query_arena>	  unresolved_jumps;
 	RegisterAllocator				  regs;
 	CursorAllocator					  cursors;
@@ -181,26 +181,25 @@ struct ProgramBuilder
 		ptr[size - 1] = '\0'; // Ensure null termination
 		return ptr;
 	}
+
 	void
 	emit(VMInstruction inst)
 	{
-		array_push(&instructions, inst);
+		instructions.push(inst);
 
 		// Track instructions that need label resolution
 		if (inst.p2 == -1 || inst.p3 == -1)
 		{
-			array_push(&unresolved_jumps, instructions.size - 1);
+			unresolved_jumps.push(instructions.size - 1);
 		}
-		return;
-		;
 	}
 
 	void
 	label(const char *name)
 	{
-		stringmap_insert(&labels, name, instructions.size);
-		return;
-		;
+		string<query_arena> label_name;
+		label_name.set(name);
+		labels.insert(label_name, instructions.size);
 	}
 
 	const char *
@@ -228,7 +227,9 @@ struct ProgramBuilder
 			if (inst.p4)
 			{ // Label stored temporarily in p4
 				const char *label_name = (const char *)inst.p4;
-				uint32_t   *target = stringmap_get(&labels, label_name);
+				string<query_arena> key;
+				key.set(label_name);
+				uint32_t *target = labels.get(key);
 
 				if (target)
 				{
@@ -250,32 +251,24 @@ struct ProgramBuilder
 	goto_label(const char *label_name)
 	{
 		emit(GOTO_MAKE((void *)label_name));
-		return;
-		;
 	}
 
 	void
 	halt(int exit_code = 0)
 	{
 		emit(HALT_MAKE(exit_code));
-		return;
-		;
 	}
 
 	void
 	jumpif_true(int test_reg, const char *label)
 	{
 		emit(JUMPIF_MAKE(test_reg, (void *)label, true));
-		return;
-		;
 	}
 
 	void
 	jumpif_false(int test_reg, const char *label)
 	{
 		emit(JUMPIF_MAKE(test_reg, (void *)label, false));
-		return;
-		;
 	}
 
 	void
@@ -313,24 +306,18 @@ struct ProgramBuilder
 		goto_label(ctx.start_label);
 		label(ctx.end_label);
 		regs.restore(ctx.saved_reg_mark);
-		return;
-		;
 	}
 
 	void
 	break_loop()
 	{
 		goto_label(current_loop.end_label);
-		return;
-		;
 	}
 
 	void
 	continue_loop()
 	{
 		goto_label(current_loop.start_label);
-		return;
-		;
 	}
 
 	// ========================================================================
@@ -353,8 +340,6 @@ struct ProgramBuilder
 		goto_label(ctx.condition_label);
 		label(ctx.end_label);
 		regs.restore(ctx.saved_reg_mark);
-		return;
-		;
 	}
 
 	WhileContext
@@ -374,8 +359,6 @@ struct ProgramBuilder
 		jumpif_not_zero(condition_reg, ctx.condition_label);
 		label(ctx.end_label);
 		regs.restore(ctx.saved_reg_mark);
-		return;
-		;
 	}
 
 	// ========================================================================
@@ -397,8 +380,6 @@ struct ProgramBuilder
 		goto_label(ctx.end_label);
 		label(ctx.else_label);
 		ctx.has_else = true;
-		return;
-		;
 	}
 
 	void
@@ -410,8 +391,6 @@ struct ProgramBuilder
 		}
 		label(ctx.end_label);
 		regs.restore(ctx.saved_reg_mark);
-		return;
-		;
 	}
 
 	// ========================================================================
@@ -609,7 +588,7 @@ struct ProgramBuilder
 	int
 	last(int cursor_id, int result_reg = -1)
 	{
-		return rewind(cursor_id, false, result_reg);
+		return rewind(cursor_id, true, result_reg);
 	}
 
 	int
@@ -678,8 +657,6 @@ struct ProgramBuilder
 	insert_record(int cursor_id, int key_reg, int record_count = 1)
 	{
 		emit(INSERT_MAKE(cursor_id, key_reg, record_count));
-		return;
-		;
 	}
 
 	int
@@ -701,8 +678,6 @@ struct ProgramBuilder
 	update_record(int cursor_id, int record_reg)
 	{
 		emit(UPDATE_MAKE(cursor_id, record_reg));
-		return;
-		;
 	}
 
 	// ========================================================================
@@ -713,8 +688,6 @@ struct ProgramBuilder
 	result(int first_reg, int reg_count = 1)
 	{
 		emit(RESULT_MAKE(first_reg, reg_count));
-		return;
-		;
 	}
 
 	// ========================================================================
@@ -725,24 +698,18 @@ struct ProgramBuilder
 	begin_transaction()
 	{
 		emit(BEGIN_MAKE());
-		return;
-		;
 	}
 
 	void
 	commit_transaction()
 	{
 		emit(COMMIT_MAKE());
-		return;
-		;
 	}
 
 	void
 	rollback_transaction()
 	{
 		emit(ROLLBACK_MAKE());
-		return;
-		;
 	}
 
 	// ========================================================================
@@ -780,8 +747,6 @@ struct ProgramBuilder
 			first_dest_reg = regs.allocate_range(2);
 		}
 		emit(UNPACK2_MAKE(first_dest_reg, src_reg));
-		return;
-		;
 	}
 };
 
@@ -974,4 +939,15 @@ alloc_dual(DataType type1, const void *data1, DataType type2, const void *data2)
 
 	pack_dual(data, type1, (const uint8_t *)data1, type2, (const uint8_t *)data2);
 	return {data, dual_type};
+}
+
+
+inline CursorContext
+from_structure(Structure &structure)
+{
+	CursorContext cctx;
+	cctx.storage.tree = &structure.storage.btree;
+	cctx.type = BPLUS;
+	cctx.layout = structure.to_layout();
+	return cctx;
 }
