@@ -849,7 +849,7 @@ step()
 
 		VmCursor   *cursor = &VM.cursors[cursor_id];
 		TypedValue *first = &VM.registers[key_reg];
-		uint32_t	count = cursor->layout.layout.size() - 1;
+		uint32_t	count = cursor->layout.layout.size- 1;
 		bool		success;
 
 		if (_debug)
@@ -898,7 +898,7 @@ step()
 		int32_t	  record_reg = UPDATE_RECORD_REG();
 		VmCursor *cursor = &VM.cursors[cursor_id];
 		uint8_t	  data[cursor->layout.record_size];
-		uint32_t  record_count = cursor->layout.layout.size() - 1;
+		uint32_t  record_count = cursor->layout.layout.size - 1;
 
 		build_record(data, record_reg, record_count);
 		bool success = vmcursor_update(cursor, data);

@@ -16,3 +16,5 @@ struct SemanticContext {
         errors.push(Error{msg,ctx});
     }
 };
+
+bool semantic_resolve_statement(Statement* stmt, SemanticContext* ctx);

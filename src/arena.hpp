@@ -658,14 +658,11 @@ stream_size(const StreamAlloc<Tag> *stream)
 
 } // namespace arena
 
-
 // Forward declaration of string
-template <typename ArenaTag, uint32_t InitialSize>
-struct string;
+template <typename ArenaTag, uint32_t InitialSize> struct string;
 
 // Forward declaration of array
-template <typename T, typename ArenaTag, uint32_t InitialSize>
-struct array;
+template <typename T, typename ArenaTag, uint32_t InitialSize> struct array;
 
 // Array class - data-oriented style without constructors/destructors
 template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8> struct array
@@ -1016,9 +1013,17 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 	}
 
 	void
-	set(const char *cstr)
+	set(const char *cstr, size_t size = 0)
 	{
-		size_t len = strlen(cstr) + 1;
+		size_t len;
+		if (size != 0)
+		{
+			len = size;
+		}
+		else
+		{
+			len = strlen(cstr) + 1;
+		}
 		reserve(len);
 		memcpy(data, cstr, len);
 		size = len;
@@ -1941,7 +1946,8 @@ template <typename K, typename ArenaTag = global_arena> struct hash_set
 	bool
 	insert(const string<OtherTag, OtherSize> &key)
 	{
-		static_assert(hash_map<K, uint8_t, ArenaTag>::template is_string<K>::value, "insert(string) can only be used with string keys");
+		static_assert(hash_map<K, uint8_t, ArenaTag>::template is_string<K>::value,
+					  "insert(string) can only be used with string keys");
 		if (map.contains(key))
 			return false;
 		map.insert(key, 1);
@@ -1959,7 +1965,8 @@ template <typename K, typename ArenaTag = global_arena> struct hash_set
 	bool
 	contains(const string<OtherTag, OtherSize> &key) const
 	{
-		static_assert(hash_map<K, uint8_t, ArenaTag>::template is_string<K>::value, "contains(string) can only be used with string keys");
+		static_assert(hash_map<K, uint8_t, ArenaTag>::template is_string<K>::value,
+					  "contains(string) can only be used with string keys");
 		return map.contains(key);
 	}
 
@@ -1974,7 +1981,8 @@ template <typename K, typename ArenaTag = global_arena> struct hash_set
 	bool
 	remove(const string<OtherTag, OtherSize> &key)
 	{
-		static_assert(hash_map<K, uint8_t, ArenaTag>::template is_string<K>::value, "remove(string) can only be used with string keys");
+		static_assert(hash_map<K, uint8_t, ArenaTag>::template is_string<K>::value,
+					  "remove(string) can only be used with string keys");
 		return map.remove(key);
 	}
 
