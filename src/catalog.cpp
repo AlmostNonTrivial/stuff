@@ -85,5 +85,7 @@ bootstrap_master(bool create)
 		structure.storage.btree.root_page_index = 1;
 	}
 
-	catalog[MASTER_CATALOG] = structure;
+	string<catalog_arena> s;
+	s.set(MASTER_CATALOG);
+	catalog[s] = structure;
 }

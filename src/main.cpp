@@ -25,24 +25,21 @@ main()
     bool existed = pager_open("test.db");
 	bootstrap_master(!existed);
 
-	// string<catalog_arena> sds;
-	// sds.set("X");
-	// auto s = Structure::from("X", array<Column>{0});
-	// catalog.insert(sds, s);
-	// const char *stm = "CREATE TABLE X (id INT);";
-	// Parser		p;
-	// parser_init(&p, stm);
-	// auto result = parser_parse_statement(&p);
 
-	// SemanticContext ctx;
+	const char *stm = "CREATE TABLE X (id INT);";
+	Parser		p;
+	parser_init(&p, stm);
+	auto result = parser_parse_statement(&p);
 
-	// if (!semantic_resolve_statement(result, &ctx))
-	// {
-	// 	for (auto err : ctx.errors)
-	// 	{
-	// 	    std::cout << err.message<< "\n";
-	// 	}
-	// }
+	SemanticContext ctx;
+
+	if (!semantic_resolve_statement(result, &ctx))
+	{
+		for (auto err : ctx.errors)
+		{
+		    std::cout << err.message<< "\n";
+		}
+	}
 
 
 
