@@ -1,0 +1,3 @@
+
+TODO:
+- Add lexical and semantic errors to parser

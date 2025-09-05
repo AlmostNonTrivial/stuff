@@ -55,6 +55,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
 /*
 ** TYPE DEFINITIONS AND MEMORY LAYOUTS
 **
@@ -172,7 +173,7 @@ static struct
 	**                         (already saved or newly created)
 	*/
 	hash_map<uint32_t, uint32_t, pager_arena> page_to_cache;
-	hash_set<uint32_t, pager_arena>		   journaled_or_new_pages;
+	hash_set<uint32_t, pager_arena>		       journaled_or_new_pages;
 
 } PAGER = {};
 
@@ -202,7 +203,7 @@ read_page_from_disk(uint32_t page_index, void *data)
 static void
 journal_write_page(uint32_t page_index, const void *data)
 {
-	hashset_insert(&PAGER.journaled_or_new_pages, page_index);
+	PAGER.journaled_or_new_pages.insert(page_index);
 
 	if (page_index == ROOT_PAGE_INDEX)
 	{
@@ -304,7 +305,7 @@ cache_evict_lru_entry()
 		write_page_to_disk(entry->page_index, &PAGER.cache_data[slot]);
 	}
 
-	hashmap_delete(&PAGER.page_to_cache, entry->page_index);
+	PAGER.page_to_cache.remove(entry->page_index);
 
 	lru_remove_from_list(slot);
 
@@ -341,8 +342,8 @@ cache_reset()
 		PAGER.cache_meta[i].lru_prev = INVALID_SLOT;
 	}
 
-	hashset_clear(&PAGER.journaled_or_new_pages);
-	hashmap_clear(&PAGER.page_to_cache);
+	PAGER.journaled_or_new_pages.clear();
+	PAGER.page_to_cache.clear();
 
 	PAGER.lru_head = INVALID_SLOT;
 	PAGER.lru_tail = INVALID_SLOT;
@@ -363,7 +364,7 @@ cache_reset()
 static base_page *
 cache_get_or_load(uint32_t page_index)
 {
-	uint32_t *slot_ptr = hashmap_get(&PAGER.page_to_cache, page_index);
+	uint32_t *slot_ptr = PAGER.page_to_cache.get(page_index);
 	if (slot_ptr)
 	{
 		uint32_t slot = *slot_ptr;
@@ -380,7 +381,7 @@ cache_get_or_load(uint32_t page_index)
 	entry->is_occupied = true;
 	entry->is_dirty = false;
 
-	hashmap_insert(&PAGER.page_to_cache, page_index, slot);
+	PAGER.page_to_cache.insert(page_index, slot);
 	lru_add_to_head(slot);
 
 	return &PAGER.cache_data[slot];
@@ -576,7 +577,7 @@ pager_new()
 		page_index = PAGER.root.page_counter++;
 	}
 
-	hashset_insert(&PAGER.journaled_or_new_pages, page_index);
+	PAGER.journaled_or_new_pages.insert(page_index);
 
 	uint32_t		slot = cache_find_free_slot();
 	cache_metadata *entry = &PAGER.cache_meta[slot];
@@ -588,7 +589,7 @@ pager_new()
 	entry->is_occupied = true;
 	entry->is_dirty = true;
 
-	hashmap_insert(&PAGER.page_to_cache, page_index, slot);
+	PAGER.page_to_cache.insert(page_index, slot);
 	lru_add_to_head(slot);
 
 	return page_index;
@@ -613,12 +614,12 @@ pager_mark_dirty(uint32_t page_index)
 		return false;
 	}
 
-	if (!hashset_contains(&PAGER.journaled_or_new_pages, page_index))
+	if (!PAGER.journaled_or_new_pages.contains(page_index))
 	{
 		journal_write_page(page_index, cache_get_or_load(page_index));
 	}
 
-	uint32_t *slot_ptr = hashmap_get(&PAGER.page_to_cache, page_index);
+	uint32_t *slot_ptr = PAGER.page_to_cache.get(page_index);
 	if (slot_ptr)
 	{
 		PAGER.cache_meta[*slot_ptr].is_dirty = true;
@@ -714,7 +715,7 @@ pager_commit()
 	PAGER.journal_fd = OS_INVALID_HANDLE;
 	PAGER.in_transaction = false;
 
-	hashset_clear(&PAGER.journaled_or_new_pages);
+	PAGER.journaled_or_new_pages.clear();
 
 	return true;
 }

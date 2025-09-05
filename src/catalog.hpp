@@ -2,9 +2,13 @@
 
 #include "btree.hpp"
 #include "types.hpp"
-#include <unordered_map>
 #include <vector>
+#include "arena.hpp"
+
 #include <cstdint>
+struct catalog_arena
+{
+};
 
 struct Column
 {
@@ -14,18 +18,18 @@ struct Column
 
 struct Layout
 {
-	std::vector<DataType> layout;
-	std::vector<uint32_t> offsets;
+	array<DataType> layout;
+	array<uint32_t> offsets;
 
 	uint32_t record_size;
 
 	static Layout
-	create(std::vector<DataType> &column_types);
+	create(array<DataType> &column_types);
 
 	uint32_t
 	count()
 	{
-		return layout.size();
+		return layout.size;
 	}
 	DataType
 	key_type()
@@ -34,14 +38,17 @@ struct Layout
 	}
 
 	// Create a new layout with swapped columns
-    Layout reorder(std::initializer_list<uint32_t> new_order) const {
-        std::vector<DataType> types = layout;
-        int i = 0;
-        for (uint32_t idx : new_order) {
-            types[i++] = layout[idx];
-        }
-        return Layout::create(types);
-    }
+	Layout
+	reorder(std::initializer_list<uint32_t>& new_order) const
+	{
+		array<DataType> types = layout;
+		int				i = 0;
+		for (uint32_t idx : new_order)
+		{
+			types[i++] = layout[idx];
+		}
+		return Layout::create(types);
+	}
 };
 
 struct Structure
@@ -50,24 +57,19 @@ struct Structure
 	union {
 		btree btree;
 	} storage;
-	std::vector<Column> columns;
+	array<Column> columns;
 
 	Layout
 	to_layout();
 
 	static Structure
-	from(const char *name, std::vector<Column> cols);
+	from(const char *name, array<Column> cols);
 
 	uint32_t
-	count()
-	{
-		return columns.size();
-	}
-	DataType
-	key_type()
+	count(){return columns.size;} DataType key_type()
 	{
 		return columns[0].type;
 	}
 };
 
-extern std::unordered_map<std::string_view, Structure> catalog;
+extern hash_map<string<catalog_arena>, Structure, catalog_arena> catalog;
