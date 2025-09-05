@@ -418,13 +418,13 @@ step()
 	case OP_Halt: {
 		if (_debug)
 		{
-			printf("=> Halting with code %d\n", HALT_EXIT_CODE(*inst));
+			printf("=> Halting with code %d\n", HALT_EXIT_CODE());
 		}
 		VM.halted = true;
 		return OK;
 	}
 	case OP_Goto: {
-		int32_t target = GOTO_TARGET(*inst);
+		int32_t target = GOTO_TARGET();
 		if (_debug)
 		{
 			printf("=> Jumping to PC=%d\n", target);
@@ -433,9 +433,9 @@ step()
 		return OK;
 	}
 	case OP_Load: {
-		int32_t	 dest_reg = LOAD_DEST_REG(*inst);
-		uint8_t *data = LOAD_DATA(*inst);
-		DataType type = LOAD_TYPE(*inst);
+		int32_t	 dest_reg = LOAD_DEST_REG();
+		uint8_t *data = LOAD_DATA();
+		DataType type = LOAD_TYPE();
 
 		auto to_load = TypedValue::make(type, data);
 		if (_debug)
@@ -450,8 +450,8 @@ step()
 		return OK;
 	}
 	case OP_Move: {
-		int32_t dest_reg = MOVE_DEST_REG(*inst);
-		int32_t src_reg = MOVE_SRC_REG(*inst);
+		int32_t dest_reg = MOVE_DEST_REG();
+		int32_t src_reg = MOVE_SRC_REG();
 		auto   *src = &VM.registers[src_reg];
 		if (_debug)
 		{
@@ -471,10 +471,10 @@ step()
 		return OK;
 	}
 	case OP_Test: {
-		int32_t		  dest = TEST_DEST_REG(*inst);
-		int32_t		  left = TEST_LEFT_REG(*inst);
-		int32_t		  right = TEST_RIGHT_REG(*inst);
-		comparison_op op = TEST_OP(*inst);
+		int32_t		  dest = TEST_DEST_REG();
+		int32_t		  left = TEST_LEFT_REG();
+		int32_t		  right = TEST_RIGHT_REG();
+		comparison_op op = TEST_OP();
 		TypedValue	 *a = &VM.registers[left];
 		TypedValue	 *b = &VM.registers[right];
 		int			  cmp_result = type_compare(a->type, a->data, b->data);
@@ -516,10 +516,10 @@ step()
 		return OK;
 	}
 	case OP_Function: {
-		int32_t	   dest = FUNCTION_DEST_REG(*inst);
-		int32_t	   first_arg = FUNCTION_FIRST_ARG_REG(*inst);
-		int32_t	   count = FUNCTION_ARG_COUNT(*inst);
-		VMFunction fn = FUNCTION_FUNCTION(*inst);
+		int32_t	   dest = FUNCTION_DEST_REG();
+		int32_t	   first_arg = FUNCTION_FIRST_ARG_REG();
+		int32_t	   count = FUNCTION_ARG_COUNT();
+		VMFunction fn = FUNCTION_FUNCTION();
 
 		if (_debug)
 		{
@@ -554,9 +554,9 @@ step()
 		return OK;
 	}
 	case OP_JumpIf: {
-		int32_t		test_reg = JUMPIF_TEST_REG(*inst);
-		int32_t		target = JUMPIF_JUMP_TARGET(*inst);
-		bool		jump_on_true = JUMPIF_JUMP_ON_TRUE(*inst);
+		int32_t		test_reg = JUMPIF_TEST_REG();
+		int32_t		target = JUMPIF_JUMP_TARGET();
+		bool		jump_on_true = JUMPIF_JUMP_ON_TRUE();
 		TypedValue *val = &VM.registers[test_reg];
 		bool		is_true = (*(uint32_t *)val->data != 0);
 		bool		will_jump = (is_true && jump_on_true) || (!is_true && !jump_on_true);
@@ -580,10 +580,10 @@ step()
 		return OK;
 	}
 	case OP_Logic: {
-		int32_t	   dest = LOGIC_DEST_REG(*inst);
-		int32_t	   left = LOGIC_LEFT_REG(*inst);
-		int32_t	   right = LOGIC_RIGHT_REG(*inst);
-		logic_op   op = LOGIC_OP(*inst);
+		int32_t	   dest = LOGIC_DEST_REG();
+		int32_t	   left = LOGIC_LEFT_REG();
+		int32_t	   right = LOGIC_RIGHT_REG();
+		logic_op   op = LOGIC_OP();
 		TypedValue result = TypedValue::make(TYPE_U32);
 		result.data = (uint8_t *)arena::alloc<query_arena>(type_size(TYPE_U32));
 		uint32_t a = *(uint32_t *)VM.registers[left].data;
@@ -614,8 +614,8 @@ step()
 		return OK;
 	}
 	case OP_Result: {
-		int32_t first_reg = RESULT_FIRST_REG(*inst);
-		int32_t reg_count = RESULT_REG_COUNT(*inst);
+		int32_t first_reg = RESULT_FIRST_REG();
+		int32_t reg_count = RESULT_REG_COUNT();
 
 		if (_debug)
 		{
@@ -654,10 +654,10 @@ step()
 		return OK;
 	}
 	case OP_Arithmetic: {
-		int32_t		dest = ARITHMETIC_DEST_REG(*inst);
-		int32_t		left = ARITHMETIC_LEFT_REG(*inst);
-		int32_t		right = ARITHMETIC_RIGHT_REG(*inst);
-		arith_op	op = ARITHMETIC_OP(*inst);
+		int32_t		dest = ARITHMETIC_DEST_REG();
+		int32_t		left = ARITHMETIC_LEFT_REG();
+		int32_t		right = ARITHMETIC_RIGHT_REG();
+		arith_op	op = ARITHMETIC_OP();
 		TypedValue *a = &VM.registers[left];
 		TypedValue *b = &VM.registers[right];
 
@@ -713,9 +713,9 @@ step()
 		return OK;
 	}
 	case OP_Open: {
-		int32_t		   cursor_id = OPEN_CURSOR_ID(*inst);
+		int32_t		   cursor_id = OPEN_CURSOR_ID();
 		VmCursor	  *cursor = &VM.cursors[cursor_id];
-		CursorContext *context = OPEN_LAYOUT(*inst);
+		CursorContext *context = OPEN_LAYOUT();
 
 		if (_debug)
 		{
@@ -728,7 +728,7 @@ step()
 		return OK;
 	}
 	case OP_Close: {
-		int32_t cursor_id = CLOSE_CURSOR_ID(*inst);
+		int32_t cursor_id = CLOSE_CURSOR_ID();
 		if (_debug)
 		{
 			printf("=> Closed cursor %d\n", cursor_id);
@@ -738,9 +738,9 @@ step()
 		return OK;
 	}
 	case OP_Rewind: {
-		int32_t	  cursor_id = REWIND_CURSOR_ID(*inst);
-		int32_t	  result_reg = REWIND_RESULT_REG(*inst);
-		bool	  to_end = REWIND_TO_END(*inst);
+		int32_t	  cursor_id = REWIND_CURSOR_ID();
+		int32_t	  result_reg = REWIND_RESULT_REG();
+		bool	  to_end = REWIND_TO_END();
 		VmCursor *cursor = &VM.cursors[cursor_id];
 		bool	  valid = vmcursor_rewind(cursor, to_end);
 		uint32_t  result_val = valid ? 1 : 0;
@@ -756,9 +756,9 @@ step()
 		return OK;
 	}
 	case OP_Step: {
-		int32_t	  cursor_id = STEP_CURSOR_ID(*inst);
-		int32_t	  result_reg = STEP_RESULT_REG(*inst);
-		bool	  forward = STEP_FORWARD(*inst);
+		int32_t	  cursor_id = STEP_CURSOR_ID();
+		int32_t	  result_reg = STEP_RESULT_REG();
+		bool	  forward = STEP_FORWARD();
 		VmCursor *cursor = &VM.cursors[cursor_id];
 		uint32_t  has_more = vmcursor_step(cursor, forward) ? 1 : 0;
 
@@ -773,10 +773,10 @@ step()
 		return OK;
 	}
 	case OP_Seek: {
-		int32_t		  cursor_id = SEEK_CURSOR_ID(*inst);
-		int32_t		  key_reg = SEEK_KEY_REG(*inst);
-		int32_t		  result_reg = SEEK_RESULT_REG(*inst);
-		comparison_op op = SEEK_OP(*inst);
+		int32_t		  cursor_id = SEEK_CURSOR_ID();
+		int32_t		  key_reg = SEEK_KEY_REG();
+		int32_t		  result_reg = SEEK_RESULT_REG();
+		comparison_op op = SEEK_OP();
 		VmCursor	 *cursor = &VM.cursors[cursor_id];
 		TypedValue	 *key = &VM.registers[key_reg];
 		bool		  found = vmcursor_seek(cursor, op, (uint8_t *)key->data);
@@ -794,15 +794,15 @@ step()
 		return OK;
 	}
 	case OP_Column: {
-		int32_t	  cursor_id = COLUMN_CURSOR_ID(*inst);
-		int32_t	  col_index = COLUMN_INDEX(*inst);
-		int32_t	  dest_reg = COLUMN_DEST_REG(*inst);
+		int32_t	  cursor_id = COLUMN_CURSOR_ID();
+		int32_t	  col_index = COLUMN_INDEX();
+		int32_t	  dest_reg = COLUMN_DEST_REG();
 		VmCursor *cursor = &VM.cursors[cursor_id];
 
-		TypedValue src = {
-			.type = vmcursor_column_type(cursor, col_index),
-			.data = vmcursor_column(cursor, col_index),
-		};
+		DataType column_type = vmcursor_column_type(cursor, col_index);
+		auto	 column_value = vmcursor_column(cursor, col_index);
+
+		TypedValue src = TypedValue::make(column_type, column_value);
 
 		if (_debug)
 		{
@@ -823,9 +823,9 @@ step()
 		return OK;
 	}
 	case OP_Delete: {
-		int32_t	   cursor_id = DELETE_CURSOR_ID(*inst);
-		int32_t	   delete_occured = DELETE_DELETE_OCCURED_REG(*inst);
-		int32_t	   cursor_valid = DELETE_CURSOR_VALID_REG(*inst);
+		int32_t	   cursor_id = DELETE_CURSOR_ID();
+		int32_t	   delete_occured = DELETE_DELETE_OCCURED_REG();
+		int32_t	   cursor_valid = DELETE_CURSOR_VALID_REG();
 		VmCursor  *cursor = &VM.cursors[cursor_id];
 		int32_t	   success = vmcursor_remove(cursor) ? 1 : 0;
 		int32_t	   valid = vmcursor_is_valid(cursor) ? 1 : 0;
@@ -844,8 +844,8 @@ step()
 		return OK;
 	}
 	case OP_Insert: {
-		int32_t cursor_id = INSERT_CURSOR_ID(*inst);
-		int32_t key_reg = INSERT_KEY_REG(*inst);
+		int32_t cursor_id = INSERT_CURSOR_ID();
+		int32_t key_reg = INSERT_KEY_REG();
 
 		VmCursor   *cursor = &VM.cursors[cursor_id];
 		TypedValue *first = &VM.registers[key_reg];
@@ -894,8 +894,8 @@ step()
 		return OK;
 	}
 	case OP_Update: {
-		int32_t	  cursor_id = UPDATE_CURSOR_ID(*inst);
-		int32_t	  record_reg = UPDATE_RECORD_REG(*inst);
+		int32_t	  cursor_id = UPDATE_CURSOR_ID();
+		int32_t	  record_reg = UPDATE_RECORD_REG();
 		VmCursor *cursor = &VM.cursors[cursor_id];
 		uint8_t	  data[cursor->layout.record_size];
 		uint32_t  record_count = cursor->layout.layout.size() - 1;
@@ -947,9 +947,9 @@ step()
 		return ABORT;
 	}
 	case OP_Pack: {
-		int32_t dest = PACK2_DEST_REG(*inst);
-		int32_t left = PACK2_LEFT_REG(*inst);
-		int32_t right = PACK2_RIGHT_REG(*inst);
+		int32_t dest = PACK2_DEST_REG();
+		int32_t left = PACK2_LEFT_REG();
+		int32_t right = PACK2_RIGHT_REG();
 
 		TypedValue *a = &VM.registers[left];
 		TypedValue *b = &VM.registers[right];
@@ -981,8 +981,8 @@ step()
 	}
 
 	case OP_Unpack: {
-		int32_t first_dest = UNPACK2_FIRST_DEST_REG(*inst);
-		int32_t src = UNPACK2_SRC_REG(*inst);
+		int32_t first_dest = UNPACK2_FIRST_DEST_REG();
+		int32_t src = UNPACK2_SRC_REG();
 
 		TypedValue *dual_val = &VM.registers[src];
 
@@ -1028,12 +1028,12 @@ step()
 // ============================================================================
 
 VM_RESULT
-vm_execute(VMInstruction *instructions, int instruction_count, MemoryContext *ctx)
+vm_execute(VMInstruction *instructions, int instruction_count)
 {
 	reset();
 	VM.program = instructions;
 	VM.program_size = instruction_count;
-	VM.ctx = ctx;
+
 
 	if (_debug)
 	{
