@@ -32,13 +32,13 @@ print_result_callback(TypedValue *result, size_t count)
 }
 
 void
-bootstrap_catalog_from_master()
+load_catalog_from_master()
 {
 	// Set the callback
 	vm_set_result_callback(catalog_bootstrap_callback);
 
 	// Run your existing master table scan
-	ProgramBuilder prog;
+	ProgramBuilder prog = {};
 	auto		   cctx = from_structure(catalog[MASTER_CATALOG]);
 	int			   cursor = prog.open_cursor(&cctx);
 	int			   is_at_end = prog.rewind(cursor, false);
@@ -56,12 +56,18 @@ bootstrap_catalog_from_master()
 	// Restore normal callback
 	vm_set_result_callback(print_result_callback);
 }
+
+void
+reload_catalog()
+{
+	catalog.clear();
+	bootstrap_master(false);
+	load_catalog_from_master();
+}
+
 int
 main()
 {
-
-	bool go = false;
-label:
 	arena::init<global_arena>();
 	arena::init<catalog_arena>();
 	arena::init<parser_arena>();
@@ -69,7 +75,8 @@ label:
 	bootstrap_master(!existed);
 	if (existed)
 	{
-		bootstrap_catalog_from_master();
+
+		load_catalog_from_master();
 	}
 
 	const char *stm = "CREATE TABLE X (id INT);";
@@ -90,23 +97,10 @@ label:
 
 	auto program = compile_program(result);
 
-	// if (OK!= vm_execute(program.data, program.size))
-	// {
-	// 	std::cout << "error\n";
-	// }
-
-	// vm_set_result_callback(print_result_callback);
+	if (OK != vm_execute(program.data, program.size))
+	{
+		reload_catalog();
+	}
 
 	pager_close();
-	if (!go)
-	{
-		go = true;
-		catalog.clear();
-		goto label;
-	}
-
-	for (auto [a, b] : catalog)
-	{
-		std::cout << a.c_str() << ",";
-	}
 }

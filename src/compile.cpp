@@ -154,7 +154,6 @@ compile_create_table_complete(Statement *stmt)
 	prog.commit_transaction();
 	prog.halt();
 
-	vm_execute(prog.instructions.data, prog.instructions.size);
 
 	return prog.instructions;
 }

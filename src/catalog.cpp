@@ -74,6 +74,8 @@ bootstrap_master(bool create)
 
 	Structure structure = Structure::from(MASTER_CATALOG, cols);
 	Layout	  layout = structure.to_layout();
+
+
 	if (create)
 	{
 		pager_begin_transaction();
