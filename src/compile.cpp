@@ -13,9 +13,11 @@ vmfunc_create_structure(TypedValue *result, TypedValue *args, uint32_t arg_count
 	catalog[table_name].storage.btree = btree_create(structure.layout[0], structure.record_size, true);
 	result->type = TYPE_U32;
 	result->data = arena::alloc<query_arena>(sizeof(uint32_t));
-	*(uint32_t*)result->data = catalog[table_name].storage.btree.root_page_index;
+	*(uint32_t *)result->data = catalog[table_name].storage.btree.root_page_index;
 	return true;
 }
+
+int i = 1;
 
 array<VMInstruction, query_arena>
 compile_create_table(Statement *stmt)
@@ -36,8 +38,8 @@ compile_create_table(Statement *stmt)
 	// 3. Prepare master catalog row data in contiguous registers
 	int row_start = prog.regs.allocate_range(5);
 
-	// type = "table"
-	prog.load(TYPE_CHAR16, prog.alloc_string("table", 16), row_start);
+
+	prog.load(alloc_u32(i++), row_start);
 
 	// name = table name
 	prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->table_name.c_str(), 32), row_start + 1);
@@ -138,7 +140,7 @@ compile_create_table_complete(Statement *stmt)
 	int row_start = prog.regs.allocate_range(5);
 
 	// Load all the master catalog fields
-	prog.load(TYPE_CHAR16, prog.alloc_string("table", 16), row_start);
+	prog.load(alloc_u32(i++), row_start);
 	prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->table_name.c_str(), 32), row_start + 1);
 	prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->table_name.c_str(), 32), row_start + 2);
 	prog.move(root_page_reg, row_start + 3); // Root page from structure creation
@@ -154,9 +156,181 @@ compile_create_table_complete(Statement *stmt)
 	prog.commit_transaction();
 	prog.halt();
 
-
 	return prog.instructions;
 }
+
+// Compile literal with optional type coercion
+int
+compile_literal(ProgramBuilder *prog, Expr *expr, DataType target_type)
+{
+	// If types match exactly, no coercion needed
+	if (expr->lit_type == target_type)
+	{
+		switch (expr->lit_type)
+		{
+		case TYPE_U32:
+			return prog->load(TYPE_U32, prog->alloc_value((uint32_t)expr->int_val));
+
+		case TYPE_CHAR32:
+			return prog->load(TYPE_CHAR32, prog->alloc_string(expr->str_val.c_str(), 32));
+
+		// Add other literal types as needed
+		default:
+			return prog->load_null();
+		}
+	}
+
+	// Handle type coercion
+	if (type_is_numeric(expr->lit_type) && type_is_numeric(target_type))
+	{
+		// Numeric coercion
+		if (type_is_unsigned(target_type))
+		{
+			uint64_t val = (uint64_t)expr->int_val;
+			switch (target_type)
+			{
+			case TYPE_U8:
+				return prog->load(TYPE_U8, prog->alloc_value((uint8_t)val));
+			case TYPE_U16:
+				return prog->load(TYPE_U16, prog->alloc_value((uint16_t)val));
+			case TYPE_U32:
+				return prog->load(TYPE_U32, prog->alloc_value((uint32_t)val));
+			case TYPE_U64:
+				return prog->load(TYPE_U64, prog->alloc_value((uint64_t)val));
+			}
+		}
+		// Add signed and float coercions...
+	}
+
+	if (type_is_string(expr->lit_type) && type_is_string(target_type))
+	{
+		// String coercion - adjust size
+		uint32_t target_size = type_size(target_type);
+		return prog->load(target_type, prog->alloc_string(expr->str_val.c_str(), target_size));
+	}
+
+	return prog->load_null(); // Fallback for unsupported coercion
+}
+
+// Compile expression with target type for coercion
+int
+compile_expression(ProgramBuilder *prog, Expr *expr, DataType target_type)
+{
+	switch (expr->type)
+	{
+	case EXPR_LITERAL:
+		return compile_literal(prog, expr, target_type);
+
+	case EXPR_NULL:
+		return prog->load_null();
+
+	// TODO: Handle other expression types
+	default:
+		return prog->load_null(); // Fallback
+	}
+}
+
+// Helper to compile a row of values into contiguous registers
+int
+compile_value_row(ProgramBuilder *prog, array<Expr *, parser_arena> *value_row, InsertStmt *stmt)
+{
+	int start_reg = prog->regs.allocate_range(value_row->size);
+
+	for (uint32_t i = 0; i < value_row->size; i++)
+	{
+		Expr	*expr = value_row->data[i];
+		uint32_t table_col_idx = stmt->sem.column_indices[i];
+		DataType target_type = stmt->sem.table->columns[table_col_idx].type;
+
+		int value_reg = compile_expression(prog, expr, target_type);
+		prog->move(value_reg, start_reg + i);
+	}
+
+	return start_reg;
+}
+
+// Compile single INSERT statement
+array<VMInstruction, query_arena>
+compile_insert(Statement *stmt)
+{
+	ProgramBuilder prog;
+	InsertStmt	  *insert_stmt = stmt->insert_stmt;
+
+	// Must be semantically resolved first
+	if (!insert_stmt->sem.is_resolved)
+	{
+		prog.halt(1); // Error
+		return prog.instructions;
+	}
+
+	prog.begin_transaction();
+
+	// Open cursor to target table
+	auto table_ctx = from_structure(*insert_stmt->sem.table);
+	int	 cursor = prog.open_cursor(&table_ctx);
+
+	// Process each value row
+	for (uint32_t row = 0; row < insert_stmt->values.size; row++)
+	{
+		prog.regs.push_scope();
+
+		auto *value_row = insert_stmt->values[row];
+		int	  start_reg = compile_value_row(&prog, value_row, insert_stmt);
+
+		// Insert the record
+		uint32_t value_count = value_row->size;
+		prog.insert_record(cursor, start_reg, value_count);
+
+		prog.regs.pop_scope();
+	}
+
+	prog.close_cursor(cursor);
+	prog.commit_transaction();
+	prog.halt();
+
+	prog.resolve_labels();
+	return prog.instructions;
+}
+
+// Optimized batch insert for large value sets
+array<VMInstruction, query_arena> compile_batch_insert(Statement* stmt) {
+    ProgramBuilder prog;
+    InsertStmt* insert_stmt = stmt->insert_stmt;
+
+    // Use same logic but with larger register allocation strategy
+    // and potentially fewer transaction boundaries for very large batches
+
+    prog.begin_transaction();
+
+    auto table_ctx = from_structure(*insert_stmt->sem.table);
+    int cursor = prog.open_cursor(&table_ctx);
+
+    // For large batches, process in chunks to avoid register exhaustion
+    const uint32_t BATCH_SIZE = 100;
+
+    for (uint32_t start = 0; start < insert_stmt->values.size; start += BATCH_SIZE) {
+        uint32_t end = (start + BATCH_SIZE < insert_stmt->values.size) ?
+                       start + BATCH_SIZE : insert_stmt->values.size;
+
+        for (uint32_t row = start; row < end; row++) {
+            prog.regs.push_scope();
+
+            auto* value_row = insert_stmt->values[row];
+            int start_reg = compile_value_row(&prog, value_row, insert_stmt);
+            prog.insert_record(cursor, start_reg, value_row->size);
+
+            prog.regs.pop_scope();
+        }
+    }
+
+    prog.close_cursor(cursor);
+    prog.commit_transaction();
+    prog.halt();
+
+    prog.resolve_labels();
+    return prog.instructions;
+}
+
 array<VMInstruction, query_arena>
 compile_program(Statement *stmt)
 {
@@ -165,5 +339,7 @@ compile_program(Statement *stmt)
 	{
 	case STMT_CREATE_TABLE:
 		return compile_create_table_complete(stmt);
+	case STMT_INSERT:
+		return compile_insert(stmt);
 	}
 }

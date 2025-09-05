@@ -1046,12 +1046,12 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 	}
 
 	void
-	append(const char *cstr)
+	append(const char *cstr, size_t s = 0)
 	{
 		if (size > 0 && data[size - 1] == '\0')
 			size--; // Remove old null terminator
 
-		size_t len = strlen(cstr);
+		size_t len = s != 0 ? s: strlen(cstr);
 		reserve(size + len + 1);
 
 		memcpy(data + size, cstr, len);

@@ -2,7 +2,7 @@
 #include "arena.hpp"
 #include "catalog.hpp"
 #include "common.hpp"
-
+#include "utils.hpp"
 #include "compile.hpp"
 #include "pager.hpp"
 #include "parser.hpp"
@@ -15,21 +15,22 @@
 #include <numeric>
 #include <chrono>
 
+bool execute_sql_statement(const char *sql);
 // #include "tests/tests_pager.hpp"
 // #include "tests/tests_parser.hpp"
-void
-print_result_callback(TypedValue *result, size_t count)
-{
-	for (int i = 0; i < count; i++)
-	{
-		result[i].print();
-		if (i != count - 1)
-		{
-			std::cout << ", ";
-		}
-	}
-	std::cout << "\n";
-}
+// void
+// print_result_callback(TypedValue *result, size_t count)
+// {
+// 	for (int i = 0; i < count; i++)
+// 	{
+// 		result[i].print();
+// 		if (i != count - 1)
+// 		{
+// 			std::cout << ", ";
+// 		}
+// 	}
+// 	std::cout << "\n";
+// }
 
 void
 load_catalog_from_master()
@@ -65,42 +66,277 @@ reload_catalog()
 	load_catalog_from_master();
 }
 
+// SQL-based table creation and data loading
+inline void
+create_all_tables_sql(bool create)
+{
+    printf("=== Creating tables using SQL CREATE TABLE statements ===\n\n");
+
+    if (!create) {
+        printf("Tables already exist, skipping creation\n");
+        return;
+    }
+
+    // Users table
+    const char* create_users_sql =
+        "CREATE TABLE users ("
+        "user_id U32 PRIMARY KEY, "
+        "username CHAR16, "
+        "email CHAR32, "
+        "age U32, "
+        "city CHAR16"
+        ");";
+
+    printf("Creating users table...\n");
+    if (!execute_sql_statement(create_users_sql)) {
+        printf("❌ Failed to create users table\n");
+        return;
+    }
+    printf("✅ Users table created\n");
+
+    // Products table
+    const char* create_products_sql =
+        "CREATE TABLE products ("
+        "product_id U32 PRIMARY KEY, "
+        "title CHAR32, "
+        "category CHAR16, "
+        "price U32, "
+        "stock U32, "
+        "brand CHAR16"
+        ");";
+
+    printf("Creating products table...\n");
+    if (!execute_sql_statement(create_products_sql)) {
+        printf("❌ Failed to create products table\n");
+        return;
+    }
+
+    printf("✅ Products table created\n");
+
+    // Orders table
+    const char* create_orders_sql =
+        "CREATE TABLE orders ("
+        "order_id U32 PRIMARY KEY, "
+        "user_id U32, "
+        "total U32, "
+        "total_quantity U32, "
+        "discount U32"
+        ");";
+
+    printf("Creating orders table...\n");
+    if (!execute_sql_statement(create_orders_sql)) {
+        printf("❌ Failed to create orders table\n");
+        return;
+    }
+    printf("✅ Orders table created\n");
+
+    printf("\n✅ All tables created successfully using SQL!\n\n");
+}
+
+// Load individual table from CSV using SQL INSERT
+inline void
+load_table_from_csv_sql(const char *csv_file, const char *table_name)
+{
+    CSVReader reader(csv_file);
+    std::vector<std::string> fields;
+
+    printf("Loading %s from %s...\n", table_name, csv_file);
+
+    int count = 0;
+    int batch_count = 0;
+    const int BATCH_SIZE = 50;
+
+    // Get table structure for column names
+    Structure* structure = catalog.get(table_name);
+    if (!structure) {
+        printf("❌ Table %s not found in catalog\n", table_name);
+        return;
+    }
+
+    // Build column list
+    string<query_arena> column_list;
+    for (uint32_t i = 0; i < structure->columns.size; i++) {
+        if (i > 0) column_list.append(", ");
+        column_list.append(structure->columns[i].name);
+    }
+
+    // Process rows one by one
+    while (reader.next_row(fields)) {
+        if (fields.size() != structure->columns.size) {
+            printf("Warning: row has %zu fields, expected %zu\n",
+                   fields.size(), structure->columns.size);
+            continue;
+        }
+
+        // Build INSERT statement
+        string<query_arena> sql;
+        sql.append("INSERT INTO ");
+        sql.append(table_name);
+        sql.append(" (");
+        sql.append(column_list);
+        sql.append(") VALUES (");
+
+        // Add values with proper formatting
+        for (size_t i = 0; i < fields.size(); i++) {
+            if (i > 0) sql.append(", ");
+
+            DataType col_type = structure->columns[i].type;
+
+            if (type_is_numeric(col_type)) {
+                // Numbers don't need quotes
+                sql.append(fields[i].c_str());
+            } else if (type_is_string(col_type)) {
+                // Strings need quotes and basic escaping
+                sql.append("'");
+                for (char c : fields[i]) {
+                    if (c == '\'') {
+                        sql.append("''");  // Escape single quotes
+                    } else {
+                        sql.append(&c, 1);
+                    }
+                }
+                sql.append("'");
+            }
+        }
+
+        sql.append(");");
+
+        // Execute the INSERT
+        if (execute_sql_statement(sql.c_str())) {
+            count++;
+        } else {
+            printf("❌ Failed to insert row %d\n", count + 1);
+        }
+
+        // Progress indicator
+        if (++batch_count >= BATCH_SIZE) {
+            printf("  Inserted %d rows...\n", count);
+            batch_count = 0;
+        }
+    }
+
+    printf("✅ Loaded %d records into %s\n", count, table_name);
+}
+
+// Load all CSV data using SQL
+inline void
+load_all_data_sql()
+{
+    printf("=== Loading data from CSV files using SQL INSERT ===\n\n");
+
+    // Load in dependency order (no foreign keys to worry about for now)
+    load_table_from_csv_sql("../users.csv", "users");
+    load_table_from_csv_sql("../products.csv", "products");
+    load_table_from_csv_sql("../orders.csv", "orders");
+
+    printf("\n✅ All data loaded successfully using SQL pipeline!\n");
+}
+
+// Execute SQL statement through full pipeline
+bool execute_sql_statement(const char *sql) {
+    // 1. Parse
+    Parser parser;
+    parser_init(&parser, sql);
+
+    Statement *stmt = parser_parse_statement(&parser);
+    if (!stmt) {
+        printf("❌ Parse error: %s\n", sql);
+        return false;
+    }
+
+    // 2. Semantic analysis
+    SemanticContext sem_ctx;
+    if (!semantic_resolve_statement(stmt, &sem_ctx)) {
+        printf("❌ Semantic error in: %s\n", sql);
+        for (uint32_t i = 0; i < sem_ctx.errors.size; i++) {
+            printf("  Error: %s", sem_ctx.errors[i].message);
+            if (sem_ctx.errors[i].context) {
+                printf(" (%s)", sem_ctx.errors[i].context);
+            }
+            printf("\n");
+        }
+        return false;
+    }
+
+    // 3. Compile to VM bytecode
+    array<VMInstruction, query_arena> program = compile_program(stmt);
+    if (program.size == 0) {
+        printf("❌ Compilation failed: %s\n", sql);
+        return false;
+    }
+
+    // 4. Execute on VM
+    VM_RESULT result = vm_execute(program.data, program.size);
+
+    if (result != OK) {
+        printf("❌ Execution failed: %s\n", sql);
+        return false;
+    }
+
+    return true;
+}
+
+// Test the SQL pipeline with sample data
+inline void
+test_sql_pipeline()
+{
+    printf("\n=== Testing SQL Pipeline ===\n");
+
+    // Test single INSERT
+    const char* test_insert =
+        "INSERT INTO users (user_id, username, email, age, city) "
+        "VALUES (9999, 'testuser', 'test@example.com', 25, 'TestCity');";
+
+    printf("Testing single INSERT...\n");
+    if (execute_sql_statement(test_insert)) {
+        printf("✅ Single INSERT successful\n");
+    } else {
+        printf("❌ Single INSERT failed\n");
+    }
+
+    // Test another table
+    const char* test_product =
+        "INSERT INTO products (product_id, title, category, price, stock, brand) "
+        "VALUES (9999, 'Test Product', 'Test Category', 100, 50, 'Test Brand');";
+
+    printf("Testing product INSERT...\n");
+    if (execute_sql_statement(test_product)) {
+        printf("✅ Product INSERT successful\n");
+    } else {
+        printf("❌ Product INSERT failed\n");
+    }
+}
+
+// Updated main test function
 int
 main()
 {
-	arena::init<global_arena>();
-	arena::init<catalog_arena>();
-	arena::init<parser_arena>();
-	bool existed = pager_open("test.db");
-	bootstrap_master(!existed);
-	if (existed)
-	{
+    arena::init<query_arena>();
+    bool existed = pager_open("relational_test.db");
 
-		load_catalog_from_master();
-	}
+    printf("=== Setting up relational database with SQL ===\n\n");
 
-	const char *stm = "CREATE TABLE X (id INT);";
-	Parser		p;
-	parser_init(&p, stm);
-	auto result = parser_parse_statement(&p);
-	// print_ast(result);
+    // Create master catalog first
+    bootstrap_master(!existed);
 
-	SemanticContext ctx;
+    if (!existed) {
+        // Create tables using SQL
+        create_all_tables_sql(true);
 
-	if (!semantic_resolve_statement(result, &ctx))
-	{
-		for (auto err : ctx.errors)
-		{
-			std::cout << err.message << "\n";
-		}
-	}
+        // Load data using SQL
+        load_all_data_sql();
 
-	auto program = compile_program(result);
+        // Test the pipeline
+        // test_sql_pipeline();
+    } else {
+        printf("Database already exists, skipping table creation and data loading\n");
+    }
 
-	if (OK != vm_execute(program.data, program.size))
-	{
-		reload_catalog();
-	}
+    // Continue with your existing tests...
+    // test_select();
+    // test_nested_loop_join();
+    // etc.
 
-	pager_close();
+    pager_close();
+    printf("\n✅ All SQL tests completed!\n");
 }

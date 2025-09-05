@@ -57,7 +57,7 @@ bootstrap_master(bool create)
 	cols.capacity = 0;
 
 	// type: "table" or "index"
-	cols.push(Column{MC_TYPE, TYPE_CHAR16});
+	cols.push(Column{MC_ID, TYPE_U32});
 
 	// name: object name
 	cols.push(Column{MC_NAME, TYPE_CHAR32});
