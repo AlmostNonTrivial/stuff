@@ -320,13 +320,33 @@ execute_sql_statement(const char *sql, bool print_as)
 
 	return true;
 }
-#include "tests/tests_parser.hpp"
-// Updated main test function
+// 71, nolanb,
+//
+// 29,
+// Jacksonville
+
+void
+test_queries()
+{
+	validation_begin(false);
+	expect_row_values({alloc_u32(71), alloc_char16("nolanb"), alloc_char32("nolan.bryant@x.dummyjson.com"),
+					   alloc_u32(29), alloc_char16("Jacksonville")
+
+	});
+
+	execute_sql_statement("SELECT * FROM users WHERE user_id > 70;");
+	validation_end();
+	    
+	validation_begin(false); 
+	
+	
+	
+}
+
 int
 main()
 {
 
-	// test_parser();
 	arena::init<query_arena>();
 	bool existed = pager_open("relational_test.db");
 
@@ -344,9 +364,7 @@ main()
 		reload_catalog();
 	}
 
-	// _debug = true;
-	execute_sql_statement("SELECT * FROM users WHERE user_id > 70;");
+	test_queries();
 
 	pager_close();
-
 }

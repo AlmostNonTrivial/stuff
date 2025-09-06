@@ -103,7 +103,7 @@ void
 catalog_bootstrap_callback(TypedValue *result, size_t count)
 {
 
-	print_result_callback(result, count);
+	// print_result_callback(result, count);
 
 	// Master catalog layout: type, name, tbl_name, rootpage, sql
 	if (count != 5)
@@ -125,7 +125,7 @@ catalog_bootstrap_callback(TypedValue *result, size_t count)
 		master->next_key = key + 1;
 	}
 
-	printf("Bootstrapping table: %s (root page: %u)\n", name, rootpage);
+	// printf("Bootstrapping table: %s (root page: %u)\n", name, rootpage);
 
 	array<Column> columns;
 	Parser parser;

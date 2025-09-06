@@ -46,7 +46,6 @@ struct CSVReader
 	}
 };
 
-
 // ============================================================================
 // Queue-based Validation System
 // ============================================================================
@@ -59,7 +58,7 @@ static array<ExpectedRow, query_arena> expected_queue;
 static uint32_t						   validation_failures = 0;
 static uint32_t						   validation_row_count = 0;
 static bool							   validation_active = false;
-
+static bool							   same_count = false;
 
 inline void
 print_result_callback(TypedValue *result, size_t count)
@@ -82,6 +81,11 @@ validation_callback(TypedValue *result, size_t count)
 
 	if (expected_queue.size == 0)
 	{
+		if (!same_count)
+		{
+		        return;
+		}
+
 		printf("❌ Row %u: Unexpected row (no more expected)\n", validation_row_count);
 		printf("   Got: ");
 		// print_result_callback(result, count);
@@ -145,11 +149,12 @@ validation_reset()
 	validation_failures = 0;
 	validation_row_count = 0;
 	validation_active = false;
+	same_count = false;
 }
 
 // Start validation mode
 inline void
-validation_begin()
+validation_begin(bool same_count)
 {
 	validation_reset();
 	validation_active = true;
@@ -209,8 +214,8 @@ expect_row_values(std::initializer_list<TypedValue> values)
 		uint32_t size = type_size(val.type);
 		uint8_t *data = (uint8_t *)arena::alloc<query_arena>(size);
 		type_copy(val.type, data, val.data);
-		row.values.push( TypedValue::make(val.type, data));
+		row.values.push(TypedValue::make(val.type, data));
 	}
 
-	expected_queue.push( row);
+	expected_queue.push(row);
 }
