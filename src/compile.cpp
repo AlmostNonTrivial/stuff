@@ -17,58 +17,8 @@ vmfunc_create_structure(TypedValue *result, TypedValue *args, uint32_t arg_count
 	return true;
 }
 
-int i = 1;
-
-array<VMInstruction, query_arena>
-compile_create_table(Statement *stmt)
-{
-	ProgramBuilder	 prog;
-	CreateTableStmt *create_stmt = stmt->create_table_stmt;
-
-	prog.begin_transaction();
-
-	// 1. Create the actual table structure
-	int table_name_reg = prog.load(TYPE_CHAR16, prog.alloc_string(create_stmt->table_name.c_str(), 16));
-	int structure_reg = prog.call_function(vmfunc_create_structure, table_name_reg, 1);
-
-	// 2. Open cursor to master catalog (always at root page 1)
-	auto master_ctx = from_structure(catalog[MASTER_CATALOG]);
-	int	 master_cursor = prog.open_cursor(&master_ctx);
-
-	// 3. Prepare master catalog row data in contiguous registers
-	int row_start = prog.regs.allocate_range(5);
 
 
-	prog.load(alloc_u32(i++), row_start);
-
-	// name = table name
-	prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->table_name.c_str(), 32), row_start + 1);
-
-	// tbl_name = table name (same as name for tables)
-	prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->table_name.c_str(), 32), row_start + 2);
-
-	// rootpage = root page number from created structure
-	// TODO: Need a way to get the root page number from vmfunc_create_structure
-	// For now, assume it returns the root page number
-	prog.move(structure_reg, row_start + 3);
-
-	// sql = original CREATE statement (reconstruct or store original)
-	// For simplicity, create a minimal CREATE statement
-	char *sql_text = (char *)arena::alloc<query_arena>(256);
-	snprintf(sql_text, 256, "CREATE TABLE %s (...)", create_stmt->table_name.c_str());
-	prog.load(TYPE_CHAR256, prog.alloc_string(sql_text, 256), row_start + 4);
-
-	// 4. Insert the row into master catalog
-	prog.insert_record(master_cursor, row_start, 5);
-
-	// 5. Close master catalog cursor
-	prog.close_cursor(master_cursor);
-
-	prog.commit_transaction();
-	prog.halt();
-
-	return prog.instructions;
-}
 
 // Helper function to reconstruct CREATE TABLE SQL from AST
 const char *
@@ -132,15 +82,16 @@ compile_create_table_complete(Statement *stmt)
 	int table_name_reg = prog.load(TYPE_CHAR16, prog.alloc_string(create_stmt->table_name.c_str(), 16));
 	int root_page_reg = prog.call_function(vmfunc_create_structure, table_name_reg, 1);
 
+	Structure &stru = catalog[MASTER_CATALOG];
 	// 2. Open cursor to master catalog
-	auto master_ctx = from_structure(catalog[MASTER_CATALOG]);
+	auto master_ctx = from_structure(stru);
 	int	 master_cursor = prog.open_cursor(&master_ctx);
 
 	// 3. Prepare master catalog row in contiguous registers
 	int row_start = prog.regs.allocate_range(5);
 
 	// Load all the master catalog fields
-	prog.load(alloc_u32(i++), row_start);
+	prog.load(alloc_u32(stru.next_key++), row_start);
 	prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->table_name.c_str(), 32), row_start + 1);
 	prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->table_name.c_str(), 32), row_start + 2);
 	prog.move(root_page_reg, row_start + 3); // Root page from structure creation

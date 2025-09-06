@@ -1,9 +1,11 @@
 #include "catalog.hpp"
 #include "arena.hpp"
+#include "compile.hpp"
 #include "pager.hpp"
 #include "parser.hpp"
 #include "types.hpp"
 #include <cassert>
+#include <cstdint>
 
 #include "utils.hpp"
 
@@ -48,8 +50,6 @@ Structure::from(const char *name, array<Column> cols)
 	return structure;
 }
 
-
-
 void
 bootstrap_master(bool create)
 {
@@ -76,7 +76,6 @@ bootstrap_master(bool create)
 
 	Structure structure = Structure::from(MASTER_CATALOG, cols);
 	Layout	  layout = structure.to_layout();
-
 
 	if (create)
 	{
@@ -135,20 +134,25 @@ catalog_bootstrap_callback(TypedValue *result, size_t count)
 
 	print_result_callback(result, count);
 
-
 	// Master catalog layout: type, name, tbl_name, rootpage, sql
 	if (count != 5)
 		return;
 
-	const char *type = result[0].as_char();
-	const char *name = result[1].as_char();
-	const char *tbl_name = result[2].as_char();
-	uint32_t	rootpage = result[3].as_u32();
-	const char *sql = result[4].as_char();
+	const uint32_t key = result[0].as_u32();
+	const char	  *name = result[1].as_char();
+	const char	  *tbl_name = result[2].as_char();
+	uint32_t	   rootpage = result[3].as_u32();
+	const char	  *sql = result[4].as_char();
 
 	// Skip the master catalog itself to avoid recursion
 	if (strcmp(name, MASTER_CATALOG) == 0)
 		return;
+
+	auto master = catalog.get(MASTER_CATALOG);
+	if (master->next_key <= key)
+	{
+		master->next_key = key + 1;
+	}
 
 	printf("Bootstrapping table: %s (root page: %u)\n", name, rootpage);
 

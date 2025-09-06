@@ -54,6 +54,7 @@ struct Layout
 struct Structure
 {
 	const char *name;
+	uint32_t next_key = 0; // just for master
 	union {
 		btree btree;
 	} storage;
