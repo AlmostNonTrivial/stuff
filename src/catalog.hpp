@@ -26,6 +26,8 @@ struct Layout
 	static Layout
 	create(array<DataType> &column_types);
 
+
+
 	uint32_t
 	count()
 	{

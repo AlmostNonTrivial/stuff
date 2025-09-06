@@ -80,16 +80,6 @@ from_structure(Structure &structure)
 	return cctx;
 }
 
-CursorContext
-red_black(Layout &layout, bool allow_duplicates = true)
-{
-	CursorContext cctx;
-	cctx.type = RED_BLACK;
-	cctx.layout = layout;
-	cctx.flags = allow_duplicates;
-	return cctx;
-}
-
 void
 print_result_callback(TypedValue *result, size_t count)
 {
@@ -222,7 +212,6 @@ std::vector<Column> user_followers = {
 	Column{FOLLOWER_ID, TYPE_U32}, // FK to users
 	Column{FOLLOWED_ID, TYPE_U32}  // FK to users
 };
-
 
 inline static void
 create_all_tables(bool create)

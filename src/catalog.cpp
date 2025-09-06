@@ -12,6 +12,8 @@
 hash_map<string<catalog_arena>, Structure, catalog_arena>			  catalog;
 hash_map<string<catalog_arena>, string<catalog_arena>, catalog_arena> table_to_index;
 
+
+
 Layout
 Structure::to_layout()
 {

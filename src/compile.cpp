@@ -3,6 +3,17 @@
 #include "common.hpp"
 #include "parser.hpp"
 #include "vm.hpp"
+#include <cstdint>
+
+CursorContext
+red_black(Layout &layout, bool allow_duplicates = true)
+{
+	CursorContext cctx;
+	cctx.type = RED_BLACK;
+	cctx.layout = layout;
+	cctx.flags = allow_duplicates;
+	return cctx;
+}
 
 bool
 vmfunc_create_structure(TypedValue *result, TypedValue *args, uint32_t arg_count)
@@ -57,6 +68,8 @@ compile_create_table_complete(Statement *stmt)
 
 	return prog.instructions;
 }
+
+
 
 array<VMInstruction, query_arena>
 compile_create_index(Statement *stmt)
@@ -517,100 +530,384 @@ compile_delete_forward(Statement *stmt)
 	return prog.instructions;
 }
 
-// Compile SELECT statement
+// compile_select_simple.cpp
+// Simplified SELECT compilation - only *, columns, and DISTINCT
+
 array<VMInstruction, query_arena>
 compile_select(Statement *stmt)
 {
-	ProgramBuilder prog;
-	SelectStmt	  *select_stmt = stmt->select_stmt;
+    ProgramBuilder prog;
+    SelectStmt *select_stmt = stmt->select_stmt;
 
-	// Must be semantically resolved first
-	if (!select_stmt->sem.is_resolved)
-	{
-		prog.halt(1); // Error
-		return prog.instructions;
-	}
+    // Must be semantically resolved first
+    if (!select_stmt->sem.is_resolved)
+    {
+        prog.halt(1);
+        return prog.instructions;
+    }
 
-	Structure *table = select_stmt->from_table->sem.resolved;
+    Structure *table = select_stmt->from_table->sem.resolved;
 
-	// Open cursor to table
-	auto table_ctx = from_structure(*table);
-	int	 cursor = prog.open_cursor(&table_ctx);
+    // Handle DISTINCT - use ephemeral tree for deduplication
+    if (select_stmt->is_distinct)
+    {
+        // For DISTINCT, we'll use an ephemeral red-black tree
+        // Create layout based on SELECT list columns only (no expressions)
+        Layout distinct_layout;
 
-	// Begin scan
-	int	 at_end = prog.first(cursor);
-	auto scan_loop = prog.begin_while(at_end);
-	{
-		prog.regs.push_scope();
+        // Check if SELECT *
+        bool is_select_star = (select_stmt->select_list.size == 1 &&
+                              select_stmt->select_list[0]->type == EXPR_STAR);
 
-		// Apply WHERE filter if present
-		bool		has_where = (select_stmt->where_clause != nullptr);
-		CondContext where_ctx;
+        if (is_select_star)
+        {
+            distinct_layout = table->to_layout();
+        }
+        else
+        {
 
-		if (has_where)
-		{
-			int where_result = compile_where_expr(&prog, select_stmt->where_clause, cursor);
-			where_ctx = prog.begin_if(where_result);
-		}
 
-		// Generate result based on SELECT list
-		int result_start = -1;
-		int result_count = 0;
+            for (uint32_t i = 0; i < select_stmt->select_list.size; i++)
+            {
+                Expr *expr = select_stmt->select_list[i];
+                uint32_t offset = 0;
+                if (expr->type != EXPR_COLUMN)
+                {
+                    prog.halt(1);
+                    return prog.instructions;
+                }
+                auto type = table->columns[expr->sem.column_index].type;
+                distinct_layout.layout.push(type);
+                distinct_layout.offsets.push(offset);
+                offset+=type_size(type);
+            }
+        }
 
-		// Check if we have SELECT *
-		bool is_select_star = (select_stmt->select_list.size == 1 && select_stmt->select_list[0]->type == EXPR_STAR);
+        auto table_ctx = from_structure(*table);
+        auto distinct_ctx = red_black(distinct_layout, false);
 
-		if (is_select_star)
-		{
-			// SELECT * - get all columns
-			result_start = prog.get_columns(cursor, 0, table->columns.size);
-			result_count = table->columns.size;
-		}
-		else
-		{
-			// Specific columns/expressions
-			result_start = prog.regs.allocate_range(select_stmt->select_list.size);
+        int main_cursor = prog.open_cursor(&table_ctx);
+        int distinct_cursor = prog.open_cursor(&distinct_ctx);
 
-			for (uint32_t i = 0; i < select_stmt->select_list.size; i++)
-			{
-				Expr *expr = select_stmt->select_list[i];
-				int	  value_reg = -1;
+        // Phase 1: Scan table and insert distinct rows into ephemeral tree
+        int at_end = prog.first(main_cursor);
+        auto scan_loop = prog.begin_while(at_end);
+        {
+            prog.regs.push_scope();
 
-				if (expr->type == EXPR_COLUMN)
-				{
-					value_reg = prog.get_column(cursor, expr->sem.column_index);
-				}
-				else
-				{
-					// Compile other expression types
-					value_reg = compile_where_expr(&prog, expr, cursor);
-				}
+            // Apply WHERE filter if present
+            if (select_stmt->where_clause)
+            {
+                int where_result = compile_where_expr(&prog, select_stmt->where_clause, main_cursor);
+                auto where_ctx = prog.begin_if(where_result);
+                {
+                    // Build the row to insert
+                    int result_start;
+                    int result_count;
 
-				prog.move(value_reg, result_start + i);
-			}
-			result_count = select_stmt->select_list.size;
-		}
+                    if (is_select_star)
+                    {
+                        // Get all columns
+                        result_start = prog.get_columns(main_cursor, 0, table->columns.size);
+                        result_count = table->columns.size;
+                    }
+                    else
+                    {
+                        // Get selected columns only
+                        result_start = prog.regs.allocate_range(select_stmt->select_list.size);
+                        for (uint32_t i = 0; i < select_stmt->select_list.size; i++)
+                        {
+                            Expr *expr = select_stmt->select_list[i];
+                            int col_reg = prog.get_column(main_cursor, expr->sem.column_index);
+                            prog.move(col_reg, result_start + i);
+                        }
+                        result_count = select_stmt->select_list.size;
+                    }
 
-		// Emit result row
-		prog.result(result_start, result_count);
+                    // Insert into distinct tree (duplicates will be ignored)
+                    prog.insert_record(distinct_cursor, result_start, result_count);
+                }
+                prog.end_if(where_ctx);
+            }
+            else
+            {
+                // No WHERE clause - insert all rows
+                int result_start;
+                int result_count;
 
-		if (has_where)
-		{
-			prog.end_if(where_ctx);
-		}
+                if (is_select_star)
+                {
+                    result_start = prog.get_columns(main_cursor, 0, table->columns.size);
+                    result_count = table->columns.size;
+                }
+                else
+                {
+                    result_start = prog.regs.allocate_range(select_stmt->select_list.size);
+                    for (uint32_t i = 0; i < select_stmt->select_list.size; i++)
+                    {
+                        Expr *expr = select_stmt->select_list[i];
+                        int col_reg = prog.get_column(main_cursor, expr->sem.column_index);
+                        prog.move(col_reg, result_start + i);
+                    }
+                    result_count = select_stmt->select_list.size;
+                }
 
-		prog.regs.pop_scope();
+                prog.insert_record(distinct_cursor, result_start, result_count);
+            }
 
-		// Move to next row
-		prog.next(cursor, at_end);
-	}
-	prog.end_while(scan_loop);
+            prog.regs.pop_scope();
+            prog.next(main_cursor, at_end);
+        }
+        prog.end_while(scan_loop);
 
-	prog.close_cursor(cursor);
-	prog.halt();
+        // Phase 2: Output all rows from distinct tree
+        at_end = prog.first(distinct_cursor);
+        auto output_loop = prog.begin_while(at_end);
+        {
+            int row_count = is_select_star ? table->columns.size : select_stmt->select_list.size;
+            int row = prog.get_columns(distinct_cursor, 0, row_count);
+            prog.result(row, row_count);
+            prog.next(distinct_cursor, at_end);
+        }
+        prog.end_while(output_loop);
 
-	prog.resolve_labels();
-	return prog.instructions;
+        prog.close_cursor(main_cursor);
+        prog.close_cursor(distinct_cursor);
+    }
+    else
+    {
+        // Non-DISTINCT regular scan
+        auto table_ctx = from_structure(*table);
+        int cursor = prog.open_cursor(&table_ctx);
+
+        int at_end = prog.first(cursor);
+        auto scan_loop = prog.begin_while(at_end);
+        {
+            prog.regs.push_scope();
+
+            // Apply WHERE filter if present
+            bool has_where = (select_stmt->where_clause != nullptr);
+            CondContext where_ctx;
+
+            if (has_where)
+            {
+                int where_result = compile_where_expr(&prog, select_stmt->where_clause, cursor);
+                where_ctx = prog.begin_if(where_result);
+            }
+
+            // Generate result based on SELECT list
+            int result_start = -1;
+            int result_count = 0;
+
+            // Check if we have SELECT *
+            bool is_select_star = (select_stmt->select_list.size == 1 &&
+                                  select_stmt->select_list[0]->type == EXPR_STAR);
+
+            if (is_select_star)
+            {
+                // SELECT * - get all columns
+                result_start = prog.get_columns(cursor, 0, table->columns.size);
+                result_count = table->columns.size;
+            }
+            else
+            {
+                // Get specific columns only (no expressions)
+                result_start = prog.regs.allocate_range(select_stmt->select_list.size);
+
+                for (uint32_t i = 0; i < select_stmt->select_list.size; i++)
+                {
+                    Expr *expr = select_stmt->select_list[i];
+
+                    if (expr->type != EXPR_COLUMN)
+                    {
+                        // Expression not supported in SELECT list - only columns
+                        // Load NULL as placeholder
+                        int null_reg = prog.load_null();
+                        prog.move(null_reg, result_start + i);
+                    }
+                    else
+                    {
+                        // Get column value
+                        int value_reg = prog.get_column(cursor, expr->sem.column_index);
+                        prog.move(value_reg, result_start + i);
+                    }
+                }
+                result_count = select_stmt->select_list.size;
+            }
+
+            // Emit result row
+            prog.result(result_start, result_count);
+
+            if (has_where)
+            {
+                prog.end_if(where_ctx);
+            }
+
+            prog.regs.pop_scope();
+            prog.next(cursor, at_end);
+        }
+        prog.end_while(scan_loop);
+
+        prog.close_cursor(cursor);
+    }
+
+    prog.halt();
+    prog.resolve_labels();
+    return prog.instructions;
+}
+// Compile any expression (not just WHERE expressions)
+int
+compile_expr(ProgramBuilder *prog, Expr *expr, int cursor_id)
+{
+    switch (expr->type)
+    {
+    case EXPR_COLUMN: {
+        // Load column value from cursor
+        return prog->get_column(cursor_id, expr->sem.column_index);
+    }
+
+    case EXPR_LITERAL: {
+        // Use the resolved type from semantic analysis
+        DataType target = expr->sem.resolved_type;
+        if (target == TYPE_NULL)
+        {
+            target = expr->lit_type;
+        }
+        return compile_literal(prog, expr, target);
+    }
+
+    case EXPR_BINARY_OP: {
+        // Recursively compile operands
+        int left_reg = compile_expr(prog, expr->left, cursor_id);
+        int right_reg = compile_expr(prog, expr->right, cursor_id);
+
+        // Generate operation
+        switch (expr->op)
+        {
+        // Comparison operators
+        case OP_EQ:
+            return prog->eq(left_reg, right_reg);
+        case OP_NE:
+            return prog->ne(left_reg, right_reg);
+        case OP_LT:
+            return prog->lt(left_reg, right_reg);
+        case OP_LE:
+            return prog->le(left_reg, right_reg);
+        case OP_GT:
+            return prog->gt(left_reg, right_reg);
+        case OP_GE:
+            return prog->ge(left_reg, right_reg);
+
+        // Logical operators
+        case OP_AND:
+            return prog->logic_and(left_reg, right_reg);
+        case OP_OR:
+            return prog->logic_or(left_reg, right_reg);
+
+        // Arithmetic operators
+        case OP_ADD:
+            return prog->add(left_reg, right_reg);
+        case OP_SUB:
+            return prog->sub(left_reg, right_reg);
+        case OP_MUL:
+            return prog->mul(left_reg, right_reg);
+        case OP_DIV:
+            return prog->div(left_reg, right_reg);
+        case OP_MOD:
+            return prog->mod(left_reg, right_reg);
+
+        case OP_IN: {
+            // Handle IN operator with list
+            if (expr->right->type == EXPR_LIST)
+            {
+                // Start with false
+                int result = prog->load(TYPE_U32, prog->alloc_value(0U));
+
+                // Check each value in list
+                for (uint32_t i = 0; i < expr->right->list_items.size; i++)
+                {
+                    int item_reg = compile_expr(prog, expr->right->list_items[i], cursor_id);
+                    int match = prog->eq(left_reg, item_reg);
+                    result = prog->logic_or(result, match);
+                }
+                return result;
+            }
+            return prog->load_null();
+        }
+
+        case OP_LIKE: {
+            // Call LIKE function if available
+            // return prog->call_function(vmfunc_like, left_reg, 2);
+        }
+
+        default:
+            return prog->load_null();
+        }
+    }
+
+    case EXPR_UNARY_OP: {
+        int operand_reg = compile_expr(prog, expr->operand, cursor_id);
+
+        if (expr->unary_op == OP_NOT)
+        {
+            // For NOT, we need to invert the boolean value
+            int one = prog->load(TYPE_U32, prog->alloc_value(1U));
+            return prog->sub(one, operand_reg); // 1 - x inverts boolean
+        }
+        else if (expr->unary_op == OP_NEG)
+        {
+            // For negation, subtract from zero
+            int zero = prog->load(TYPE_U32, prog->alloc_value(0U));
+            return prog->sub(zero, operand_reg);
+        }
+
+        return operand_reg;
+    }
+
+    case EXPR_FUNCTION: {
+        // Handle aggregate and scalar functions
+        if (expr->sem.is_aggregate)
+        {
+            // Aggregate functions need special handling
+            // For now, return a placeholder
+            return prog->load_null();
+        }
+        else
+        {
+            // // Scalar functions
+            // if (strcasecmp(expr->func_name.c_str(), "UPPER") == 0)
+            // {
+            //     int arg_reg = compile_expr(prog, expr->args[0], cursor_id);
+            //     return prog->call_function(vmfunc_upper, arg_reg, 1);
+            // }
+            // else if (strcasecmp(expr->func_name.c_str(), "LOWER") == 0)
+            // {
+            //     int arg_reg = compile_expr(prog, expr->args[0], cursor_id);
+            //     return prog->call_function(vmfunc_lower, arg_reg, 1);
+            // }
+            // else if (strcasecmp(expr->func_name.c_str(), "LENGTH") == 0)
+            // {
+            //     int arg_reg = compile_expr(prog, expr->args[0], cursor_id);
+            //     return prog->call_function(vmfunc_length, arg_reg, 1);
+            // }
+            // Add more functions as needed
+            return prog->load_null();
+        }
+    }
+
+    case EXPR_NULL: {
+        return prog->load_null();
+    }
+
+    case EXPR_STAR: {
+        // Should not reach here for individual expression compilation
+        // SELECT * is handled at a higher level
+        return prog->load_null();
+    }
+
+    default:
+        return prog->load_null();
+    }
 }
 
 bool

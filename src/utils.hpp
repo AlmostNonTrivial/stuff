@@ -191,7 +191,7 @@ validation_end()
 
 	if (success)
 	{
-		printf("✅ All %u rows validated successfully\n", validation_row_count);
+
 	}
 	else
 	{
