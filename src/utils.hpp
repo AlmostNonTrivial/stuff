@@ -61,7 +61,7 @@ static uint32_t						   validation_row_count = 0;
 static bool							   validation_active = false;
 
 
-void
+inline void
 print_result_callback(TypedValue *result, size_t count)
 {
 	for (int i = 0; i < count; i++)
@@ -75,7 +75,7 @@ print_result_callback(TypedValue *result, size_t count)
 	std::cout << "\n";
 }
 // Validation callback
-void
+inline void
 validation_callback(TypedValue *result, size_t count)
 {
 	validation_row_count++;
@@ -163,7 +163,7 @@ validation_end()
 {
 	validation_active = false;
 
-	// vm_set_result_callback(print_result_callback);
+	vm_set_result_callback(print_result_callback);
 
 	bool success = (validation_failures == 0);
 

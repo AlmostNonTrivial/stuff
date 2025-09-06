@@ -5,6 +5,8 @@
 #include "types.hpp"
 #include <cassert>
 
+#include "utils.hpp"
+
 hash_map<string<catalog_arena>, Structure, catalog_arena> catalog;
 
 Layout
@@ -130,6 +132,10 @@ parse_create_sql_for_columns(const char *sql)
 void
 catalog_bootstrap_callback(TypedValue *result, size_t count)
 {
+
+	print_result_callback(result, count);
+
+
 	// Master catalog layout: type, name, tbl_name, rootpage, sql
 	if (count != 5)
 		return;
@@ -139,10 +145,6 @@ catalog_bootstrap_callback(TypedValue *result, size_t count)
 	const char *tbl_name = result[2].as_char();
 	uint32_t	rootpage = result[3].as_u32();
 	const char *sql = result[4].as_char();
-
-	// Only handle tables for now (could extend for indexes)
-	if (strcmp(type, "table") != 0)
-		return;
 
 	// Skip the master catalog itself to avoid recursion
 	if (strcmp(name, MASTER_CATALOG) == 0)
@@ -158,6 +160,7 @@ catalog_bootstrap_callback(TypedValue *result, size_t count)
 
 	// Set up the btree with the existing root page (don't create new)
 	structure.storage.btree = btree_create(structure.to_layout().key_type(), structure.to_layout().record_size, false);
+	structure.storage.btree.root_page_index = rootpage;
 
 	// Add to catalog
 	catalog.insert(name, structure);

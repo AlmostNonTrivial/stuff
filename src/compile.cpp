@@ -331,15 +331,161 @@ array<VMInstruction, query_arena> compile_batch_insert(Statement* stmt) {
     return prog.instructions;
 }
 
+// ============================================================================
+// NEW: SELECT compilation functions
+// ============================================================================
+
+// Compile WHERE clause expression
+int compile_where_expr(ProgramBuilder* prog, Expr* expr, int cursor_id) {
+    switch (expr->type) {
+        case EXPR_COLUMN: {
+            // Load column value from cursor
+            return prog->get_column(cursor_id, expr->sem.column_index);
+        }
+
+        case EXPR_LITERAL: {
+            return compile_literal(prog, expr, expr->sem.resolved_type);
+        }
+
+        case EXPR_BINARY_OP: {
+            // Compile left and right operands
+            int left_reg = compile_where_expr(prog, expr->left, cursor_id);
+            int right_reg = compile_where_expr(prog, expr->right, cursor_id);
+
+            // Generate comparison/arithmetic operation
+            switch (expr->op) {
+                case OP_EQ:  return prog->eq(left_reg, right_reg);
+                case OP_NE:  return prog->ne(left_reg, right_reg);
+                case OP_LT:  return prog->lt(left_reg, right_reg);
+                case OP_LE:  return prog->le(left_reg, right_reg);
+                case OP_GT:  return prog->gt(left_reg, right_reg);
+                case OP_GE:  return prog->ge(left_reg, right_reg);
+
+                case OP_AND: return prog->logic_and(left_reg, right_reg);
+                case OP_OR:  return prog->logic_or(left_reg, right_reg);
+
+                case OP_ADD: return prog->add(left_reg, right_reg);
+                case OP_SUB: return prog->sub(left_reg, right_reg);
+                case OP_MUL: return prog->mul(left_reg, right_reg);
+                case OP_DIV: return prog->div(left_reg, right_reg);
+                case OP_MOD: return prog->mod(left_reg, right_reg);
+
+                default:
+                    return prog->load_null();
+            }
+        }
+
+        case EXPR_NULL: {
+            return prog->load_null();
+        }
+
+        // TODO: Handle other expression types
+        default:
+            return prog->load_null();
+    }
+}
+
+// Compile SELECT statement
+array<VMInstruction, query_arena> compile_select(Statement* stmt) {
+    ProgramBuilder prog;
+    SelectStmt* select_stmt = stmt->select_stmt;
+
+    // Must be semantically resolved first
+    if (!select_stmt->sem.is_resolved) {
+        prog.halt(1); // Error
+        return prog.instructions;
+    }
+
+    Structure* table = select_stmt->from_table->sem.resolved;
+
+    // Open cursor to table
+    auto table_ctx = from_structure(*table);
+    int cursor = prog.open_cursor(&table_ctx);
+
+    // Begin scan
+    int at_end = prog.first(cursor);
+    auto scan_loop = prog.begin_while(at_end);
+    {
+        prog.regs.push_scope();
+
+        // Apply WHERE filter if present
+        bool has_where = (select_stmt->where_clause != nullptr);
+        CondContext where_ctx;
+
+        if (has_where) {
+            int where_result = compile_where_expr(&prog, select_stmt->where_clause, cursor);
+            where_ctx = prog.begin_if(where_result);
+        }
+
+        // Generate result based on SELECT list
+        int result_start = -1;
+        int result_count = 0;
+
+        // Check if we have SELECT *
+        bool is_select_star = (select_stmt->select_list.size == 1 &&
+                              select_stmt->select_list[0]->type == EXPR_STAR);
+
+        if (is_select_star) {
+            // SELECT * - get all columns
+            result_start = prog.get_columns(cursor, 0, table->columns.size);
+            result_count = table->columns.size;
+        } else {
+            // Specific columns/expressions
+            result_start = prog.regs.allocate_range(select_stmt->select_list.size);
+
+            for (uint32_t i = 0; i < select_stmt->select_list.size; i++) {
+                Expr* expr = select_stmt->select_list[i];
+                int value_reg = -1;
+
+                if (expr->type == EXPR_COLUMN) {
+                    value_reg = prog.get_column(cursor, expr->sem.column_index);
+                } else {
+                    // Compile other expression types
+                    value_reg = compile_where_expr(&prog, expr, cursor);
+                }
+
+                prog.move(value_reg, result_start + i);
+            }
+            result_count = select_stmt->select_list.size;
+        }
+
+        // Emit result row
+        prog.result(result_start, result_count);
+
+        if (has_where) {
+            prog.end_if(where_ctx);
+        }
+
+        prog.regs.pop_scope();
+
+        // Move to next row
+        prog.next(cursor, at_end);
+    }
+    prog.end_while(scan_loop);
+
+    prog.close_cursor(cursor);
+    prog.halt();
+
+    prog.resolve_labels();
+    return prog.instructions;
+}
+
+// Main dispatch function
 array<VMInstruction, query_arena>
 compile_program(Statement *stmt)
 {
-
 	switch (stmt->type)
 	{
+	case STMT_SELECT:
+		return compile_select(stmt);
 	case STMT_CREATE_TABLE:
 		return compile_create_table_complete(stmt);
 	case STMT_INSERT:
 		return compile_insert(stmt);
+	default:
+		// Return empty program with error halt
+		ProgramBuilder prog;
+		prog.halt(1);
+		return prog.instructions;
 	}
 }

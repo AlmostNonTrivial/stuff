@@ -15,7 +15,7 @@
 #include <numeric>
 #include <chrono>
 
-bool execute_sql_statement(const char *sql);
+bool execute_sql_statement(const char *sql, bool asda  = false);
 // #include "tests/tests_pager.hpp"
 // #include "tests/tests_parser.hpp"
 // void
@@ -233,16 +233,22 @@ load_all_data_sql()
 }
 
 // Execute SQL statement through full pipeline
-bool execute_sql_statement(const char *sql) {
+bool execute_sql_statement(const char *sql, bool print_as) {
     // 1. Parse
     Parser parser;
     parser_init(&parser, sql);
 
     Statement *stmt = parser_parse_statement(&parser);
+
+    if(print_as) {
+        print_ast(stmt);
+    }
     if (!stmt) {
         printf("❌ Parse error: %s\n", sql);
         return false;
     }
+
+
 
     // 2. Semantic analysis
     SemanticContext sem_ctx;
@@ -317,9 +323,9 @@ main()
     printf("=== Setting up relational database with SQL ===\n\n");
 
     // Create master catalog first
-    bootstrap_master(!existed);
 
     if (!existed) {
+        bootstrap_master(true);
         // Create tables using SQL
         create_all_tables_sql(true);
 
@@ -329,14 +335,28 @@ main()
         // Test the pipeline
         // test_sql_pipeline();
     } else {
+        reload_catalog();
         printf("Database already exists, skipping table creation and data loading\n");
+        execute_sql_statement("SELECT * FROM users;", true);
+
+        for(auto [a,b] : catalog) {
+            std::cout << a.c_str()  << b.storage.btree.root_page_index<< "\n";
+        }
+
+        return 0;
     }
 
-    // Continue with your existing tests...
-    // test_select();
-    // test_nested_loop_join();
-    // etc.
+
+   // validation_end();
+
+   // _debug = true;
+
+
 
     pager_close();
+
+    main();
+
+
     printf("\n✅ All SQL tests completed!\n");
 }
