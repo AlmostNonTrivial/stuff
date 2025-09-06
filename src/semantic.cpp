@@ -4,6 +4,7 @@
 #include "catalog.hpp"
 #include "common.hpp"
 #include "parser.hpp"
+
 // In semantic.cpp, add this function:
 bool
 semantic_resolve_create_index(CreateIndexStmt *stmt, SemanticContext *ctx)
@@ -465,6 +466,79 @@ semantic_resolve_select(SelectStmt *stmt, SemanticContext *ctx)
 	return true;
 }
 
+bool
+semantic_resolve_delete(DeleteStmt *stmt, SemanticContext *ctx)
+{
+	// 1. Validate table exists
+	Structure *table = catalog.get(stmt->table_name);
+	if (!table)
+	{
+		ctx->add_error("Table does not exist", stmt->table_name.c_str());
+		return false;
+	}
+	stmt->sem.table = table;
+
+	// 2. Resolve WHERE clause if present
+	if (stmt->where_clause)
+	{
+		if (!semantic_resolve_expr(stmt->where_clause, table, ctx))
+		{
+			return false;
+		}
+
+		// WHERE clause should evaluate to boolean
+		if (stmt->where_clause->sem.resolved_type != TYPE_U32 && stmt->where_clause->sem.resolved_type != TYPE_NULL)
+		{
+			ctx->add_error("WHERE clause must evaluate to boolean", nullptr);
+			return false;
+		}
+	}
+
+	stmt->sem.is_resolved = true;
+	return true;
+}
+
+// DROP INDEX semantic resolution
+bool
+semantic_resolve_drop_index(DropIndexStmt *stmt, SemanticContext *ctx)
+{
+	Structure *index = catalog.get(stmt->index_name);
+	if (!index)
+	{
+		if (!stmt->if_exists)
+		{
+			ctx->add_error("Index does not exist", stmt->index_name.c_str());
+			return false;
+		}
+		stmt->sem.is_resolved = true;
+		return true;
+	}
+
+	stmt->sem.is_resolved = true;
+	return true;
+}
+
+// DROP TABLE semantic resolution
+bool
+semantic_resolve_drop_table(DropTableStmt *stmt, SemanticContext *ctx)
+{
+	Structure *table = catalog.get(stmt->table_name);
+	if (!table)
+	{
+		if (!stmt->if_exists)
+		{
+			ctx->add_error("Table does not exist", stmt->table_name.c_str());
+			return false;
+		}
+		stmt->sem.is_resolved = true;
+		return true;
+	}
+
+	stmt->sem.table = table;
+	stmt->sem.is_resolved = true;
+	return true;
+}
+
 // Main entry point for statement semantic analysis
 bool
 semantic_resolve_statement(Statement *stmt, SemanticContext *ctx)
@@ -475,10 +549,14 @@ semantic_resolve_statement(Statement *stmt, SemanticContext *ctx)
 		return semantic_resolve_create_table(stmt->create_table_stmt, ctx);
 	case STMT_CREATE_INDEX:
 		return semantic_resolve_create_index(stmt->create_index_stmt, ctx);
-
+	case STMT_DROP_INDEX:
+		return semantic_resolve_drop_index(stmt->drop_index_stmt, ctx);
+	case STMT_DROP_TABLE:
+		return semantic_resolve_drop_table(stmt->drop_table_stmt, ctx);
+	case STMT_DELETE:
+		return semantic_resolve_delete(stmt->delete_stmt, ctx);
 	case STMT_INSERT:
 		return semantic_resolve_insert(stmt->insert_stmt, ctx);
-
 	case STMT_SELECT:
 		return semantic_resolve_select(stmt->select_stmt, ctx);
 

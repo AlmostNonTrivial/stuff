@@ -350,7 +350,12 @@ main()
 
 	vm_set_result_callback(print_result_callback);
 
-	execute_sql_statement("SELECT * FROM idx_users_username;");
+	// execute_sql_statement("DELETE FROM users WHERE user_id = 1;");
+	execute_sql_statement("SELECT * FROM sqlite_master;");
+	printf("\n");
+	execute_sql_statement("DROP INDEX idx_users_username;");
+	execute_sql_statement("SELECT * FROM sqlite_master;");
+	printf("\n");
 
 	// test_queries();
 
