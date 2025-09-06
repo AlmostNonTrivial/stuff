@@ -2375,3 +2375,35 @@ reconstruct_create_sql(CreateTableStmt *stmt)
 
 	return (const char *)arena::stream_finish(&stream);
 }
+const char* reconstruct_index_sql(CreateIndexStmt *stmt) {
+    auto stream = arena::stream_begin(256);
+
+    const char *prefix = "CREATE ";
+    if (stmt->is_unique) {
+        prefix = "CREATE UNIQUE ";
+    }
+    arena::stream_write(&stream, prefix, strlen(prefix));
+
+    arena::stream_write(&stream, "INDEX ", 6);
+
+    if (stmt->if_not_exists) {
+        arena::stream_write(&stream, "IF NOT EXISTS ", 14);
+    }
+
+    arena::stream_write(&stream, stmt->index_name.c_str(), stmt->index_name.length());
+    arena::stream_write(&stream, " ON ", 4);
+    arena::stream_write(&stream, stmt->table_name.c_str(), stmt->table_name.length());
+    arena::stream_write(&stream, " (", 2);
+
+    for (uint32_t i = 0; i < stmt->columns.size; i++) {
+        if (i > 0) {
+            arena::stream_write(&stream, ", ", 2);
+        }
+        arena::stream_write(&stream, stmt->columns[i].c_str(), stmt->columns[i].length());
+    }
+
+    arena::stream_write(&stream, ")", 1);
+    arena::stream_write(&stream, "\0", 1);
+
+    return (const char *)arena::stream_finish(&stream);
+}

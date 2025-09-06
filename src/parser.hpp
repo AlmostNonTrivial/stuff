@@ -508,3 +508,5 @@ void
 print_ast(Statement *stmt);
 const char *
 reconstruct_create_sql(CreateTableStmt *stmt);
+
+const char* reconstruct_index_sql(CreateIndexStmt *stmt);

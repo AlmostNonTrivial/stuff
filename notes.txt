@@ -3,3 +3,9 @@
 - resolve colunm names
 - hard failure and error messages
 - why is _debug causing a segfault
+- need to validate names are within size limits
+
+
+
+- shadow_catalog
+-deletions

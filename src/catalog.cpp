@@ -94,61 +94,105 @@ bootstrap_master(bool create)
 	catalog.insert(MASTER_CATALOG, structure);
 }
 
-
-
 // In catalog.cpp or a new bootstrap file
 
 // Result callback for catalog bootstrap
-void
-catalog_bootstrap_callback(TypedValue *result, size_t count)
-{
+void catalog_bootstrap_callback(TypedValue *result, size_t count) {
+    if (count != 5)
+        return;
 
-	// print_result_callback(result, count);
+    const uint32_t key = result[0].as_u32();
+    const char *name = result[1].as_char();
+    const char *tbl_name = result[2].as_char();
+    uint32_t rootpage = result[3].as_u32();
+    const char *sql = result[4].as_char();
 
-	// Master catalog layout: type, name, tbl_name, rootpage, sql
-	if (count != 5)
-		return;
+    if (strcmp(name, MASTER_CATALOG) == 0)
+        return;
 
-	const uint32_t key = result[0].as_u32();
-	const char	  *name = result[1].as_char();
-	const char	  *tbl_name = result[2].as_char();
-	uint32_t	   rootpage = result[3].as_u32();
-	const char	  *sql = result[4].as_char();
+    auto master = catalog.get(MASTER_CATALOG);
+    if (master->next_key <= key) {
+        master->next_key = key + 1;
+    }
 
-	// Skip the master catalog itself to avoid recursion
-	if (strcmp(name, MASTER_CATALOG) == 0)
-		return;
+    Parser parser;
+    parser_init(&parser, sql);
+    Statement *stmt = parser_parse_statement(&parser);
 
-	auto master = catalog.get(MASTER_CATALOG);
-	if (master->next_key <= key)
-	{
-		master->next_key = key + 1;
-	}
+    array<Column> columns;
 
-	// printf("Bootstrapping table: %s (root page: %u)\n", name, rootpage);
+    if (strcmp(tbl_name, name) == 0) {
+        // It's a table
+        CreateTableStmt *create_stmt = stmt->create_table_stmt;
+        columns.reserve(create_stmt->columns.size);
 
-	array<Column> columns;
-	Parser parser;
-	parser_init(&parser, sql);
-	Statement *stmt = parser_parse_statement(&parser);
-	CreateTableStmt *create_stmt = stmt->create_table_stmt;
-	columns.reserve(create_stmt->columns.size);
+        for (uint32_t i = 0; i < create_stmt->columns.size; i++) {
+            ColumnDef *col_def = create_stmt->columns[i];
+            Column col = {col_def->name.c_str(), col_def->type};
+            columns.push(col);
+        }
+    } else {
+        // It's an index - extract the 2 columns from SQL
+        CreateIndexStmt *create_stmt = stmt->create_index_stmt;
 
-	for (uint32_t i = 0; i < create_stmt->columns.size; i++)
-	{
-		ColumnDef *col_def = create_stmt->columns[i];
-		Column	   col = {col_def->name.c_str(), col_def->type};
-		columns.push(col);
-	}
-	// Parse the SQL to reconstruct columns
+        Structure *parent_table = catalog.get(tbl_name);
+        if (!parent_table) {
+            printf("Error: Parent table %s not found for index %s\n", tbl_name, name);
+            return;
+        }
 
-	// Create the structure
-	Structure structure = Structure::from(name, columns);
+        // We need exactly 2 columns for the DUAL
+        DataType type1, type2;
 
-	// Set up the btree with the existing root page (don't create new)
-	structure.storage.btree = btree_create(structure.to_layout().key_type(), structure.to_layout().record_size, false);
-	structure.storage.btree.root_page_index = rootpage;
+        if (create_stmt->columns.size == 1) {
+            // Single column specified - pair with PK
+            const char *col_name = create_stmt->columns[0].c_str();
 
-	// Add to catalog
-	catalog.insert(name, structure);
+            // Find the column type
+            for (uint32_t i = 0; i < parent_table->columns.size; i++) {
+                if (strcmp(parent_table->columns[i].name, col_name) == 0) {
+                    type1 = parent_table->columns[i].type;
+                    break;
+                }
+            }
+
+            // Second type is the primary key (column 0)
+            type2 = parent_table->columns[0].type;
+
+        } else if (create_stmt->columns.size == 2) {
+            // Two columns specified - use them directly
+            const char *col1_name = create_stmt->columns[0].c_str();
+            const char *col2_name = create_stmt->columns[1].c_str();
+
+            // Find both column types
+            for (uint32_t i = 0; i < parent_table->columns.size; i++) {
+                if (strcmp(parent_table->columns[i].name, col1_name) == 0) {
+                    type1 = parent_table->columns[i].type;
+                }
+                if (strcmp(parent_table->columns[i].name, col2_name) == 0) {
+                    type2 = parent_table->columns[i].type;
+                }
+            }
+        } else {
+            printf("Error: Index %s has unsupported column count\n", name);
+            return;
+        }
+
+        // Create the DUAL type for the index key
+        DataType dual_type = make_dual(type1, type2);
+        columns.push(Column{"key", dual_type});
+    }
+
+    // Create the structure
+    Structure structure = Structure::from(name, columns);
+
+    // Set up the btree with existing root page
+    structure.storage.btree = btree_create(
+        structure.to_layout().key_type(),
+        structure.to_layout().record_size,
+        false
+    );
+    structure.storage.btree.root_page_index = rootpage;
+
+    catalog.insert(name, structure);
 }

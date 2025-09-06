@@ -60,6 +60,94 @@ compile_create_table_complete(Statement *stmt)
 	return prog.instructions;
 }
 
+array<VMInstruction, query_arena> compile_create_index(Statement *stmt) {
+    ProgramBuilder prog;
+    CreateIndexStmt *create_stmt = stmt->create_index_stmt;
+
+    // Must be semantically resolved first
+    if (!create_stmt->sem.is_resolved) {
+        prog.halt(1);
+        return prog.instructions;
+    }
+
+    prog.begin_transaction();
+
+    // 1. Create the index structure
+    int index_name_reg = prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->index_name.c_str(), 32));
+    int root_page_reg = prog.call_function(vmfunc_create_structure, index_name_reg, 1);
+
+    // 2. Add entry to master catalog
+    Structure &master = catalog[MASTER_CATALOG];
+    auto master_ctx = from_structure(master);
+    int master_cursor = prog.open_cursor(&master_ctx);
+
+    // Prepare master catalog row
+    int row_start = prog.regs.allocate_range(5);
+
+    prog.load(alloc_u32(master.next_key++), row_start);  // id
+    prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->index_name.c_str(), 32), row_start + 1);  // name
+    prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->table_name.c_str(), 32), row_start + 2);  // tbl_name
+    prog.move(root_page_reg, row_start + 3);  // rootpage
+
+    const char *sql = reconstruct_index_sql(create_stmt);
+    prog.load(TYPE_CHAR256, prog.alloc_string(sql, 256), row_start + 4);  // sql
+
+    prog.insert_record(master_cursor, row_start, 5);
+    prog.close_cursor(master_cursor);
+
+    // 3. Populate the index from the source table
+    Structure *source_table = create_stmt->sem.table;
+    Structure *index_structure = catalog.get(create_stmt->index_name);
+
+    auto source_ctx = from_structure(*source_table);
+    auto index_ctx = from_structure(*index_structure);
+
+    int source_cursor = prog.open_cursor(&source_ctx);
+    int index_cursor = prog.open_cursor(&index_ctx);
+
+    {
+        prog.regs.push_scope();
+
+        int at_end = prog.first(source_cursor);
+        auto scan_loop = prog.begin_while(at_end);
+        {
+            // Extract indexed columns and build key
+            int key_reg;
+
+            if (create_stmt->sem.column_indices.size == 1) {
+                // Single column index
+                key_reg = prog.get_column(source_cursor, create_stmt->sem.column_indices[0]);
+            } else {
+                // Composite index - need to pack columns
+                int first_col = prog.get_column(source_cursor, create_stmt->sem.column_indices[0]);
+
+                key_reg = first_col;
+                for (uint32_t i = 1; i < create_stmt->sem.column_indices.size; i++) {
+                    int next_col = prog.get_column(source_cursor, create_stmt->sem.column_indices[i]);
+                    int packed = prog.pack2(key_reg, next_col);
+                    key_reg = packed;
+                }
+            }
+
+            // Insert into index (key only, no record data)
+            prog.insert_record(index_cursor, key_reg, 0);
+
+            prog.next(source_cursor, at_end);
+        }
+        prog.end_while(scan_loop);
+
+        prog.regs.pop_scope();
+    }
+
+    prog.close_cursor(source_cursor);
+    prog.close_cursor(index_cursor);
+    prog.commit_transaction();
+    prog.halt();
+
+    prog.resolve_labels();
+    return prog.instructions;
+}
+
 
 int compile_literal(ProgramBuilder *prog, Expr *expr, DataType target_type);
 
@@ -412,6 +500,8 @@ compile_program(Statement *stmt, bool inject_transaction)
 		return compile_select(stmt);
 	case STMT_CREATE_TABLE:
 		return compile_create_table_complete(stmt);
+	case STMT_CREATE_INDEX:
+        return compile_create_index(stmt);
 	case STMT_INSERT:
 		return compile_insert(stmt);
 	default:

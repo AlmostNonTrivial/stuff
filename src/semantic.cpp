@@ -4,6 +4,75 @@
 #include "catalog.hpp"
 #include "common.hpp"
 #include "parser.hpp"
+// In semantic.cpp, add this function:
+bool semantic_resolve_create_index(CreateIndexStmt *stmt, SemanticContext *ctx) {
+    // 1. Validate table exists
+    Structure *table = catalog.get(stmt->table_name);
+    if (!table) {
+        ctx->add_error("Table does not exist", stmt->table_name.c_str());
+        return false;
+    }
+    stmt->sem.table = table;
+
+    // 2. Check column count - we only support 1 or 2 columns
+    if (stmt->columns.size > 2) {
+        ctx->add_error("Indexes support at most 2 columns", stmt->index_name.c_str());
+        return false;
+    }
+
+    if (stmt->columns.size == 0) {
+        ctx->add_error("Index must specify at least one column", stmt->index_name.c_str());
+        return false;
+    }
+
+    // 3. Validate columns exist and get their indices
+    stmt->sem.column_indices.clear();
+    stmt->sem.column_indices.reserve(2);  // Always 2 for DUAL
+
+    for (uint32_t i = 0; i < stmt->columns.size; i++) {
+        bool found = false;
+        for (uint32_t j = 0; j < table->columns.size; j++) {
+            if (strcmp(stmt->columns[i].c_str(), table->columns[j].name) == 0) {
+                stmt->sem.column_indices.push(j);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            ctx->add_error("Column does not exist in table", stmt->columns[i].c_str());
+            return false;
+        }
+    }
+
+    // 4. If only 1 column specified, add primary key (column 0) as second
+    if (stmt->columns.size == 1) {
+        // Check that the specified column isn't already the PK
+        if (stmt->sem.column_indices[0] == 0) {
+            ctx->add_error("Cannot create single-column index on primary key", nullptr);
+            return false;
+        }
+        stmt->sem.column_indices.push(0);  // Add PK as second column
+    }
+
+    // 5. Build index structure with DUAL key
+    array<Column> index_cols;
+
+    DataType type1 = table->columns[stmt->sem.column_indices[0]].type;
+    DataType type2 = table->columns[stmt->sem.column_indices[1]].type;
+    DataType dual_type = make_dual(type1, type2);
+
+    index_cols.push(Column{"key", dual_type});
+
+    // Add index structure to catalog
+    Structure *index_structure = (Structure *)arena::alloc<query_arena>(sizeof(Structure));
+    *index_structure = Structure::from(stmt->index_name.c_str(), index_cols);
+
+    catalog[stmt->index_name] = *index_structure;
+
+    stmt->sem.is_resolved = true;
+    return true;
+}
+
 
 bool
 semantic_resolve_create_table(CreateTableStmt *stmt, SemanticContext *ctx)
@@ -379,6 +448,8 @@ semantic_resolve_statement(Statement *stmt, SemanticContext *ctx)
 	{
 	case STMT_CREATE_TABLE:
 		return semantic_resolve_create_table(stmt->create_table_stmt, ctx);
+	case STMT_CREATE_INDEX:
+        return semantic_resolve_create_index(stmt->create_index_stmt, ctx);
 
 	case STMT_INSERT:
 		return semantic_resolve_insert(stmt->insert_stmt, ctx);

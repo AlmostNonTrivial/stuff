@@ -17,21 +17,6 @@
 
 bool
 execute_sql_statement(const char *sql, bool asda = false);
-// #include "tests/tests_pager.hpp"
-// #include "tests/tests_parser.hpp"
-// void
-// print_result_callback(TypedValue *result, size_t count)
-// {
-// 	for (int i = 0; i < count; i++)
-// 	{
-// 		result[i].print();
-// 		if (i != count - 1)
-// 		{
-// 			std::cout << ", ";
-// 		}
-// 	}
-// 	std::cout << "\n";
-// }
 
 void
 load_catalog_from_master()
@@ -89,8 +74,10 @@ create_all_tables_sql(bool create)
 								   ");";
 
 	printf("Creating users table...\n");
+	// _debug = true;
 	if (!execute_sql_statement(create_users_sql))
 	{
+		exit(0);
 		printf("❌ Failed to create users table\n");
 		return;
 	}
@@ -336,11 +323,8 @@ test_queries()
 
 	execute_sql_statement("SELECT * FROM users WHERE user_id > 70;");
 	validation_end();
-	    
-	validation_begin(false); 
-	
-	
-	
+
+	validation_begin(false);
 }
 
 int
@@ -348,14 +332,14 @@ main()
 {
 
 	arena::init<query_arena>();
-	bool existed = pager_open("relational_test.db");
+	bool existed = pager_open("relational_test_.db");
 
 	if (!existed)
 	{
 		bootstrap_master(true);
 		// Create tables using SQL
 		create_all_tables_sql(true);
-
+		execute_sql_statement("CREATE UNIQUE INDEX idx_users_username ON users (username);");
 		// Load data using SQL
 		load_all_data_sql();
 	}
@@ -364,7 +348,11 @@ main()
 		reload_catalog();
 	}
 
-	test_queries();
+	vm_set_result_callback(print_result_callback);
+
+	execute_sql_statement("SELECT * FROM idx_users_username;");
+
+	// test_queries();
 
 	pager_close();
 }
