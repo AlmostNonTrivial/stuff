@@ -72,8 +72,12 @@ struct Structure
 		return columns[0].type;
 	}
 };
-
+extern hash_map<string<catalog_arena>, string<catalog_arena>, catalog_arena> table_to_index;
+extern hash_map<string<catalog_arena>, string<catalog_arena>, catalog_arena> rollback_catalog;
 extern hash_map<string<catalog_arena>, Structure, catalog_arena> catalog;
+
+
+
 #define MASTER_CATALOG "sqlite_master"
 
 // Column names for master catalog

@@ -5,74 +5,91 @@
 #include "common.hpp"
 #include "parser.hpp"
 // In semantic.cpp, add this function:
-bool semantic_resolve_create_index(CreateIndexStmt *stmt, SemanticContext *ctx) {
-    // 1. Validate table exists
-    Structure *table = catalog.get(stmt->table_name);
-    if (!table) {
-        ctx->add_error("Table does not exist", stmt->table_name.c_str());
-        return false;
-    }
-    stmt->sem.table = table;
+bool
+semantic_resolve_create_index(CreateIndexStmt *stmt, SemanticContext *ctx)
+{
+	// 1. Validate table exists
+	Structure *table = catalog.get(stmt->table_name);
+	if (!table)
+	{
+		ctx->add_error("Table does not exist", stmt->table_name.c_str());
+		return false;
+	}
+	stmt->sem.table = table;
 
-    // 2. Check column count - we only support 1 or 2 columns
-    if (stmt->columns.size > 2) {
-        ctx->add_error("Indexes support at most 2 columns", stmt->index_name.c_str());
-        return false;
-    }
+	// 2. Check column count - we only support 1 or 2 columns
+	if (stmt->columns.size > 2)
+	{
+		ctx->add_error("Indexes support at most 2 columns", stmt->index_name.c_str());
+		return false;
+	}
 
-    if (stmt->columns.size == 0) {
-        ctx->add_error("Index must specify at least one column", stmt->index_name.c_str());
-        return false;
-    }
+	if (stmt->columns.size == 0)
+	{
+		ctx->add_error("Index must specify at least one column", stmt->index_name.c_str());
+		return false;
+	}
 
-    // 3. Validate columns exist and get their indices
-    stmt->sem.column_indices.clear();
-    stmt->sem.column_indices.reserve(2);  // Always 2 for DUAL
+	// 3. Validate columns exist and get their indices
+	stmt->sem.column_indices.clear();
+	stmt->sem.column_indices.reserve(2); // Always 2 for DUAL
 
-    for (uint32_t i = 0; i < stmt->columns.size; i++) {
-        bool found = false;
-        for (uint32_t j = 0; j < table->columns.size; j++) {
-            if (strcmp(stmt->columns[i].c_str(), table->columns[j].name) == 0) {
-                stmt->sem.column_indices.push(j);
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            ctx->add_error("Column does not exist in table", stmt->columns[i].c_str());
-            return false;
-        }
-    }
+	for (uint32_t i = 0; i < stmt->columns.size; i++)
+	{
+		bool found = false;
+		for (uint32_t j = 0; j < table->columns.size; j++)
+		{
+			if (strcmp(stmt->columns[i].c_str(), table->columns[j].name) == 0)
+			{
+				stmt->sem.column_indices.push(j);
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+		{
+			ctx->add_error("Column does not exist in table", stmt->columns[i].c_str());
+			return false;
+		}
+	}
 
-    // 4. If only 1 column specified, add primary key (column 0) as second
-    if (stmt->columns.size == 1) {
-        // Check that the specified column isn't already the PK
-        if (stmt->sem.column_indices[0] == 0) {
-            ctx->add_error("Cannot create single-column index on primary key", nullptr);
-            return false;
-        }
-        stmt->sem.column_indices.push(0);  // Add PK as second column
-    }
+	// 4. If only 1 column specified, add primary key (column 0) as second
+	if (stmt->columns.size == 1)
+	{
+		// Check that the specified column isn't already the PK
+		if (stmt->sem.column_indices[0] == 0)
+		{
+			ctx->add_error("Cannot create single-column index on primary key", nullptr);
+			return false;
+		}
+		stmt->sem.column_indices.push(0); // Add PK as second column
+	}
 
-    // 5. Build index structure with DUAL key
-    array<Column> index_cols;
+	// 5. Build index structure with DUAL key
+	array<Column> index_cols;
 
-    DataType type1 = table->columns[stmt->sem.column_indices[0]].type;
-    DataType type2 = table->columns[stmt->sem.column_indices[1]].type;
-    DataType dual_type = make_dual(type1, type2);
+	DataType type1 = table->columns[stmt->sem.column_indices[0]].type;
+	DataType type2 = table->columns[stmt->sem.column_indices[1]].type;
+	DataType dual_type = make_dual(type1, type2);
 
-    index_cols.push(Column{"key", dual_type});
+	index_cols.push(Column{"key", dual_type});
 
-    // Add index structure to catalog
-    Structure *index_structure = (Structure *)arena::alloc<query_arena>(sizeof(Structure));
-    *index_structure = Structure::from(stmt->index_name.c_str(), index_cols);
+	// Add index structure to catalog
+	Structure *index_structure = (Structure *)arena::alloc<query_arena>(sizeof(Structure));
+	*index_structure = Structure::from(stmt->index_name.c_str(), index_cols);
 
-    catalog[stmt->index_name] = *index_structure;
+	catalog[stmt->index_name] = *index_structure;
 
-    stmt->sem.is_resolved = true;
-    return true;
+	string<catalog_arena> s;
+	string<catalog_arena> ss;
+
+	s.set(stmt->table_name);
+	ss.set(stmt->index_name);
+	table_to_index.insert(s, ss);
+
+	stmt->sem.is_resolved = true;
+	return true;
 }
-
 
 bool
 semantic_resolve_create_table(CreateTableStmt *stmt, SemanticContext *ctx)
@@ -145,7 +162,6 @@ semantic_resolve_create_table(CreateTableStmt *stmt, SemanticContext *ctx)
 
 	return true;
 }
-
 
 bool
 semantic_resolve_insert(InsertStmt *stmt, SemanticContext *ctx)
@@ -266,96 +282,105 @@ semantic_resolve_column(Expr *expr, Structure *table, SemanticContext *ctx)
 	return false;
 }
 
-bool semantic_resolve_expr(Expr* expr, Structure* table, SemanticContext* ctx) {
-    switch (expr->type) {
-        case EXPR_COLUMN:
-            return semantic_resolve_column(expr, table, ctx);
+bool
+semantic_resolve_expr(Expr *expr, Structure *table, SemanticContext *ctx)
+{
+	switch (expr->type)
+	{
+	case EXPR_COLUMN:
+		return semantic_resolve_column(expr, table, ctx);
 
-        case EXPR_STAR:
-            expr->sem.is_resolved = true;
-            return true;
+	case EXPR_STAR:
+		expr->sem.is_resolved = true;
+		return true;
 
-        case EXPR_LITERAL:
-            // Make sure lit_type is set from parser
-            expr->sem.resolved_type = expr->lit_type;
-            expr->sem.is_resolved = true;
-            return true;
+	case EXPR_LITERAL:
+		// Make sure lit_type is set from parser
+		expr->sem.resolved_type = expr->lit_type;
+		expr->sem.is_resolved = true;
+		return true;
 
-        case EXPR_NULL:
-            expr->sem.resolved_type = TYPE_NULL;
-            expr->sem.is_resolved = true;
-            return true;
+	case EXPR_NULL:
+		expr->sem.resolved_type = TYPE_NULL;
+		expr->sem.is_resolved = true;
+		return true;
 
-        case EXPR_BINARY_OP: {
-            // Recursively resolve left and right operands
-            if (!semantic_resolve_expr(expr->left, table, ctx)) {
-                return false;
-            }
-            if (!semantic_resolve_expr(expr->right, table, ctx)) {
-                return false;
-            }
+	case EXPR_BINARY_OP: {
+		// Recursively resolve left and right operands
+		if (!semantic_resolve_expr(expr->left, table, ctx))
+		{
+			return false;
+		}
+		if (!semantic_resolve_expr(expr->right, table, ctx))
+		{
+			return false;
+		}
 
-            // Determine result type based on operation
-            DataType left_type = expr->left->sem.resolved_type;
-            DataType right_type = expr->right->sem.resolved_type;
+		// Determine result type based on operation
+		DataType left_type = expr->left->sem.resolved_type;
+		DataType right_type = expr->right->sem.resolved_type;
 
-            switch (expr->op) {
-                // Comparison operators always return U32 (boolean)
-                case OP_EQ:
-                case OP_NE:
-                case OP_LT:
-                case OP_LE:
-                case OP_GT:
-                case OP_GE:
-                    expr->sem.resolved_type = TYPE_U32;
-                    break;
+		switch (expr->op)
+		{
+		// Comparison operators always return U32 (boolean)
+		case OP_EQ:
+		case OP_NE:
+		case OP_LT:
+		case OP_LE:
+		case OP_GT:
+		case OP_GE:
+			expr->sem.resolved_type = TYPE_U32;
+			break;
 
-                // Logical operators expect and return U32 (boolean)
-                case OP_AND:
-                case OP_OR:
-                    expr->sem.resolved_type = TYPE_U32;
-                    break;
+		// Logical operators expect and return U32 (boolean)
+		case OP_AND:
+		case OP_OR:
+			expr->sem.resolved_type = TYPE_U32;
+			break;
 
-                // Arithmetic operators - use wider type
-                case OP_ADD:
-                case OP_SUB:
-                case OP_MUL:
-                case OP_DIV:
-                case OP_MOD:
-                    // Simple type promotion - use the larger type
-                    expr->sem.resolved_type = (type_size(left_type) >= type_size(right_type))
-                                             ? left_type : right_type;
-                    break;
+		// Arithmetic operators - use wider type
+		case OP_ADD:
+		case OP_SUB:
+		case OP_MUL:
+		case OP_DIV:
+		case OP_MOD:
+			// Simple type promotion - use the larger type
+			expr->sem.resolved_type = (type_size(left_type) >= type_size(right_type)) ? left_type : right_type;
+			break;
 
-                default:
-                    expr->sem.resolved_type = TYPE_NULL;
-            }
+		default:
+			expr->sem.resolved_type = TYPE_NULL;
+		}
 
-            expr->sem.is_resolved = true;
-            return true;
-        }
+		expr->sem.is_resolved = true;
+		return true;
+	}
 
-        case EXPR_UNARY_OP: {
-            // Resolve operand
-            if (!semantic_resolve_expr(expr->operand, table, ctx)) {
-                return false;
-            }
+	case EXPR_UNARY_OP: {
+		// Resolve operand
+		if (!semantic_resolve_expr(expr->operand, table, ctx))
+		{
+			return false;
+		}
 
-            // Result type depends on operator
-            if (expr->unary_op == OP_NOT) {
-                expr->sem.resolved_type = TYPE_U32; // Boolean result
-            } else if (expr->unary_op == OP_NEG) {
-                expr->sem.resolved_type = expr->operand->sem.resolved_type;
-            }
+		// Result type depends on operator
+		if (expr->unary_op == OP_NOT)
+		{
+			expr->sem.resolved_type = TYPE_U32; // Boolean result
+		}
+		else if (expr->unary_op == OP_NEG)
+		{
+			expr->sem.resolved_type = expr->operand->sem.resolved_type;
+		}
 
-            expr->sem.is_resolved = true;
-            return true;
-        }
+		expr->sem.is_resolved = true;
+		return true;
+	}
 
-        // TODO: Handle EXPR_FUNCTION, EXPR_SUBQUERY, EXPR_LIST
-        default:
-            return true;
-    }
+	// TODO: Handle EXPR_FUNCTION, EXPR_SUBQUERY, EXPR_LIST
+	default:
+		return true;
+	}
 }
 
 bool
@@ -449,7 +474,7 @@ semantic_resolve_statement(Statement *stmt, SemanticContext *ctx)
 	case STMT_CREATE_TABLE:
 		return semantic_resolve_create_table(stmt->create_table_stmt, ctx);
 	case STMT_CREATE_INDEX:
-        return semantic_resolve_create_index(stmt->create_index_stmt, ctx);
+		return semantic_resolve_create_index(stmt->create_index_stmt, ctx);
 
 	case STMT_INSERT:
 		return semantic_resolve_insert(stmt->insert_stmt, ctx);
