@@ -237,75 +237,275 @@ load_all_data_sql()
 
 	printf("\n✅ All data loaded successfully using SQL pipeline!\n");
 }
+// Simple helper to determine column width based on type
+int get_column_width(DataType type) {
+    switch(type) {
+        case TYPE_U8:
+        case TYPE_U16:
+        case TYPE_U32:
+        case TYPE_I8:
+        case TYPE_I16:
+        case TYPE_I32:
+            return 10;
+        case TYPE_U64:
+        case TYPE_I64:
+            return 15;
+        case TYPE_F32:
+        case TYPE_F64:
+            return 12;
+        case TYPE_CHAR8:
+            return 10;
+        case TYPE_CHAR16:
+            return 18;
+        case TYPE_CHAR32:
+            return 35;  // For emails and such
+        case TYPE_CHAR64:
+            return 35;
+        case TYPE_CHAR128:
+            return 40;
+        case TYPE_CHAR256:
+            return 50;
+        default:
+            return 15;
+    }
+}
+
+// Print column headers for SELECT statements
+void print_select_headers(SelectStmt* select_stmt) {
+    if (!select_stmt->sem.is_resolved) {
+        return;
+    }
+
+    Structure* table = select_stmt->from_table->sem.resolved;
+    if (!table) {
+        return;
+    }
+
+    // Check if SELECT *
+    bool is_select_star = (select_stmt->select_list.size == 1 &&
+                          select_stmt->select_list[0]->type == EXPR_STAR);
+
+    printf("\n");
+
+    if (is_select_star) {
+        // Print all column names from table
+        for (uint32_t i = 0; i < table->columns.size; i++) {
+            int width = get_column_width(table->columns[i].type);
+            printf("%-*s  ", width, table->columns[i].name);
+        }
+        printf("\n");
+
+        // Print separator line
+        for (uint32_t i = 0; i < table->columns.size; i++) {
+            int width = get_column_width(table->columns[i].type);
+            for (int j = 0; j < width; j++) printf("-");
+            printf("  ");
+        }
+    } else {
+        // Print specific column names from select list
+        for (uint32_t i = 0; i < select_stmt->select_list.size; i++) {
+            Expr* expr = select_stmt->select_list[i];
+            const char* name = "expr";
+            DataType type = TYPE_CHAR32; // default
+
+            if (expr->type == EXPR_COLUMN) {
+                name = table->columns[expr->sem.column_index].name;
+                type = table->columns[expr->sem.column_index].type;
+            } else if (expr->type == EXPR_FUNCTION) {
+                name = expr->func_name.c_str();
+            }
+
+            int width = get_column_width(type);
+            printf("%-*s  ", width, name);
+        }
+        printf("\n");
+
+        // Print separator line
+        for (uint32_t i = 0; i < select_stmt->select_list.size; i++) {
+            Expr* expr = select_stmt->select_list[i];
+            DataType type = TYPE_CHAR32;
+
+            if (expr->type == EXPR_COLUMN) {
+                type = table->columns[expr->sem.column_index].type;
+            }
+
+            int width = get_column_width(type);
+            for (int j = 0; j < width; j++) printf("-");
+            printf("  ");
+        }
+    }
+
+    printf("\n");
+}
+
+// Store column widths for result formatting
+static array<int, query_arena> result_column_widths;
+
+// Store column info for current SELECT
+void setup_result_formatting(SelectStmt* select_stmt) {
+    result_column_widths.clear();
+
+    if (!select_stmt->sem.is_resolved) {
+        return;
+    }
+
+    Structure* table = select_stmt->from_table->sem.resolved;
+    if (!table) {
+        return;
+    }
+
+    bool is_select_star = (select_stmt->select_list.size == 1 &&
+                          select_stmt->select_list[0]->type == EXPR_STAR);
+
+    if (is_select_star) {
+        for (uint32_t i = 0; i < table->columns.size; i++) {
+            result_column_widths.push(get_column_width(table->columns[i].type));
+        }
+    } else {
+        for (uint32_t i = 0; i < select_stmt->select_list.size; i++) {
+            Expr* expr = select_stmt->select_list[i];
+            DataType type = TYPE_CHAR32;
+
+            if (expr->type == EXPR_COLUMN) {
+                type = table->columns[expr->sem.column_index].type;
+            }
+
+            result_column_widths.push(get_column_width(type));
+        }
+    }
+}
+
+// Enhanced result callback that formats output nicely
+void formatted_result_callback(TypedValue *result, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        int width = (i < result_column_widths.size) ? result_column_widths[i] : 15;
+
+        // Format based on type
+        switch (result[i].type) {
+            case TYPE_U32:
+            case TYPE_U64:
+            case TYPE_U16:
+            case TYPE_U8:
+                printf("%-*llu  ", width, result[i].as_u64());
+                break;
+
+            case TYPE_I32:
+            case TYPE_I64:
+            case TYPE_I16:
+            case TYPE_I8:
+                printf("%-*lld  ", width, result[i].as_i64());
+                break;
+
+            case TYPE_F32:
+            case TYPE_F64:
+                printf("%-*.2f  ", width, result[i].as_f64());
+                break;
+
+            case TYPE_CHAR8:
+            case TYPE_CHAR16:
+            case TYPE_CHAR32:
+            case TYPE_CHAR64:
+            case TYPE_CHAR128:
+            case TYPE_CHAR256: {
+                const char* str = result[i].as_char();
+                printf("%-*s  ", width, str ? str : "NULL");
+                break;
+            }
+
+            case TYPE_NULL:
+                printf("%-*s  ", width, "NULL");
+                break;
+
+            default:
+                printf("%-*s  ", width, "???");
+        }
+    }
+    printf("\n");
+}
 
 // Execute SQL statement through full pipeline
 bool
-execute_sql_statement(const char *sql, bool print_as)
+execute_sql_statement(const char *sql, bool print_ast_tree)
 {
-	// 1. Parse
+    // 1. Parse
+    bool in_transaction = false;
+    array<Statement *, parser_arena> statements = *parse_sql(sql);
 
-	bool							 in_transaction = false;
-	array<Statement *, parser_arena> statements = *parse_sql(sql);
+    for (auto &stmt : statements)
+    {
+        if (print_ast_tree)
+        {
+            print_ast(stmt);
+        }
 
-	for (auto &stmt : statements)
-	{
-		if (print_as)
-		{
-			print_ast(stmt);
-		}
+        // 2. Semantic analysis
+        SemanticContext sem_ctx;
+        if (!semantic_resolve_statement(stmt, &sem_ctx))
+        {
+            printf("❌ Semantic error in: %s\n", sql);
+            for (uint32_t i = 0; i < sem_ctx.errors.size; i++)
+            {
+                printf("  Error: %s", sem_ctx.errors[i].message);
+                if (sem_ctx.errors[i].context)
+                {
+                    printf(" (%s)", sem_ctx.errors[i].context);
+                }
+                printf("\n");
+            }
+            if (in_transaction)
+            {
+                pager_rollback();
+            }
+            reload_catalog();
+            return false;
+        }
 
-		// 2. Semantic analysis
-		SemanticContext sem_ctx;
-		if (!semantic_resolve_statement(stmt, &sem_ctx))
-		{
-			printf("❌ Semantic error in: %s\n", sql);
-			for (uint32_t i = 0; i < sem_ctx.errors.size; i++)
-			{
-				printf("  Error: %s", sem_ctx.errors[i].message);
-				if (sem_ctx.errors[i].context)
-				{
-					printf(" (%s)", sem_ctx.errors[i].context);
-				}
-				printf("\n");
-			}
+        // Track transaction state
+        if (stmt->type == STMT_BEGIN && !in_transaction)
+        {
+            in_transaction = true;
+        }
+        else if (stmt->type == STMT_COMMIT || stmt->type == STMT_ROLLBACK)
+        {
+            in_transaction = false;
+        }
 
-			if (in_transaction)
-			{
-				pager_rollback();
-			}
+        // 2.5 For SELECT statements, print column headers and setup formatting
+        if (stmt->type == STMT_SELECT)
+        {
+            print_select_headers(stmt->select_stmt);
+            setup_result_formatting(stmt->select_stmt);
+            vm_set_result_callback(formatted_result_callback);
+        }
+        else
+        {
+            // Use default print callback for non-SELECT statements
+            vm_set_result_callback(print_result_callback);
+        }
 
-			reload_catalog();
-			return false;
-		}
+        // 3. Compile to VM bytecode
+        array<VMInstruction, query_arena> program = compile_program(stmt, !in_transaction);
+        if (program.size == 0)
+        {
+            printf("❌ Compilation failed: %s\n", sql);
+            return false;
+        }
 
-		if (stmt->type == STMT_BEGIN && !in_transaction)
-		{
-			in_transaction = true;
-		}
-		else if (stmt->type == STMT_COMMIT || stmt->type == STMT_ROLLBACK)
-		{
-			in_transaction = false;
-		}
+        // 4. Execute on VM
+        VM_RESULT result = vm_execute(program.data, program.size);
+        if (result != OK)
+        {
+            printf("❌ Execution failed: %s\n", sql);
+            return false;
+        }
 
-		// 3. Compile to VM bytecode
-		array<VMInstruction, query_arena> program = compile_program(stmt, !in_transaction);
-		if (program.size == 0)
-		{
-			printf("❌ Compilation failed: %s\n", sql);
-			return false;
-		}
-
-		// 4. Execute on VM
-		VM_RESULT result = vm_execute(program.data, program.size);
-
-		if (result != OK)
-		{
-			printf("❌ Execution failed: %s\n", sql);
-			return false;
-		}
-	}
-
-	return true;
+        // Add a blank line after SELECT results
+        if (stmt->type == STMT_SELECT)
+        {
+            printf("\n");
+        }
+    }
+    return true;
 }
 // 71, nolanb,
 //
@@ -348,16 +548,7 @@ main()
 		reload_catalog();
 	}
 
-	vm_set_result_callback(print_result_callback);
-
-	// execute_sql_statement("DELETE FROM users WHERE user_id = 1;");
-	execute_sql_statement("SELECT * FROM sqlite_master;");
-	printf("\n");
-	execute_sql_statement("DROP INDEX idx_users_username;");
-	execute_sql_statement("SELECT * FROM sqlite_master;");
-	printf("\n");
-
-	// test_queries();
+	execute_sql_statement("SELECT email FROM users;");
 
 	pager_close();
 }
