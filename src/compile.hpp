@@ -955,4 +955,4 @@ from_structure(Structure &structure)
 
 
 
-array<VMInstruction, query_arena> compile_program(Statement*stmt);
+array<VMInstruction, query_arena> compile_program(Statement*stmt, bool inject_transaction);

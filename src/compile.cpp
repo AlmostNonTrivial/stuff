@@ -423,7 +423,7 @@ array<VMInstruction, query_arena> compile_select(Statement* stmt) {
 
 // Main dispatch function
 array<VMInstruction, query_arena>
-compile_program(Statement *stmt)
+compile_program(Statement *stmt, bool inject_transaction)
 {
 	switch (stmt->type)
 	{
