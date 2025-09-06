@@ -59,100 +59,6 @@ compile_create_table_complete(Statement *stmt)
 	return prog.instructions;
 }
 
-array<VMInstruction, query_arena>
-compile_create_index(Statement *stmt)
-{
-	ProgramBuilder	 prog;
-	CreateIndexStmt *create_stmt = stmt->create_index_stmt;
-
-	// Must be semantically resolved first
-	if (!create_stmt->sem.is_resolved)
-	{
-		prog.halt(1);
-		return prog.instructions;
-	}
-
-	prog.begin_transaction();
-
-	// 1. Create the index structure
-	int index_name_reg = prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->index_name.c_str(), 32));
-	int root_page_reg = prog.call_function(vmfunc_create_structure, index_name_reg, 1);
-
-	// 2. Add entry to master catalog
-	Structure &master = catalog[MASTER_CATALOG];
-	auto	   master_ctx = from_structure(master);
-	int		   master_cursor = prog.open_cursor(master_ctx);
-
-	// Prepare master catalog row
-	int row_start = prog.regs.allocate_range(5);
-
-	prog.load(alloc_u32(master.next_key++), row_start);											   // id
-	prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->index_name.c_str(), 32), row_start + 1); // name
-	prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->table_name.c_str(), 32), row_start + 2); // tbl_name
-	prog.move(root_page_reg, row_start + 3);													   // rootpage
-
-	const char *sql = reconstruct_index_sql(create_stmt);
-	prog.load(TYPE_CHAR256, prog.alloc_string(sql, 256), row_start + 4); // sql
-
-	prog.insert_record(master_cursor, row_start, 5);
-	prog.close_cursor(master_cursor);
-
-	// 3. Populate the index from the source table
-	Structure *source_table = create_stmt->sem.table;
-	Structure *index_structure = catalog.get(create_stmt->index_name);
-
-	auto source_ctx = from_structure(*source_table);
-	auto index_ctx = from_structure(*index_structure);
-
-	int source_cursor = prog.open_cursor(source_ctx);
-	int index_cursor = prog.open_cursor(index_ctx);
-
-	{
-		prog.regs.push_scope();
-
-		int	 at_end = prog.first(source_cursor);
-		auto scan_loop = prog.begin_while(at_end);
-		{
-			// Extract indexed columns and build key
-			int key_reg;
-
-			if (create_stmt->sem.column_indices.size == 1)
-			{
-				// Single column index
-				key_reg = prog.get_column(source_cursor, create_stmt->sem.column_indices[0]);
-			}
-			else
-			{
-				// Composite index - need to pack columns
-				int first_col = prog.get_column(source_cursor, create_stmt->sem.column_indices[0]);
-
-				key_reg = first_col;
-				for (uint32_t i = 1; i < create_stmt->sem.column_indices.size; i++)
-				{
-					int next_col = prog.get_column(source_cursor, create_stmt->sem.column_indices[i]);
-					int packed = prog.pack2(key_reg, next_col);
-					key_reg = packed;
-				}
-			}
-
-			// Insert into index (key only, no record data)
-			prog.insert_record(index_cursor, key_reg, 0);
-
-			prog.next(source_cursor, at_end);
-		}
-		prog.end_while(scan_loop);
-
-		prog.regs.pop_scope();
-	}
-
-	prog.close_cursor(source_cursor);
-	prog.close_cursor(index_cursor);
-	prog.commit_transaction();
-	prog.halt();
-
-	prog.resolve_labels();
-	return prog.instructions;
-}
 
 int
 compile_literal(ProgramBuilder *prog, Expr *expr, DataType target_type);
@@ -521,6 +427,141 @@ compile_delete_forward(Statement *stmt)
 // compile_select_simple.cpp
 // Simplified SELECT compilation - only *, columns, and DISTINCT
 
+// Helper to compile aggregate function initialization
+int compile_aggregate_init(ProgramBuilder *prog, Expr *expr)
+{
+    if (strcasecmp(expr->func_name.c_str(), "COUNT") == 0)
+    {
+        // COUNT starts at 0
+        return prog->load(TYPE_U64, prog->alloc_value(0ULL));
+    }
+    else if (strcasecmp(expr->func_name.c_str(), "SUM") == 0)
+    {
+        // SUM starts at 0 (using appropriate type)
+        DataType sum_type = expr->sem.resolved_type;
+        if (sum_type == TYPE_I64)
+            return prog->load(TYPE_I64, prog->alloc_value(0LL));
+        else if (sum_type == TYPE_F64)
+            return prog->load(TYPE_F64, prog->alloc_value(0.0));
+        else
+            return prog->load(TYPE_U32, prog->alloc_value(0U));
+    }
+    else if (strcasecmp(expr->func_name.c_str(), "MIN") == 0)
+    {
+        // MIN starts at NULL (will be replaced with first value)
+        return prog->load_null();
+    }
+    else if (strcasecmp(expr->func_name.c_str(), "MAX") == 0)
+    {
+        // MAX starts at NULL (will be replaced with first value)
+        return prog->load_null();
+    }
+    else if (strcasecmp(expr->func_name.c_str(), "AVG") == 0)
+    {
+        // AVG needs both sum and count - for now just return sum accumulator
+        return prog->load(TYPE_F64, prog->alloc_value(0.0));
+    }
+
+    return prog->load_null();
+}
+
+// Helper to compile aggregate accumulation
+void compile_aggregate_accumulate(ProgramBuilder *prog, Expr *expr, int acc_reg, int cursor_id, int count_reg = -1)
+{
+    if (strcasecmp(expr->func_name.c_str(), "COUNT") == 0)
+    {
+        // COUNT(*) - increment by 1
+        int one = prog->load(TYPE_U64, prog->alloc_value(1ULL));
+        prog->add(acc_reg, one, acc_reg);
+    }
+    else if (strcasecmp(expr->func_name.c_str(), "SUM") == 0)
+    {
+        // SUM(column) - add column value to accumulator
+        if (expr->args.size > 0 && expr->args[0]->type == EXPR_COLUMN)
+        {
+            int value_reg = prog->get_column(cursor_id, expr->args[0]->sem.column_index);
+            prog->add(acc_reg, value_reg, acc_reg);
+        }
+    }
+    else if (strcasecmp(expr->func_name.c_str(), "MIN") == 0)
+    {
+        if (expr->args.size > 0 && expr->args[0]->type == EXPR_COLUMN)
+        {
+            int value_reg = prog->get_column(cursor_id, expr->args[0]->sem.column_index);
+
+            // Check if accumulator is NULL (first value)
+            int null_type = prog->load(TYPE_U64, prog->alloc_value((uint64_t)TYPE_NULL));
+            int acc_type = prog->regs.allocate();
+            prog->emit({OP_GetType, acc_type, acc_reg, 0, nullptr, 0});
+            int is_null = prog->eq(acc_type, null_type);
+
+            auto if_null = prog->begin_if(is_null);
+            {
+                // First value - just store it
+                prog->move(value_reg, acc_reg);
+            }
+            prog->begin_else(if_null);
+            {
+                // Compare and keep minimum
+                int is_less = prog->lt(value_reg, acc_reg);
+                auto if_less = prog->begin_if(is_less);
+                {
+                    prog->move(value_reg, acc_reg);
+                }
+                prog->end_if(if_less);
+            }
+            prog->end_if(if_null);
+        }
+    }
+    else if (strcasecmp(expr->func_name.c_str(), "MAX") == 0)
+    {
+        if (expr->args.size > 0 && expr->args[0]->type == EXPR_COLUMN)
+        {
+            int value_reg = prog->get_column(cursor_id, expr->args[0]->sem.column_index);
+
+            // Check if accumulator is NULL (first value)
+            int null_type = prog->load(TYPE_U64, prog->alloc_value((uint64_t)TYPE_NULL));
+            int acc_type = prog->regs.allocate();
+            prog->emit({OP_GetType, acc_type, acc_reg, 0, nullptr, 0});
+            int is_null = prog->eq(acc_type, null_type);
+
+            auto if_null = prog->begin_if(is_null);
+            {
+                // First value - just store it
+                prog->move(value_reg, acc_reg);
+            }
+            prog->begin_else(if_null);
+            {
+                // Compare and keep maximum
+                int is_greater = prog->gt(value_reg, acc_reg);
+                auto if_greater = prog->begin_if(is_greater);
+                {
+                    prog->move(value_reg, acc_reg);
+                }
+                prog->end_if(if_greater);
+            }
+            prog->end_if(if_null);
+        }
+    }
+    else if (strcasecmp(expr->func_name.c_str(), "AVG") == 0)
+    {
+        // AVG needs to accumulate sum and track count
+        if (expr->args.size > 0 && expr->args[0]->type == EXPR_COLUMN)
+        {
+            int value_reg = prog->get_column(cursor_id, expr->args[0]->sem.column_index);
+            // Convert to float and add
+            prog->add(acc_reg, value_reg, acc_reg);
+            // Increment count if we have a count register
+            if (count_reg != -1)
+            {
+                int one = prog->load(TYPE_U64, prog->alloc_value(1ULL));
+                prog->add(count_reg, one, count_reg);
+            }
+        }
+    }
+}
+
+// Main compile_select function with aggregate support
 array<VMInstruction, query_arena>
 compile_select(Statement *stmt)
 {
@@ -534,162 +575,148 @@ compile_select(Statement *stmt)
         return prog.instructions;
     }
 
-    Structure *table = select_stmt->from_table->sem.resolved;
+    // Check if we have aggregates (no GROUP BY for now)
+    bool has_aggregates = select_stmt->sem.has_aggregates;
+    bool has_where = (select_stmt->where_clause != nullptr);
 
-    // Handle DISTINCT - use ephemeral tree for deduplication
-    if (select_stmt->is_distinct)
+    // Single table for now
+    if (!select_stmt->from_table || !select_stmt->from_table->sem.resolved)
     {
-        // For DISTINCT, we'll use an ephemeral red-black tree
-        // Create layout based on SELECT list columns only (no expressions)
-        Layout distinct_layout;
+        prog.halt(1);
+        return prog.instructions;
+    }
 
-        // Check if SELECT *
-        bool is_select_star = (select_stmt->select_list.size == 1 &&
-                              select_stmt->select_list[0]->type == EXPR_STAR);
+    Structure *table = select_stmt->from_table->sem.resolved;
+    auto table_ctx = from_structure(*table);
+    int cursor = prog.open_cursor(table_ctx);
 
-        if (is_select_star)
+    if (has_aggregates)
+    {
+        // AGGREGATE PATH: Initialize accumulators, scan, then output final result
+
+        // Initialize accumulator registers for each aggregate in SELECT list
+        array<int, query_arena> accumulators;
+        array<int, query_arena> count_regs; // For AVG functions
+
+        for (uint32_t i = 0; i < select_stmt->select_list.size; i++)
         {
-            distinct_layout = table->to_layout();
-        }
-        else
-        {
-
-
-            for (uint32_t i = 0; i < select_stmt->select_list.size; i++)
+            Expr *expr = select_stmt->select_list[i];
+            if (expr->type == EXPR_FUNCTION && expr->sem.is_aggregate)
             {
-                Expr *expr = select_stmt->select_list[i];
-                uint32_t offset = 0;
-                if (expr->type != EXPR_COLUMN)
+                int acc_reg = compile_aggregate_init(&prog, expr);
+                accumulators.push(acc_reg);
+
+                // For AVG, we need a separate count register
+                if (strcasecmp(expr->func_name.c_str(), "AVG") == 0)
                 {
-                    prog.halt(1);
-                    return prog.instructions;
-                }
-                auto type = table->columns[expr->sem.column_index].type;
-                distinct_layout.layout.push(type);
-                distinct_layout.offsets.push(offset);
-                offset+=type_size(type);
-            }
-        }
-
-        auto table_ctx = from_structure(*table);
-        auto distinct_ctx = red_black(distinct_layout, false);
-
-        int main_cursor = prog.open_cursor(table_ctx);
-        int distinct_cursor = prog.open_cursor(distinct_ctx);
-
-        // Phase 1: Scan table and insert distinct rows into ephemeral tree
-        int at_end = prog.first(main_cursor);
-        auto scan_loop = prog.begin_while(at_end);
-        {
-            prog.regs.push_scope();
-
-            // Apply WHERE filter if present
-            if (select_stmt->where_clause)
-            {
-                int where_result = compile_where_expr(&prog, select_stmt->where_clause, main_cursor);
-                auto where_ctx = prog.begin_if(where_result);
-                {
-                    // Build the row to insert
-                    int result_start;
-                    int result_count;
-
-                    if (is_select_star)
-                    {
-                        // Get all columns
-                        result_start = prog.get_columns(main_cursor, 0, table->columns.size);
-                        result_count = table->columns.size;
-                    }
-                    else
-                    {
-                        // Get selected columns only
-                        result_start = prog.regs.allocate_range(select_stmt->select_list.size);
-                        for (uint32_t i = 0; i < select_stmt->select_list.size; i++)
-                        {
-                            Expr *expr = select_stmt->select_list[i];
-                            int col_reg = prog.get_column(main_cursor, expr->sem.column_index);
-                            prog.move(col_reg, result_start + i);
-                        }
-                        result_count = select_stmt->select_list.size;
-                    }
-
-                    // Insert into distinct tree (duplicates will be ignored)
-                    prog.insert_record(distinct_cursor, result_start, result_count);
-                }
-                prog.end_if(where_ctx);
-            }
-            else
-            {
-                // No WHERE clause - insert all rows
-                int result_start;
-                int result_count;
-
-                if (is_select_star)
-                {
-                    result_start = prog.get_columns(main_cursor, 0, table->columns.size);
-                    result_count = table->columns.size;
+                    int count_reg = prog.load(TYPE_U64, prog.alloc_value(0ULL));
+                    count_regs.push(count_reg);
                 }
                 else
                 {
-                    result_start = prog.regs.allocate_range(select_stmt->select_list.size);
-                    for (uint32_t i = 0; i < select_stmt->select_list.size; i++)
-                    {
-                        Expr *expr = select_stmt->select_list[i];
-                        int col_reg = prog.get_column(main_cursor, expr->sem.column_index);
-                        prog.move(col_reg, result_start + i);
-                    }
-                    result_count = select_stmt->select_list.size;
+                    count_regs.push(-1);
                 }
-
-                prog.insert_record(distinct_cursor, result_start, result_count);
             }
-
-            prog.regs.pop_scope();
-            prog.next(main_cursor, at_end);
+            else
+            {
+                // Non-aggregate in aggregate query - shouldn't happen without GROUP BY
+                accumulators.push(-1);
+                count_regs.push(-1);
+            }
         }
-        prog.end_while(scan_loop);
 
-        // Phase 2: Output all rows from distinct tree
-        at_end = prog.first(distinct_cursor);
-        auto output_loop = prog.begin_while(at_end);
-        {
-            int row_count = is_select_star ? table->columns.size : select_stmt->select_list.size;
-            int row = prog.get_columns(distinct_cursor, 0, row_count);
-            prog.result(row, row_count);
-            prog.next(distinct_cursor, at_end);
-        }
-        prog.end_while(output_loop);
-
-        prog.close_cursor(main_cursor);
-        prog.close_cursor(distinct_cursor);
-    }
-    else
-    {
-        // Non-DISTINCT regular scan
-        auto table_ctx = from_structure(*table);
-        int cursor = prog.open_cursor(table_ctx);
-
+        // Scan the table and accumulate
         int at_end = prog.first(cursor);
         auto scan_loop = prog.begin_while(at_end);
         {
             prog.regs.push_scope();
 
-            // Apply WHERE filter if present
-            bool has_where = (select_stmt->where_clause != nullptr);
-            CondContext where_ctx;
+            // Check WHERE clause if present
+            bool should_process = true;
+            WhileContext where_ctx;
+            if (has_where)
+            {
+                int where_result = compile_where_expr(&prog, select_stmt->where_clause, cursor);
+                where_ctx = prog.begin_if(where_result);
+                should_process = true;
+            }
 
+            if (should_process)
+            {
+                // Accumulate for each aggregate
+                for (uint32_t i = 0; i < select_stmt->select_list.size; i++)
+                {
+                    Expr *expr = select_stmt->select_list[i];
+                    if (expr->type == EXPR_FUNCTION && expr->sem.is_aggregate)
+                    {
+                        compile_aggregate_accumulate(&prog, expr, accumulators[i], cursor, count_regs[i]);
+                    }
+                }
+            }
+
+            if (has_where)
+            {
+                prog.end_if(where_ctx);
+            }
+
+            prog.regs.pop_scope();
+            prog.next(cursor, at_end);
+        }
+        prog.end_while(scan_loop);
+
+        // Finalize aggregates and output single result row
+        int result_start = prog.regs.allocate_range(select_stmt->select_list.size);
+
+        for (uint32_t i = 0; i < select_stmt->select_list.size; i++)
+        {
+            Expr *expr = select_stmt->select_list[i];
+            if (expr->type == EXPR_FUNCTION && expr->sem.is_aggregate)
+            {
+                if (strcasecmp(expr->func_name.c_str(), "AVG") == 0 && count_regs[i] != -1)
+                {
+                    // AVG = sum / count
+                    prog.div(accumulators[i], count_regs[i], result_start + i);
+                }
+                else
+                {
+                    // Other aggregates - just move the accumulator
+                    prog.move(accumulators[i], result_start + i);
+                }
+            }
+            else
+            {
+                // Non-aggregate - shouldn't happen without GROUP BY
+                prog.load_null(result_start + i);
+            }
+        }
+
+        prog.result(result_start, select_stmt->select_list.size);
+    }
+    else
+    {
+        // NON-AGGREGATE PATH: Output each row (existing logic)
+
+        // Handle SELECT * expansion
+        bool is_select_star = (select_stmt->select_list.size == 1 &&
+                              select_stmt->select_list[0]->type == EXPR_STAR);
+
+        // Scan and output rows
+        int at_end = prog.first(cursor);
+        auto scan_loop = prog.begin_while(at_end);
+        {
+            prog.regs.push_scope();
+
+            // Check WHERE clause if present
+            WhileContext where_ctx;
             if (has_where)
             {
                 int where_result = compile_where_expr(&prog, select_stmt->where_clause, cursor);
                 where_ctx = prog.begin_if(where_result);
             }
 
-            // Generate result based on SELECT list
-            int result_start = -1;
-            int result_count = 0;
-
-            // Check if we have SELECT *
-            bool is_select_star = (select_stmt->select_list.size == 1 &&
-                                  select_stmt->select_list[0]->type == EXPR_STAR);
+            // Project columns
+            int result_start;
+            int result_count;
 
             if (is_select_star)
             {
@@ -699,17 +726,13 @@ compile_select(Statement *stmt)
             }
             else
             {
-                // Get specific columns only (no expressions)
+                // Specific columns
                 result_start = prog.regs.allocate_range(select_stmt->select_list.size);
-
                 for (uint32_t i = 0; i < select_stmt->select_list.size; i++)
                 {
                     Expr *expr = select_stmt->select_list[i];
-
-                    if (expr->type != EXPR_COLUMN)
+                    if (expr->type == EXPR_NULL)
                     {
-                        // Expression not supported in SELECT list - only columns
-                        // Load NULL as placeholder
                         int null_reg = prog.load_null();
                         prog.move(null_reg, result_start + i);
                     }
@@ -735,10 +758,9 @@ compile_select(Statement *stmt)
             prog.next(cursor, at_end);
         }
         prog.end_while(scan_loop);
-
-        prog.close_cursor(cursor);
     }
 
+    prog.close_cursor(cursor);
     prog.halt();
     prog.resolve_labels();
     return prog.instructions;
@@ -954,75 +976,7 @@ vmfunc_drop_structure(TypedValue *result, TypedValue *args, uint32_t arg_count)
 	return true;
 }
 
-array<VMInstruction, query_arena>
-compile_drop_index(Statement *stmt)
-{
-	ProgramBuilder prog;
-	DropIndexStmt *drop_stmt = stmt->drop_index_stmt;
 
-	if (!drop_stmt->sem.is_resolved)
-	{
-		prog.halt(1);
-		return prog.instructions;
-	}
-
-	// Check if index exists (for IF EXISTS case)
-	Structure *index = catalog.get(drop_stmt->index_name);
-	if (!index)
-	{
-		prog.halt(0);
-		return prog.instructions;
-	}
-
-	prog.begin_transaction();
-
-	// Drop the index structure
-	int name_reg = prog.load(TYPE_CHAR32, prog.alloc_string(drop_stmt->index_name.c_str(), 32));
-	int is_table = prog.load(TYPE_U32, prog.alloc_value(0U));
-	prog.call_function(vmfunc_drop_structure, name_reg, 2);
-
-	// Delete from master catalog using DELETE-style approach
-	Structure &master = catalog[MASTER_CATALOG];
-	auto	   master_ctx = from_structure(master);
-	int		   cursor = prog.open_cursor(master_ctx);
-
-	int	 at_end = prog.first(cursor);
-	auto scan_loop = prog.begin_while(at_end);
-	{
-		prog.regs.push_scope();
-
-		// Get name column (column 1)
-		int entry_name = prog.get_column(cursor, 1);
-
-		// Compare with target name
-		int matches = prog.eq(entry_name, name_reg);
-
-		// Delete if matches
-		auto delete_if = prog.begin_if(matches);
-		{
-			int deleted = prog.regs.allocate();
-			int still_valid = prog.regs.allocate();
-			prog.delete_record(cursor, deleted, still_valid);
-
-			// Exit loop after deletion
-			prog.goto_label("index_deleted");
-		}
-		prog.end_if(delete_if);
-
-		prog.next(cursor, at_end);
-		prog.regs.pop_scope();
-	}
-	prog.end_while(scan_loop);
-
-	prog.label("index_deleted");
-	prog.close_cursor(cursor);
-
-	prog.commit_transaction();
-	prog.halt();
-
-	prog.resolve_labels();
-	return prog.instructions;
-}
 
 array<VMInstruction, query_arena>
 compile_drop_table(Statement *stmt)
