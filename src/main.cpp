@@ -320,11 +320,13 @@ execute_sql_statement(const char *sql, bool print_as)
 
 	return true;
 }
-
+#include "tests/tests_parser.hpp"
 // Updated main test function
 int
 main()
 {
+
+    test_parser();
 	arena::init<query_arena>();
 	bool existed = pager_open("relational_test.db");
 

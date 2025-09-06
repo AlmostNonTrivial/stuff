@@ -546,7 +546,7 @@ template <typename Tag> struct StreamAlloc
 	size_t	 reserved;	// How much we've reserved so far
 };
 
-template <typename Tag>
+template <typename Tag = global_arena>
 StreamAlloc<Tag>
 stream_begin(size_t initial_reserve = 1024)
 {
@@ -585,7 +585,7 @@ stream_begin(size_t initial_reserve = 1024)
 	return StreamAlloc<Tag>{start, start, initial_reserve};
 }
 
-template <typename Tag>
+template <typename Tag = global_arena>
 void
 stream_write(StreamAlloc<Tag> *stream, const void *data, size_t size)
 {
@@ -632,7 +632,7 @@ stream_write(StreamAlloc<Tag> *stream, const void *data, size_t size)
 	stream->write_pos += size;
 }
 
-template <typename Tag>
+template <typename Tag = global_arena>
 uint8_t *
 stream_finish(StreamAlloc<Tag> *stream)
 {
@@ -641,7 +641,7 @@ stream_finish(StreamAlloc<Tag> *stream)
 	return stream->start;
 }
 
-template <typename Tag>
+template <typename Tag = global_arena>
 void
 stream_abandon(StreamAlloc<Tag> *stream)
 {
@@ -649,7 +649,7 @@ stream_abandon(StreamAlloc<Tag> *stream)
 	Arena<Tag>::current = stream->start;
 }
 
-template <typename Tag>
+template <typename Tag = global_arena>
 size_t
 stream_size(const StreamAlloc<Tag> *stream)
 {
@@ -922,6 +922,7 @@ hash_int(T x)
 	}
 }
 
+
 // String class with hash support
 template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct string
 {
@@ -1051,7 +1052,7 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 		if (size > 0 && data[size - 1] == '\0')
 			size--; // Remove old null terminator
 
-		size_t len = s != 0 ? s: strlen(cstr);
+		size_t len = s != 0 ? s : strlen(cstr);
 		reserve(size + len + 1);
 
 		memcpy(data + size, cstr, len);
@@ -1351,6 +1352,7 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 		return s;
 	}
 };
+
 
 // Pair structure
 template <typename K, typename V> struct pair

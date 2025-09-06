@@ -94,36 +94,7 @@ bootstrap_master(bool create)
 	catalog.insert(MASTER_CATALOG, structure);
 }
 
-// Parse CREATE TABLE SQL to extract columns
-array<Column>
-parse_create_sql_for_columns(const char *sql)
-{
-	array<Column> columns;
 
-	// For now, a simple parser - could use your existing parser
-	// This is a minimal implementation
-	Parser parser;
-	parser_init(&parser, sql);
-
-	Statement *stmt = parser_parse_statement(&parser);
-	if (!stmt || stmt->type != STMT_CREATE_TABLE)
-	{
-		printf("Failed to parse CREATE TABLE: %s\n", sql);
-		return columns;
-	}
-
-	CreateTableStmt *create_stmt = stmt->create_table_stmt;
-	columns.reserve(create_stmt->columns.size);
-
-	for (uint32_t i = 0; i < create_stmt->columns.size; i++)
-	{
-		ColumnDef *col_def = create_stmt->columns[i];
-		Column	   col = {col_def->name.c_str(), col_def->type};
-		columns.push(col);
-	}
-
-	return columns;
-}
 
 // In catalog.cpp or a new bootstrap file
 
@@ -156,8 +127,20 @@ catalog_bootstrap_callback(TypedValue *result, size_t count)
 
 	printf("Bootstrapping table: %s (root page: %u)\n", name, rootpage);
 
+	array<Column> columns;
+	Parser parser;
+	parser_init(&parser, sql);
+	Statement *stmt = parser_parse_statement(&parser);
+	CreateTableStmt *create_stmt = stmt->create_table_stmt;
+	columns.reserve(create_stmt->columns.size);
+
+	for (uint32_t i = 0; i < create_stmt->columns.size; i++)
+	{
+		ColumnDef *col_def = create_stmt->columns[i];
+		Column	   col = {col_def->name.c_str(), col_def->type};
+		columns.push(col);
+	}
 	// Parse the SQL to reconstruct columns
-	array<Column> columns = parse_create_sql_for_columns(sql);
 
 	// Create the structure
 	Structure structure = Structure::from(name, columns);

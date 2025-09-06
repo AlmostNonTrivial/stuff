@@ -77,31 +77,6 @@ semantic_resolve_create_table(CreateTableStmt *stmt, SemanticContext *ctx)
 	return true;
 }
 
-// Helper function for type compatibility
-bool
-types_compatible(DataType source, DataType target)
-{
-	// Exact match
-	if (source == target)
-		return true;
-
-	// Numeric type promotions
-	if (type_is_numeric(source) && type_is_numeric(target))
-	{
-		// Allow promotion from smaller to larger types
-		uint32_t source_size = type_size(source);
-		uint32_t target_size = type_size(target);
-		return source_size <= target_size;
-	}
-
-	// String compatibility
-	if (type_is_string(source) && type_is_string(target))
-	{
-		return true; // Allow string conversions
-	}
-
-	return false;
-}
 
 bool
 semantic_resolve_insert(InsertStmt *stmt, SemanticContext *ctx)

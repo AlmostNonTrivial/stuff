@@ -506,3 +506,5 @@ parse_sql(const char *sql);
 
 void
 print_ast(Statement *stmt);
+const char *
+reconstruct_create_sql(CreateTableStmt *stmt);

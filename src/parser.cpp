@@ -1,5 +1,6 @@
 #include "parser.hpp"
 #include "arena.hpp"
+#include "catalog.hpp"
 #include "common.hpp"
 #include <cctype>
 #include <cstring>
@@ -2322,4 +2323,55 @@ print_ast(Statement *stmt)
 	default:
 		printf("Unknown statement type\n");
 	}
+}
+
+
+
+// Helper function to reconstruct CREATE TABLE SQL from AST
+const char *
+reconstruct_create_sql(CreateTableStmt *stmt)
+{
+	auto stream = arena::stream_begin(512);
+
+	// Start with CREATE TABLE
+	const char *prefix = "CREATE TABLE ";
+	if (stmt->if_not_exists)
+	{
+		prefix = "CREATE TABLE IF NOT EXISTS ";
+	}
+	arena::stream_write(&stream, prefix, strlen(prefix));
+
+	// Table name
+	arena::stream_write(&stream, stmt->table_name.c_str(), stmt->table_name.length());
+	arena::stream_write(&stream, " (", 2);
+
+	// Columns
+	for (uint32_t i = 0; i < stmt->columns.size; i++)
+	{
+		if (i > 0)
+		{
+			arena::stream_write(&stream, ", ", 2);
+		}
+
+		ColumnDef *col = stmt->columns[i];
+		arena::stream_write(&stream, col->name, strlen(col->name));
+		arena::stream_write(&stream, " ", 1);
+
+		const char *type_nam = type_name(col->type);
+		arena::stream_write(&stream, type_nam, strlen(type_nam));
+
+		if (col->is_primary_key)
+		{
+			arena::stream_write(&stream, " PRIMARY KEY", 12);
+		}
+		if (col->is_not_null)
+		{
+			arena::stream_write(&stream, " NOT NULL", 9);
+		}
+	}
+
+	arena::stream_write(&stream, ")", 1);
+	arena::stream_write(&stream, "\0", 1); // Null terminate
+
+	return (const char *)arena::stream_finish(&stream);
 }
