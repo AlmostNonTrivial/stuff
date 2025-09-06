@@ -5,16 +5,6 @@
 #include "vm.hpp"
 #include <cstdint>
 
-CursorContext
-red_black(Layout &layout, bool allow_duplicates = true)
-{
-	CursorContext cctx;
-	cctx.type = RED_BLACK;
-	cctx.layout = layout;
-	cctx.flags = allow_duplicates;
-	return cctx;
-}
-
 bool
 vmfunc_create_structure(TypedValue *result, TypedValue *args, uint32_t arg_count)
 {
@@ -44,7 +34,7 @@ compile_create_table_complete(Statement *stmt)
 	Structure &stru = catalog[MASTER_CATALOG];
 	// 2. Open cursor to master catalog
 	auto master_ctx = from_structure(stru);
-	int	 master_cursor = prog.open_cursor(&master_ctx);
+	int	 master_cursor = prog.open_cursor(master_ctx);
 
 	// 3. Prepare master catalog row in contiguous registers
 	int row_start = prog.regs.allocate_range(5);
@@ -69,8 +59,6 @@ compile_create_table_complete(Statement *stmt)
 	return prog.instructions;
 }
 
-
-
 array<VMInstruction, query_arena>
 compile_create_index(Statement *stmt)
 {
@@ -93,7 +81,7 @@ compile_create_index(Statement *stmt)
 	// 2. Add entry to master catalog
 	Structure &master = catalog[MASTER_CATALOG];
 	auto	   master_ctx = from_structure(master);
-	int		   master_cursor = prog.open_cursor(&master_ctx);
+	int		   master_cursor = prog.open_cursor(master_ctx);
 
 	// Prepare master catalog row
 	int row_start = prog.regs.allocate_range(5);
@@ -116,8 +104,8 @@ compile_create_index(Statement *stmt)
 	auto source_ctx = from_structure(*source_table);
 	auto index_ctx = from_structure(*index_structure);
 
-	int source_cursor = prog.open_cursor(&source_ctx);
-	int index_cursor = prog.open_cursor(&index_ctx);
+	int source_cursor = prog.open_cursor(source_ctx);
+	int index_cursor = prog.open_cursor(index_ctx);
 
 	{
 		prog.regs.push_scope();
@@ -224,7 +212,7 @@ compile_insert(Statement *stmt)
 
 	// Open cursor to target table
 	auto table_ctx = from_structure(*insert_stmt->sem.table);
-	int	 cursor = prog.open_cursor(&table_ctx);
+	int	 cursor = prog.open_cursor(table_ctx);
 
 	// Process each value row
 	for (uint32_t row = 0; row < insert_stmt->values.size; row++)
@@ -262,7 +250,7 @@ compile_batch_insert(Statement *stmt)
 	prog.begin_transaction();
 
 	auto table_ctx = from_structure(*insert_stmt->sem.table);
-	int	 cursor = prog.open_cursor(&table_ctx);
+	int	 cursor = prog.open_cursor(table_ctx);
 
 	// For large batches, process in chunks to avoid register exhaustion
 	const uint32_t BATCH_SIZE = 100;
@@ -469,7 +457,7 @@ compile_delete_forward(Statement *stmt)
 	prog.begin_transaction();
 
 	auto table_ctx = from_structure(*delete_stmt->sem.table);
-	int	 cursor = prog.open_cursor(&table_ctx);
+	int	 cursor = prog.open_cursor(table_ctx);
 
 	// Forward scan - need to be careful about cursor invalidation
 	int at_end = prog.first(cursor);
@@ -586,8 +574,8 @@ compile_select(Statement *stmt)
         auto table_ctx = from_structure(*table);
         auto distinct_ctx = red_black(distinct_layout, false);
 
-        int main_cursor = prog.open_cursor(&table_ctx);
-        int distinct_cursor = prog.open_cursor(&distinct_ctx);
+        int main_cursor = prog.open_cursor(table_ctx);
+        int distinct_cursor = prog.open_cursor(distinct_ctx);
 
         // Phase 1: Scan table and insert distinct rows into ephemeral tree
         int at_end = prog.first(main_cursor);
@@ -678,7 +666,7 @@ compile_select(Statement *stmt)
     {
         // Non-DISTINCT regular scan
         auto table_ctx = from_structure(*table);
-        int cursor = prog.open_cursor(&table_ctx);
+        int cursor = prog.open_cursor(table_ctx);
 
         int at_end = prog.first(cursor);
         auto scan_loop = prog.begin_while(at_end);
@@ -759,155 +747,155 @@ compile_select(Statement *stmt)
 int
 compile_expr(ProgramBuilder *prog, Expr *expr, int cursor_id)
 {
-    switch (expr->type)
-    {
-    case EXPR_COLUMN: {
-        // Load column value from cursor
-        return prog->get_column(cursor_id, expr->sem.column_index);
-    }
+	switch (expr->type)
+	{
+	case EXPR_COLUMN: {
+		// Load column value from cursor
+		return prog->get_column(cursor_id, expr->sem.column_index);
+	}
 
-    case EXPR_LITERAL: {
-        // Use the resolved type from semantic analysis
-        DataType target = expr->sem.resolved_type;
-        if (target == TYPE_NULL)
-        {
-            target = expr->lit_type;
-        }
-        return compile_literal(prog, expr, target);
-    }
+	case EXPR_LITERAL: {
+		// Use the resolved type from semantic analysis
+		DataType target = expr->sem.resolved_type;
+		if (target == TYPE_NULL)
+		{
+			target = expr->lit_type;
+		}
+		return compile_literal(prog, expr, target);
+	}
 
-    case EXPR_BINARY_OP: {
-        // Recursively compile operands
-        int left_reg = compile_expr(prog, expr->left, cursor_id);
-        int right_reg = compile_expr(prog, expr->right, cursor_id);
+	case EXPR_BINARY_OP: {
+		// Recursively compile operands
+		int left_reg = compile_expr(prog, expr->left, cursor_id);
+		int right_reg = compile_expr(prog, expr->right, cursor_id);
 
-        // Generate operation
-        switch (expr->op)
-        {
-        // Comparison operators
-        case OP_EQ:
-            return prog->eq(left_reg, right_reg);
-        case OP_NE:
-            return prog->ne(left_reg, right_reg);
-        case OP_LT:
-            return prog->lt(left_reg, right_reg);
-        case OP_LE:
-            return prog->le(left_reg, right_reg);
-        case OP_GT:
-            return prog->gt(left_reg, right_reg);
-        case OP_GE:
-            return prog->ge(left_reg, right_reg);
+		// Generate operation
+		switch (expr->op)
+		{
+		// Comparison operators
+		case OP_EQ:
+			return prog->eq(left_reg, right_reg);
+		case OP_NE:
+			return prog->ne(left_reg, right_reg);
+		case OP_LT:
+			return prog->lt(left_reg, right_reg);
+		case OP_LE:
+			return prog->le(left_reg, right_reg);
+		case OP_GT:
+			return prog->gt(left_reg, right_reg);
+		case OP_GE:
+			return prog->ge(left_reg, right_reg);
 
-        // Logical operators
-        case OP_AND:
-            return prog->logic_and(left_reg, right_reg);
-        case OP_OR:
-            return prog->logic_or(left_reg, right_reg);
+		// Logical operators
+		case OP_AND:
+			return prog->logic_and(left_reg, right_reg);
+		case OP_OR:
+			return prog->logic_or(left_reg, right_reg);
 
-        // Arithmetic operators
-        case OP_ADD:
-            return prog->add(left_reg, right_reg);
-        case OP_SUB:
-            return prog->sub(left_reg, right_reg);
-        case OP_MUL:
-            return prog->mul(left_reg, right_reg);
-        case OP_DIV:
-            return prog->div(left_reg, right_reg);
-        case OP_MOD:
-            return prog->mod(left_reg, right_reg);
+		// Arithmetic operators
+		case OP_ADD:
+			return prog->add(left_reg, right_reg);
+		case OP_SUB:
+			return prog->sub(left_reg, right_reg);
+		case OP_MUL:
+			return prog->mul(left_reg, right_reg);
+		case OP_DIV:
+			return prog->div(left_reg, right_reg);
+		case OP_MOD:
+			return prog->mod(left_reg, right_reg);
 
-        case OP_IN: {
-            // Handle IN operator with list
-            if (expr->right->type == EXPR_LIST)
-            {
-                // Start with false
-                int result = prog->load(TYPE_U32, prog->alloc_value(0U));
+		case OP_IN: {
+			// Handle IN operator with list
+			if (expr->right->type == EXPR_LIST)
+			{
+				// Start with false
+				int result = prog->load(TYPE_U32, prog->alloc_value(0U));
 
-                // Check each value in list
-                for (uint32_t i = 0; i < expr->right->list_items.size; i++)
-                {
-                    int item_reg = compile_expr(prog, expr->right->list_items[i], cursor_id);
-                    int match = prog->eq(left_reg, item_reg);
-                    result = prog->logic_or(result, match);
-                }
-                return result;
-            }
-            return prog->load_null();
-        }
+				// Check each value in list
+				for (uint32_t i = 0; i < expr->right->list_items.size; i++)
+				{
+					int item_reg = compile_expr(prog, expr->right->list_items[i], cursor_id);
+					int match = prog->eq(left_reg, item_reg);
+					result = prog->logic_or(result, match);
+				}
+				return result;
+			}
+			return prog->load_null();
+		}
 
-        case OP_LIKE: {
-            // Call LIKE function if available
-            // return prog->call_function(vmfunc_like, left_reg, 2);
-        }
+		case OP_LIKE: {
+			// Call LIKE function if available
+			// return prog->call_function(vmfunc_like, left_reg, 2);
+		}
 
-        default:
-            return prog->load_null();
-        }
-    }
+		default:
+			return prog->load_null();
+		}
+	}
 
-    case EXPR_UNARY_OP: {
-        int operand_reg = compile_expr(prog, expr->operand, cursor_id);
+	case EXPR_UNARY_OP: {
+		int operand_reg = compile_expr(prog, expr->operand, cursor_id);
 
-        if (expr->unary_op == OP_NOT)
-        {
-            // For NOT, we need to invert the boolean value
-            int one = prog->load(TYPE_U32, prog->alloc_value(1U));
-            return prog->sub(one, operand_reg); // 1 - x inverts boolean
-        }
-        else if (expr->unary_op == OP_NEG)
-        {
-            // For negation, subtract from zero
-            int zero = prog->load(TYPE_U32, prog->alloc_value(0U));
-            return prog->sub(zero, operand_reg);
-        }
+		if (expr->unary_op == OP_NOT)
+		{
+			// For NOT, we need to invert the boolean value
+			int one = prog->load(TYPE_U32, prog->alloc_value(1U));
+			return prog->sub(one, operand_reg); // 1 - x inverts boolean
+		}
+		else if (expr->unary_op == OP_NEG)
+		{
+			// For negation, subtract from zero
+			int zero = prog->load(TYPE_U32, prog->alloc_value(0U));
+			return prog->sub(zero, operand_reg);
+		}
 
-        return operand_reg;
-    }
+		return operand_reg;
+	}
 
-    case EXPR_FUNCTION: {
-        // Handle aggregate and scalar functions
-        if (expr->sem.is_aggregate)
-        {
-            // Aggregate functions need special handling
-            // For now, return a placeholder
-            return prog->load_null();
-        }
-        else
-        {
-            // // Scalar functions
-            // if (strcasecmp(expr->func_name.c_str(), "UPPER") == 0)
-            // {
-            //     int arg_reg = compile_expr(prog, expr->args[0], cursor_id);
-            //     return prog->call_function(vmfunc_upper, arg_reg, 1);
-            // }
-            // else if (strcasecmp(expr->func_name.c_str(), "LOWER") == 0)
-            // {
-            //     int arg_reg = compile_expr(prog, expr->args[0], cursor_id);
-            //     return prog->call_function(vmfunc_lower, arg_reg, 1);
-            // }
-            // else if (strcasecmp(expr->func_name.c_str(), "LENGTH") == 0)
-            // {
-            //     int arg_reg = compile_expr(prog, expr->args[0], cursor_id);
-            //     return prog->call_function(vmfunc_length, arg_reg, 1);
-            // }
-            // Add more functions as needed
-            return prog->load_null();
-        }
-    }
+	case EXPR_FUNCTION: {
+		// Handle aggregate and scalar functions
+		if (expr->sem.is_aggregate)
+		{
+			// Aggregate functions need special handling
+			// For now, return a placeholder
+			return prog->load_null();
+		}
+		else
+		{
+			// // Scalar functions
+			// if (strcasecmp(expr->func_name.c_str(), "UPPER") == 0)
+			// {
+			//     int arg_reg = compile_expr(prog, expr->args[0], cursor_id);
+			//     return prog->call_function(vmfunc_upper, arg_reg, 1);
+			// }
+			// else if (strcasecmp(expr->func_name.c_str(), "LOWER") == 0)
+			// {
+			//     int arg_reg = compile_expr(prog, expr->args[0], cursor_id);
+			//     return prog->call_function(vmfunc_lower, arg_reg, 1);
+			// }
+			// else if (strcasecmp(expr->func_name.c_str(), "LENGTH") == 0)
+			// {
+			//     int arg_reg = compile_expr(prog, expr->args[0], cursor_id);
+			//     return prog->call_function(vmfunc_length, arg_reg, 1);
+			// }
+			// Add more functions as needed
+			return prog->load_null();
+		}
+	}
 
-    case EXPR_NULL: {
-        return prog->load_null();
-    }
+	case EXPR_NULL: {
+		return prog->load_null();
+	}
 
-    case EXPR_STAR: {
-        // Should not reach here for individual expression compilation
-        // SELECT * is handled at a higher level
-        return prog->load_null();
-    }
+	case EXPR_STAR: {
+		// Should not reach here for individual expression compilation
+		// SELECT * is handled at a higher level
+		return prog->load_null();
+	}
 
-    default:
-        return prog->load_null();
-    }
+	default:
+		return prog->load_null();
+	}
 }
 
 bool
@@ -996,7 +984,7 @@ compile_drop_index(Statement *stmt)
 	// Delete from master catalog using DELETE-style approach
 	Structure &master = catalog[MASTER_CATALOG];
 	auto	   master_ctx = from_structure(master);
-	int		   cursor = prog.open_cursor(&master_ctx);
+	int		   cursor = prog.open_cursor(master_ctx);
 
 	int	 at_end = prog.first(cursor);
 	auto scan_loop = prog.begin_while(at_end);
@@ -1069,7 +1057,7 @@ compile_drop_table(Statement *stmt)
 	// Delete table entry from master catalog
 	Structure &master = catalog[MASTER_CATALOG];
 	auto	   master_ctx = from_structure(master);
-	int		   cursor = prog.open_cursor(&master_ctx);
+	int		   cursor = prog.open_cursor(master_ctx);
 
 	// First pass - delete the table entry
 	int	 at_end = prog.first(cursor);

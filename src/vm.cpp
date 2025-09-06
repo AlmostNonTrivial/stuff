@@ -234,8 +234,8 @@ vmcursor_type_name(VmCursor *cur) {
             return "RED_BLACK";
         case BPLUS:
             return "BPLUS";
-        case BLOB:
-            return "BLOB";
+        // case BLOB:
+        //     return "BLOB";
     }
     return "UNKNOWN";
 }

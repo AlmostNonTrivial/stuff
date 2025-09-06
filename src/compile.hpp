@@ -26,7 +26,7 @@ struct CursorAllocator
 	void
 	free(int cursor_id)
 	{
-		free_list.push(cursor_id);
+		// free_list.push(cursor_id);
 	}
 };
 
@@ -947,15 +947,27 @@ alloc_dual(DataType type1, const void *data1, DataType type2, const void *data2)
 }
 
 
-inline CursorContext
+inline CursorContext*
 from_structure(Structure &structure)
 {
-	CursorContext cctx;
-	cctx.storage.tree = &structure.storage.btree;
-	cctx.type = BPLUS;
-	cctx.layout = structure.to_layout();
+	CursorContext * cctx= (CursorContext*)arena::alloc<query_arena>(sizeof(CursorContext));
+	cctx->storage.tree = &structure.storage.btree;
+	cctx->type = BPLUS;
+	cctx->layout = structure.to_layout();
 	return cctx;
 }
+
+
+inline CursorContext *
+red_black(Layout &layout, bool allow_duplicates = true)
+{
+	CursorContext * cctx= (CursorContext*)arena::alloc<query_arena>(sizeof(CursorContext));
+	cctx->type = RED_BLACK;
+	cctx->layout = layout;
+	cctx->flags = allow_duplicates;
+	return cctx;
+}
+
 
 
 

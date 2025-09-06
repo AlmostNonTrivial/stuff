@@ -17,7 +17,7 @@ enum storage_type : uint8_t
 {
 	BPLUS,
 	RED_BLACK,
-	BLOB
+	// BLOB
 };
 
 struct CursorContext

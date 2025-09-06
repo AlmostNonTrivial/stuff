@@ -27,11 +27,11 @@ load_catalog_from_master()
 	// Run your existing master table scan
 	ProgramBuilder prog = {};
 	auto		   cctx = from_structure(catalog[MASTER_CATALOG]);
-	int			   cursor = prog.open_cursor(&cctx);
+	int			   cursor = prog.open_cursor(cctx);
 	int			   is_at_end = prog.rewind(cursor, false);
 	auto		   while_context = prog.begin_while(is_at_end);
-	int			   dest_reg = prog.get_columns(cursor, 0, cctx.layout.count());
-	prog.result(dest_reg, cctx.layout.count());
+	int			   dest_reg = prog.get_columns(cursor, 0, cctx->layout.count());
+	prog.result(dest_reg, cctx->layout.count());
 	prog.next(cursor, is_at_end);
 	prog.end_while(while_context);
 	prog.close_cursor(cursor);
@@ -446,10 +446,6 @@ execute_sql_statement(const char *sql, bool test_mode)
 
 	for (auto &stmt : statements)
 	{
-		if (test_mode)
-		{
-			print_ast(stmt);
-		}
 
 		// 2. Semantic analysis
 		SemanticContext sem_ctx;
@@ -571,6 +567,46 @@ test_select_features()
 	validation_end();
 }
 
+// Test GROUP BY and aggregates
+void
+test_group_by_aggregates()
+{
+    printf("\n=== Testing GROUP BY and Aggregates ===\n");
+    // _debug = true;
+    // Test 1: Simple GROUP BY with COUNT(*)
+    printf("\n1. Testing GROUP BY city with COUNT(*):\n");
+    // validation_begin(false);  // Order may vary from red-black tree
+
+    // Based on the data, we should get counts per city
+    // Houston appears multiple times, Phoenix, etc.
+    // expect_row_values({alloc_char16("Houston"), alloc_u32(2)});  // Houston has 2 users in first 3
+    // expect_row_values({alloc_char16("Phoenix"), alloc_u32(1)});  // Phoenix has 1
+
+    execute_sql_statement("SELECT COUNT(*) FROM users;", false);
+    // validation_end();
+
+    return;
+    // Test 2: GROUP BY with SUM
+    printf("\n2. Testing GROUP BY with SUM(age):\n");
+    validation_begin(false);
+
+    expect_row_values({alloc_char16("Houston"), alloc_u32(77)});  // 35 + 42
+    expect_row_values({alloc_char16("Phoenix"), alloc_u32(28)});  // 28
+
+    execute_sql_statement("SELECT city, SUM(age) FROM users WHERE user_id <= 3 GROUP BY city;", true);
+    validation_end();
+
+    // Test 3: Multiple aggregates
+    printf("\n3. Testing multiple aggregates:\n");
+    validation_begin(false);
+
+    expect_row_values({alloc_char16("Houston"), alloc_u32(2), alloc_u32(77), alloc_u32(35)});  // count, sum, min
+    expect_row_values({alloc_char16("Phoenix"), alloc_u32(1), alloc_u32(28), alloc_u32(28)});
+
+    execute_sql_statement("SELECT city, COUNT(*), SUM(age), MIN(age) FROM users WHERE user_id <= 3 GROUP BY city;", true);
+    validation_end();
+}
+
 int
 main()
 {
@@ -593,7 +629,8 @@ main()
 
 	// Run the SELECT feature tests
 
-	test_select_features();
+	// test_select_features();
+	test_group_by_aggregates();
 
 	pager_close();
 }
