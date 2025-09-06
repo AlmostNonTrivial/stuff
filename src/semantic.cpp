@@ -197,32 +197,96 @@ semantic_resolve_column(Expr *expr, Structure *table, SemanticContext *ctx)
 	return false;
 }
 
-bool
-semantic_resolve_expr(Expr *expr, Structure *table, SemanticContext *ctx)
-{
-	switch (expr->type)
-	{
-	case EXPR_COLUMN:
-		return semantic_resolve_column(expr, table, ctx);
+bool semantic_resolve_expr(Expr* expr, Structure* table, SemanticContext* ctx) {
+    switch (expr->type) {
+        case EXPR_COLUMN:
+            return semantic_resolve_column(expr, table, ctx);
 
-	case EXPR_STAR:
-		expr->sem.is_resolved = true;
-		return true;
+        case EXPR_STAR:
+            expr->sem.is_resolved = true;
+            return true;
 
-	case EXPR_LITERAL:
-		expr->sem.resolved_type = expr->lit_type;
-		expr->sem.is_resolved = true;
-		return true;
+        case EXPR_LITERAL:
+            // Make sure lit_type is set from parser
+            expr->sem.resolved_type = expr->lit_type;
+            expr->sem.is_resolved = true;
+            return true;
 
-	case EXPR_NULL:
-		expr->sem.resolved_type = TYPE_NULL;
-		expr->sem.is_resolved = true;
-		return true;
+        case EXPR_NULL:
+            expr->sem.resolved_type = TYPE_NULL;
+            expr->sem.is_resolved = true;
+            return true;
 
-	// TODO: Handle other expression types (binary ops, functions, etc)
-	default:
-		return true;
-	}
+        case EXPR_BINARY_OP: {
+            // Recursively resolve left and right operands
+            if (!semantic_resolve_expr(expr->left, table, ctx)) {
+                return false;
+            }
+            if (!semantic_resolve_expr(expr->right, table, ctx)) {
+                return false;
+            }
+
+            // Determine result type based on operation
+            DataType left_type = expr->left->sem.resolved_type;
+            DataType right_type = expr->right->sem.resolved_type;
+
+            switch (expr->op) {
+                // Comparison operators always return U32 (boolean)
+                case OP_EQ:
+                case OP_NE:
+                case OP_LT:
+                case OP_LE:
+                case OP_GT:
+                case OP_GE:
+                    expr->sem.resolved_type = TYPE_U32;
+                    break;
+
+                // Logical operators expect and return U32 (boolean)
+                case OP_AND:
+                case OP_OR:
+                    expr->sem.resolved_type = TYPE_U32;
+                    break;
+
+                // Arithmetic operators - use wider type
+                case OP_ADD:
+                case OP_SUB:
+                case OP_MUL:
+                case OP_DIV:
+                case OP_MOD:
+                    // Simple type promotion - use the larger type
+                    expr->sem.resolved_type = (type_size(left_type) >= type_size(right_type))
+                                             ? left_type : right_type;
+                    break;
+
+                default:
+                    expr->sem.resolved_type = TYPE_NULL;
+            }
+
+            expr->sem.is_resolved = true;
+            return true;
+        }
+
+        case EXPR_UNARY_OP: {
+            // Resolve operand
+            if (!semantic_resolve_expr(expr->operand, table, ctx)) {
+                return false;
+            }
+
+            // Result type depends on operator
+            if (expr->unary_op == OP_NOT) {
+                expr->sem.resolved_type = TYPE_U32; // Boolean result
+            } else if (expr->unary_op == OP_NEG) {
+                expr->sem.resolved_type = expr->operand->sem.resolved_type;
+            }
+
+            expr->sem.is_resolved = true;
+            return true;
+        }
+
+        // TODO: Handle EXPR_FUNCTION, EXPR_SUBQUERY, EXPR_LIST
+        default:
+            return true;
+    }
 }
 
 bool

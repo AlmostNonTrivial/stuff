@@ -60,58 +60,8 @@ compile_create_table_complete(Statement *stmt)
 	return prog.instructions;
 }
 
-// Compile literal with optional type coercion
-int
-compile_literal(ProgramBuilder *prog, Expr *expr, DataType target_type)
-{
-	// If types match exactly, no coercion needed
-	if (expr->lit_type == target_type)
-	{
-		switch (expr->lit_type)
-		{
-		case TYPE_U32:
-			return prog->load(TYPE_U32, prog->alloc_value((uint32_t)expr->int_val));
 
-		case TYPE_CHAR32:
-			return prog->load(TYPE_CHAR32, prog->alloc_string(expr->str_val.c_str(), 32));
-
-		// Add other literal types as needed
-		default:
-			return prog->load_null();
-		}
-	}
-
-	// Handle type coercion
-	if (type_is_numeric(expr->lit_type) && type_is_numeric(target_type))
-	{
-		// Numeric coercion
-		if (type_is_unsigned(target_type))
-		{
-			uint64_t val = (uint64_t)expr->int_val;
-			switch (target_type)
-			{
-			case TYPE_U8:
-				return prog->load(TYPE_U8, prog->alloc_value((uint8_t)val));
-			case TYPE_U16:
-				return prog->load(TYPE_U16, prog->alloc_value((uint16_t)val));
-			case TYPE_U32:
-				return prog->load(TYPE_U32, prog->alloc_value((uint32_t)val));
-			case TYPE_U64:
-				return prog->load(TYPE_U64, prog->alloc_value((uint64_t)val));
-			}
-		}
-		// Add signed and float coercions...
-	}
-
-	if (type_is_string(expr->lit_type) && type_is_string(target_type))
-	{
-		// String coercion - adjust size
-		uint32_t target_size = type_size(target_type);
-		return prog->load(target_type, prog->alloc_string(expr->str_val.c_str(), target_size));
-	}
-
-	return prog->load_null(); // Fallback for unsupported coercion
-}
+int compile_literal(ProgramBuilder *prog, Expr *expr, DataType target_type);
 
 // Compile expression with target type for coercion
 int
@@ -236,7 +186,68 @@ array<VMInstruction, query_arena> compile_batch_insert(Statement* stmt) {
 // NEW: SELECT compilation functions
 // ============================================================================
 
-// Compile WHERE clause expression
+
+// Also fix compile_literal to be more defensive
+int compile_literal(ProgramBuilder *prog, Expr *expr, DataType target_type) {
+    // First, ensure we have a valid literal type
+    DataType lit_type = expr->lit_type;
+
+    // If no target type specified, use the literal's own type
+    if (target_type == TYPE_NULL) {
+        target_type = lit_type;
+    }
+
+    // Handle exact match or compatible types
+    if (lit_type == target_type ||
+        (type_is_numeric(lit_type) && type_is_numeric(target_type))) {
+
+        // For numeric literals, handle based on target type
+        if (type_is_numeric(target_type)) {
+            uint64_t val = (uint64_t)expr->int_val;
+
+            switch (target_type) {
+                case TYPE_U8:
+                    return prog->load(TYPE_U8, prog->alloc_value((uint8_t)val));
+                case TYPE_U16:
+                    return prog->load(TYPE_U16, prog->alloc_value((uint16_t)val));
+                case TYPE_U32:
+                    return prog->load(TYPE_U32, prog->alloc_value((uint32_t)val));
+                case TYPE_U64:
+                    return prog->load(TYPE_U64, prog->alloc_value((uint64_t)val));
+                case TYPE_I8:
+                    return prog->load(TYPE_I8, prog->alloc_value((int8_t)val));
+                case TYPE_I16:
+                    return prog->load(TYPE_I16, prog->alloc_value((int16_t)val));
+                case TYPE_I32:
+                    return prog->load(TYPE_I32, prog->alloc_value((int32_t)val));
+                case TYPE_I64:
+                    return prog->load(TYPE_I64, prog->alloc_value((int64_t)val));
+                case TYPE_F32:
+                    return prog->load(TYPE_F32, prog->alloc_value((float)expr->float_val));
+                case TYPE_F64:
+                    return prog->load(TYPE_F64, prog->alloc_value((double)expr->float_val));
+                default:
+                    // Fallback to U32 for unknown numeric
+                    return prog->load(TYPE_U32, prog->alloc_value((uint32_t)val));
+            }
+        }
+    }
+
+    // String literals
+    if (type_is_string(lit_type) && type_is_string(target_type)) {
+        uint32_t target_size = type_size(target_type);
+        return prog->load(target_type, prog->alloc_string(expr->str_val.c_str(), target_size));
+    }
+
+    // Last resort - try to load as-is
+    if (lit_type != TYPE_NULL) {
+        return compile_literal(prog, expr, lit_type);
+    }
+
+    return prog->load_null();
+}
+
+// And update compile_where_expr to be clearer
 int compile_where_expr(ProgramBuilder* prog, Expr* expr, int cursor_id) {
     switch (expr->type) {
         case EXPR_COLUMN: {
@@ -245,15 +256,20 @@ int compile_where_expr(ProgramBuilder* prog, Expr* expr, int cursor_id) {
         }
 
         case EXPR_LITERAL: {
-            return compile_literal(prog, expr, expr->sem.resolved_type);
+            // Use the resolved type from semantic analysis
+            DataType target = expr->sem.resolved_type;
+            if (target == TYPE_NULL) {
+                target = expr->lit_type; // Fallback to parser type
+            }
+            return compile_literal(prog, expr, target);
         }
 
         case EXPR_BINARY_OP: {
-            // Compile left and right operands
+            // Recursively compile operands
             int left_reg = compile_where_expr(prog, expr->left, cursor_id);
             int right_reg = compile_where_expr(prog, expr->right, cursor_id);
 
-            // Generate comparison/arithmetic operation
+            // Generate operation
             switch (expr->op) {
                 case OP_EQ:  return prog->eq(left_reg, right_reg);
                 case OP_NE:  return prog->ne(left_reg, right_reg);
@@ -276,11 +292,26 @@ int compile_where_expr(ProgramBuilder* prog, Expr* expr, int cursor_id) {
             }
         }
 
+        case EXPR_UNARY_OP: {
+            int operand_reg = compile_where_expr(prog, expr->operand, cursor_id);
+
+            if (expr->unary_op == OP_NOT) {
+                // For NOT, we need to invert the boolean value
+                int one = prog->load(TYPE_U32, prog->alloc_value(1U));
+                return prog->sub(one, operand_reg); // 1 - x inverts boolean
+            } else if (expr->unary_op == OP_NEG) {
+                // For negation, subtract from zero
+                int zero = prog->load(TYPE_U32, prog->alloc_value(0U));
+                return prog->sub(zero, operand_reg);
+            }
+
+            return operand_reg;
+        }
+
         case EXPR_NULL: {
             return prog->load_null();
         }
 
-        // TODO: Handle other expression types
         default:
             return prog->load_null();
     }

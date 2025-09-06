@@ -234,6 +234,9 @@ OP_Unpack= 66,
 #define UNPACK2_DEBUG_PRINT() \
     printf("UNPACK2 R[%d],R[%d] <- unpack(R[%d])", \
            UNPACK2_FIRST_DEST_REG(), UNPACK2_FIRST_DEST_REG()+1, UNPACK2_SRC_REG())
+
+
+OP_Debug = 67
 };
 
 struct VMInstruction

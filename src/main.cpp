@@ -326,13 +326,9 @@ int
 main()
 {
 
-    test_parser();
+	// test_parser();
 	arena::init<query_arena>();
 	bool existed = pager_open("relational_test.db");
-
-	printf("=== Setting up relational database with SQL ===\n\n");
-
-	// Create master catalog first
 
 	if (!existed)
 	{
@@ -346,24 +342,11 @@ main()
 	else
 	{
 		reload_catalog();
-		printf("Database already exists, skipping table creation and data loading\n");
-		execute_sql_statement("SELECT * FROM users;", true);
-
-		for (auto [a, b] : catalog)
-		{
-			std::cout << a.c_str() << b.storage.btree.root_page_index << "\n";
-		}
-
-		return 0;
 	}
 
-	// validation_end();
-
 	// _debug = true;
+	execute_sql_statement("SELECT * FROM users WHERE user_id > 70;");
 
 	pager_close();
 
-	main();
-
-	printf("\n✅ All SQL tests completed!\n");
 }

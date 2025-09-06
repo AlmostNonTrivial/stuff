@@ -411,6 +411,11 @@ step()
 {
 	VMInstruction *inst = &VM.program[VM.pc];
 
+	if (_debug)
+	{
+		int ___ = 0;
+	}
+
 	// Instruction decode removed - just show execution results
 
 	switch (inst->opcode)
@@ -849,7 +854,7 @@ step()
 
 		VmCursor   *cursor = &VM.cursors[cursor_id];
 		TypedValue *first = &VM.registers[key_reg];
-		uint32_t	count = cursor->layout.layout.size- 1;
+		uint32_t	count = cursor->layout.layout.size - 1;
 		bool		success;
 
 		if (_debug)
@@ -1017,6 +1022,12 @@ step()
 		return OK;
 	}
 
+	case OP_Debug: {
+		_debug = !_debug;
+		VM.pc++;
+		return OK;
+	}
+
 	default:
 		printf("Unknown opcode: %d\n", inst->opcode);
 		return ERR;
@@ -1033,7 +1044,6 @@ vm_execute(VMInstruction *instructions, int instruction_count)
 	reset();
 	VM.program = instructions;
 	VM.program_size = instruction_count;
-
 
 	if (_debug)
 	{
