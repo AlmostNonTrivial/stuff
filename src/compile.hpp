@@ -163,7 +163,7 @@ struct ProgramBuilder
 	T *
 	alloc_value(T value)
 	{
-		T *ptr = (T *)arena::alloc<query_arena>(sizeof(T));
+		T *ptr = (T *)arena<query_arena>::alloc(sizeof(T));
 		*ptr = value;
 		return ptr;
 	}
@@ -171,7 +171,7 @@ struct ProgramBuilder
 	char *
 	alloc_string(const char *str, size_t size)
 	{
-		char *ptr = (char *)arena::alloc<query_arena>(size);
+		char *ptr = (char *)arena<query_arena>::alloc(size);
 		memset(ptr, 0, size); // Zero entire buffer
 		if (str)
 		{
@@ -206,7 +206,7 @@ struct ProgramBuilder
 	const char *
 	generate_label(const char *prefix = "L")
 	{
-		char *name = (char *)arena::alloc<query_arena>(32);
+		char *name = (char *)arena<query_arena>::alloc(32);
 		snprintf(name, 32, "%s%d", prefix, label_counter++);
 		return name;
 	}
@@ -765,7 +765,7 @@ static TypedValue
 alloc(DataType type, const void *src = nullptr)
 {
 	uint32_t size = type_size(type);
-	uint8_t *data = (uint8_t *)arena::alloc<query_arena>(size);
+	uint8_t *data = (uint8_t *)arena<query_arena>::alloc(size);
 
 	if (src)
 	{
@@ -785,7 +785,7 @@ static TypedValue
 alloc_scalar(DataType type, T value)
 {
 	static_assert(sizeof(T) <= 8, "Scalar too large");
-	uint8_t *data = (uint8_t *)arena::alloc<query_arena>(sizeof(T));
+	uint8_t *data = (uint8_t *)arena<query_arena>::alloc(sizeof(T));
 	*(T *)data = value;
 	return {data, type};
 }
@@ -847,7 +847,7 @@ alloc_char(const char *str, uint32_t size)
 {
 
 	// mem
-	char *data = (char *)arena::alloc<query_arena>(size);
+	char *data = (char *)arena<query_arena>::alloc(size);
 	if (str)
 	{
 		strncpy(data, str, size - 1);
@@ -913,7 +913,7 @@ alloc_varchar(const char *str, size_t size)
 		len = 1;
 	}
 
-	char *data = (char *)arena::alloc<query_arena>(len);
+	char *data = (char *)arena<query_arena>::alloc(len);
 	if (str)
 	{
 		strcpy(data, str);
@@ -940,7 +940,7 @@ alloc_dual(DataType type1, const void *data1, DataType type2, const void *data2)
 {
 	DataType dual_type = make_dual(type1, type2);
 	uint32_t total_size = type_size(dual_type);
-	uint8_t *data = (uint8_t *)arena::alloc<query_arena>(total_size);
+	uint8_t *data = (uint8_t *)arena<query_arena>::alloc(total_size);
 
 	pack_dual(data, type1, (const uint8_t *)data1, type2, (const uint8_t *)data2);
 	return {data, dual_type};
@@ -950,7 +950,7 @@ alloc_dual(DataType type1, const void *data1, DataType type2, const void *data2)
 inline CursorContext*
 from_structure(Structure &structure)
 {
-	CursorContext * cctx= (CursorContext*)arena::alloc<query_arena>(sizeof(CursorContext));
+	CursorContext * cctx= (CursorContext*)arena<query_arena>::alloc(sizeof(CursorContext));
 	cctx->storage.tree = &structure.storage.btree;
 	cctx->type = BPLUS;
 	cctx->layout = structure.to_layout();
@@ -961,7 +961,7 @@ from_structure(Structure &structure)
 inline CursorContext *
 red_black(Layout &layout, bool allow_duplicates = true)
 {
-	CursorContext * cctx= (CursorContext*)arena::alloc<query_arena>(sizeof(CursorContext));
+	CursorContext * cctx= (CursorContext*)arena<query_arena>::alloc(sizeof(CursorContext));
 	cctx->type = RED_BLACK;
 	cctx->layout = layout;
 	cctx->flags = allow_duplicates;

@@ -211,7 +211,7 @@ bool vmfunc_like(TypedValue *result, TypedValue *args, uint32_t arg_count) {
         // No match
         uint32_t match = 0;
         result->type = TYPE_U32;
-        result->data = (uint8_t*)arena::alloc<query_arena>(sizeof(uint32_t));
+        result->data = (uint8_t*)arena<query_arena>::alloc(sizeof(uint32_t));
         *(uint32_t*)result->data = match;
         return true;
     }
@@ -221,7 +221,7 @@ bool vmfunc_like(TypedValue *result, TypedValue *args, uint32_t arg_count) {
 
     uint32_t match = (*p == '\0') ? 1 : 0;
     result->type = TYPE_U32;
-    result->data = (uint8_t*)arena::alloc<query_arena>(sizeof(uint32_t));
+    result->data = (uint8_t*)arena<query_arena>::alloc(sizeof(uint32_t));
     *(uint32_t*)result->data = match;
     return true;
 }
@@ -244,7 +244,7 @@ bool vmfunc_create_index_structure(TypedValue *result, TypedValue *args, uint32_
     catalog.insert(index_name, index);
 
     result->type = TYPE_U32;
-    result->data = (uint8_t*)arena::alloc<query_arena>(sizeof(uint32_t));
+    result->data = (uint8_t*)arena<query_arena>::alloc(sizeof(uint32_t));
     *(uint32_t*)result->data = 1;
     return true;
 }
@@ -845,7 +845,7 @@ bool vmfunc_write_blob(TypedValue *result, TypedValue *args, uint32_t arg_count)
     uint32_t index = blob_create(data, size);
 
     result->type = TYPE_U32;
-    result->data = (uint8_t*)arena::alloc<query_arena>(sizeof(uint32_t));
+    result->data = (uint8_t*)arena<query_arena>::alloc(sizeof(uint32_t));
     *(uint32_t*)result->data = index;
     return true;
 }

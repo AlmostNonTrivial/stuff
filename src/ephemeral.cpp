@@ -124,7 +124,7 @@ static ephemeral_tree_node *
 alloc_node(ephemeral_tree *tree, void *key, void *record)
 {
 	size_t total_size = sizeof(ephemeral_tree_node) + tree->data_size;
-	auto  *node = (ephemeral_tree_node *)arena::alloc<query_arena>(total_size);
+	auto  *node = (ephemeral_tree_node *)arena<query_arena>::alloc(total_size);
 	node->data = (uint8_t *)(node + 1); // Data follows immediately after node
 
 	memcpy(GET_KEY(node), key, tree->key_size);

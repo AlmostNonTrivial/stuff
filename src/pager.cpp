@@ -486,7 +486,7 @@ pager_open(const char *filename)
 		return false;
 	}
 
-	arena::init<pager_arena>();
+	arena<pager_arena>::init();
 
 	strcpy(PAGER.data_file, filename);
 
@@ -775,7 +775,7 @@ pager_rollback()
 	PAGER.journal_fd = OS_INVALID_HANDLE;
 
 	cache_reset();
-	arena::reset_and_decommit<pager_arena>();
+	arena<pager_arena>::reset_and_decommit();
 
 	PAGER.in_transaction = false;
 
@@ -797,7 +797,7 @@ pager_close()
 	PAGER.in_transaction = false;
 	PAGER.data_fd = OS_INVALID_HANDLE;
 
-	arena::shutdown<pager_arena>();
+	arena<pager_arena>::shutdown();
 }
 
 pager_meta

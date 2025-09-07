@@ -100,30 +100,30 @@ static bool is_pk_lookup(Expr *where_clause, Structure *table,
 
 // Reconstruct CREATE TABLE SQL from AST
 static const char* reconstruct_create_sql(CreateTableStmt *stmt) {
-    auto stream = arena::stream_begin<query_arena>(512);
+    auto stream = arena_stream_begin<query_arena>(512);
 
     const char *prefix = "CREATE TABLE ";
-    arena::stream_write(&stream, prefix, strlen(prefix));
-    arena::stream_write(&stream, stmt->table_name.c_str(), stmt->table_name.length());
-    arena::stream_write(&stream, " (", 2);
+    arena_stream_write(&stream, prefix, strlen(prefix));
+    arena_stream_write(&stream, stmt->table_name.c_str(), stmt->table_name.length());
+    arena_stream_write(&stream, " (", 2);
 
     for (uint32_t i = 0; i < stmt->columns.size; i++) {
         if (i > 0) {
-            arena::stream_write(&stream, ", ", 2);
+            arena_stream_write(&stream, ", ", 2);
         }
 
         ColumnDef &col = stmt->columns[i];
-        arena::stream_write(&stream, col.name.c_str(), col.name.length());
-        arena::stream_write(&stream, " ", 1);
+        arena_stream_write(&stream, col.name.c_str(), col.name.length());
+        arena_stream_write(&stream, " ", 1);
 
         const char *type_name = (col.type == TYPE_U32) ? "INT" : "TEXT";
-        arena::stream_write(&stream, type_name, strlen(type_name));
+        arena_stream_write(&stream, type_name, strlen(type_name));
     }
 
-    arena::stream_write(&stream, ")", 1);
-    arena::stream_write(&stream, "\0", 1);
+    arena_stream_write(&stream, ")", 1);
+    arena_stream_write(&stream, "\0", 1);
 
-    return (const char*)arena::stream_finish(&stream);
+    return (const char*)arena_stream_finish(&stream);
 }
 
 // ============================================================================
@@ -136,7 +136,7 @@ static bool vmfunc_create_structure(TypedValue *result, TypedValue *args, uint32
     Structure *structure = catalog.get(table_name);
     if (!structure) {
         result->type = TYPE_U32;
-        result->data = arena::alloc<query_arena>(sizeof(uint32_t));
+        result->data = arena<query_arena>::alloc(sizeof(uint32_t));
         *(uint32_t*)result->data = 0;
         return false;
     }
@@ -145,7 +145,7 @@ static bool vmfunc_create_structure(TypedValue *result, TypedValue *args, uint32
     structure->storage.btree = btree_create(layout.key_type(), layout.record_size, true);
 
     result->type = TYPE_U32;
-    result->data = arena::alloc<query_arena>(sizeof(uint32_t));
+    result->data = arena<query_arena>::alloc(sizeof(uint32_t));
     *(uint32_t*)result->data = structure->storage.btree.root_page_index;
     return true;
 }
@@ -161,7 +161,7 @@ static bool vmfunc_drop_structure(TypedValue *result, TypedValue *args, uint32_t
     if (!structure) {
         // Already gone
         result->type = TYPE_U32;
-        result->data = arena::alloc<query_arena>(sizeof(uint32_t));
+        result->data = arena<query_arena>::alloc(sizeof(uint32_t));
         *(uint32_t*)result->data = 1;
         return true;
     }
@@ -175,7 +175,7 @@ static bool vmfunc_drop_structure(TypedValue *result, TypedValue *args, uint32_t
     catalog.remove(key);
 
     result->type = TYPE_U32;
-    result->data = arena::alloc<query_arena>(sizeof(uint32_t));
+    result->data = arena<query_arena>::alloc(sizeof(uint32_t));
     *(uint32_t*)result->data = 1;
     return true;
 }

@@ -19,17 +19,17 @@ struct global_arena
  *
  * Key design decisions:
  * - Uses virtual memory reserve/commit pattern to avoid fragmentation
- * - Static storage per Tag type (no instance overhead)
+ * - Static storage per Tag type
  * - Power-of-2 freelists for O(1) reclamation and reuse
- * - Lazy zeroing via OS facilities when available
  *
  * Usage pattern:
  * 1. Arena<MyTag>::init() reserves virtual address space
  * 2. Allocations commit pages as needed
  * 3. Containers can reclaim() memory when growing
  * 4. reset() nukes everything but keeps pages committed
+ * 4. reset_and_decommit() nukes everything and give's back pages
  */
-template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8> struct Arena
+template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align = 8> struct arena
 {
 	static_assert((Align & (Align - 1)) == 0, "Alignment must be power of 2");
 
@@ -40,9 +40,9 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 	static inline size_t   max_capacity = 0;
 	static inline size_t   initial_commit = 0;
 
-	struct FreeBlock
+	struct free_block
 	{
-		FreeBlock *next;
+		free_block *next;
 		size_t	   size;
 	};
 
@@ -53,7 +53,7 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 	 * etc.
 	 * This gives us O(1) bucket selection via bit manipulation.
 	 */
-	static inline FreeBlock *freelists[32] = {};
+	static inline free_block *freelists[32] = {};
 	static inline uint32_t	 occupied_buckets = 0; // Bitmask: which buckets have blocks
 	static inline size_t	 reclaimed_bytes = 0;
 	static inline size_t	 reused_bytes = 0;
@@ -66,27 +66,24 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 			return;
 		}
 
-		initial_commit = VirtualMemory::round_to_pages(initial);
+		initial_commit = virtual_memory::round_to_pages(initial);
 		max_capacity = maximum;
 
 		/*
 		 * Reserve a huge virtual address range upfront.
-		 * This costs nothing on 64-bit systems - it's just address space.
+		 * This costs nothing on 64-bit systems
 		 * We'll commit physical pages lazily as needed.
+		 *
+		 * This means that each arena can have it's own address space giving it a
+		 * contiguous view of memory
 		 */
-		reserved_capacity = max_capacity ? max_capacity : (1ULL << 38); // 256GB default
+		reserved_capacity = max_capacity ? max_capacity : (1ULL << 33); // 8GB
 
-		base = (uint8_t *)VirtualMemory::reserve(reserved_capacity);
+		base = (uint8_t *)virtual_memory::reserve(reserved_capacity);
 		if (!base)
 		{
-			// Fallback to smaller reservation
-			reserved_capacity = 1ULL << 33; // 8GB
-			base = (uint8_t *)VirtualMemory::reserve(reserved_capacity);
-			if (!base)
-			{
-				fprintf(stderr, "Failed to reserve virtual memory\n");
-				exit(1);
-			}
+			fprintf(stderr, "Failed to reserve virtual memory\n");
+			exit(1);
 		}
 
 		current = base;
@@ -94,10 +91,10 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 
 		if (initial_commit > 0)
 		{
-			if (!VirtualMemory::commit(base, initial_commit))
+			if (!virtual_memory::commit(base, initial_commit))
 			{
 				fprintf(stderr, "Failed to commit initial memory: %zu bytes\n", initial_commit);
-				VirtualMemory::release(base, reserved_capacity);
+				virtual_memory::release(base, reserved_capacity);
 				base = nullptr;
 				exit(1);
 			}
@@ -118,7 +115,7 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 	{
 		if (base)
 		{
-			VirtualMemory::release(base, reserved_capacity);
+			virtual_memory::release(base, reserved_capacity);
 			base = nullptr;
 			current = nullptr;
 			reserved_capacity = 0;
@@ -138,12 +135,8 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 	/*
 	 * Maps allocation size to freelist bucket index.
 	 *
-	 * The trick: we need the index i such that 2^i <= size < 2^(i+1)
+	 * We need the index i such that 2^i <= size < 2^(i+1)
 	 * This is just finding the position of the highest set bit.
-	 *
-	 * The OR with 0x2 handles edge cases:
-	 * - size=0 becomes 2, avoiding undefined behavior in clz(-1)
-	 * - size=1 becomes 3, mapping to bucket 1 instead of 0
 	 *
 	 * The XOR dance at the end clamps the result to [0, 31] branchlessly.
 	 */
@@ -151,6 +144,11 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 	get_size_class(size_t size)
 	{
 		size = size | 0x2;
+		/*
+		 * The OR with 0x2 handles edge cases:
+		 * - size=0 becomes 2, avoiding undefined behavior in clz(-1)
+		 * - size=1 becomes 3, mapping to bucket 1 instead of 0
+		 */
 
 #ifdef _MSC_VER
 		unsigned long index;
@@ -169,23 +167,17 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 	static void
 	reclaim(void *ptr, size_t size)
 	{
-		if (!ptr || size < sizeof(FreeBlock))
-		{
-			return;
-		}
+		assert(!(!ptr || size < sizeof(free_block)));
 
 		uint8_t *addr = (uint8_t *)ptr;
-		if (addr < base || addr >= base + reserved_capacity)
-		{
-			return; // Not from this arena
-		}
+		assert(!(addr < base || addr >= base + reserved_capacity));
 
-		assert(addr < current); // Can't reclaim unallocated memory
+		assert(addr < current);
 		assert(size > 0);
 
 		int size_class = get_size_class(size);
 
-		FreeBlock *block = (FreeBlock *)ptr;
+		free_block *block = (free_block *)ptr;
 		block->size = size;
 		block->next = freelists[size_class];
 		freelists[size_class] = block;
@@ -195,9 +187,9 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 	}
 
 	/*
-	 * Allocation strategy:
-	 * 1. Check freelists for a suitable reclaimed block
-	 * 2. Fall back to bump allocation from current pointer
+
+	 * Check freelists for a suitable reclaimed block but
+	 * fall back to bump allocation from current pointer
 	 *
 	 * We use the occupied_buckets bitmask to quickly find the smallest
 	 * bucket that can satisfy our request.
@@ -236,7 +228,7 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 		int cls = __builtin_ctz(candidates);
 #endif
 
-		FreeBlock *block = freelists[cls];
+		free_block *block = freelists[cls];
 		freelists[cls] = block->next;
 
 		if (!freelists[cls])
@@ -249,14 +241,22 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 		return block;
 	}
 
+	/* faster path, make sure you have enough allocated */
+	static void *
+	alloc_fast(size_t size)
+	{
+		uint8_t *aligned = (uint8_t *)(((uintptr_t)current + (Align - 1)) & ~(Align - 1));
+		uint8_t *next = aligned + size;
+		current = next;
+		return aligned;
+	}
+
 	static void *
 	alloc(size_t size)
 	{
-
 		assert(size > 0);
-		assert(size < reserved_capacity); // Sanity check
+		assert(size < reserved_capacity);
 
-		/* First try to reuse a reclaimed block */
 		void *recycled = try_alloc_from_freelist(size);
 		if (recycled)
 		{
@@ -287,8 +287,7 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 				exit(1);
 			}
 
-			/* Round up to page boundary for efficiency */
-			size_t new_committed = VirtualMemory::round_to_pages(needed);
+			size_t new_committed = virtual_memory::round_to_pages(needed);
 
 			if (max_capacity > 0 && new_committed > max_capacity)
 			{
@@ -301,7 +300,7 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 			}
 
 			size_t commit_size = new_committed - committed_capacity;
-			if (!VirtualMemory::commit(base + committed_capacity, commit_size))
+			if (!virtual_memory::commit(base + committed_capacity, commit_size))
 			{
 				fprintf(stderr, "Failed to commit memory: %zu bytes\n", commit_size);
 				exit(1);
@@ -315,9 +314,8 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 	}
 
 	/*
-	 * Platform-specific optimization: Instead of memset, we tell the OS
+	 * Instead of zeroing all pages, tell the OS
 	 * to discard the page contents. Next access will get zero pages.
-	 * This turns O(n) zeroing into O(pages actually touched).
 	 */
 	static void
 	zero_pages_lazy(void *addr, size_t size)
@@ -331,13 +329,13 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 #endif
 	}
 
-	/* Reset the arena but keep pages committed for fast reuse */
+	/* Reset the arena but keep pages committed */
 	static void
 	reset()
 	{
 		current = base;
 
-		if constexpr (ZeroOnReset)
+		if constexpr (zero_on_reset)
 		{
 			if (base && committed_capacity > 0)
 			{
@@ -355,7 +353,6 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 		reused_bytes = 0;
 	}
 
-	/* Reset and give memory back to OS (keeps initial_commit for fast restart) */
 	static void
 	reset_and_decommit()
 	{
@@ -363,11 +360,11 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 
 		if (committed_capacity > initial_commit)
 		{
-			VirtualMemory::decommit(base + initial_commit, committed_capacity - initial_commit);
+			virtual_memory::decommit(base + initial_commit, committed_capacity - initial_commit);
 			committed_capacity = initial_commit;
 		}
 
-		if constexpr (ZeroOnReset)
+		if constexpr (zero_on_reset)
 		{
 			if (base && committed_capacity > 0)
 			{
@@ -384,7 +381,6 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 		reused_bytes = 0;
 	}
 
-	/* Query functions */
 	static size_t
 	used()
 	{
@@ -417,7 +413,7 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 		size_t total = 0;
 		for (int i = 0; i < 32; i++)
 		{
-			FreeBlock *block = freelists[i];
+			free_block *block = freelists[i];
 			while (block)
 			{
 				total += block->size;
@@ -456,235 +452,52 @@ template <typename Tag = global_arena, bool ZeroOnReset = true, size_t Align = 8
 		}
 	}
 };
-
-namespace arena
-{
-template <typename Tag>
-void
-init(size_t initial = 4 * 1024 * 1024, size_t maximum = 0)
-{
-	Arena<Tag>::init(initial);
-}
-
-template <typename Tag>
-void
-shutdown()
-{
-	Arena<Tag>::shutdown();
-}
-template <typename Tag>
-void
-reset()
-{
-	Arena<Tag>::reset();
-}
-template <typename Tag>
-void
-reset_and_decommit()
-{
-	Arena<Tag>::reset_and_decommit();
-}
-template <typename Tag>
-void *
-alloc(size_t size)
-{
-	return Arena<Tag>::alloc(size);
-}
-template <typename Tag>
-void
-reclaim(void *ptr, size_t size)
-{
-	Arena<Tag>::reclaim(ptr, size);
-}
-template <typename Tag>
-size_t
-used()
-{
-	return Arena<Tag>::used();
-}
-template <typename Tag>
-size_t
-committed()
-{
-	return Arena<Tag>::committed();
-}
-template <typename Tag>
-size_t
-reclaimed()
-{
-	return Arena<Tag>::reclaimed();
-}
-template <typename Tag>
-size_t
-reused()
-{
-	return Arena<Tag>::reused();
-}
-template <typename Tag>
-void
-print_stats()
-{
-	Arena<Tag>::print_stats();
-}
-
-// Streaming allocation support
-template <typename Tag> struct StreamAlloc
-{
-	uint8_t *start;		// Where this allocation began
-	uint8_t *write_pos; // Current write position
-	size_t	 reserved;	// How much we've reserved so far
-};
-
-template <typename Tag = global_arena>
-StreamAlloc<Tag>
-stream_begin(size_t initial_reserve = 1024)
-{
-	if (!Arena<Tag>::base)
-	{
-		Arena<Tag>::init();
-	}
-
-	// Ensure we have space for initial reservation
-	uint8_t *start = Arena<Tag>::current;
-	size_t	 available = Arena<Tag>::committed_capacity - (Arena<Tag>::current - Arena<Tag>::base);
-
-	if (initial_reserve > available)
-	{
-		// Need to commit more memory
-		size_t needed = (Arena<Tag>::current - Arena<Tag>::base) + initial_reserve;
-		if (needed > Arena<Tag>::reserved_capacity)
-		{
-			fprintf(stderr, "Stream allocation too large\n");
-			exit(1);
-		}
-
-		size_t new_committed = VirtualMemory::round_to_pages(needed);
-		if (!VirtualMemory::commit(Arena<Tag>::base + Arena<Tag>::committed_capacity,
-								   new_committed - Arena<Tag>::committed_capacity))
-		{
-			fprintf(stderr, "Failed to commit memory for stream\n");
-			exit(1);
-		}
-		Arena<Tag>::committed_capacity = new_committed;
-	}
-
-	// Reserve initial space by moving current
-	Arena<Tag>::current = start + initial_reserve;
-
-	return StreamAlloc<Tag>{start, start, initial_reserve};
-}
-
-template <typename Tag = global_arena>
-void
-stream_write(StreamAlloc<Tag> *stream, const void *data, size_t size)
-{
-	size_t used = stream->write_pos - stream->start;
-	size_t remaining = stream->reserved - used;
-
-	if (size > remaining)
-	{
-		// Need to grow the reservation
-		size_t new_reserved = stream->reserved * 2;
-		while (new_reserved - used < size)
-		{
-			new_reserved *= 2;
-		}
-
-		// Ensure we have space
-		size_t available = Arena<Tag>::committed_capacity - (stream->start - Arena<Tag>::base);
-		if (new_reserved > available)
-		{
-			size_t needed = (stream->start - Arena<Tag>::base) + new_reserved;
-			if (needed > Arena<Tag>::reserved_capacity)
-			{
-				fprintf(stderr, "Stream allocation too large\n");
-				exit(1);
-			}
-
-			size_t new_committed = VirtualMemory::round_to_pages(needed);
-			if (!VirtualMemory::commit(Arena<Tag>::base + Arena<Tag>::committed_capacity,
-									   new_committed - Arena<Tag>::committed_capacity))
-			{
-				fprintf(stderr, "Failed to commit memory for stream\n");
-				exit(1);
-			}
-			Arena<Tag>::committed_capacity = new_committed;
-		}
-
-		// Update arena's current pointer to new end
-		Arena<Tag>::current = stream->start + new_reserved;
-		stream->reserved = new_reserved;
-	}
-
-	// Copy the data
-	memcpy(stream->write_pos, data, size);
-	stream->write_pos += size;
-}
-
-template <typename Tag = global_arena>
-uint8_t *
-stream_finish(StreamAlloc<Tag> *stream)
-{
-	// Shrink allocation to actual size (give back unused reservation)
-	Arena<Tag>::current = stream->write_pos;
-	return stream->start;
-}
-
-template <typename Tag = global_arena>
-void
-stream_abandon(StreamAlloc<Tag> *stream)
-{
-	// Reset current to where we started
-	Arena<Tag>::current = stream->start;
-}
-
-template <typename Tag = global_arena>
-size_t
-stream_size(const StreamAlloc<Tag> *stream)
-{
-	return stream->write_pos - stream->start;
-}
-
-} // namespace arena
-
 /**
- * Arena-based containers for C++ with data-oriented design.
- * All containers allocate from arena memory pools and support O(1) growth via reclamation.
+ * Arena-based containers
+ *
+ * I considered whether to use STL with allocators, but felt there was
+ * a fundermental mismatch between STL's RAII lifetime management, and my nuke-from-orbit
+ * arena approach.
+ *
+ * Implented is array, string, and map, with stack/inlined metadata with a a dynamic
+ * space that pulls from, and releases into their arena. Each container should specify
+ * which arena it is bound to, but cross-arena copying is supported.
+ *
+ * When resizing, the old data is put back to the respective arena into the free list but
+ * when the array falls out of scope the allocations won't automatically be freed.
+ * The reclaimation mechanism is really just about crawling back some wasted space from the array/string/map
+ * resizing, so it's quite crude comparitively. The expectation is that
+ *
+ *
  */
 
 template <typename ArenaTag, uint32_t InitialSize> struct string;
 
-/**
- * Arena-based containers for C++ with data-oriented design.
- * All containers allocate from arena memory pools and support O(1) growth via reclamation.
- */
-
-template <typename ArenaTag, uint32_t InitialSize> struct string;
-
-/**
- * Dynamic array with arena allocation.
- * - Grows by doubling capacity
- * - Reclaims old buffers back to arena when resizing
- * - Specialized support for string element types
- */
 template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8> struct array
 {
-	template <typename U> struct is_string : std::false_type {};
-	template <typename Tag, uint32_t Size> struct is_string<string<Tag, Size>> : std::true_type {};
+	template <typename U> struct is_string : std::false_type
+	{
+	};
+	template <typename Tag, uint32_t Size> struct is_string<string<Tag, Size>> : std::true_type
+	{
+	};
 
 	T		*data = nullptr;
 	uint32_t size = 0;
 	uint32_t capacity = 0;
 
-	void reserve(uint32_t min_capacity)
+	void
+	reserve(uint32_t min_capacity)
 	{
-		if (capacity >= min_capacity) {
+		if (capacity >= min_capacity)
+		{
 			return;
 		}
 
-		if (!data) {
+		if (!data)
+		{
 			capacity = min_capacity > InitialSize ? min_capacity : InitialSize;
-			data = (T *)Arena<ArenaTag>::alloc(capacity * sizeof(T));
+			data = (T *)arena<ArenaTag>::alloc(capacity * sizeof(T));
 			return;
 		}
 
@@ -692,20 +505,22 @@ template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8
 		uint32_t old_capacity = capacity;
 
 		uint32_t new_cap = capacity * 2;
-		if (new_cap < min_capacity) {
+		if (new_cap < min_capacity)
+		{
 			new_cap = min_capacity;
 		}
 
-		T *new_data = (T *)Arena<ArenaTag>::alloc(new_cap * sizeof(T));
+		T *new_data = (T *)arena<ArenaTag>::alloc(new_cap * sizeof(T));
 		memcpy(new_data, data, size * sizeof(T));
 
 		data = new_data;
 		capacity = new_cap;
 
-		Arena<ArenaTag>::reclaim(old_data, old_capacity * sizeof(T));
+		arena<ArenaTag>::reclaim(old_data, old_capacity * sizeof(T));
 	}
 
-	uint32_t push(const T &value)
+	uint32_t
+	push(const T &value)
 	{
 		reserve(size + 1);
 		data[size] = value;
@@ -713,7 +528,8 @@ template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8
 	}
 
 	template <typename OtherTag = ArenaTag, uint32_t OtherSize = InitialSize>
-	uint32_t push(const string<OtherTag, OtherSize> &value)
+	uint32_t
+	push(const string<OtherTag, OtherSize> &value)
 	{
 		static_assert(is_string<T>::value, "push(string) can only be used with string arrays");
 		reserve(size + 1);
@@ -722,7 +538,8 @@ template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8
 		return size++;
 	}
 
-	T *push_n(const T *values, uint32_t count)
+	T *
+	push_n(const T *values, uint32_t count)
 	{
 		reserve(size + count);
 		T *dest = data + size;
@@ -732,130 +549,170 @@ template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	T *push_n(const string<OtherTag, OtherSize> *values, uint32_t count)
+	T *
+	push_n(const string<OtherTag, OtherSize> *values, uint32_t count)
 	{
 		static_assert(is_string<T>::value, "push_n(string) can only be used with string arrays");
 		reserve(size + count);
 		T *dest = data + size;
-		for (uint32_t i = 0; i < count; i++) {
+		for (uint32_t i = 0; i < count; i++)
+		{
 			dest[i].set(values[i].c_str());
 		}
 		size += count;
 		return dest;
 	}
 
-	void pop_back()
+	void
+	pop_back()
 	{
 		assert(size > 0);
 		--size;
 	}
 
-	T pop_value()
+	T
+	pop_value()
 	{
 		assert(size > 0);
 		return data[--size];
 	}
 
-	void clear()
+	void
+	clear()
 	{
 		size = 0;
 	}
 
-	void resize(uint32_t new_size)
+	void
+	resize(uint32_t new_size)
 	{
 		uint32_t old_size = size;
 		reserve(new_size);
 
-		if (new_size > old_size && data) {
+		if (new_size > old_size && data)
+		{
 			memset(data + old_size, 0, (new_size - old_size) * sizeof(T));
 		}
 
 		size = new_size;
 	}
 
-	void shrink_to_fit()
+	void
+	shrink_to_fit()
 	{
-		if (!data || size == capacity || size == 0) {
+		if (!data || size == capacity || size == 0)
+		{
 			return;
 		}
 
 		T		*old_data = data;
 		uint32_t old_capacity = capacity;
 
-		data = (T *)Arena<ArenaTag>::alloc(size * sizeof(T));
+		data = (T *)arena<ArenaTag>::alloc(size * sizeof(T));
 		memcpy(data, old_data, size * sizeof(T));
 		capacity = size;
 
-		Arena<ArenaTag>::reclaim(old_data, old_capacity * sizeof(T));
+		arena<ArenaTag>::reclaim(old_data, old_capacity * sizeof(T));
 	}
 
 	template <typename OtherTag>
-	void set(const array<T, OtherTag> &other)
+	void
+	set(const array<T, OtherTag> &other)
 	{
 		clear();
 		reserve(other.size);
 
-		if (other.size > 0 && other.data) {
+		if (other.size > 0 && other.data)
+		{
 			memcpy(data, other.data, other.size * sizeof(T));
 			size = other.size;
 		}
 	}
 
 	template <typename OtherTag, uint32_t OtherSize, typename OtherArrayTag>
-	void set(const array<string<OtherTag, OtherSize>, OtherArrayTag> &other)
+	void
+	set(const array<string<OtherTag, OtherSize>, OtherArrayTag> &other)
 	{
 		static_assert(is_string<T>::value, "set(string array) can only be used with string arrays");
 		clear();
 		reserve(other.size);
 
-		for (uint32_t i = 0; i < other.size; i++) {
+		for (uint32_t i = 0; i < other.size; i++)
+		{
 			data[i].set(other.data[i].c_str());
 		}
 		size = other.size;
 	}
 
-	T &operator[](uint32_t index)
+	T &
+	operator[](uint32_t index)
 	{
 		assert(index < size);
 		return data[index];
 	}
 
-	const T &operator[](uint32_t index) const
+	const T &
+	operator[](uint32_t index) const
 	{
 		assert(index < size);
 		return data[index];
 	}
 
-	T *back()
+	T *
+	back()
 	{
 		return size > 0 ? &data[size - 1] : nullptr;
 	}
 
-	const T *back() const
+	const T *
+	back() const
 	{
 		return size > 0 ? &data[size - 1] : nullptr;
 	}
 
-	T *front()
+	T *
+	front()
 	{
 		return size > 0 ? &data[0] : nullptr;
 	}
 
-	const T *front() const
+	const T *
+	front() const
 	{
 		return size > 0 ? &data[0] : nullptr;
 	}
 
-	T *begin() { return data; }
-	T *end() { return data + size; }
-	const T *begin() const { return data; }
-	const T *end() const { return data + size; }
-
-	bool empty() const { return size == 0; }
-
-	static array *create()
+	T *
+	begin()
 	{
-		auto *arr = (array *)Arena<ArenaTag>::alloc(sizeof(array));
+		return data;
+	}
+	T *
+	end()
+	{
+		return data + size;
+	}
+	const T *
+	begin() const
+	{
+		return data;
+	}
+	const T *
+	end() const
+	{
+		return data + size;
+	}
+
+	bool
+	empty() const
+	{
+		return size == 0;
+	}
+
+	static array *
+	create()
+	{
+		auto *arr = (array *)arena<ArenaTag>::alloc(sizeof(array));
 		arr->data = nullptr;
 		arr->size = 0;
 		arr->capacity = 0;
@@ -863,7 +720,8 @@ template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8
 	}
 };
 
-inline uint32_t hash_32(uint32_t x)
+inline uint32_t
+hash_32(uint32_t x)
 {
 	x = ((x >> 16) ^ x) * 0x45d9f3b;
 	x = ((x >> 16) ^ x) * 0x45d9f3b;
@@ -871,7 +729,8 @@ inline uint32_t hash_32(uint32_t x)
 	return x;
 }
 
-inline uint64_t hash_64(uint64_t x)
+inline uint64_t
+hash_64(uint64_t x)
 {
 	x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
 	x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
@@ -880,50 +739,54 @@ inline uint64_t hash_64(uint64_t x)
 }
 
 template <typename T>
-inline uint32_t hash_int(T x)
+inline uint32_t
+hash_int(T x)
 {
 	using U = typename std::make_unsigned<T>::type;
 	U ux = static_cast<U>(x);
 
-	if constexpr (sizeof(T) <= 4) {
+	if constexpr (sizeof(T) <= 4)
+	{
 		return hash_32(static_cast<uint32_t>(ux));
 	}
-	else {
+	else
+	{
 		return static_cast<uint32_t>(hash_64(static_cast<uint64_t>(ux)));
 	}
 }
 
-/**
- * Arena-allocated string with small string optimization.
- * - Caches hash value for efficient comparison
- * - Supports cross-arena string operations
- * - Automatically null-terminates for C compatibility
- */
-template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct string
+template <typename ArenaTag = global_arena, uint32_t InitialSize = 16> struct string
 {
-	char	*data = nullptr;
-	uint32_t size = 0;
-	uint32_t capacity = 0;
+	char			*data = nullptr;
+	uint32_t		 size = 0;
+	uint32_t		 capacity = 0;
 	mutable uint32_t cached_hash = 0;
 
-	string &operator=(const char *cstr)
+	string &
+	operator=(const char *cstr)
 	{
-		if (cstr) {
+		if (cstr)
+		{
 			set(cstr);
 		}
-		else {
+		else
+		{
 			clear();
 		}
 		return *this;
 	}
 
-	string &operator=(const string &other)
+	string &
+	operator=(const string &other)
 	{
-		if (this != &other) {
-			if (other.empty()) {
+		if (this != &other)
+		{
+			if (other.empty())
+			{
 				clear();
 			}
-			else {
+			else
+			{
 				set(other.c_str());
 			}
 		}
@@ -931,26 +794,32 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	string &operator=(const string<OtherTag, OtherSize> &other)
+	string &
+	operator=(const string<OtherTag, OtherSize> &other)
 	{
-		if (other.empty()) {
+		if (other.empty())
+		{
 			clear();
 		}
-		else {
+		else
+		{
 			set(other.c_str());
 		}
 		return *this;
 	}
 
-	void reserve(uint32_t min_capacity)
+	void
+	reserve(uint32_t min_capacity)
 	{
-		if (capacity >= min_capacity) {
+		if (capacity >= min_capacity)
+		{
 			return;
 		}
 
-		if (!data) {
+		if (!data)
+		{
 			capacity = min_capacity > InitialSize ? min_capacity : InitialSize;
-			data = (char *)Arena<ArenaTag>::alloc(capacity);
+			data = (char *)arena<ArenaTag>::alloc(capacity);
 			return;
 		}
 
@@ -958,27 +827,31 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 		uint32_t old_capacity = capacity;
 
 		uint32_t new_cap = capacity * 2;
-		if (new_cap < min_capacity) {
+		if (new_cap < min_capacity)
+		{
 			new_cap = min_capacity;
 		}
 
-		char *new_data = (char *)Arena<ArenaTag>::alloc(new_cap);
+		char *new_data = (char *)arena<ArenaTag>::alloc(new_cap);
 		memcpy(new_data, data, size);
 
 		data = new_data;
 		capacity = new_cap;
 		cached_hash = 0;
 
-		Arena<ArenaTag>::reclaim(old_data, old_capacity);
+		arena<ArenaTag>::reclaim(old_data, old_capacity);
 	}
 
-	void set(const char *cstr, size_t len = 0)
+	void
+	set(const char *cstr, size_t len = 0)
 	{
 		size_t actual_len;
-		if (len != 0) {
+		if (len != 0)
+		{
 			actual_len = len;
 		}
-		else {
+		else
+		{
 			actual_len = strlen(cstr) + 1;
 		}
 		reserve(actual_len);
@@ -988,19 +861,24 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	void set(const string<OtherTag, OtherSize> &other)
+	void
+	set(const string<OtherTag, OtherSize> &other)
 	{
-		if (other.empty()) {
+		if (other.empty())
+		{
 			clear();
 		}
-		else {
+		else
+		{
 			set(other.c_str());
 		}
 	}
 
-	void append(const char *cstr, size_t s = 0)
+	void
+	append(const char *cstr, size_t s = 0)
 	{
-		if (size > 0 && data[size - 1] == '\0') {
+		if (size > 0 && data[size - 1] == '\0')
+		{
 			size--;
 		}
 
@@ -1013,18 +891,22 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 		cached_hash = 0;
 	}
 
-	void append(const string &other)
+	void
+	append(const string &other)
 	{
-		if (other.empty()) {
+		if (other.empty())
+		{
 			return;
 		}
 
-		if (size > 0 && data[size - 1] == '\0') {
+		if (size > 0 && data[size - 1] == '\0')
+		{
 			size--;
 		}
 
 		size_t copy_len = other.size;
-		if (other.data[other.size - 1] == '\0') {
+		if (other.data[other.size - 1] == '\0')
+		{
 			copy_len--;
 		}
 
@@ -1036,18 +918,22 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	void append(const string<OtherTag, OtherSize> &other)
+	void
+	append(const string<OtherTag, OtherSize> &other)
 	{
-		if (other.empty()) {
+		if (other.empty())
+		{
 			return;
 		}
 
-		if (size > 0 && data[size - 1] == '\0') {
+		if (size > 0 && data[size - 1] == '\0')
+		{
 			size--;
 		}
 
 		size_t copy_len = other.size;
-		if (other.data[other.size - 1] == '\0') {
+		if (other.data[other.size - 1] == '\0')
+		{
 			copy_len--;
 		}
 
@@ -1058,22 +944,28 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 		cached_hash = 0;
 	}
 
-	void clear()
+	void
+	clear()
 	{
-		if (data) {
+		if (data)
+		{
 			memset(data, 0, size);
 		}
 		size = 0;
 		cached_hash = 0;
 	}
 
-	const char *c_str() const
+	const char *
+	c_str() const
 	{
-		if (!data || size == 0) {
+		if (!data || size == 0)
+		{
 			return "";
 		}
 
-		if (data[size - 1] != '\0') {
+		// hacky
+		if (data[size - 1] != '\0')
+		{
 			const_cast<string *>(this)->reserve(size + 1);
 			const_cast<string *>(this)->data[size] = '\0';
 			const_cast<string *>(this)->size++;
@@ -1081,19 +973,24 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 		return data;
 	}
 
-	uint32_t hash() const
+	/* For use in hash maps  */
+	uint32_t
+	hash() const
 	{
-		if (cached_hash != 0) {
+		if (cached_hash != 0)
+		{
 			return cached_hash;
 		}
 
-		if (!data || size == 0) {
+		if (!data || size == 0)
+		{
 			cached_hash = 1;
 			return cached_hash;
 		}
 
 		uint32_t h = 2166136261u;
-		for (uint32_t i = 0; i < size && data[i] != '\0'; i++) {
+		for (uint32_t i = 0; i < size && data[i] != '\0'; i++)
+		{
 			h ^= (uint8_t)data[i];
 			h *= 16777619u;
 		}
@@ -1102,69 +999,99 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 		return cached_hash;
 	}
 
-	uint32_t length() const
+	uint32_t
+	length() const
 	{
-		if (!data || size == 0) {
+		if (!data || size == 0)
+		{
 			return 0;
 		}
 
-		if (data[size - 1] == '\0') {
+		if (data[size - 1] == '\0')
+		{
 			return size - 1;
 		}
 		return size;
 	}
 
-	bool equals(const char *cstr) const
+	bool
+	equals(const char *cstr) const
 	{
-		if (!data || !cstr) {
+		if (!data || !cstr)
+		{
 			return !data && !cstr;
 		}
 		return strcmp(c_str(), cstr) == 0;
 	}
 
-	bool equals(const string &other) const
+	bool
+	equals(const string &other) const
 	{
-		if (!data || !other.data) {
+		if (!data || !other.data)
+		{
 			return !data && !other.data;
 		}
 
-		if (hash() != other.hash()) {
+		if (hash() != other.hash())
+		{
 			return false;
 		}
 
 		return strcmp(c_str(), other.c_str()) == 0;
 	}
 
-	bool operator==(const string &other) const { return equals(other); }
-	bool operator==(const char *cstr) const { return equals(cstr); }
-	bool operator!=(const string &other) const { return !equals(other); }
-	bool operator!=(const char *cstr) const { return !equals(cstr); }
+	bool
+	operator==(const string &other) const
+	{
+		return equals(other);
+	}
+	bool
+	operator==(const char *cstr) const
+	{
+		return equals(cstr);
+	}
+	bool
+	operator!=(const string &other) const
+	{
+		return !equals(other);
+	}
+	bool
+	operator!=(const char *cstr) const
+	{
+		return !equals(cstr);
+	}
 
-	string &operator+=(const char *cstr)
+	string &
+	operator+=(const char *cstr)
 	{
 		append(cstr);
 		return *this;
 	}
 
-	string &operator+=(const string &other)
+	string &
+	operator+=(const string &other)
 	{
 		append(other);
 		return *this;
 	}
 
-	bool operator<(const string &other) const
+	bool
+	operator<(const string &other) const
 	{
 		return strcmp(c_str(), other.c_str()) < 0;
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	bool equals(const string<OtherTag, OtherSize> &other) const
+	bool
+	equals(const string<OtherTag, OtherSize> &other) const
 	{
-		if (!data || !other.data) {
+		if (!data || !other.data)
+		{
 			return !data && !other.data;
 		}
 
-		if (hash() != other.hash()) {
+		if (hash() != other.hash())
+		{
 			return false;
 		}
 
@@ -1172,11 +1099,13 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 	}
 
 	template <typename ArrayTag = ArenaTag>
-	void split(char delimiter, array<string<ArenaTag>, ArrayTag> *result) const
+	void
+	split(char delimiter, array<string<ArenaTag>, ArrayTag> *result) const
 	{
 		result->clear();
 
-		if (!data || size == 0) {
+		if (!data || size == 0)
+		{
 			return;
 		}
 
@@ -1184,11 +1113,14 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 		const char *end = data;
 		const char *limit = data + length();
 
-		while (end < limit) {
-			if (*end == delimiter) {
+		while (end < limit)
+		{
+			if (*end == delimiter)
+			{
 				string<ArenaTag> substr;
-				size_t len = end - start;
-				if (len > 0) {
+				size_t			 len = end - start;
+				if (len > 0)
+				{
 					substr.reserve(len + 1);
 					memcpy(substr.data, start, len);
 					substr.data[len] = '\0';
@@ -1200,9 +1132,10 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 			end++;
 		}
 
-		if (start < end) {
+		if (start < end)
+		{
 			string<ArenaTag> substr;
-			size_t len = end - start;
+			size_t			 len = end - start;
 			substr.reserve(len + 1);
 			memcpy(substr.data, start, len);
 			substr.data[len] = '\0';
@@ -1212,11 +1145,13 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 	}
 
 	template <typename OtherTag, typename ArrayTag>
-	void split(char delimiter, array<string<OtherTag>, ArrayTag> *result) const
+	void
+	split(char delimiter, array<string<OtherTag>, ArrayTag> *result) const
 	{
 		result->clear();
 
-		if (!data || size == 0) {
+		if (!data || size == 0)
+		{
 			return;
 		}
 
@@ -1224,11 +1159,14 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 		const char *end = data;
 		const char *limit = data + length();
 
-		while (end < limit) {
-			if (*end == delimiter) {
+		while (end < limit)
+		{
+			if (*end == delimiter)
+			{
 				string<OtherTag> substr;
-				size_t len = end - start;
-				if (len > 0) {
+				size_t			 len = end - start;
+				if (len > 0)
+				{
 					substr.reserve(len + 1);
 					memcpy(substr.data, start, len);
 					substr.data[len] = '\0';
@@ -1240,9 +1178,10 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 			end++;
 		}
 
-		if (start < end) {
+		if (start < end)
+		{
 			string<OtherTag> substr;
-			size_t len = end - start;
+			size_t			 len = end - start;
 			substr.reserve(len + 1);
 			memcpy(substr.data, start, len);
 			substr.data[len] = '\0';
@@ -1251,28 +1190,35 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 		}
 	}
 
-	bool empty() const
+	bool
+	empty() const
 	{
 		return size == 0 || (size == 1 && data[0] == '\0');
 	}
 
-	char &operator[](uint32_t index)
+	char &
+	operator[](uint32_t index)
 	{
 		assert(index < size);
 		return data[index];
 	}
 
-	const char &operator[](uint32_t index) const
+	const char &
+	operator[](uint32_t index) const
 	{
 		assert(index < size);
 		return data[index];
 	}
 
-	operator const char *() const { return c_str(); }
-
-	static string *create()
+	operator const char *() const
 	{
-		auto *str = (string *)Arena<ArenaTag>::alloc(sizeof(string));
+		return c_str();
+	}
+
+	static string *
+	create()
+	{
+		auto *str = (string *)arena<ArenaTag>::alloc(sizeof(string));
 		str->data = nullptr;
 		str->size = 0;
 		str->capacity = 0;
@@ -1280,7 +1226,8 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 		return str;
 	}
 
-	static string make(const char *cstr)
+	static string
+	make(const char *cstr)
 	{
 		string s;
 		s.set(cstr);
@@ -1288,7 +1235,8 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	static string make(const string<OtherTag, OtherSize> &other)
+	static string
+	make(const string<OtherTag, OtherSize> &other)
 	{
 		string s;
 		s.set(other.c_str());
@@ -1303,11 +1251,9 @@ template <typename K, typename V> struct pair
 };
 
 /**
- * Open-addressed hash map with quadratic probing.
- * - Power-of-2 sizing for fast modulo via bit masking
- * - Tombstone deletion for stable iteration
- * - Supports both integer and string keys
- * - Automatic growth at 75% load factor
+ * Open-addressed hash map
+ * For keys, only supports primtivites and and arena string/cstrings as special cases
+ *
  */
 template <typename K, typename V, typename ArenaTag = global_arena> struct hash_map
 {
@@ -1330,48 +1276,62 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	uint32_t size = 0;
 	uint32_t tombstones = 0;
 
-	template <typename T> struct is_string : std::false_type {};
-	template <typename Tag, uint32_t Size> struct is_string<string<Tag, Size>> : std::true_type {};
-
-	uint32_t hash_key(const K &key) const
+	template <typename T> struct is_string : std::false_type
 	{
-		if constexpr (is_string<K>::value) {
+	};
+	template <typename Tag, uint32_t Size> struct is_string<string<Tag, Size>> : std::true_type
+	{
+	};
+
+	uint32_t
+	hash_key(const K &key) const
+	{
+		if constexpr (is_string<K>::value)
+		{
 			return key.hash();
 		}
-		else if constexpr (std::is_integral<K>::value) {
+		else if constexpr (std::is_integral<K>::value)
+		{
 			return hash_int(key);
 		}
-		else {
-			static_assert(std::is_integral<K>::value || is_string<K>::value,
-						  "Key must be an integer or string type");
+		else
+		{
+			static_assert(std::is_integral<K>::value || is_string<K>::value, "Key must be an integer or string type");
 			return 0;
 		}
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	uint32_t hash_key(const string<OtherTag, OtherSize> &key) const
+	uint32_t
+	hash_key(const string<OtherTag, OtherSize> &key) const
 	{
 		return key.hash();
 	}
 
-	bool keys_equal(const K &a, const K &b) const
+	bool
+	keys_equal(const K &a, const K &b) const
 	{
-		if constexpr (is_string<K>::value) {
+		if constexpr (is_string<K>::value)
+		{
 			return a.equals(b);
 		}
-		else {
+		else
+		{
 			return a == b;
 		}
 	}
 
-	uint32_t hash_cstr(const char *cstr) const
+	uint32_t
+	hash_cstr(const char *cstr) const
 	{
-		if (!cstr || !*cstr) {
+		if (!cstr || !*cstr)
+		{
 			return 1;
 		}
 
 		uint32_t h = 2166136261u;
-		while (*cstr) {
+		while (*cstr)
+		{
 			h ^= (uint8_t)*cstr++;
 			h *= 16777619u;
 		}
@@ -1380,9 +1340,11 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	}
 
 	template <typename U = K>
-	typename std::enable_if<is_string<U>::value, V *>::type get(const char *key)
+	typename std::enable_if<is_string<U>::value, V *>::type
+	get(const char *key)
 	{
-		if (!entries || size == 0 || !key) {
+		if (!entries || size == 0 || !key)
+		{
 			return nullptr;
 		}
 
@@ -1390,39 +1352,47 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		uint32_t mask = capacity - 1;
 		uint32_t idx = hash & mask;
 
-		while (true) {
+		while (true)
+		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY) {
+			if (entry.state == Entry::EMPTY)
+			{
 				return nullptr;
 			}
 
-			if (entry.state == Entry::OCCUPIED && entry.hash == hash && entry.key.equals(key)) {
+			if (entry.state == Entry::OCCUPIED && entry.hash == hash && entry.key.equals(key))
+			{
 				return &entry.value;
 			}
 
 			idx = (idx + 1) & mask;
 		}
 	}
-
+	/* To allow map.get("cstring") */
 	template <typename U = K>
-	typename std::enable_if<is_string<U>::value, const V *>::type get(const char *key) const
+	typename std::enable_if<is_string<U>::value, const V *>::type
+	get(const char *key) const
 	{
 		return const_cast<hash_map *>(this)->template get<U>(key);
 	}
 
 	template <typename U = K>
-	typename std::enable_if<is_string<U>::value, V *>::type insert(const char *key, const V &value)
+	typename std::enable_if<is_string<U>::value, V *>::type
+	insert(const char *key, const V &value)
 	{
-		if (!key) {
+		if (!key)
+		{
 			return nullptr;
 		}
 
-		if (!entries) {
+		if (!entries)
+		{
 			init();
 		}
 
-		if ((size + tombstones) * 4 >= capacity * 3) {
+		if ((size + tombstones) * 4 >= capacity * 3)
+		{
 			grow();
 		}
 
@@ -1431,11 +1401,14 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		uint32_t idx = hash & mask;
 		uint32_t first_deleted = (uint32_t)-1;
 
-		while (true) {
+		while (true)
+		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY) {
-				if (first_deleted != (uint32_t)-1) {
+			if (entry.state == Entry::EMPTY)
+			{
+				if (first_deleted != (uint32_t)-1)
+				{
 					Entry &deleted_entry = entries[first_deleted];
 					deleted_entry.key.set(key);
 					deleted_entry.value = value;
@@ -1445,7 +1418,8 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 					size++;
 					return &deleted_entry.value;
 				}
-				else {
+				else
+				{
 					entry.key.set(key);
 					entry.value = value;
 					entry.hash = hash;
@@ -1455,12 +1429,15 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 				}
 			}
 
-			if (entry.state == Entry::DELETED) {
-				if (first_deleted == (uint32_t)-1) {
+			if (entry.state == Entry::DELETED)
+			{
+				if (first_deleted == (uint32_t)-1)
+				{
 					first_deleted = idx;
 				}
 			}
-			else if (entry.hash == hash && entry.key.equals(key)) {
+			else if (entry.hash == hash && entry.key.equals(key))
+			{
 				entry.value = value;
 				return &entry.value;
 			}
@@ -1470,15 +1447,18 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	}
 
 	template <typename U = K>
-	typename std::enable_if<is_string<U>::value, bool>::type contains(const char *key) const
+	typename std::enable_if<is_string<U>::value, bool>::type
+	contains(const char *key) const
 	{
 		return const_cast<hash_map *>(this)->get(key) != nullptr;
 	}
 
 	template <typename U = K>
-	typename std::enable_if<is_string<U>::value, bool>::type remove(const char *key)
+	typename std::enable_if<is_string<U>::value, bool>::type
+	remove(const char *key)
 	{
-		if (!entries || size == 0 || !key) {
+		if (!entries || size == 0 || !key)
+		{
 			return false;
 		}
 
@@ -1486,14 +1466,17 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		uint32_t mask = capacity - 1;
 		uint32_t idx = hash & mask;
 
-		while (true) {
+		while (true)
+		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY) {
+			if (entry.state == Entry::EMPTY)
+			{
 				return false;
 			}
 
-			if (entry.state == Entry::OCCUPIED && entry.hash == hash && entry.key.equals(key)) {
+			if (entry.state == Entry::OCCUPIED && entry.hash == hash && entry.key.equals(key))
+			{
 				entry.state = Entry::DELETED;
 				size--;
 				tombstones++;
@@ -1505,10 +1488,12 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	}
 
 	template <typename U = K>
-	typename std::enable_if<is_string<U>::value, V &>::type operator[](const char *key)
+	typename std::enable_if<is_string<U>::value, V &>::type
+	operator[](const char *key)
 	{
 		V *val = get(key);
-		if (val) {
+		if (val)
+		{
 			return *val;
 		}
 
@@ -1516,23 +1501,26 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		return *insert(key, default_val);
 	}
 
-
-
 	template <typename OtherTag, uint32_t OtherSize>
-	bool keys_equal(const K &a, const string<OtherTag, OtherSize> &b) const
+	bool
+	keys_equal(const K &a, const string<OtherTag, OtherSize> &b) const
 	{
-		if constexpr (is_string<K>::value) {
+		if constexpr (is_string<K>::value)
+		{
 			return a.equals(b);
 		}
-		else {
+		else
+		{
 			static_assert(std::is_integral<K>::value, "Key must be an integer or string type");
 			return false;
 		}
 	}
 
-	void init(uint32_t initial_capacity = 16)
+	void
+	init(uint32_t initial_capacity = 16)
 	{
-		if (entries) {
+		if (entries)
+		{
 			return;
 		}
 
@@ -1545,21 +1533,24 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		initial_capacity++;
 
 		capacity = initial_capacity;
-		entries = (Entry *)Arena<ArenaTag>::alloc(capacity * sizeof(Entry));
+		entries = (Entry *)arena<ArenaTag>::alloc(capacity * sizeof(Entry));
 		memset(entries, 0, capacity * sizeof(Entry));
 		size = 0;
 		tombstones = 0;
 	}
 
-	V *insert_internal(const K &key, uint32_t hash, const V &value)
+	V *
+	insert_internal(const K &key, uint32_t hash, const V &value)
 	{
 		uint32_t mask = capacity - 1;
 		uint32_t idx = hash & mask;
 
-		while (true) {
+		while (true)
+		{
 			Entry &entry = entries[idx];
 
-			if (entry.state != Entry::OCCUPIED) {
+			if (entry.state != Entry::OCCUPIED)
+			{
 				entry.key = key;
 				entry.value = value;
 				entry.hash = hash;
@@ -1568,7 +1559,8 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 				return &entry.value;
 			}
 
-			if (entry.hash == hash && keys_equal(entry.key, key)) {
+			if (entry.hash == hash && keys_equal(entry.key, key))
+			{
 				entry.value = value;
 				return &entry.value;
 			}
@@ -1577,35 +1569,41 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		}
 	}
 
-	void grow()
+	void
+	grow()
 	{
 		uint32_t old_capacity = capacity;
 		Entry	*old_entries = entries;
 
 		capacity = old_capacity * 2;
-		entries = (Entry *)Arena<ArenaTag>::alloc(capacity * sizeof(Entry));
+		entries = (Entry *)arena<ArenaTag>::alloc(capacity * sizeof(Entry));
 		memset(entries, 0, capacity * sizeof(Entry));
 
 		uint32_t old_size = size;
 		size = 0;
 		tombstones = 0;
 
-		for (uint32_t i = 0; i < old_capacity; i++) {
-			if (old_entries[i].state == Entry::OCCUPIED) {
+		for (uint32_t i = 0; i < old_capacity; i++)
+		{
+			if (old_entries[i].state == Entry::OCCUPIED)
+			{
 				insert_internal(old_entries[i].key, old_entries[i].hash, old_entries[i].value);
 			}
 		}
 
-		Arena<ArenaTag>::reclaim(old_entries, old_capacity * sizeof(Entry));
+		arena<ArenaTag>::reclaim(old_entries, old_capacity * sizeof(Entry));
 	}
 
-	V *insert(const K &key, const V &value)
+	V *
+	insert(const K &key, const V &value)
 	{
-		if (!entries) {
+		if (!entries)
+		{
 			init();
 		}
 
-		if ((size + tombstones) * 4 >= capacity * 3) {
+		if ((size + tombstones) * 4 >= capacity * 3)
+		{
 			grow();
 		}
 
@@ -1614,11 +1612,14 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		uint32_t idx = hash & mask;
 		uint32_t first_deleted = (uint32_t)-1;
 
-		while (true) {
+		while (true)
+		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY) {
-				if (first_deleted != (uint32_t)-1) {
+			if (entry.state == Entry::EMPTY)
+			{
+				if (first_deleted != (uint32_t)-1)
+				{
 					Entry &deleted_entry = entries[first_deleted];
 					deleted_entry.key = key;
 					deleted_entry.value = value;
@@ -1628,7 +1629,8 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 					size++;
 					return &deleted_entry.value;
 				}
-				else {
+				else
+				{
 					entry.key = key;
 					entry.value = value;
 					entry.hash = hash;
@@ -1638,12 +1640,15 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 				}
 			}
 
-			if (entry.state == Entry::DELETED) {
-				if (first_deleted == (uint32_t)-1) {
+			if (entry.state == Entry::DELETED)
+			{
+				if (first_deleted == (uint32_t)-1)
+				{
 					first_deleted = idx;
 				}
 			}
-			else if (entry.hash == hash && keys_equal(entry.key, key)) {
+			else if (entry.hash == hash && keys_equal(entry.key, key))
+			{
 				entry.value = value;
 				return &entry.value;
 			}
@@ -1653,14 +1658,17 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	V *insert(const string<OtherTag, OtherSize> &key, const V &value)
+	V *
+	insert(const string<OtherTag, OtherSize> &key, const V &value)
 	{
 		static_assert(is_string<K>::value, "insert(string) can only be used with string keys");
-		if (!entries) {
+		if (!entries)
+		{
 			init();
 		}
 
-		if ((size + tombstones) * 4 >= capacity * 3) {
+		if ((size + tombstones) * 4 >= capacity * 3)
+		{
 			grow();
 		}
 
@@ -1669,11 +1677,14 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		uint32_t idx = hash & mask;
 		uint32_t first_deleted = (uint32_t)-1;
 
-		while (true) {
+		while (true)
+		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY) {
-				if (first_deleted != (uint32_t)-1) {
+			if (entry.state == Entry::EMPTY)
+			{
+				if (first_deleted != (uint32_t)-1)
+				{
 					Entry &deleted_entry = entries[first_deleted];
 					deleted_entry.key.set(key.c_str());
 					deleted_entry.value = value;
@@ -1683,7 +1694,8 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 					size++;
 					return &deleted_entry.value;
 				}
-				else {
+				else
+				{
 					entry.key.set(key.c_str());
 					entry.value = value;
 					entry.hash = hash;
@@ -1693,12 +1705,15 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 				}
 			}
 
-			if (entry.state == Entry::DELETED) {
-				if (first_deleted == (uint32_t)-1) {
+			if (entry.state == Entry::DELETED)
+			{
+				if (first_deleted == (uint32_t)-1)
+				{
 					first_deleted = idx;
 				}
 			}
-			else if (entry.hash == hash && keys_equal(entry.key, key)) {
+			else if (entry.hash == hash && keys_equal(entry.key, key))
+			{
 				entry.value = value;
 				return &entry.value;
 			}
@@ -1707,9 +1722,11 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		}
 	}
 
-	V *get(const K &key)
+	V *
+	get(const K &key)
 	{
-		if (!entries || size == 0) {
+		if (!entries || size == 0)
+		{
 			return nullptr;
 		}
 
@@ -1717,14 +1734,17 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		uint32_t mask = capacity - 1;
 		uint32_t idx = hash & mask;
 
-		while (true) {
+		while (true)
+		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY) {
+			if (entry.state == Entry::EMPTY)
+			{
 				return nullptr;
 			}
 
-			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key)) {
+			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
+			{
 				return &entry.value;
 			}
 
@@ -1733,10 +1753,12 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	V *get(const string<OtherTag, OtherSize> &key)
+	V *
+	get(const string<OtherTag, OtherSize> &key)
 	{
 		static_assert(is_string<K>::value, "get(string) can only be used with string keys");
-		if (!entries || size == 0) {
+		if (!entries || size == 0)
+		{
 			return nullptr;
 		}
 
@@ -1744,14 +1766,17 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		uint32_t mask = capacity - 1;
 		uint32_t idx = hash & mask;
 
-		while (true) {
+		while (true)
+		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY) {
+			if (entry.state == Entry::EMPTY)
+			{
 				return nullptr;
 			}
 
-			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key)) {
+			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
+			{
 				return &entry.value;
 			}
 
@@ -1759,31 +1784,37 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		}
 	}
 
-	const V *get(const K &key) const
+	const V *
+	get(const K &key) const
 	{
 		return const_cast<hash_map *>(this)->get(key);
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	const V *get(const string<OtherTag, OtherSize> &key) const
+	const V *
+	get(const string<OtherTag, OtherSize> &key) const
 	{
 		return const_cast<hash_map *>(this)->get(key);
 	}
 
-	bool contains(const K &key) const
+	bool
+	contains(const K &key) const
 	{
 		return const_cast<hash_map *>(this)->get(key) != nullptr;
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	bool contains(const string<OtherTag, OtherSize> &key) const
+	bool
+	contains(const string<OtherTag, OtherSize> &key) const
 	{
 		return const_cast<hash_map *>(this)->get(key) != nullptr;
 	}
 
-	bool remove(const K &key)
+	bool
+	remove(const K &key)
 	{
-		if (!entries || size == 0) {
+		if (!entries || size == 0)
+		{
 			return false;
 		}
 
@@ -1791,14 +1822,17 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		uint32_t mask = capacity - 1;
 		uint32_t idx = hash & mask;
 
-		while (true) {
+		while (true)
+		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY) {
+			if (entry.state == Entry::EMPTY)
+			{
 				return false;
 			}
 
-			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key)) {
+			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
+			{
 				entry.state = Entry::DELETED;
 				size--;
 				tombstones++;
@@ -1810,10 +1844,12 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	bool remove(const string<OtherTag, OtherSize> &key)
+	bool
+	remove(const string<OtherTag, OtherSize> &key)
 	{
 		static_assert(is_string<K>::value, "remove(string) can only be used with string keys");
-		if (!entries || size == 0) {
+		if (!entries || size == 0)
+		{
 			return false;
 		}
 
@@ -1821,14 +1857,17 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		uint32_t mask = capacity - 1;
 		uint32_t idx = hash & mask;
 
-		while (true) {
+		while (true)
+		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY) {
+			if (entry.state == Entry::EMPTY)
+			{
 				return false;
 			}
 
-			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key)) {
+			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
+			{
 				entry.state = Entry::DELETED;
 				size--;
 				tombstones++;
@@ -1839,9 +1878,11 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		}
 	}
 
-	void clear()
+	void
+	clear()
 	{
-		if (entries) {
+		if (entries)
+		{
 			memset(entries, 0, capacity * sizeof(Entry));
 		}
 		size = 0;
@@ -1849,18 +1890,22 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	}
 
 	template <typename ArrayTag = ArenaTag>
-	void collect(array<pair<K, V>, ArrayTag> *out) const
+	void
+	collect(array<pair<K, V>, ArrayTag> *out) const
 	{
 		out->clear();
-		if (!entries || size == 0) {
+		if (!entries || size == 0)
+		{
 			return;
 		}
 
 		out->reserve(size);
 
-		for (uint32_t i = 0; i < capacity; i++) {
+		for (uint32_t i = 0; i < capacity; i++)
+		{
 			const Entry &entry = entries[i];
-			if (entry.state == Entry::OCCUPIED) {
+			if (entry.state == Entry::OCCUPIED)
+			{
 				pair<K, V> p = {entry.key, entry.value};
 				out->push(p);
 			}
@@ -1875,38 +1920,53 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 
 		iterator(Entry *e, uint32_t cap, uint32_t i) : entries(e), capacity(cap), idx(i)
 		{
-			while (idx < capacity && entries[idx].state != Entry::OCCUPIED) {
+			while (idx < capacity && entries[idx].state != Entry::OCCUPIED)
+			{
 				idx++;
 			}
 		}
 
-		pair<K &, V &> operator*()
+		pair<K &, V &>
+		operator*()
 		{
 			return {entries[idx].key, entries[idx].value};
 		}
 
-		iterator &operator++()
+		iterator &
+		operator++()
 		{
 			idx++;
-			while (idx < capacity && entries[idx].state != Entry::OCCUPIED) {
+			while (idx < capacity && entries[idx].state != Entry::OCCUPIED)
+			{
 				idx++;
 			}
 			return *this;
 		}
 
-		bool operator!=(const iterator &other) const
+		bool
+		operator!=(const iterator &other) const
 		{
 			return idx != other.idx;
 		}
 	};
 
-	iterator begin() { return iterator(entries, capacity, 0); }
-	iterator end() { return iterator(entries, capacity, capacity); }
+	iterator
+	begin()
+	{
+		return iterator(entries, capacity, 0);
+	}
+	iterator
+	end()
+	{
+		return iterator(entries, capacity, capacity);
+	}
 
-	V &operator[](const K &key)
+	V &
+	operator[](const K &key)
 	{
 		V *val = get(key);
-		if (val) {
+		if (val)
+		{
 			return *val;
 		}
 
@@ -1915,11 +1975,13 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	V &operator[](const string<OtherTag, OtherSize> &key)
+	V &
+	operator[](const string<OtherTag, OtherSize> &key)
 	{
 		static_assert(is_string<K>::value, "operator[](string) can only be used with string keys");
 		V *val = get(key);
-		if (val) {
+		if (val)
+		{
 			return *val;
 		}
 
@@ -1927,11 +1989,16 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		return *insert(key, default_val);
 	}
 
-	bool empty() const { return size == 0; }
-
-	static hash_map *create(uint32_t initial_capacity = 16)
+	bool
+	empty() const
 	{
-		auto *m = (hash_map *)Arena<ArenaTag>::alloc(sizeof(hash_map));
+		return size == 0;
+	}
+
+	static hash_map *
+	create(uint32_t initial_capacity = 16)
+	{
+		auto *m = (hash_map *)arena<ArenaTag>::alloc(sizeof(hash_map));
 		m->entries = nullptr;
 		m->capacity = 0;
 		m->size = 0;
@@ -1942,22 +2009,23 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 };
 
 /**
- * Set implementation using hash_map with dummy values.
- * - Inherits all performance characteristics from hash_map
- * - Provides set-specific interface (insert returns bool)
+ * Just reuse the hash_map with a char value
  */
 template <typename K, typename ArenaTag = global_arena> struct hash_set
 {
 	hash_map<K, uint8_t, ArenaTag> map;
 
-	void init(uint32_t initial_capacity = 16)
+	void
+	init(uint32_t initial_capacity = 16)
 	{
 		map.init(initial_capacity);
 	}
 
-	bool insert(const K &key)
+	bool
+	insert(const K &key)
 	{
-		if (map.contains(key)) {
+		if (map.contains(key))
+		{
 			return false;
 		}
 		map.insert(key, 1);
@@ -1965,11 +2033,13 @@ template <typename K, typename ArenaTag = global_arena> struct hash_set
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	bool insert(const string<OtherTag, OtherSize> &key)
+	bool
+	insert(const string<OtherTag, OtherSize> &key)
 	{
 		static_assert(hash_map<K, uint8_t, ArenaTag>::template is_string<K>::value,
 					  "insert(string) can only be used with string keys");
-		if (map.contains(key)) {
+		if (map.contains(key))
+		{
 			return false;
 		}
 		map.insert(key, 1);
@@ -1980,20 +2050,23 @@ template <typename K, typename ArenaTag = global_arena> struct hash_set
 	typename std::enable_if<hash_map<K, uint8_t, ArenaTag>::template is_string<U>::value, bool>::type
 	insert(const char *key)
 	{
-		if (map.contains(key)) {
+		if (map.contains(key))
+		{
 			return false;
 		}
 		map.insert(key, 1);
 		return true;
 	}
 
-	bool contains(const K &key) const
+	bool
+	contains(const K &key) const
 	{
 		return map.contains(key);
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	bool contains(const string<OtherTag, OtherSize> &key) const
+	bool
+	contains(const string<OtherTag, OtherSize> &key) const
 	{
 		static_assert(hash_map<K, uint8_t, ArenaTag>::template is_string<K>::value,
 					  "contains(string) can only be used with string keys");
@@ -2007,13 +2080,15 @@ template <typename K, typename ArenaTag = global_arena> struct hash_set
 		return map.contains(key);
 	}
 
-	bool remove(const K &key)
+	bool
+	remove(const K &key)
 	{
 		return map.remove(key);
 	}
 
 	template <typename OtherTag, uint32_t OtherSize>
-	bool remove(const string<OtherTag, OtherSize> &key)
+	bool
+	remove(const string<OtherTag, OtherSize> &key)
 	{
 		static_assert(hash_map<K, uint8_t, ArenaTag>::template is_string<K>::value,
 					  "remove(string) can only be used with string keys");
@@ -2027,17 +2102,27 @@ template <typename K, typename ArenaTag = global_arena> struct hash_set
 		return map.remove(key);
 	}
 
-	void clear()
+	void
+	clear()
 	{
 		map.clear();
 	}
 
-	uint32_t size() const { return map.size; }
-	bool empty() const { return map.empty(); }
-
-	static hash_set *create(uint32_t initial_capacity = 16)
+	uint32_t
+	size() const
 	{
-		auto *s = (hash_set *)Arena<ArenaTag>::alloc(sizeof(hash_set));
+		return map.size;
+	}
+	bool
+	empty() const
+	{
+		return map.empty();
+	}
+
+	static hash_set *
+	create(uint32_t initial_capacity = 16)
+	{
+		auto *s = (hash_set *)arena<ArenaTag>::alloc(sizeof(hash_set));
 		s->map.entries = nullptr;
 		s->map.capacity = 0;
 		s->map.size = 0;
@@ -2046,3 +2131,118 @@ template <typename K, typename ArenaTag = global_arena> struct hash_set
 		return s;
 	}
 };
+
+/* Streams to support contiguous allocation without knowing the size ahead of time */
+
+template <typename Tag> struct stream_alloc
+{
+	uint8_t *start;		// Where this allocation began
+	uint8_t *write_pos; // Current write position
+	size_t	 reserved;	// How much we've reserved so far
+};
+
+template <typename Tag = global_arena>
+stream_alloc<Tag>
+arena_stream_begin(size_t initial_reserve = 1024)
+{
+	if (!arena<Tag>::base)
+	{
+		arena<Tag>::init();
+	}
+
+	// Ensure we have space for initial reservation
+	uint8_t *start = arena<Tag>::current;
+	size_t	 available = arena<Tag>::committed_capacity - (arena<Tag>::current - arena<Tag>::base);
+
+	if (initial_reserve > available)
+	{
+		// Need to commit more memory
+		size_t needed = (arena<Tag>::current - arena<Tag>::base) + initial_reserve;
+		if (needed > arena<Tag>::reserved_capacity)
+		{
+			fprintf(stderr, "Stream allocation too large\n");
+			exit(1);
+		}
+
+		size_t new_committed = virtual_memory::round_to_pages(needed);
+		if (!virtual_memory::commit(arena<Tag>::base + arena<Tag>::committed_capacity,
+								   new_committed - arena<Tag>::committed_capacity))
+		{
+			fprintf(stderr, "Failed to commit memory for stream\n");
+			exit(1);
+		}
+		arena<Tag>::committed_capacity = new_committed;
+	}
+
+	arena<Tag>::current = start + initial_reserve;
+
+	return stream_alloc<Tag>{start, start, initial_reserve};
+}
+
+template <typename Tag = global_arena>
+void
+arena_stream_write(stream_alloc<Tag> *stream, const void *data, size_t size)
+{
+	size_t used = stream->write_pos - stream->start;
+	size_t remaining = stream->reserved - used;
+
+	if (size > remaining)
+	{
+
+		size_t new_reserved = stream->reserved * 2;
+		while (new_reserved - used < size)
+		{
+			new_reserved *= 2;
+		}
+
+		size_t available = arena<Tag>::committed_capacity - (stream->start - arena<Tag>::base);
+		if (new_reserved > available)
+		{
+			size_t needed = (stream->start - arena<Tag>::base) + new_reserved;
+			if (needed > arena<Tag>::reserved_capacity)
+			{
+				fprintf(stderr, "Stream allocation too large\n");
+				exit(1);
+			}
+
+			size_t new_committed = virtual_memory::round_to_pages(needed);
+			if (!virtual_memory::commit(arena<Tag>::base + arena<Tag>::committed_capacity,
+									   new_committed - arena<Tag>::committed_capacity))
+			{
+				fprintf(stderr, "Failed to commit memory for stream\n");
+				exit(1);
+			}
+			arena<Tag>::committed_capacity = new_committed;
+		}
+
+		arena<Tag>::current = stream->start + new_reserved;
+		stream->reserved = new_reserved;
+	}
+
+	memcpy(stream->write_pos, data, size);
+	stream->write_pos += size;
+}
+
+template <typename Tag = global_arena>
+uint8_t *
+arena_stream_finish(stream_alloc<Tag> *stream)
+{
+
+	arena<Tag>::current = stream->write_pos;
+	return stream->start;
+}
+
+template <typename Tag = global_arena>
+void
+arena_stream_abandon(stream_alloc<Tag> *stream)
+{
+
+	arena<Tag>::current = stream->start;
+}
+
+template <typename Tag = global_arena>
+size_t
+arena_stream_size(const stream_alloc<Tag> *stream)
+{
+	return stream->write_pos - stream->start;
+}

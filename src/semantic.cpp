@@ -57,7 +57,7 @@ static Structure* lookup_table(const string<parser_arena>& name) {
 
 // Format error message
 static const char* format_error(const char* fmt, ...) {
-    char* buffer = (char*)arena::alloc<parser_arena>(256);
+    char* buffer = (char*)arena<parser_arena>::alloc(256);
     va_list args;
     va_start(args, fmt);
     vsnprintf(buffer, 256, fmt, args);
@@ -475,20 +475,20 @@ static bool semantic_resolve_create_table(CreateTableStmt* stmt, const char** er
         }
 
         // Allocate name in catalog arena for persistence
-        char* persistent_name = (char*)arena::alloc<catalog_arena>(def.name.length() + 1);
+        char* persistent_name = (char*)arena<catalog_arena>::alloc(def.name.length() + 1);
         strcpy(persistent_name, def.name.c_str());
 
         cols.push(Column{persistent_name, def.type});
     }
 
     // Allocate table name in catalog arena
-    char* persistent_table_name = (char*)arena::alloc<catalog_arena>(stmt->table_name.length() + 1);
+    char* persistent_table_name = (char*)arena<catalog_arena>::alloc(stmt->table_name.length() + 1);
     strcpy(persistent_table_name, stmt->table_name.c_str());
 
     Structure new_structure = Structure::from(persistent_table_name, cols);
 
     // Store in semantic info for later use
-    stmt->sem.created_structure = (Structure*)arena::alloc<parser_arena>(sizeof(Structure));
+    stmt->sem.created_structure = (Structure*)arena<parser_arena>::alloc(sizeof(Structure));
     *stmt->sem.created_structure = new_structure;
 
     // Add to pending catalog changes

@@ -172,7 +172,7 @@ load_catalog_from_master()
 void
 reload_catalog()
 {
-	arena::init<catalog_arena>();
+	arena<catalog_arena>::init();
 	catalog.clear();
 	bootstrap_master(false);
 	load_catalog_from_master();

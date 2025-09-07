@@ -273,10 +273,10 @@ static struct {
 static void
 set_register(TypedValue *dest, uint8_t *src, DataType type) {
     if (dest->get_size() < type_size(type)) {
-        arena::reclaim<query_arena>(dest->data, type_size(dest->type));
-        dest->data = (uint8_t *) arena::alloc<query_arena>(type_size(type));
+        arena<query_arena>::reclaim(dest->data, type_size(dest->type));
+        dest->data = (uint8_t *) arena<query_arena>::alloc(type_size(type));
     } else if (nullptr == dest->data) {
-        dest->data = (uint8_t *) arena::alloc<query_arena>(type_size(type));
+        dest->data = (uint8_t *) arena<query_arena>::alloc(type_size(type));
     }
 
     dest->type = type;
@@ -510,7 +510,7 @@ step() {
             int32_t right = LOGIC_RIGHT_REG();
             logic_op op = LOGIC_OP();
             TypedValue result = TypedValue::make(TYPE_U32);
-            result.data = (uint8_t *) arena::alloc<query_arena>(type_size(TYPE_U32));
+            result.data = (uint8_t *) arena<query_arena>::alloc(type_size(TYPE_U32));
             uint32_t a = *(uint32_t *) VM.registers[left].data;
             uint32_t b = *(uint32_t *) VM.registers[right].data;
             uint32_t res_val;
@@ -557,12 +557,12 @@ step() {
             }
 
             // Allocate output array using the context's allocator
-            TypedValue *values = (TypedValue *) arena::alloc<query_arena>(sizeof(TypedValue) * reg_count);
+            TypedValue *values = (TypedValue *) arena<query_arena>::alloc(sizeof(TypedValue) * reg_count);
 
             for (int i = 0; i < reg_count; i++) {
                 TypedValue *val = &VM.registers[first_reg + i];
                 values[i].type = val->type;
-                values[i].data = (uint8_t *) arena::alloc<query_arena>(type_size(val->type));
+                values[i].data = (uint8_t *) arena<query_arena>::alloc(type_size(val->type));
                 memcpy(values[i].data, val->data, type_size(val->type));
             }
 
@@ -579,7 +579,7 @@ step() {
             TypedValue *b = &VM.registers[right];
 
             TypedValue result = {.type = (a->type > b->type) ? a->type : b->type};
-            result.data = (uint8_t *) arena::alloc<query_arena>(type_size(result.type));
+            result.data = (uint8_t *) arena<query_arena>::alloc(type_size(result.type));
 
             bool success = true;
 

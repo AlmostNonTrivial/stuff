@@ -586,7 +586,7 @@ test_error_handling()
 inline void
 test_parser()
 {
-	arena::init<parser_arena>();
+	arena<parser_arena>::init();
 
 	// SELECT tests
 	test_select_star();

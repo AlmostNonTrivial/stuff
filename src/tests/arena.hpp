@@ -7,7 +7,7 @@
 #include <cstdio>
 
 struct test_arena {};
-using TestArena = Arena<test_arena>;
+using TestArena = arena<test_arena>;
 
 struct Allocation {
     void* ptr;
@@ -17,7 +17,7 @@ struct Allocation {
 inline void
 fuzz_arena(int reclaim_ratio)
 {
-    TestArena::reset_and_decommit();  // Clean slate for each run
+    Testreset_and_decommit();  // Clean slate for each run
 
     std::vector<Allocation> active;
 
@@ -49,7 +49,7 @@ fuzz_arena(int reclaim_ratio)
             size_t idx = std::rand() % active.size();
             Allocation& alloc = active[idx];
 
-            TestArena::reclaim(alloc.ptr, alloc.size);
+            Testreclaim(alloc.ptr, alloc.size);
             total_reclaims++;
             total_bytes_reclaimed += alloc.size;
 
@@ -63,7 +63,7 @@ fuzz_arena(int reclaim_ratio)
             size_t size = size_distribution[std::rand() % size_count];
             size = size + (std::rand() % (size / 4 + 1));  // Add variance
 
-            void* ptr = TestArena::alloc(size);
+            void* ptr = Testalloc(size);
             if (ptr)
             {
                 memset(ptr, (uint8_t)(i & 0xFF), size);
@@ -95,18 +95,18 @@ fuzz_arena(int reclaim_ratio)
 
     printf("\nArena internals:\n");
     printf("  Arena used:            %zu bytes (%.2f MB)\n",
-           TestArena::used(), TestArena::used() / (1024.0 * 1024.0));
+           Testused(), Testused() / (1024.0 * 1024.0));
     printf("  Arena committed:       %zu bytes (%.2f MB)\n",
-           TestArena::committed(), TestArena::committed() / (1024.0 * 1024.0));
+           Testcommitted(), Testcommitted() / (1024.0 * 1024.0));
     printf("  Bytes in freelists:    %zu bytes (%.2f MB)\n",
-           TestArena::freelist_bytes(), TestArena::freelist_bytes() / (1024.0 * 1024.0));
+           Testfreelist_bytes(), Testfreelist_bytes() / (1024.0 * 1024.0));
 
     double reuse_rate = (total_bytes_allocated > 0)
-        ? (100.0 * TestArena::reused() / total_bytes_allocated)
+        ? (100.0 * Testreused() / total_bytes_allocated)
         : 0;
     printf("\nEfficiency:\n");
     printf("  Bytes reused:          %zu (%.2f MB)\n",
-           TestArena::reused(), TestArena::reused() / (1024.0 * 1024.0));
+           Testreused(), Testreused() / (1024.0 * 1024.0));
     printf("  Reuse rate:            %.2f%% of total allocated\n", reuse_rate);
 }
 
@@ -116,7 +116,7 @@ test_arena()
     std::srand(42);  // Deterministic results
 
     /* Initialize once with enough space */
-    TestArena::init();
+    Testinit();
 
     printf("Arena Fuzzing Test - 50,000 operations per run\n");
     printf("Testing different reclaim ratios to observe freelist behavior\n\n");
@@ -139,5 +139,5 @@ test_arena()
     }
 
 
-    TestArena::shutdown();
+    Testshutdown();
 }

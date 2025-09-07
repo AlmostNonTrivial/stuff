@@ -14,7 +14,7 @@ inline void
 test_array()
 {
 
-	Arena<test_arena>::init(1024 * 1024);
+	arena<test_arena>::init(1024 * 1024);
 
 	{
 		array<int, test_arena> arr;
@@ -115,17 +115,17 @@ test_array()
 	}
 
 	printf("  Array memory stats:\n");
-	printf("    Reclaimed: %zu bytes\n", Arena<test_arena>::reclaimed());
-	printf("    Reused: %zu bytes\n", Arena<test_arena>::reused());
+	printf("    Reclaimed: %zu bytes\n", arena<test_arena>::reclaimed());
+	printf("    Reused: %zu bytes\n", arena<test_arena>::reused());
 
-	Arena<test_arena>::reset();
+	arena<test_arena>::reset();
 }
 
 inline void
 test_string()
 {
 
-	Arena<test_arena>::reset();
+	arena<test_arena>::reset();
 
 	{
 		string<test_arena> str;
@@ -220,17 +220,17 @@ test_string()
 	}
 
 	printf("  String memory stats:\n");
-	printf("    Reclaimed: %zu bytes\n", Arena<test_arena>::reclaimed());
-	printf("    Reused: %zu bytes\n", Arena<test_arena>::reused());
+	printf("    Reclaimed: %zu bytes\n", arena<test_arena>::reclaimed());
+	printf("    Reused: %zu bytes\n", arena<test_arena>::reused());
 
-	Arena<test_arena>::reset();
+	arena<test_arena>::reset();
 }
 
 inline void
 test_hash_map()
 {
 
-	Arena<test_arena>::reset();
+	arena<test_arena>::reset();
 
 	{
 		hash_map<int, int, test_arena> map;
@@ -364,7 +364,7 @@ test_hash_map()
 		assert(!map.contains(25));
 	}
 
-	Arena<test_arena>::reset();
+	arena<test_arena>::reset();
 }
 
 inline void
@@ -378,8 +378,8 @@ test_cross_arena_operations()
 	{
 	};
 
-	Arena<arena1>::init(1024 * 1024);
-	Arena<arena2>::init(1024 * 1024);
+	arena<arena1>::init(1024 * 1024);
+	arena<arena2>::init(1024 * 1024);
 
 	{
 		string<arena1> str1;
@@ -425,44 +425,44 @@ test_cross_arena_operations()
 		assert(*map.get(key_from_arena2) == 42);
 	}
 
-	Arena<arena1>::shutdown();
-	Arena<arena2>::shutdown();
+	arena<arena1>::shutdown();
+	arena<arena2>::shutdown();
 }
 
 inline void
 test_stream_allocation()
 {
 
-	Arena<test_arena>::init(1024 * 1024);
-	Arena<test_arena>::reset();
+	arena<test_arena>::init(1024 * 1024);
+	arena<test_arena>::reset();
 
 	{
-		auto stream = arena::stream_begin<test_arena>(256);
+		auto stream = arena_stream_begin<test_arena>(256);
 
 		const char *data1 = "Hello ";
-		arena::stream_write(&stream, data1, strlen(data1));
+		arena_stream_write(&stream, data1, strlen(data1));
 
 		const char *data2 = "World!";
-		arena::stream_write(&stream, data2, strlen(data2) + 1);
+		arena_stream_write(&stream, data2, strlen(data2) + 1);
 
-		char *result = (char *)arena::stream_finish(&stream);
+		char *result = (char *)arena_stream_finish(&stream);
 		assert(strcmp(result, "Hello World!") == 0);
-		assert(arena::stream_size(&stream) == strlen("Hello World!") + 1);
+		assert(arena_stream_size(&stream) == strlen("Hello World!") + 1);
 	}
 
 	{
-		auto stream = arena::stream_begin<test_arena>(16);
+		auto stream = arena_stream_begin<test_arena>(16);
 
 		char buffer[1024];
 		memset(buffer, 'A', sizeof(buffer));
-		arena::stream_write(&stream, buffer, sizeof(buffer));
+		arena_stream_write(&stream, buffer, sizeof(buffer));
 
 		char more[512];
 		memset(more, 'B', sizeof(more));
-		arena::stream_write(&stream, more, sizeof(more));
+		arena_stream_write(&stream, more, sizeof(more));
 
-		uint8_t *result = arena::stream_finish(&stream);
-		assert(arena::stream_size(&stream) == 1024 + 512);
+		uint8_t *result = arena_stream_finish(&stream);
+		assert(arena_stream_size(&stream) == 1024 + 512);
 
 		for (int i = 0; i < 1024; i++)
 		{
@@ -475,21 +475,21 @@ test_stream_allocation()
 	}
 
 	{
-		size_t before = Arena<test_arena>::used();
+		size_t before = arena<test_arena>::used();
 
-		auto stream = arena::stream_begin<test_arena>(1024);
-		arena::stream_write(&stream, "test", 4);
-		arena::stream_abandon(&stream);
+		auto stream = arena_stream_begin<test_arena>(1024);
+		arena_stream_write(&stream, "test", 4);
+		arena_stream_abandon(&stream);
 
-		size_t after = Arena<test_arena>::used();
+		size_t after = arena<test_arena>::used();
 		assert(after == before);
 	}
 
 	printf("  Stream allocation memory stats:\n");
-	printf("    Used: %zu bytes\n", Arena<test_arena>::used());
-	printf("    Committed: %zu bytes\n", Arena<test_arena>::committed());
+	printf("    Used: %zu bytes\n", arena<test_arena>::used());
+	printf("    Committed: %zu bytes\n", arena<test_arena>::committed());
 
-	Arena<test_arena>::reset();
+	arena<test_arena>::reset();
 }
 
 inline void
@@ -497,7 +497,7 @@ test_memory_reuse_patterns()
 {
 	printf("\n=== Testing memory reuse patterns ===\n");
 
-	Arena<test_arena>::reset();
+	arena<test_arena>::reset();
 
 	for (int iteration = 0; iteration < 10; iteration++)
 	{
@@ -532,14 +532,14 @@ test_memory_reuse_patterns()
 	}
 
 	printf("  Final memory reuse stats:\n");
-	printf("    Total reclaimed: %zu bytes\n", Arena<test_arena>::reclaimed());
-	printf("    Total reused: %zu bytes\n", Arena<test_arena>::reused());
-	printf("    Currently in freelists: %zu bytes\n", Arena<test_arena>::freelist_bytes());
+	printf("    Total reclaimed: %zu bytes\n", arena<test_arena>::reclaimed());
+	printf("    Total reused: %zu bytes\n", arena<test_arena>::reused());
+	printf("    Currently in freelists: %zu bytes\n", arena<test_arena>::freelist_bytes());
 	printf("    Reuse efficiency: %.2f%%\n",
-		   Arena<test_arena>::reclaimed() > 0 ? (100.0 * Arena<test_arena>::reused() / Arena<test_arena>::reclaimed())
+		   arena<test_arena>::reclaimed() > 0 ? (100.0 * arena<test_arena>::reused() / arena<test_arena>::reclaimed())
 											  : 0.0);
 
-	Arena<test_arena>::print_stats();
+	arena<test_arena>::print_stats();
 }
 
 inline int
@@ -553,7 +553,7 @@ test_containers()
 	test_stream_allocation();
 	test_memory_reuse_patterns();
 
-	Arena<test_arena>::shutdown();
+	arena<test_arena>::shutdown();
 
 	return 0;
 }

@@ -407,7 +407,7 @@ run_meta_command(const char *cmd)
 int
 run_repl()
 {
-	arena::init<query_arena>();
+	arena<query_arena>::init();
 
 	bool existed = pager_open("relational_test.db");
 

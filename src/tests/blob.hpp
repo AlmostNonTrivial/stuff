@@ -174,7 +174,7 @@ test_large_blob()
 
 	// 10KB blob
 	const size_t large_size = 10240;
-	char		*large_text = (char *)arena::alloc<query_arena>(large_size + 1);
+	char		*large_text = (char *)arena<query_arena>::alloc(large_size + 1);
 	memset(large_text, 'L', large_size);
 	large_text[large_size] = '\0';
 
@@ -324,7 +324,7 @@ int
 test_blob()
 {
 	// Initialize systems
-	arena::init<query_arena>(16 * 1024 * 1024);
+	arena<query_arena>::init(16 * 1024 * 1024);
 	pager_open("test_blob.db");
 
 	printf("=== BLOB STORAGE TESTS ===\n");
@@ -345,7 +345,7 @@ test_blob()
 
 	// Cleanup
 	pager_close();
-	arena::shutdown<query_arena>();
+	arena<query_arena>::shutdown();
 
 	return 0;
 }

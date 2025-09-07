@@ -258,7 +258,7 @@ void os_file_truncate(os_file_handle_t handle, os_file_offset_t size);
 #endif
 
 // Cross-platform virtual memory operations
-struct VirtualMemory
+struct virtual_memory
 {
 	static void *
 	reserve(size_t size)

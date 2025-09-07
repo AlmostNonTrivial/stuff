@@ -237,7 +237,7 @@ blob_get_size(uint32_t first_page)
 void *
 blob_read_full(uint32_t first_page, uint64_t *size)
 {
-	auto stream = arena::stream_begin<query_arena>(BLOB_DATA_SIZE);
+	auto stream = arena_stream_begin<query_arena>(BLOB_DATA_SIZE);
 
 	uint32_t current = first_page;
 	while (current)
@@ -245,17 +245,17 @@ blob_read_full(uint32_t first_page, uint64_t *size)
 		blob_node *node = GET_BLOB_NODE(current);
 		if (!node)
 		{
-			arena::stream_abandon(&stream);
+			arena_stream_abandon(&stream);
 			size = 0;
 			return nullptr;
 		}
 
-		arena::stream_write(&stream, node->data, node->size);
+		arena_stream_write(&stream, node->data, node->size);
 		current = node->next;
 	}
 
-	*size = arena::stream_size<query_arena>(&stream);
+	*size = arena_stream_size<query_arena>(&stream);
 
-	auto data = arena::stream_finish(&stream);
+	auto data = arena_stream_finish(&stream);
 	return data;
 }

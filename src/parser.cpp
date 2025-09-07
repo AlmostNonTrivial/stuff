@@ -14,7 +14,7 @@
 static const char *
 format_error(Parser *parser, const char *fmt, ...)
 {
-	char   *buffer = (char *)arena::alloc<parser_arena>(256);
+	char   *buffer = (char *)arena<parser_arena>::alloc(256);
 	va_list args;
 	va_start(args, fmt);
 	vsnprintf(buffer, 256, fmt, args);
@@ -50,7 +50,7 @@ str_eq_ci(const char *a, uint32_t a_len, const char *b)
 static void
 set_string_from_token(string<parser_arena>& dest, const char* text, uint32_t length)
 {
-    char* buffer = (char*)arena::alloc<parser_arena>(length + 1);
+    char* buffer = (char*)arena<parser_arena>::alloc(length + 1);
     memcpy(buffer, text, length);
     buffer[length] = '\0';
     dest.set(buffer);
@@ -325,7 +325,7 @@ lexer_peek_token(Lexer *lex)
 void
 parser_init(Parser *parser, const char *input)
 {
-	arena::init<parser_arena>();
+	arena<parser_arena>::init();
 
 	lexer_init(&parser->lexer, input);
 	parser->error_msg = nullptr;
@@ -434,7 +434,7 @@ parse_or_expr(Parser *parser)
 			return nullptr;
 		}
 
-		Expr *expr = (Expr *)arena::alloc<parser_arena>(sizeof(Expr));
+		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
 		expr->type = EXPR_BINARY_OP;
 		expr->op = OP_OR;
 		expr->left = left;
@@ -461,7 +461,7 @@ parse_and_expr(Parser *parser)
 			return nullptr;
 		}
 
-		Expr *expr = (Expr *)arena::alloc<parser_arena>(sizeof(Expr));
+		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
 		expr->type = EXPR_BINARY_OP;
 		expr->op = OP_AND;
 		expr->left = left;
@@ -520,7 +520,7 @@ parse_comparison_expr(Parser *parser)
 			return nullptr;
 		}
 
-		Expr *expr = (Expr *)arena::alloc<parser_arena>(sizeof(Expr));
+		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
 		expr->type = EXPR_BINARY_OP;
 		expr->op = op;
 		expr->left = left;
@@ -543,7 +543,7 @@ parse_unary_expr(Parser *parser)
 			return nullptr;
 		}
 
-		Expr *expr = (Expr *)arena::alloc<parser_arena>(sizeof(Expr));
+		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
 		expr->type = EXPR_UNARY_OP;
 		expr->unary_op = OP_NOT;
 		expr->operand = operand;
@@ -561,7 +561,7 @@ parse_primary_expr(Parser *parser)
 	// NULL literal
 	if (consume_keyword(parser, "NULL"))
 	{
-		Expr *expr = (Expr *)arena::alloc<parser_arena>(sizeof(Expr));
+		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
 		expr->type = EXPR_NULL;
 		return expr;
 	}
@@ -570,11 +570,11 @@ parse_primary_expr(Parser *parser)
 	if (token.type == TOKEN_NUMBER)
 	{
 		lexer_next_token(&parser->lexer);
-		Expr *expr = (Expr *)arena::alloc<parser_arena>(sizeof(Expr));
+		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
 		expr->type = EXPR_LITERAL;
 		expr->lit_type = TYPE_U32;
 
-		char *num_str = (char *)arena::alloc<parser_arena>(token.length + 1);
+		char *num_str = (char *)arena<parser_arena>::alloc(token.length + 1);
 		memcpy(num_str, token.text, token.length);
 		num_str[token.length] = '\0';
 
@@ -586,7 +586,7 @@ parse_primary_expr(Parser *parser)
 	if (token.type == TOKEN_STRING)
 	{
 		lexer_next_token(&parser->lexer);
-		Expr *expr = (Expr *)arena::alloc<parser_arena>(sizeof(Expr));
+		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
 		expr->type = EXPR_LITERAL;
 		expr->lit_type = TYPE_CHAR32;
 		set_string_from_token(expr->str_val, token.text, token.length);
@@ -616,7 +616,7 @@ parse_primary_expr(Parser *parser)
 	if (token.type == TOKEN_IDENTIFIER)
 	{
 		lexer_next_token(&parser->lexer);
-		Expr *expr = (Expr *)arena::alloc<parser_arena>(sizeof(Expr));
+		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
 		expr->type = EXPR_COLUMN;
 		set_string_from_token(expr->column_name, token.text, token.length);
 		return expr;
@@ -1066,7 +1066,7 @@ parse_rollback(Parser *parser, RollbackStmt *stmt)
 Statement *
 parser_parse_statement(Parser *parser)
 {
-	Statement *stmt = (Statement *)arena::alloc<parser_arena>(sizeof(Statement));
+	Statement *stmt = (Statement *)arena<parser_arena>::alloc(sizeof(Statement));
 	memset(stmt, 0, sizeof(Statement));
 
 	Token token = lexer_peek_token(&parser->lexer);
