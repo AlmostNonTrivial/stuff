@@ -381,6 +381,7 @@ test_pager_stress()
 inline void
 test_pager()
 {
+
 	test_lru();
 	test_rollback();
 	test_free_list();

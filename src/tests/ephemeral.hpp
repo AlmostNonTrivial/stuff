@@ -429,7 +429,7 @@ inline void test_ephemeral_tree_varchar_keys() {
     arena::reset<query_arena>();
 }
 
-inline void test_memtree() {
+inline void test_ephemeral() {
     std::cout << "\n========== MemTree Tests ==========\n";
 
     test_ephemeral_tree_sequential_ops();

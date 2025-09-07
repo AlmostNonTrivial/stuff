@@ -1,5 +1,12 @@
-// main.cpp - Full REPL implementation
 
+// main.cpp - Full REPL implementation
+#include "tests/parser.hpp"
+#include "tests/arena.hpp"
+#include "tests/blob.hpp"
+#include "tests/btree.hpp"
+#include "tests/pager.hpp"
+#include "tests/types.hpp"
+#include "tests/ephemeral.hpp"
 #include "arena.hpp"
 #include "catalog.hpp"
 #include "common.hpp"
@@ -338,6 +345,36 @@ run_meta_command(const char *cmd)
 							  "username = 'hazeslg' ORDER BY age ASC");
 		execute_sql_statement("SELECT * FROM products WHERE price > 100 AND stock < 50 ORDER BY price DESC");
 	}
+	else if (strncmp(cmd, ".demo_like", 10) == 0)
+	{
+		const char *args = cmd[10] ? cmd + 11 : "";
+		demo_like_pattern(args);
+	}
+	else if (strncmp(cmd, ".demo_join", 10) == 0)
+	{
+		const char *args = cmd[10] ? cmd + 11 : "";
+		demo_nested_loop_join(args);
+	}
+	else if (strncmp(cmd, ".demo_subquery", 14) == 0)
+	{
+		const char *args = cmd[14] ? cmd + 15 : "";
+		demo_subquery_pattern(args);
+	}
+	else if (strncmp(cmd, ".demo_index", 11) == 0)
+	{
+		const char *args = cmd[11] ? cmd + 12 : "";
+		demo_composite_index(args);
+	}
+	else if (strncmp(cmd, ".demo_group", 11) == 0)
+	{
+		const char *args = cmd[11] ? cmd + 12 : "";
+		demo_group_by_aggregate(args);
+	}
+	else if (strncmp(cmd, ".demo_blob", 10) == 0)
+	{
+		const char *args = cmd[10] ? cmd + 11 : "";
+		demo_blob_storage(args);
+	}
 	else if (strcmp(cmd, ".test_perf") == 0)
 	{
 		printf("\n-- Performance Test --\n");
@@ -367,7 +404,7 @@ run_meta_command(const char *cmd)
 // ============================================================================
 
 int
-main()
+run_repl()
 {
 	arena::init<query_arena>();
 
@@ -464,4 +501,34 @@ main()
 
 	pager_close();
 	return 0;
+}
+
+
+
+int
+run_tests()
+{
+	test_types();
+	// test_parser();
+	test_blob();
+	test_arena();
+	test_pager();
+	test_ephemeral();
+	test_btree();
+	return 0;
+}
+
+int
+main(int argc, char **argv)
+{
+
+	if (argc > 1 && strlen(argv[1]) >= 5)
+	{
+		if (strcmp("debug", argv[1]) == 0)
+		{
+			return run_tests();
+		}
+	}
+
+	return run_repl();
 }
