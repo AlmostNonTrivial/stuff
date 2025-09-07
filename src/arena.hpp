@@ -1255,22 +1255,25 @@ template <typename K, typename V> struct pair
  * For keys, only supports primtivites and and arena string/cstrings as special cases
  *
  */
+
+// Add this type alias at global scope:
+
+enum hash_slot_state : uint8_t
+{
+	EMPTY = 0,
+	OCCUPIED = 1,
+	DELETED = 2
+};
+
 template <typename K, typename V, typename ArenaTag = global_arena> struct hash_map
 {
 	struct Entry
 	{
 
-		enum slot_state : uint8_t
-		{
-			EMPTY = 0,
-			OCCUPIED = 1,
-			DELETED = 2
-		};
-
 		K		   key;
 		V		   value;
 		uint32_t   hash;
-		slot_state state;
+		hash_slot_state state;
 	};
 
 	Entry	*entries = nullptr;
@@ -1358,12 +1361,12 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY)
+			if (entry.state == hash_slot_state::EMPTY)
 			{
 				return nullptr;
 			}
 
-			if (entry.state == Entry::OCCUPIED && entry.hash == hash && entry.key.equals(key))
+			if (entry.state == hash_slot_state::OCCUPIED && entry.hash == hash && entry.key.equals(key))
 			{
 				return &entry.value;
 			}
@@ -1407,7 +1410,7 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY)
+			if (entry.state == hash_slot_state::EMPTY)
 			{
 				if (first_deleted != (uint32_t)-1)
 				{
@@ -1415,7 +1418,7 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 					deleted_entry.key.set(key);
 					deleted_entry.value = value;
 					deleted_entry.hash = hash;
-					deleted_entry.state = Entry::OCCUPIED;
+					deleted_entry.state = hash_slot_state::OCCUPIED;
 					tombstones--;
 					size++;
 					return &deleted_entry.value;
@@ -1425,13 +1428,13 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 					entry.key.set(key);
 					entry.value = value;
 					entry.hash = hash;
-					entry.state = Entry::OCCUPIED;
+					entry.state = hash_slot_state::OCCUPIED;
 					size++;
 					return &entry.value;
 				}
 			}
 
-			if (entry.state == Entry::DELETED)
+			if (entry.state == hash_slot_state::DELETED)
 			{
 				if (first_deleted == (uint32_t)-1)
 				{
@@ -1472,14 +1475,14 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY)
+			if (entry.state == hash_slot_state::EMPTY)
 			{
 				return false;
 			}
 
-			if (entry.state == Entry::OCCUPIED && entry.hash == hash && entry.key.equals(key))
+			if (entry.state == hash_slot_state::OCCUPIED && entry.hash == hash && entry.key.equals(key))
 			{
-				entry.state = Entry::DELETED;
+				entry.state = hash_slot_state::DELETED;
 				size--;
 				tombstones++;
 				return true;
@@ -1551,12 +1554,12 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		{
 			Entry &entry = entries[idx];
 
-			if (entry.state != Entry::OCCUPIED)
+			if (entry.state != hash_slot_state::OCCUPIED)
 			{
 				entry.key = key;
 				entry.value = value;
 				entry.hash = hash;
-				entry.state = Entry::OCCUPIED;
+				entry.state = hash_slot_state::OCCUPIED;
 				size++;
 				return &entry.value;
 			}
@@ -1587,7 +1590,7 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 
 		for (uint32_t i = 0; i < old_capacity; i++)
 		{
-			if (old_entries[i].state == Entry::OCCUPIED)
+			if (old_entries[i].state == hash_slot_state::OCCUPIED)
 			{
 				insert_internal(old_entries[i].key, old_entries[i].hash, old_entries[i].value);
 			}
@@ -1618,7 +1621,7 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY)
+			if (entry.state == hash_slot_state::EMPTY)
 			{
 				if (first_deleted != (uint32_t)-1)
 				{
@@ -1626,7 +1629,7 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 					deleted_entry.key = key;
 					deleted_entry.value = value;
 					deleted_entry.hash = hash;
-					deleted_entry.state = Entry::OCCUPIED;
+					deleted_entry.state = hash_slot_state::OCCUPIED;
 					tombstones--;
 					size++;
 					return &deleted_entry.value;
@@ -1636,13 +1639,13 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 					entry.key = key;
 					entry.value = value;
 					entry.hash = hash;
-					entry.state = Entry::OCCUPIED;
+					entry.state = hash_slot_state::OCCUPIED;
 					size++;
 					return &entry.value;
 				}
 			}
 
-			if (entry.state == Entry::DELETED)
+			if (entry.state == hash_slot_state::DELETED)
 			{
 				if (first_deleted == (uint32_t)-1)
 				{
@@ -1683,7 +1686,7 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY)
+			if (entry.state == hash_slot_state::EMPTY)
 			{
 				if (first_deleted != (uint32_t)-1)
 				{
@@ -1691,7 +1694,7 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 					deleted_entry.key.set(key.c_str());
 					deleted_entry.value = value;
 					deleted_entry.hash = hash;
-					deleted_entry.state = Entry::OCCUPIED;
+					deleted_entry.state = hash_slot_state::OCCUPIED;
 					tombstones--;
 					size++;
 					return &deleted_entry.value;
@@ -1701,13 +1704,13 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 					entry.key.set(key.c_str());
 					entry.value = value;
 					entry.hash = hash;
-					entry.state = Entry::OCCUPIED;
+					entry.state = hash_slot_state::OCCUPIED;
 					size++;
 					return &entry.value;
 				}
 			}
 
-			if (entry.state == Entry::DELETED)
+			if (entry.state == hash_slot_state::DELETED)
 			{
 				if (first_deleted == (uint32_t)-1)
 				{
@@ -1740,12 +1743,12 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY)
+			if (entry.state == hash_slot_state::EMPTY)
 			{
 				return nullptr;
 			}
 
-			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
+			if (entry.state == hash_slot_state::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
 			{
 				return &entry.value;
 			}
@@ -1772,12 +1775,12 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY)
+			if (entry.state == hash_slot_state::EMPTY)
 			{
 				return nullptr;
 			}
 
-			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
+			if (entry.state == hash_slot_state::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
 			{
 				return &entry.value;
 			}
@@ -1828,14 +1831,14 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY)
+			if (entry.state == hash_slot_state::EMPTY)
 			{
 				return false;
 			}
 
-			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
+			if (entry.state == hash_slot_state::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
 			{
-				entry.state = Entry::DELETED;
+				entry.state = hash_slot_state::DELETED;
 				size--;
 				tombstones++;
 				return true;
@@ -1863,14 +1866,14 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		{
 			Entry &entry = entries[idx];
 
-			if (entry.state == Entry::EMPTY)
+			if (entry.state == hash_slot_state::EMPTY)
 			{
 				return false;
 			}
 
-			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
+			if (entry.state == hash_slot_state::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
 			{
-				entry.state = Entry::DELETED;
+				entry.state = hash_slot_state::DELETED;
 				size--;
 				tombstones++;
 				return true;
@@ -1906,61 +1909,12 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		for (uint32_t i = 0; i < capacity; i++)
 		{
 			const Entry &entry = entries[i];
-			if (entry.state == Entry::OCCUPIED)
+			if (entry.state == hash_slot_state::OCCUPIED)
 			{
 				pair<K, V> p = {entry.key, entry.value};
 				out->push(p);
 			}
 		}
-	}
-
-	struct iterator
-	{
-		Entry	*entries;
-		uint32_t capacity;
-		uint32_t idx;
-
-		iterator(Entry *e, uint32_t cap, uint32_t i) : entries(e), capacity(cap), idx(i)
-		{
-			while (idx < capacity && entries[idx].state != Entry::OCCUPIED)
-			{
-				idx++;
-			}
-		}
-
-		pair<K &, V &>
-		operator*()
-		{
-			return {entries[idx].key, entries[idx].value};
-		}
-
-		iterator &
-		operator++()
-		{
-			idx++;
-			while (idx < capacity && entries[idx].state != Entry::OCCUPIED)
-			{
-				idx++;
-			}
-			return *this;
-		}
-
-		bool
-		operator!=(const iterator &other) const
-		{
-			return idx != other.idx;
-		}
-	};
-
-	iterator
-	begin()
-	{
-		return iterator(entries, capacity, 0);
-	}
-	iterator
-	end()
-	{
-		return iterator(entries, capacity, capacity);
 	}
 
 	V &

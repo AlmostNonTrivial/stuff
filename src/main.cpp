@@ -291,8 +291,15 @@ run_meta_command(const char *cmd)
 	{
 		printf("\nTables:\n");
 		printf("-------\n");
-		for (auto [name, structure] : catalog)
+		for (int i = 0; i < catalog.size; i++)
 		{
+			if (catalog.entries[i].state != hash_slot_state::OCCUPIED)
+			{
+				continue;
+			}
+			auto &name = catalog.entries[i].key;
+			auto &structure = catalog.entries[i].value;
+
 			if (strcmp(name.c_str(), MASTER_CATALOG) != 0)
 			{
 				printf("  %s (%d columns)\n", name.c_str(), structure.columns.size);
@@ -504,7 +511,6 @@ run_repl()
 	return 0;
 }
 
-
 // #include "./tests/containers.hpp"
 
 int
@@ -534,8 +540,6 @@ main(int argc, char **argv)
 	// }
 
 	// return run_repl();
-
-
 
 	return run_tests();
 }

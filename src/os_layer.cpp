@@ -389,7 +389,7 @@ os_file_delete(const char *filename)
     for (uint32_t i = 0; i < g_filesystem.handles.capacity; i++)
     {
         auto &entry = g_filesystem.handles.entries[i];
-        if (entry.state == hash_map<os_file_handle_t, file_handle, global_arena>::Entry::OCCUPIED)
+        if (entry.state ==hash_slot_state::OCCUPIED)
         {
             if (entry.value.filepath.equals(filename))
             {
