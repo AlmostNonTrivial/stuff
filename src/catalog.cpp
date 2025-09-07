@@ -1,222 +1,153 @@
-// #include "catalog.hpp"
-// #include "arena.hpp"
-// #include "compile.hpp"
-// #include "pager.hpp"
-// #include "parser.hpp"
-// #include "types.hpp"
-// #include <cassert>
-// #include <cstdint>
+#include "catalog.hpp"
+#include "arena.hpp"
+#include "compile.hpp"
+#include "pager.hpp"
+#include "parser.hpp"
+#include "types.hpp"
+#include <cassert>
+#include <cstdint>
 
-// #include "utils.hpp"
+#include "utils.hpp"
 
-// hash_map<string<catalog_arena>, Structure, catalog_arena>			  catalog;
-// hash_map<string<catalog_arena>, string<catalog_arena>, catalog_arena> table_to_index;
+hash_map<string<catalog_arena>, Structure, catalog_arena>			  catalog;
+hash_map<string<catalog_arena>, string<catalog_arena>, catalog_arena> table_to_index;
 
 
 
-// Layout
-// Structure::to_layout()
-// {
-// 	array<DataType> column_types;
-// 	column_types.reserve(columns.size);
-// 	for (size_t i = 0; i < columns.size; i++)
-// 	{
-// 		column_types.push(columns[i].type);
-// 	}
-// 	return Layout::create(column_types);
-// }
+Layout
+Structure::to_layout()
+{
+	array<DataType> column_types;
+	column_types.reserve(columns.size);
+	for (size_t i = 0; i < columns.size; i++)
+	{
+		column_types.push(columns[i].type);
+	}
+	return Layout::create(column_types);
+}
 
-// Layout
-// Layout::create(array<DataType> &cols)
-// {
-// 	Layout layout;
-// 	layout.layout = cols;
-// 	layout.offsets.reserve(cols.size);
+Layout
+Layout::create(array<DataType> &cols)
+{
+	Layout layout;
+	layout.layout = cols;
+	layout.offsets.reserve(cols.size);
 
-// 	int offset = 0;
-// 	layout.offsets.push(0);
-// 	for (int i = 1; i < cols.size; i++)
-// 	{
-// 		offset += type_size(cols[i]);
-// 		layout.offsets.push(offset);
-// 	}
-// 	layout.record_size = offset;
-// 	return layout;
-// }
+	int offset = 0;
+	layout.offsets.push(0);
+	for (int i = 1; i < cols.size; i++)
+	{
+		offset += type_size(cols[i]);
+		layout.offsets.push(offset);
+	}
+	layout.record_size = offset;
+	return layout;
+}
 
-// Structure
-// Structure::from(const char *name, array<Column> cols)
-// {
-// 	Structure structure;
-// 	structure.columns.set(cols);
-// 	structure.name = name;
-// 	return structure;
-// }
+Structure
+Structure::from(const char *name, array<Column> cols)
+{
+	Structure structure;
+	structure.columns.set(cols);
+	structure.name = name;
+	return structure;
+}
 
-// void
-// bootstrap_master(bool create)
-// {
-// 	array<Column> cols;
-// 	cols.data = nullptr;
-// 	cols.size = 0;
-// 	cols.capacity = 0;
+void
+bootstrap_master(bool create)
+{
+	array<Column> cols;
+	cols.data = nullptr;
+	cols.size = 0;
+	cols.capacity = 0;
 
-// 	// type: "table" or "index"
-// 	cols.push(Column{MC_ID, TYPE_U32});
+	// type: "table" or "index"
+	cols.push(Column{MC_ID, TYPE_U32});
 
-// 	// name: object name
-// 	cols.push(Column{MC_NAME, TYPE_CHAR32});
+	// name: object name
+	cols.push(Column{MC_NAME, TYPE_CHAR32});
 
-// 	// tbl_name: table that this object belongs to
-// 	// (same as name for tables, parent table for indexes)
-// 	cols.push(Column{MC_TBL_NAME, TYPE_CHAR32});
+	// tbl_name: table that this object belongs to
+	// (same as name for tables, parent table for indexes)
+	cols.push(Column{MC_TBL_NAME, TYPE_CHAR32});
 
-// 	// rootpage: root page number in the btree
-// 	cols.push(Column{MC_ROOTPAGE, TYPE_U32});
+	// rootpage: root page number in the btree
+	cols.push(Column{MC_ROOTPAGE, TYPE_U32});
 
-// 	// sql: CREATE statement (using largest fixed char type)
-// 	cols.push(Column{MC_SQL, TYPE_CHAR256});
+	// sql: CREATE statement (using largest fixed char type)
+	cols.push(Column{MC_SQL, TYPE_CHAR256});
 
-// 	Structure structure = Structure::from(MASTER_CATALOG, cols);
-// 	Layout	  layout = structure.to_layout();
+	Structure structure = Structure::from(MASTER_CATALOG, cols);
+	Layout	  layout = structure.to_layout();
 
-// 	if (create)
-// 	{
-// 		pager_begin_transaction();
-// 		structure.storage.btree = btree_create(layout.key_type(), layout.record_size, create);
-// 		assert(1 == structure.storage.btree.root_page_index);
-// 		// validate
-// 		pager_commit();
-// 	}
-// 	else
-// 	{
-// 		structure.storage.btree = btree_create(layout.key_type(), layout.record_size, create);
-// 		structure.storage.btree.root_page_index = 1;
-// 	}
+	if (create)
+	{
+		pager_begin_transaction();
+		structure.storage.btree = btree_create(layout.key_type(), layout.record_size, create);
+		assert(1 == structure.storage.btree.root_page_index);
+		// validate
+		pager_commit();
+	}
+	else
+	{
+		structure.storage.btree = btree_create(layout.key_type(), layout.record_size, create);
+		structure.storage.btree.root_page_index = 1;
+	}
 
-// 	catalog.insert(MASTER_CATALOG, structure);
-// }
+	catalog.insert(MASTER_CATALOG, structure);
+}
 
-// // In catalog.cpp or a new bootstrap file
+// In catalog.cpp or a new bootstrap file
 
-// // Result callback for catalog bootstrap
-// void
-// catalog_bootstrap_callback(TypedValue *result, size_t count)
-// {
-// 	if (count != 5)
-// 		return;
+// Result callback for catalog bootstrap
+void
+catalog_bootstrap_callback(TypedValue *result, size_t count)
+{
+	if (count != 5)
+		return;
 
-// 	const uint32_t key = result[0].as_u32();
-// 	const char	  *name = result[1].as_char();
-// 	const char	  *tbl_name = result[2].as_char();
-// 	uint32_t	   rootpage = result[3].as_u32();
-// 	const char	  *sql = result[4].as_char();
+	const uint32_t key = result[0].as_u32();
+	const char	  *name = result[1].as_char();
+	const char	  *tbl_name = result[2].as_char();
+	uint32_t	   rootpage = result[3].as_u32();
+	const char	  *sql = result[4].as_char();
 
-// 	if (strcmp(name, MASTER_CATALOG) == 0)
-// 		return;
+	if (strcmp(name, MASTER_CATALOG) == 0)
+		return;
 
-// 	auto master = catalog.get(MASTER_CATALOG);
-// 	if (master->next_key <= key)
-// 	{
-// 		master->next_key = key + 1;
-// 	}
+	auto master = catalog.get(MASTER_CATALOG);
+	if (master->next_key <= key)
+	{
+		master->next_key = key + 1;
+	}
 
-// 	Parser parser;
-// 	parser_init(&parser, sql);
-// 	Statement *stmt = parser_parse_statement(&parser);
+	Parser parser;
+	parser_init(&parser, sql);
+	Statement *stmt = parser_parse_statement(&parser);
 
-// 	array<Column> columns;
+	array<Column> columns;
 
-// 	if (strcmp(tbl_name, name) == 0)
-// 	{
-// 		// It's a table
-// 		CreateTableStmt *create_stmt = stmt->create_table_stmt;
-// 		columns.reserve(create_stmt->columns.size);
+	if (strcmp(tbl_name, name) == 0)
+	{
+		// It's a table
+		CreateTableStmt &create_stmt = stmt->create_table_stmt;
+		columns.reserve(create_stmt.columns.size);
 
-// 		for (uint32_t i = 0; i < create_stmt->columns.size; i++)
-// 		{
-// 			ColumnDef *col_def = create_stmt->columns[i];
-// 			Column	   col = {col_def->name.c_str(), col_def->type};
-// 			columns.push(col);
-// 		}
-// 	}
-// 	else
-// 	{
-// 		// It's an index - extract the 2 columns from SQL
-// 		CreateIndexStmt *create_stmt = stmt->create_index_stmt;
+		for (uint32_t i = 0; i < create_stmt.columns.size; i++)
+		{
+			ColumnDef &col_def = create_stmt.columns[i];
+			Column	   col = {col_def.name.c_str(), col_def.type};
+			columns.push(col);
+		}
+	}
 
-// 		Structure *parent_table = catalog.get(tbl_name);
-// 		if (!parent_table)
-// 		{
-// 			printf("Error: Parent table %s not found for index %s\n", tbl_name, name);
-// 			return;
-// 		}
 
-// 		// We need exactly 2 columns for the DUAL
-// 		DataType type1, type2;
+	// Create the structure
+	Structure structure = Structure::from(name, columns);
 
-// 		if (create_stmt->columns.size == 1)
-// 		{
-// 			// Single column specified - pair with PK
-// 			const char *col_name = create_stmt->columns[0].c_str();
+	// Set up the btree with existing root page
+	structure.storage.btree = btree_create(structure.to_layout().key_type(), structure.to_layout().record_size, false);
+	structure.storage.btree.root_page_index = rootpage;
 
-// 			// Find the column type
-// 			for (uint32_t i = 0; i < parent_table->columns.size; i++)
-// 			{
-// 				if (strcmp(parent_table->columns[i].name, col_name) == 0)
-// 				{
-// 					type1 = parent_table->columns[i].type;
-// 					break;
-// 				}
-// 			}
-
-// 			// Second type is the primary key (column 0)
-// 			type2 = parent_table->columns[0].type;
-// 		}
-// 		else if (create_stmt->columns.size == 2)
-// 		{
-
-// 			string<catalog_arena> s;
-// 			string<catalog_arena> ss;
-
-// 			s.set(create_stmt->table_name);
-// 			ss.set(create_stmt->index_name);
-// 			table_to_index.insert(s, ss);
-
-// 			// Two columns specified - use them directly
-// 			const char *col1_name = create_stmt->columns[0].c_str();
-// 			const char *col2_name = create_stmt->columns[1].c_str();
-
-// 			// Find both column types
-// 			for (uint32_t i = 0; i < parent_table->columns.size; i++)
-// 			{
-// 				if (strcmp(parent_table->columns[i].name, col1_name) == 0)
-// 				{
-// 					type1 = parent_table->columns[i].type;
-// 				}
-// 				if (strcmp(parent_table->columns[i].name, col2_name) == 0)
-// 				{
-// 					type2 = parent_table->columns[i].type;
-// 				}
-// 			}
-// 		}
-// 		else
-// 		{
-// 			printf("Error: Index %s has unsupported column count\n", name);
-// 			return;
-// 		}
-
-// 		// Create the DUAL type for the index key
-// 		DataType dual_type = make_dual(type1, type2);
-// 		columns.push(Column{"key", dual_type});
-// 	}
-
-// 	// Create the structure
-// 	Structure structure = Structure::from(name, columns);
-
-// 	// Set up the btree with existing root page
-// 	structure.storage.btree = btree_create(structure.to_layout().key_type(), structure.to_layout().record_size, false);
-// 	structure.storage.btree.root_page_index = rootpage;
-
-// 	catalog.insert(name, structure);
-// }
+	catalog.insert(name, structure);
+}

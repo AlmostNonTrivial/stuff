@@ -1,18 +1,3 @@
-// semantic.hpp
-#pragma once
-#include "parser.hpp"
-#include "catalog.hpp"
-
-struct SemanticResult {
-    bool success;
-    const char* error;           // Error message (nullptr if success)
-    const char* error_context;   // Additional context (table/column name)
-    int failed_statement_index;  // Which statement failed (-1 if none)
-};
-
-// Main entry point - modifies statements in place
-SemanticResult semantic_analyze(array<Statement*, parser_arena>* statements);
-
 // ============================================================================
 // semantic.cpp
 // ============================================================================
@@ -66,8 +51,13 @@ static Structure* lookup_table(const string<parser_arena>& name) {
         return pending;
     }
 
+
+
+    for(auto x : catalog) {
+        std::cout << x.key << "\n";
+    }
     // Check actual catalog
-    return catalog.get(name);
+    return catalog.get("products");
 }
 
 // Format error message

@@ -2,19 +2,13 @@
 #pragma once
 #include "parser.hpp"
 #include "catalog.hpp"
-#include "arena.hpp"
 
-struct SemanticContext {
-    // Error reporting
-    struct Error {
-        const char* message;
-        const char* context;  // table/column name
-    };
-    array<Error, query_arena> errors;
-
-    void add_error(const char* msg, const char* ctx = nullptr) {
-        errors.push(Error{msg,ctx});
-    }
+struct SemanticResult {
+    bool success;
+    const char* error;           // Error message (nullptr if success)
+    const char* error_context;   // Additional context (table/column name)
+    int failed_statement_index;  // Which statement failed (-1 if none)
 };
 
-bool semantic_resolve_statement(Statement* stmt, SemanticContext* ctx);
+// Main entry point - modifies statements in place
+SemanticResult semantic_analyze(array<Statement*, parser_arena>* statements);
