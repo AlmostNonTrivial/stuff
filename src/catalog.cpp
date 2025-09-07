@@ -9,10 +9,7 @@
 
 #include "utils.hpp"
 
-hash_map<string<catalog_arena>, Structure, catalog_arena>			  catalog;
-hash_map<string<catalog_arena>, string<catalog_arena>, catalog_arena> table_to_index;
-
-
+hash_map<string<catalog_arena>, Structure, catalog_arena> catalog;
 
 Layout
 Structure::to_layout()
@@ -140,7 +137,6 @@ catalog_bootstrap_callback(TypedValue *result, size_t count)
 			columns.push(col);
 		}
 	}
-
 
 	// Create the structure
 	Structure structure = Structure::from(name, columns);

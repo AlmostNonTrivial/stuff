@@ -509,8 +509,6 @@ main()
 
 	// Run the SELECT feature tests
 
-	// test_select_features();
-	// test_group_by_aggregates();
 
 	pager_close();
 }

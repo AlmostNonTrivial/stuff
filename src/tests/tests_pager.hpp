@@ -244,7 +244,7 @@ test_pager_stress()
 			}
 			uint32_t page_id = pager_new();
 			assert(page_id != 0 && "Failed to create new page");
-			array_push(&transaction_pages, page_id);
+			transaction_pages.push(page_id);
 			made_changes = true;
 			std::cout << "Created page " << page_id << "\n";
 			pager_meta new_stats = pager_get_stats();
@@ -317,7 +317,7 @@ test_pager_stress()
 			made_changes = false;
 			std::cout << "Rolled back transaction\n";
 
-			array_clear(&transaction_pages);
+			transaction_pages.clear();
 			pager_meta new_stats = pager_get_stats();
 			std::cout << "Stats after rollback: free_pages=" << new_stats.free_pages
 					  << ", total_pages=" << new_stats.total_pages << "\n";
@@ -334,10 +334,9 @@ test_pager_stress()
 			made_changes = false;
 			std::cout << "Committed transaction\n";
 			for (uint32_t j = 0; j < transaction_pages.size; ++j)
-			{
-				array_push(&committed_pages, transaction_pages.data[j]);
+			{committed_pages.push( transaction_pages.data[j]);
 			}
-			array_clear(&transaction_pages);
+			transaction_pages.clear();
 			pager_meta new_stats = pager_get_stats();
 			std::cout << "Stats after commit: free_pages=" << new_stats.free_pages
 					  << ", total_pages=" << new_stats.total_pages << "\n";
@@ -357,15 +356,15 @@ test_pager_stress()
 			std::cout << "Committed final transaction\n";
 			for (uint32_t j = 0; j < transaction_pages.size; ++j)
 			{
-				array_push(&committed_pages, transaction_pages.data[j]);
+				committed_pages.push( transaction_pages.data[j]);
 			}
-			array_clear(&transaction_pages);
+			transaction_pages.clear();
 		}
 		else
 		{
 			pager_rollback();
 			std::cout << "Rolled back final transaction\n";
-			array_clear(&transaction_pages);
+			transaction_pages.clear();
 		}
 	}
 	pager_meta final_stats = pager_get_stats();

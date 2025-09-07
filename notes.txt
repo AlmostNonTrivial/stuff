@@ -1,11 +1,8 @@
-
-- Shadow catalog, and resetting
-- resolve colunm names
-- hard failure and error messages
-- why is _debug causing a segfault
 - need to validate names are within size limits
 
 
-
-- shadow_catalog
--deletions
+- allow for specific programs to run
+- repl
+- validation infra, with no noallocations,
+- get rid of all containers
+- benchmark?
