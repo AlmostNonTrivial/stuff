@@ -43,7 +43,7 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 	struct free_block
 	{
 		free_block *next;
-		size_t	   size;
+		size_t		size;
 	};
 
 	/*
@@ -54,9 +54,9 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 	 * This gives us O(1) bucket selection via bit manipulation.
 	 */
 	static inline free_block *freelists[32] = {};
-	static inline uint32_t	 occupied_buckets = 0; // Bitmask: which buckets have blocks
-	static inline size_t	 reclaimed_bytes = 0;
-	static inline size_t	 reused_bytes = 0;
+	static inline uint32_t	  occupied_buckets = 0; // Bitmask: which buckets have blocks
+	static inline size_t	  reclaimed_bytes = 0;
+	static inline size_t	  reused_bytes = 0;
 
 	static void
 	init(size_t initial = 4 * 1024 * 1024, size_t maximum = 0)
@@ -1259,16 +1259,18 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 {
 	struct Entry
 	{
-		K		 key;
-		V		 value;
-		uint32_t hash;
-		enum State : uint8_t
+
+		enum slot_state : uint8_t
 		{
 			EMPTY = 0,
 			OCCUPIED = 1,
 			DELETED = 2
 		};
-		State state;
+
+		K		   key;
+		V		   value;
+		uint32_t   hash;
+		slot_state state;
 	};
 
 	Entry	*entries = nullptr;
@@ -2008,130 +2010,6 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	}
 };
 
-/**
- * Just reuse the hash_map with a char value
- */
-template <typename K, typename ArenaTag = global_arena> struct hash_set
-{
-	hash_map<K, uint8_t, ArenaTag> map;
-
-	void
-	init(uint32_t initial_capacity = 16)
-	{
-		map.init(initial_capacity);
-	}
-
-	bool
-	insert(const K &key)
-	{
-		if (map.contains(key))
-		{
-			return false;
-		}
-		map.insert(key, 1);
-		return true;
-	}
-
-	template <typename OtherTag, uint32_t OtherSize>
-	bool
-	insert(const string<OtherTag, OtherSize> &key)
-	{
-		static_assert(hash_map<K, uint8_t, ArenaTag>::template is_string<K>::value,
-					  "insert(string) can only be used with string keys");
-		if (map.contains(key))
-		{
-			return false;
-		}
-		map.insert(key, 1);
-		return true;
-	}
-
-	template <typename U = K>
-	typename std::enable_if<hash_map<K, uint8_t, ArenaTag>::template is_string<U>::value, bool>::type
-	insert(const char *key)
-	{
-		if (map.contains(key))
-		{
-			return false;
-		}
-		map.insert(key, 1);
-		return true;
-	}
-
-	bool
-	contains(const K &key) const
-	{
-		return map.contains(key);
-	}
-
-	template <typename OtherTag, uint32_t OtherSize>
-	bool
-	contains(const string<OtherTag, OtherSize> &key) const
-	{
-		static_assert(hash_map<K, uint8_t, ArenaTag>::template is_string<K>::value,
-					  "contains(string) can only be used with string keys");
-		return map.contains(key);
-	}
-
-	template <typename U = K>
-	typename std::enable_if<hash_map<K, uint8_t, ArenaTag>::template is_string<U>::value, bool>::type
-	contains(const char *key) const
-	{
-		return map.contains(key);
-	}
-
-	bool
-	remove(const K &key)
-	{
-		return map.remove(key);
-	}
-
-	template <typename OtherTag, uint32_t OtherSize>
-	bool
-	remove(const string<OtherTag, OtherSize> &key)
-	{
-		static_assert(hash_map<K, uint8_t, ArenaTag>::template is_string<K>::value,
-					  "remove(string) can only be used with string keys");
-		return map.remove(key);
-	}
-
-	template <typename U = K>
-	typename std::enable_if<hash_map<K, uint8_t, ArenaTag>::template is_string<U>::value, bool>::type
-	remove(const char *key)
-	{
-		return map.remove(key);
-	}
-
-	void
-	clear()
-	{
-		map.clear();
-	}
-
-	uint32_t
-	size() const
-	{
-		return map.size;
-	}
-	bool
-	empty() const
-	{
-		return map.empty();
-	}
-
-	static hash_set *
-	create(uint32_t initial_capacity = 16)
-	{
-		auto *s = (hash_set *)arena<ArenaTag>::alloc(sizeof(hash_set));
-		s->map.entries = nullptr;
-		s->map.capacity = 0;
-		s->map.size = 0;
-		s->map.tombstones = 0;
-		s->map.init(initial_capacity);
-		return s;
-	}
-};
-
 /* Streams to support contiguous allocation without knowing the size ahead of time */
 
 template <typename Tag> struct stream_alloc
@@ -2166,7 +2044,7 @@ arena_stream_begin(size_t initial_reserve = 1024)
 
 		size_t new_committed = virtual_memory::round_to_pages(needed);
 		if (!virtual_memory::commit(arena<Tag>::base + arena<Tag>::committed_capacity,
-								   new_committed - arena<Tag>::committed_capacity))
+									new_committed - arena<Tag>::committed_capacity))
 		{
 			fprintf(stderr, "Failed to commit memory for stream\n");
 			exit(1);
@@ -2207,7 +2085,7 @@ arena_stream_write(stream_alloc<Tag> *stream, const void *data, size_t size)
 
 			size_t new_committed = virtual_memory::round_to_pages(needed);
 			if (!virtual_memory::commit(arena<Tag>::base + arena<Tag>::committed_capacity,
-									   new_committed - arena<Tag>::committed_capacity))
+										new_committed - arena<Tag>::committed_capacity))
 			{
 				fprintf(stderr, "Failed to commit memory for stream\n");
 				exit(1);

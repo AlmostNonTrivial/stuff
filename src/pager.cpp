@@ -173,7 +173,7 @@ static struct
 	**                         (already saved or newly created)
 	*/
 	hash_map<uint32_t, uint32_t, pager_arena> page_to_cache;
-	hash_set<uint32_t, pager_arena>		       journaled_or_new_pages;
+	hash_map<uint32_t, char /* use as set */, pager_arena>		       journaled_or_new_pages;
 
 } PAGER = {};
 
@@ -203,7 +203,7 @@ read_page_from_disk(uint32_t page_index, void *data)
 static void
 journal_write_page(uint32_t page_index, const void *data)
 {
-	PAGER.journaled_or_new_pages.insert(page_index);
+	PAGER.journaled_or_new_pages.insert(page_index, 1);
 
 	if (page_index == ROOT_PAGE_INDEX)
 	{
@@ -577,7 +577,7 @@ pager_new()
 		page_index = PAGER.root.page_counter++;
 	}
 
-	PAGER.journaled_or_new_pages.insert(page_index);
+	PAGER.journaled_or_new_pages.insert(page_index, 1);
 
 	uint32_t		slot = cache_find_free_slot();
 	cache_metadata *entry = &PAGER.cache_meta[slot];
