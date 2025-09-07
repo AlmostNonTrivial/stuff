@@ -254,136 +254,111 @@ get_column_width(DataType type)
 		return 15;
 	}
 }
-
-// // Print column headers for SELECT statements
-// void
-// print_select_headers(SelectStmt *select_stmt)
-// {
-// 	if (!select_stmt->sem.is_resolved)
-// 	{
-// 		return;
-// 	}
-
-// 	Structure *table = select_stmt->sem.table;
-// 	if (!table)
-// 	{
-// 		return;
-// 	}
-
-// 	// Check if SELECT *
-// 	bool is_select_star = (select_stmt->columns.size == 1 && select_stmt->wcolumns[0]->type == EXPR_STAR);
-
-// 	printf("\n");
-
-// 	if (is_select_star)
-// 	{
-// 		// Print all column names from table
-// 		for (uint32_t i = 0; i < table->columns.size; i++)
-// 		{
-// 			int width = get_column_width(table->columns[i].type);
-// 			printf("%-*s  ", width, table->columns[i].name);
-// 		}
-// 		printf("\n");
-
-// 		// Print separator line
-// 		for (uint32_t i = 0; i < table->columns.size; i++)
-// 		{
-// 			int width = get_column_width(table->columns[i].type);
-// 			for (int j = 0; j < width; j++)
-// 				printf("-");
-// 			printf("  ");
-// 		}
-// 	}
-// 	else
-// 	{
-// 		// Print specific column names from select list
-// 		for (uint32_t i = 0; i < select_stmt->select_list.size; i++)
-// 		{
-// 			Expr	   *expr = select_stmt->select_list[i];
-// 			const char *name = "expr";
-// 			DataType	type = TYPE_CHAR32; // default
-
-// 			if (expr->type == EXPR_COLUMN)
-// 			{
-// 				name = table->columns[expr->sem.column_index].name;
-// 				type = table->columns[expr->sem.column_index].type;
-// 			}
-// 			else if (expr->type == EXPR_FUNCTION)
-// 			{
-// 				name = expr->func_name.c_str();
-// 			}
-
-// 			int width = get_column_width(type);
-// 			printf("%-*s  ", width, name);
-// 		}
-// 		printf("\n");
-
-// 		// Print separator line
-// 		for (uint32_t i = 0; i < select_stmt->select_list.size; i++)
-// 		{
-// 			Expr	*expr = select_stmt->select_list[i];
-// 			DataType type = TYPE_CHAR32;
-
-// 			if (expr->type == EXPR_COLUMN)
-// 			{
-// 				type = table->columns[expr->sem.column_index].type;
-// 			}
-
-// 			int width = get_column_width(type);
-// 			for (int j = 0; j < width; j++)
-// 				printf("-");
-// 			printf("  ");
-// 		}
-// 	}
-
-// 	printf("\n");
-// }
-
 // Store column widths for result formatting
 static array<int, query_arena> result_column_widths;
 
+// Print column headers for SELECT statements
+void
+print_select_headers(SelectStmt *select_stmt)
+{
+	if (!select_stmt->sem.is_resolved)
+	{
+		return;
+	}
+
+	Structure *table = select_stmt->sem.table;
+	if (!table)
+	{
+		return;
+	}
+
+	printf("\n");
+
+	if (select_stmt->is_star)
+	{
+		// Print all column names from table
+		for (uint32_t i = 0; i < table->columns.size; i++)
+		{
+			int width = get_column_width(table->columns[i].type);
+			printf("%-*s  ", width, table->columns[i].name);
+		}
+		printf("\n");
+
+		// Print separator line
+		for (uint32_t i = 0; i < table->columns.size; i++)
+		{
+			int width = get_column_width(table->columns[i].type);
+			for (int j = 0; j < width; j++)
+				printf("-");
+			printf("  ");
+		}
+		printf("\n");
+	}
+	else
+	{
+		// Print specific column names from select list
+		for (uint32_t i = 0; i < select_stmt->sem.column_indices.size; i++)
+		{
+			uint32_t col_idx = select_stmt->sem.column_indices[i];
+			const char *name = table->columns[col_idx].name;
+			DataType type = table->columns[col_idx].type;
+
+			int width = get_column_width(type);
+			printf("%-*s  ", width, name);
+		}
+		printf("\n");
+
+		// Print separator line
+		for (uint32_t i = 0; i < select_stmt->sem.column_indices.size; i++)
+		{
+			uint32_t col_idx = select_stmt->sem.column_indices[i];
+			DataType type = table->columns[col_idx].type;
+
+			int width = get_column_width(type);
+			for (int j = 0; j < width; j++)
+				printf("-");
+			printf("  ");
+		}
+		printf("\n");
+	}
+}
+
 // Store column info for current SELECT
-// void
-// setup_result_formatting(SelectStmt *select_stmt)
-// {
-// 	result_column_widths.clear();
+void
+setup_result_formatting(SelectStmt *select_stmt)
+{
+	result_column_widths.clear();
 
-// 	if (!select_stmt->sem.is_resolved)
-// 	{
-// 		return;
-// 	}
+	if (!select_stmt->sem.is_resolved)
+	{
+		return;
+	}
 
-// 	Structure *table = select_stmt->from_table->sem.resolved;
-// 	if (!table)
-// 	{
-// 		return;
-// 	}
+	Structure *table = select_stmt->sem.table;
+	if (!table)
+	{
+		return;
+	}
 
-// 	bool is_select_star = (select_stmt->select_list.size == 1 && select_stmt->select_list[0]->type == EXPR_STAR);
-
-// 	if (is_select_star)
-// 	{
-// 		for (uint32_t i = 0; i < table->columns.size; i++)
-// 		{
-// 			result_column_widths.push(get_column_width(table->columns[i].type));
-// 		}
-// 	}
-// 	else
-// 	{
-// 		for (uint32_t i = 0; i < select_stmt->select_list.size; i++)
-// 		{
-// 			Expr	*expr = select_stmt->select_list[i];
-// 			DataType type = TYPE_CHAR32;
-
-// 			if (expr->type == EXPR_COLUMN)
-// 			{
-// 				type = table->columns[expr->sem.column_index].type;
-// 			}
-
-// 			result_column_widths.push(get_column_width(type));
-// 		}
-// 	}
-// }
+	if (select_stmt->is_star)
+	{
+		// For SELECT *, use all columns
+		for (uint32_t i = 0; i < table->columns.size; i++)
+		{
+			result_column_widths.push(get_column_width(table->columns[i].type));
+		}
+	}
+	else
+	{
+		// For specific columns, use the selected column indices
+		for (uint32_t i = 0; i < select_stmt->sem.column_indices.size; i++)
+		{
+			uint32_t col_idx = select_stmt->sem.column_indices[i];
+			DataType type = table->columns[col_idx].type;
+			result_column_widths.push(get_column_width(type));
+		}
+	}
+}
 
 // Enhanced result callback that formats output nicely
 void
@@ -394,39 +369,35 @@ formatted_result_callback(TypedValue *result, size_t count)
 		int width = (i < result_column_widths.size) ? result_column_widths[i] : 15;
 
 		// Format based on type
-		switch (result[i].type)
+		switch (type_id(result[i].type))
 		{
-		case TYPE_U32:
-		case TYPE_U64:
-		case TYPE_U16:
-		case TYPE_U8:
-			printf("%-*llu  ", width, result[i].as_u64());
+		case TYPE_ID_U8:
+		case TYPE_ID_U16:
+		case TYPE_ID_U32:
+		case TYPE_ID_U64:
+			printf("%-*u  ", width, result[i].as_u32());
 			break;
 
-		case TYPE_I32:
-		case TYPE_I64:
-		case TYPE_I16:
-		case TYPE_I8:
-			printf("%-*lld  ", width, result[i].as_i64());
+		case TYPE_ID_I8:
+		case TYPE_ID_I16:
+		case TYPE_ID_I32:
+		case TYPE_ID_I64:
+			printf("%-*d  ", width, result[i].as_i32());
 			break;
 
-		case TYPE_F32:
-		case TYPE_F64:
+		case TYPE_ID_F32:
+		case TYPE_ID_F64:
 			printf("%-*.2f  ", width, result[i].as_f64());
 			break;
 
-		case TYPE_CHAR8:
-		case TYPE_CHAR16:
-		case TYPE_CHAR32:
-		case TYPE_CHAR64:
-		case TYPE_CHAR128:
-		case TYPE_CHAR256: {
+		case TYPE_ID_CHAR:
+		case TYPE_ID_VARCHAR: {
 			const char *str = result[i].as_char();
 			printf("%-*s  ", width, str ? str : "NULL");
 			break;
 		}
 
-		case TYPE_NULL:
+		case TYPE_ID_NULL:
 			printf("%-*s  ", width, "NULL");
 			break;
 
@@ -479,8 +450,8 @@ execute_sql_statement(const char *sql, bool test_mode)
 			// 2.5 For SELECT statements, print column headers and setup formatting
 			if (stmt->type == STMT_SELECT)
 			{
-				// print_select_headers(stmt->select_stmt);
-				// setup_result_formatting(stmt->select_stmt);
+				print_select_headers(&stmt->select_stmt);
+				setup_result_formatting(&stmt->select_stmt);
 				vm_set_result_callback(formatted_result_callback);
 			}
 			else
@@ -534,13 +505,7 @@ main()
 		reload_catalog();
 	}
 
-
-	for(auto x : catalog) {
-	    std::cout << x.key << "\n";
-	}
-
-
-	execute_sql_statement("SELECT * FROM sqlite_master");
+	execute_sql_statement("SELECT age, email FROM users WHERE (user_id >= 75 AND age < 30 AND age != 27) OR username = 'hazeslg' ORDER BY age ASC");
 
 	// Run the SELECT feature tests
 

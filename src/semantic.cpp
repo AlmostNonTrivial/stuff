@@ -51,13 +51,8 @@ static Structure* lookup_table(const string<parser_arena>& name) {
         return pending;
     }
 
-
-
-    for(auto x : catalog) {
-        std::cout << x.key << "\n";
-    }
     // Check actual catalog
-    return catalog.get("products");
+    return catalog.get(name);
 }
 
 // Format error message

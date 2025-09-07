@@ -46,6 +46,16 @@ str_eq_ci(const char *a, uint32_t a_len, const char *b)
 	return true;
 }
 
+// Helper to properly copy a token's text with null termination
+static void
+set_string_from_token(string<parser_arena>& dest, const char* text, uint32_t length)
+{
+    char* buffer = (char*)arena::alloc<parser_arena>(length + 1);
+    memcpy(buffer, text, length);
+    buffer[length] = '\0';
+    dest.set(buffer);
+}
+
 //=============================================================================
 // KEYWORD LIST
 //=============================================================================
@@ -579,7 +589,7 @@ parse_primary_expr(Parser *parser)
 		Expr *expr = (Expr *)arena::alloc<parser_arena>(sizeof(Expr));
 		expr->type = EXPR_LITERAL;
 		expr->lit_type = TYPE_CHAR32;
-		expr->str_val.set(token.text, token.length + 1);
+		set_string_from_token(expr->str_val, token.text, token.length);
 		return expr;
 	}
 
@@ -608,7 +618,7 @@ parse_primary_expr(Parser *parser)
 		lexer_next_token(&parser->lexer);
 		Expr *expr = (Expr *)arena::alloc<parser_arena>(sizeof(Expr));
 		expr->type = EXPR_COLUMN;
-		expr->column_name.set(token.text, token.length + 1);
+		set_string_from_token(expr->column_name, token.text, token.length);
 		return expr;
 	}
 
@@ -668,7 +678,7 @@ parse_select(Parser *parser, SelectStmt *stmt)
 			}
 
 			string<parser_arena> col_name;
-			col_name.set(token.text, token.length + 1);
+			set_string_from_token(col_name, token.text, token.length);
 			stmt->columns.push(col_name);
 		} while (consume_token(parser, TOKEN_COMMA));
 	}
@@ -687,7 +697,7 @@ parse_select(Parser *parser, SelectStmt *stmt)
 		return;
 	}
 
-	stmt->table_name.set(token.text, token.length + 1);
+	set_string_from_token(stmt->table_name, token.text, token.length);
 
 	// Optional WHERE clause
 	stmt->where_clause = parse_where_clause(parser);
@@ -708,7 +718,7 @@ parse_select(Parser *parser, SelectStmt *stmt)
 			return;
 		}
 
-		stmt->order_by_column.set(token.text, token.length + 1);
+		set_string_from_token(stmt->order_by_column, token.text, token.length);
 
 		// Optional ASC/DESC
 		if (consume_keyword(parser, "DESC"))
@@ -751,7 +761,7 @@ parse_insert(Parser *parser, InsertStmt *stmt)
 		return;
 	}
 
-	stmt->table_name.set(token.text, token.length + 1);
+	set_string_from_token(stmt->table_name, token.text, token.length);
 
 	// Optional column list
 	if (consume_token(parser, TOKEN_LPAREN))
@@ -766,7 +776,7 @@ parse_insert(Parser *parser, InsertStmt *stmt)
 			}
 
 			string<parser_arena> col_name;
-			col_name.set(token.text, token.length + 1);
+			set_string_from_token(col_name, token.text, token.length);
 			stmt->columns.push(col_name);
 		} while (consume_token(parser, TOKEN_COMMA));
 
@@ -830,7 +840,7 @@ parse_update(Parser *parser, UpdateStmt *stmt)
 		return;
 	}
 
-	stmt->table_name.set(token.text, token.length + 1);
+	set_string_from_token(stmt->table_name, token.text, token.length);
 
 	if (!consume_keyword(parser, "SET"))
 	{
@@ -849,7 +859,7 @@ parse_update(Parser *parser, UpdateStmt *stmt)
 		}
 
 		string<parser_arena> col_name;
-		col_name.set(token.text, token.length + 1);
+		set_string_from_token(col_name, token.text, token.length);
 		stmt->columns.push(col_name);
 
 		if (!consume_operator(parser, "="))
@@ -899,7 +909,7 @@ parse_delete(Parser *parser, DeleteStmt *stmt)
 		return;
 	}
 
-	stmt->table_name.set(token.text, token.length + 1);
+	set_string_from_token(stmt->table_name, token.text, token.length);
 
 	// Optional WHERE clause
 	stmt->where_clause = parse_where_clause(parser);
@@ -933,7 +943,7 @@ parse_create_table(Parser *parser, CreateTableStmt *stmt)
 		return;
 	}
 
-	stmt->table_name.set(token.text, token.length + 1);
+	set_string_from_token(stmt->table_name, token.text, token.length);
 
 	if (!consume_token(parser, TOKEN_LPAREN))
 	{
@@ -954,7 +964,7 @@ parse_create_table(Parser *parser, CreateTableStmt *stmt)
 		ColumnDef col;
 		memset(&col, 0, sizeof(ColumnDef));
 
-		col.name.set(token.text, token.length + 1);
+		set_string_from_token(col.name, token.text, token.length);
 
 		col.type = parse_data_type(parser);
 		if (col.type == TYPE_NULL)
@@ -1012,7 +1022,7 @@ parse_drop_table(Parser *parser, DropTableStmt *stmt)
 		return;
 	}
 
-	stmt->table_name.set(token.text, token.length + 1);
+	set_string_from_token(stmt->table_name, token.text, token.length);
 }
 
 //=============================================================================
@@ -1455,7 +1465,7 @@ print_ast(Statement *stmt)
 const char *
 reconstruct_create_sql(CreateTableStmt *stmt)
 {
-	auto stream = arena::stream_begin(512);
+	auto stream = arena::stream_begin<parser_arena>(512);
 
 	// Start with CREATE TABLE
 	const char *prefix = "CREATE TABLE ";
@@ -1474,7 +1484,7 @@ reconstruct_create_sql(CreateTableStmt *stmt)
 		}
 
 		ColumnDef &col = stmt->columns[i];
-		arena::stream_write(&stream, col.name, col.name.size);
+		arena::stream_write(&stream, col.name.c_str(), col.name.length());
 		arena::stream_write(&stream, " ", 1);
 
 		const char *type_nam = type_name(col.type);
@@ -1488,4 +1498,6 @@ reconstruct_create_sql(CreateTableStmt *stmt)
 
 	arena::stream_write(&stream, ")", 1);
 	arena::stream_write(&stream, "\0", 1); // Null terminate
+
+	return (const char*)arena::stream_finish(&stream);
 }
