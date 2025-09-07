@@ -6,3 +6,6 @@
 - validation infra, with no noallocations,
 - get rid of all containers
 - benchmark?
+- can catalog structures be better?
+- move vmemory to os layer, inline everything in os_layer
+- get os_page size

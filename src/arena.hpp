@@ -1,98 +1,26 @@
-
 #pragma once
+#include <cassert>
 #include <cstring>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include "os_layer.hpp"
 #include <cstring>
 #include <cstdint>
 #include <typeinfo>
 #include <type_traits>
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <sys/mman.h>
-#include <unistd.h>
-#endif
-
-// Cross-platform virtual memory operations
-struct VirtualMemory
-{
-	static void *
-	reserve(size_t size)
-	{
-#ifdef _WIN32
-		return VirtualAlloc(nullptr, size, MEM_RESERVE, PAGE_READWRITE);
-#else
-		void *ptr = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-		return (ptr == MAP_FAILED) ? nullptr : ptr;
-#endif
-	}
-
-	static bool
-	commit(void *addr, size_t size)
-	{
-#ifdef _WIN32
-		return VirtualAlloc(addr, size, MEM_COMMIT, PAGE_READWRITE) != nullptr;
-#else
-		return mprotect(addr, size, PROT_READ | PROT_WRITE) == 0;
-#endif
-	}
-
-	static void
-	decommit(void *addr, size_t size)
-	{
-#ifdef _WIN32
-		VirtualFree(addr, size, MEM_DECOMMIT);
-#else
-		madvise(addr, size, MADV_DONTNEED);
-		mprotect(addr, size, PROT_NONE);
-#endif
-	}
-
-	static void
-	release(void *addr, size_t size)
-	{
-#ifdef _WIN32
-		(void)size; // Windows doesn't need size for MEM_RELEASE
-		VirtualFree(addr, 0, MEM_RELEASE);
-#else
-		munmap(addr, size);
-#endif
-	}
-
-	static size_t
-	page_size()
-	{
-		static size_t cached_size = 0;
-		if (cached_size == 0)
-		{
-#ifdef _WIN32
-			SYSTEM_INFO si;
-			GetSystemInfo(&si);
-			cached_size = si.dwPageSize;
-#else
-			cached_size = sysconf(_SC_PAGESIZE);
-#endif
-		}
-		return cached_size;
-	}
-
-	static size_t
-	round_to_pages(size_t size)
-	{
-		size_t page_sz = page_size();
-		return ((size + page_sz - 1) / page_sz) * page_sz;
-	}
-};
-
 struct global_arena
 {
 };
 
+// Growth strategies
+struct GrowthPageByPage
+{
+};
+
 // Arena with virtual memory backing and automatic reclamation
-template <typename Tag> struct Arena
+template <typename Tag, bool ZeroOnReset = true> struct Arena
 {
 	static inline uint8_t *base = nullptr;
 	static inline uint8_t *current = nullptr;
@@ -111,46 +39,9 @@ template <typename Tag> struct Arena
 	// Freelists for different size classes (powers of 2)
 	// freelists[i] holds blocks of size [2^i, 2^(i+1))
 	static inline FreeBlock *freelists[32] = {};
+	static inline uint32_t	 occupied_buckets = 0; // Bitmask of non-empty buckets
 	static inline size_t	 reclaimed_bytes = 0;
 	static inline size_t	 reused_bytes = 0;
-
-	// Get size class for a given size (which freelist bucket to use)
-	static int
-	get_size_class(size_t size)
-	{
-		if (size == 0)
-			return 0;
-
-		// Find highest bit set (essentially log2)
-		int	   cls = 0;
-		size_t s = size - 1;
-		if (s >= (1ULL << 16))
-		{
-			cls += 16;
-			s >>= 16;
-		}
-		if (s >= (1ULL << 8))
-		{
-			cls += 8;
-			s >>= 8;
-		}
-		if (s >= (1ULL << 4))
-		{
-			cls += 4;
-			s >>= 4;
-		}
-		if (s >= (1ULL << 2))
-		{
-			cls += 2;
-			s >>= 2;
-		}
-		if (s >= (1ULL << 1))
-		{
-			cls += 1;
-		}
-
-		return cls < 31 ? cls : 31;
-	}
 
 	// Initialize with initial size and optional maximum
 	static void
@@ -196,6 +87,7 @@ template <typename Tag> struct Arena
 		{
 			freelists[i] = nullptr;
 		}
+		occupied_buckets = 0;
 		reclaimed_bytes = 0;
 		reused_bytes = 0;
 	}
@@ -217,11 +109,26 @@ template <typename Tag> struct Arena
 			{
 				freelists[i] = nullptr;
 			}
+			occupied_buckets = 0;
 			reclaimed_bytes = 0;
 			reused_bytes = 0;
 		}
 	}
 
+	static inline int
+	get_size_class(size_t size)
+	{
+		size = size | 0x2;
+
+#ifdef _MSC_VER
+		unsigned long index;
+		_BitScanReverse64(&index, size - 1);
+		return (int)index ^ ((index ^ 31) & -((int)index > 31));
+#else
+		int cls = 63 - __builtin_clzll(size - 1);
+		return cls ^ ((cls ^ 31) & -(cls > 31));
+#endif
+	}
 	// Reclaim memory for reuse (called automatically by containers)
 	static void
 	reclaim(void *ptr, size_t size)
@@ -241,61 +148,53 @@ template <typename Tag> struct Arena
 		block->next = freelists[size_class];
 		freelists[size_class] = block;
 
+		occupied_buckets |= (1u << size_class); // Mark bucket as occupied
 		reclaimed_bytes += size;
 	}
 
-	// Try to allocate from freelists
 	static void *
 	try_alloc_from_freelist(size_t size)
 	{
+		// Find the class that guarantees size
 		int size_class = get_size_class(size);
 
-		// Search in this size class and larger ones
-		for (int cls = size_class; cls < 32; cls++)
+		// If size > 2^size_class, we need class size_class+1 or higher
+		if (size > (1u << size_class))
 		{
-			FreeBlock **prev_ptr = &freelists[cls];
-			FreeBlock  *block = freelists[cls];
-
-			while (block)
-			{
-				if (block->size >= size)
-				{
-					// Remove from freelist
-					*prev_ptr = block->next;
-
-					// If block is significantly larger, split it
-					size_t remaining = block->size - size;
-					if (remaining >= sizeof(FreeBlock) && remaining >= 64)
-					{
-						// Put remainder back in appropriate freelist
-						uint8_t *remainder_addr = ((uint8_t *)block) + size;
-						reclaim(remainder_addr, remaining);
-					}
-					else
-					{
-						// Use whole block to avoid tiny fragments
-						size = block->size;
-					}
-
-					reused_bytes += size;
-					return block;
-				}
-				prev_ptr = &block->next;
-				block = block->next;
-			}
+			size_class++;
 		}
 
-		return nullptr;
+		uint32_t mask = ~((1u << size_class) - 1);
+		uint32_t candidates = occupied_buckets & mask;
+
+		if (!candidates)
+			return nullptr;
+
+#ifdef _MSC_VER
+		unsigned long cls;
+		_BitScanForward(&cls, candidates);
+#else
+		int cls = __builtin_ctz(candidates);
+#endif
+
+		FreeBlock *block = freelists[cls];
+		freelists[cls] = block->next;
+
+		if (!freelists[cls])
+		{
+			occupied_buckets &= ~(1u << cls);
+		}
+
+		reused_bytes += block->size;
+		return block;
 	}
 
 	// Allocate memory from arena
 	static void *
 	alloc(size_t size)
 	{
-		if (!base)
-		{
-			init();
-		}
+		assert(base);
+		assert(size);
 
 		// Try freelists first
 		void *recycled = try_alloc_from_freelist(size);
@@ -304,12 +203,8 @@ template <typename Tag> struct Arena
 			return recycled;
 		}
 
-		// Normal allocation path
-		size_t	  align = 8;
-		uintptr_t current_addr = (uintptr_t)current;
-		uintptr_t aligned_addr = (current_addr + align - 1) & ~(align - 1);
-
-		uint8_t *aligned = (uint8_t *)aligned_addr;
+		// Normal allocation path - hardcoded alignment for 8 bytes
+		uint8_t *aligned = (uint8_t *)(((uintptr_t)current + 7) & ~7ULL);
 		uint8_t *next = aligned + size;
 
 		// Check if we need to commit more memory
@@ -330,11 +225,6 @@ template <typename Tag> struct Arena
 			}
 
 			size_t new_committed = VirtualMemory::round_to_pages(needed);
-			size_t min_growth = committed_capacity > 0 ? committed_capacity + committed_capacity / 2 : initial_commit;
-			if (new_committed < min_growth)
-			{
-				new_committed = min_growth;
-			}
 
 			if (max_capacity > 0 && new_committed > max_capacity)
 			{
@@ -365,9 +255,13 @@ template <typename Tag> struct Arena
 	reset()
 	{
 		current = base;
-		if (base && committed_capacity > 0)
+
+		if constexpr (ZeroOnReset)
 		{
-			memset(base, 0, committed_capacity);
+			if (base && committed_capacity > 0)
+			{
+				memset(base, 0, committed_capacity);
+			}
 		}
 
 		// Clear freelists
@@ -375,6 +269,7 @@ template <typename Tag> struct Arena
 		{
 			freelists[i] = nullptr;
 		}
+		occupied_buckets = 0;
 		reclaimed_bytes = 0;
 		reused_bytes = 0;
 	}
@@ -391,9 +286,12 @@ template <typename Tag> struct Arena
 			committed_capacity = initial_commit;
 		}
 
-		if (base && committed_capacity > 0)
+		if constexpr (ZeroOnReset)
 		{
-			memset(base, 0, committed_capacity);
+			if (base && committed_capacity > 0)
+			{
+				memset(base, 0, committed_capacity);
+			}
 		}
 
 		// Clear freelists
@@ -401,6 +299,7 @@ template <typename Tag> struct Arena
 		{
 			freelists[i] = nullptr;
 		}
+		occupied_buckets = 0;
 		reclaimed_bytes = 0;
 		reused_bytes = 0;
 	}
@@ -464,10 +363,23 @@ template <typename Tag> struct Arena
 		printf("  Reclaimed: %zu bytes (%.2f MB)\n", reclaimed_bytes, reclaimed_bytes / (1024.0 * 1024.0));
 		printf("  Reused:    %zu bytes (%.2f MB)\n", reused_bytes, reused_bytes / (1024.0 * 1024.0));
 		printf("  In freelists: %zu bytes (%.2f MB)\n", freelist_bytes(), freelist_bytes() / (1024.0 * 1024.0));
+
+		// Show occupied buckets
+		if (occupied_buckets)
+		{
+			printf("  Occupied buckets: ");
+			for (int i = 0; i < 32; i++)
+			{
+				if (occupied_buckets & (1u << i))
+				{
+					printf("%d ", i);
+				}
+			}
+			printf("\n");
+		}
 	}
 };
 
-// Convenience namespace
 namespace arena
 {
 template <typename Tag>
@@ -657,8 +569,6 @@ stream_size(const StreamAlloc<Tag> *stream)
 }
 
 } // namespace arena
-
-// Forward declaration of string
 template <typename ArenaTag, uint32_t InitialSize> struct string;
 
 // Forward declaration of array
@@ -921,7 +831,6 @@ hash_int(T x)
 		return static_cast<uint32_t>(hash_64(static_cast<uint64_t>(ux)));
 	}
 }
-
 
 // String class with hash support
 template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct string
@@ -1352,7 +1261,6 @@ template <typename ArenaTag = global_arena, uint32_t InitialSize = 32> struct st
 		return s;
 	}
 };
-
 
 // Pair structure
 template <typename K, typename V> struct pair

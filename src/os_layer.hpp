@@ -249,3 +249,81 @@ os_file_offset_t os_file_size(os_file_handle_t handle);
 **   - No-op if handle is read-only
 */
 void os_file_truncate(os_file_handle_t handle, os_file_offset_t size);
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
+
+// Cross-platform virtual memory operations
+struct VirtualMemory
+{
+	static void *
+	reserve(size_t size)
+	{
+#ifdef _WIN32
+		return VirtualAlloc(nullptr, size, MEM_RESERVE, PAGE_READWRITE);
+#else
+		void *ptr = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+		return (ptr == MAP_FAILED) ? nullptr : ptr;
+#endif
+	}
+
+	static bool
+	commit(void *addr, size_t size)
+	{
+#ifdef _WIN32
+		return VirtualAlloc(addr, size, MEM_COMMIT, PAGE_READWRITE) != nullptr;
+#else
+		return mprotect(addr, size, PROT_READ | PROT_WRITE) == 0;
+#endif
+	}
+
+	static void
+	decommit(void *addr, size_t size)
+	{
+#ifdef _WIN32
+		VirtualFree(addr, size, MEM_DECOMMIT);
+#else
+		madvise(addr, size, MADV_DONTNEED);
+		mprotect(addr, size, PROT_NONE);
+#endif
+	}
+
+	static void
+	release(void *addr, size_t size)
+	{
+#ifdef _WIN32
+		(void)size; // Windows doesn't need size for MEM_RELEASE
+		VirtualFree(addr, 0, MEM_RELEASE);
+#else
+		munmap(addr, size);
+#endif
+	}
+
+	static size_t
+	page_size()
+	{
+		static size_t cached_size = 0;
+		if (cached_size == 0)
+		{
+#ifdef _WIN32
+			SYSTEM_INFO si;
+			GetSystemInfo(&si);
+			cached_size = si.dwPageSize;
+#else
+			cached_size = sysconf(_SC_PAGESIZE);
+#endif
+		}
+		return cached_size;
+	}
+
+	static size_t
+	round_to_pages(size_t size)
+	{
+		size_t page_sz = page_size();
+		return ((size + page_sz - 1) / page_sz) * page_sz;
+	}
+};
