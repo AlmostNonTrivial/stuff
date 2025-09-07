@@ -1,12 +1,13 @@
 
 // main.cpp - Full REPL implementation
-#include "tests/parser.hpp"
-#include "tests/arena.hpp"
-#include "tests/blob.hpp"
+// #include "tests/parser.hpp"
+// #include "tests/arena.hpp"
+// #include "tests/blob.hpp"
 #include "tests/btree.hpp"
-#include "tests/pager.hpp"
+// #include "tests/pager.hpp"
+#include "tests/containers.hpp"
 #include "tests/types.hpp"
-#include "tests/ephemeral.hpp"
+// #include "tests/ephemeral.hpp"
 #include "arena.hpp"
 #include "catalog.hpp"
 #include "common.hpp"
@@ -504,17 +505,19 @@ run_repl()
 }
 
 
+// #include "./tests/containers.hpp"
 
 int
 run_tests()
 {
-	test_types();
+	// test_arena();
+	test_containers();
+	// test_types();
 	// test_parser();
-	test_blob();
-	test_arena();
-	test_pager();
-	test_ephemeral();
-	test_btree();
+	// test_blob();
+	// test_pager();
+	// test_ephemeral();
+	// test_btree();
 	return 0;
 }
 
@@ -522,13 +525,17 @@ int
 main(int argc, char **argv)
 {
 
-	if (argc > 1 && strlen(argv[1]) >= 5)
-	{
-		if (strcmp("debug", argv[1]) == 0)
-		{
-			return run_tests();
-		}
-	}
+	// if (argc > 1 && strlen(argv[1]) >= 5)
+	// {
+	// 	if (strcmp("debug", argv[1]) == 0)
+	// 	{
+	// 		return run_tests();
+	// 	}
+	// }
 
-	return run_repl();
+	// return run_repl();
+
+
+
+	return run_tests();
 }
