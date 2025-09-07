@@ -7,8 +7,6 @@
 #include <cassert>
 #include <cstdint>
 
-#include "utils.hpp"
-
 hash_map<string<catalog_arena>, Structure, catalog_arena> catalog;
 
 Layout
@@ -146,4 +144,36 @@ catalog_bootstrap_callback(TypedValue *result, size_t count)
 	structure.storage.btree.root_page_index = rootpage;
 
 	catalog.insert(name, structure);
+}
+
+void
+load_catalog_from_master()
+{
+	// Set the callback
+	vm_set_result_callback(catalog_bootstrap_callback);
+
+	// Run your existing master table scan
+	ProgramBuilder prog = {};
+	auto		   cctx = from_structure(catalog[MASTER_CATALOG]);
+	int			   cursor = prog.open_cursor(cctx);
+	int			   is_at_end = prog.rewind(cursor, false);
+	auto		   while_context = prog.begin_while(is_at_end);
+	int			   dest_reg = prog.get_columns(cursor, 0, cctx->layout.count());
+	prog.result(dest_reg, cctx->layout.count());
+	prog.next(cursor, is_at_end);
+	prog.end_while(while_context);
+	prog.close_cursor(cursor);
+	prog.halt();
+	prog.resolve_labels();
+
+	vm_execute(prog.instructions.data, prog.instructions.size);
+}
+
+void
+reload_catalog()
+{
+	arena::init<catalog_arena>();
+	catalog.clear();
+	bootstrap_master(false);
+	load_catalog_from_master();
 }

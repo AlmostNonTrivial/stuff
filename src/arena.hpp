@@ -193,9 +193,12 @@ template <typename Tag, bool ZeroOnReset = true> struct Arena
 	static void *
 	alloc(size_t size)
 	{
-		assert(base);
-		assert(size);
-
+		// assert(base);
+		// assert(size);
+		if (!base)
+		{
+			Arena<Tag>::init(1000);
+		}
 		// Try freelists first
 		void *recycled = try_alloc_from_freelist(size);
 		if (recycled)

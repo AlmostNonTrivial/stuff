@@ -96,3 +96,6 @@ bootstrap_master(bool create);
 
 void
 catalog_bootstrap_callback(TypedValue *result, size_t count);
+void
+load_catalog_from_master();
+void reload_catalog();
