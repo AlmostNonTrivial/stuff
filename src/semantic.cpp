@@ -11,15 +11,144 @@
 #include <cstring>
 #include <cstdio>
 
+// Result tracking for current analysis
+static struct
+{
+	string_view error;
+	string_view context;
+} current_result;
+
 // Static catalog changes tracker
 static struct
 {
-	// Tables to be created (name -> Structure)
+	// Tables to be created (name -> Relation)
 	hash_map<string_view, Relation, query_arena> tables_to_create;
 
 	// Tables to be dropped (just names)
 	hash_set<string_view, query_arena> tables_to_drop;
 } catalog_changes;
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+// Set error in current result
+static void
+set_error(string_view error, string_view context = {})
+{
+	current_result.error = error;
+	current_result.context = context;
+}
+
+// Helper to lookup table (checks both real catalog and pending changes)
+static Relation *
+lookup_table(string_view name)
+{
+	// Check if it was deleted in a previous statement
+	if (catalog_changes.tables_to_drop.contains(name))
+	{
+		return nullptr;
+	}
+
+	// Check pending creations
+	Relation *pending = catalog_changes.tables_to_create.get(name);
+	if (pending)
+	{
+		return pending;
+	}
+
+	// Check actual catalog
+	return catalog.get(name);
+}
+
+// Helper to find a column index in a table
+static int32_t
+find_column_index(Relation *table, string_view column_name)
+{
+	for (uint32_t i = 0; i < table->columns.size(); i++)
+	{
+		if (column_name.compare(table->columns[i].name) == 0)
+		{
+			return i;
+		}
+	}
+	return -1;
+}
+
+// Helper to resolve multiple columns and populate indices
+static bool
+resolve_column_list(Relation *table, const array<string_view, query_arena> &column_names,
+					array<int32_t, query_arena> &out_indices)
+{
+
+	out_indices.clear();
+
+	for (uint32_t i = 0; i < column_names.size(); i++)
+	{
+		int32_t idx = find_column_index(table, column_names[i]);
+
+		if (idx < 0)
+		{
+			set_error("Column does not exist in table", column_names[i]);
+			return false;
+		}
+
+		out_indices.push(idx);
+	}
+	return true;
+}
+
+// Get SQL type name for error messages
+static const char *
+sql_type_name(DataType type)
+{
+	return (type == TYPE_U32) ? "INT" : "TEXT";
+}
+
+// Require table exists and optionally set output field
+static Relation *
+require_table(string_view table_name, Relation **out_field)
+{
+	Relation *table = lookup_table(table_name);
+	if (!table)
+	{
+		set_error("Table does not exist", table_name);
+		return nullptr;
+	}
+	if (out_field)
+	{
+		*out_field = table;
+	}
+	return table;
+}
+
+// Validate literal value expression for INSERT/UPDATE
+static bool
+validate_literal_value(Expr *expr, DataType expected_type, const char *column_name, const char *operation)
+{
+	// Only literals and NULL allowed
+	if (expr->type != EXPR_LITERAL && expr->type != EXPR_NULL)
+	{
+		set_error(format_error("Only literal values allowed in %s", operation), column_name);
+		return false;
+	}
+
+	if (expr->type == EXPR_LITERAL)
+	{
+		// Check type compatibility
+		if (expr->lit_type != expected_type)
+		{
+			set_error(format_error("Type mismatch for column '%s': expected %s, got %s", column_name,
+								   sql_type_name(expected_type), sql_type_name(expr->lit_type)),
+					  column_name);
+			return false;
+		}
+	}
+
+	expr->sem.resolved_type = expected_type;
+	expr->sem.is_resolved = true;
+	return true;
+}
 
 // Apply all pending changes to the actual catalog
 static void
@@ -43,28 +172,6 @@ clear_catalog_changes()
 {
 	catalog_changes.tables_to_create.clear();
 	catalog_changes.tables_to_drop.clear();
-}
-
-// Helper to lookup table (checks both real catalog and pending changes)
-static Relation *
-lookup_table(string_view name)
-{
-
-	// it was deleted in a previous statement
-	if (catalog_changes.tables_to_drop.contains(name))
-	{
-		return nullptr;
-	}
-
-	// Check pending creations
-	Relation *pending = catalog_changes.tables_to_create.get(name);
-	if (pending)
-	{
-		return pending;
-	}
-
-	// Check actual catalog
-	return catalog.get(name);
 }
 
 // ============================================================================
@@ -92,18 +199,18 @@ semantic_resolve_expr(Expr *expr, Relation *table)
 
 	case EXPR_COLUMN: {
 		// Find column in table
-		for (uint32_t i = 0; i < table->columns.size(); i++)
+		int32_t idx = find_column_index(table, expr->column_name);
+		if (idx < 0)
 		{
-			if (expr->column_name.compare(table->columns[i].name) == 0)
-			{
-				expr->sem.column_index = i;
-				expr->sem.resolved_type = table->columns[i].type;
-				expr->sem.table = table;
-				expr->sem.is_resolved = true;
-				return true;
-			}
+			set_error("Column not found", expr->column_name);
+			return false;
 		}
-		return false; // Column not found
+
+		expr->sem.column_index = idx;
+		expr->sem.resolved_type = table->columns[idx].type;
+		expr->sem.table = table;
+		expr->sem.is_resolved = true;
+		return true;
 	}
 
 	case EXPR_BINARY_OP: {
@@ -159,8 +266,55 @@ semantic_resolve_expr(Expr *expr, Relation *table)
 	}
 
 	default:
+		set_error("Unknown expression type");
 		return false;
 	}
+}
+
+// Resolve WHERE clause (shared by SELECT, UPDATE, DELETE)
+static bool
+resolve_where_clause(Expr *where_clause, Relation *table)
+{
+	if (!where_clause)
+	{
+		return true; // No WHERE clause is valid
+	}
+
+	if (!semantic_resolve_expr(where_clause, table))
+	{
+		if (current_result.error.empty())
+		{
+			set_error("Invalid expression in WHERE clause");
+		}
+		return false;
+	}
+
+	// WHERE should evaluate to boolean
+	if (where_clause->sem.resolved_type != TYPE_U32 && where_clause->sem.resolved_type != TYPE_NULL)
+	{
+		set_error("WHERE clause must evaluate to boolean");
+		return false;
+	}
+
+	return true;
+}
+
+// Resolve INSERT column list (explicit or implicit)
+static bool
+resolve_insert_columns(InsertStmt *stmt, Relation *table)
+{
+	if (stmt->columns.size() > 0)
+	{
+		return resolve_column_list(table, stmt->columns, stmt->sem.column_indices);
+	}
+
+	// No column list - use all columns in order
+	stmt->sem.column_indices.clear();
+	for (uint32_t i = 0; i < table->columns.size(); i++)
+	{
+		stmt->sem.column_indices.push(i);
+	}
+	return true;
 }
 
 // ============================================================================
@@ -168,17 +322,12 @@ semantic_resolve_expr(Expr *expr, Relation *table)
 // ============================================================================
 
 static bool
-semantic_resolve_select(SelectStmt *stmt, const char **error, const char **context)
+semantic_resolve_select(SelectStmt *stmt)
 {
 	// 1. Validate table exists
-	Relation *table = lookup_table(stmt->table_name);
+	Relation *table = require_table(stmt->table_name, &stmt->sem.table);
 	if (!table)
-	{
-		*error = "Table does not exist";
-		// context = stmt->table_name
 		return false;
-	}
-	stmt->sem.table = table;
 
 	// 2. Resolve column list
 	if (stmt->is_star)
@@ -196,70 +345,32 @@ semantic_resolve_select(SelectStmt *stmt, const char **error, const char **conte
 	else
 	{
 		// Specific columns
-		stmt->sem.column_indices.clear();
-		stmt->sem.column_types.clear();
-
-		for (uint32_t i = 0; i < stmt->columns.size(); i++)
+		if (!resolve_column_list(table, stmt->columns, stmt->sem.column_indices))
 		{
-			bool found = false;
-			for (uint32_t j = 0; j < table->columns.size(); j++)
-			{
+			return false;
+		}
 
-				// if (stmt->columns[i].compare(table->columns[j].name)) == 0)
-				if (stmt->columns[i].compare(table->columns[j].name) == 0)
-				{
-					stmt->sem.column_indices.push(j);
-					stmt->sem.column_types.push(table->columns[j].type);
-					found = true;
-					break;
-				}
-			}
-			if (!found)
-			{
-				*error = "Column does not exist in table";
-				*context = stmt->columns[i].cbegin();
-				return false;
-			}
+		// Populate types after indices are resolved
+		stmt->sem.column_types.clear();
+		for (uint32_t i = 0; i < stmt->sem.column_indices.size(); i++)
+		{
+			stmt->sem.column_types.push(table->columns[stmt->sem.column_indices[i]].type);
 		}
 	}
 
 	// 3. Resolve WHERE clause if present
-	if (stmt->where_clause)
+	if (!resolve_where_clause(stmt->where_clause, table))
 	{
-		if (!semantic_resolve_expr(stmt->where_clause, table))
-		{
-			*error = "Invalid expression in WHERE clause";
-			*context = nullptr;
-			return false;
-		}
-
-		// WHERE should evaluate to boolean
-		if (stmt->where_clause->sem.resolved_type != TYPE_U32 && stmt->where_clause->sem.resolved_type != TYPE_NULL)
-		{
-			*error = "WHERE clause must evaluate to boolean";
-			*context = nullptr;
-			return false;
-		}
+		return false;
 	}
 
 	// 4. Resolve ORDER BY column if present
 	if (stmt->order_by_column.size() > 0)
 	{
-		bool found = false;
-		for (uint32_t i = 0; i < table->columns.size(); i++)
+		stmt->sem.order_by_index = find_column_index(table, stmt->order_by_column);
+		if (stmt->sem.order_by_index < 0)
 		{
-			if (stmt->order_by_column.compare(table->columns[i].name) == 0)
-			// if (strcmp(stmt->order_by_column.c_str(), table->columns[i].name) == 0)
-			{
-				stmt->sem.order_by_index = i;
-				found = true;
-				break;
-			}
-		}
-		if (!found)
-		{
-			*error = "ORDER BY column does not exist in table";
-			// *context = stmt->order_by_column.c_str();
+			set_error("ORDER BY column does not exist in table", stmt->order_by_column);
 			return false;
 		}
 	}
@@ -273,60 +384,25 @@ semantic_resolve_select(SelectStmt *stmt, const char **error, const char **conte
 // ============================================================================
 
 static bool
-semantic_resolve_insert(InsertStmt *stmt, const char **error, const char **context)
+semantic_resolve_insert(InsertStmt *stmt)
 {
 	// 1. Validate table exists
-	Relation *table = lookup_table(stmt->table_name);
+	Relation *table = require_table(stmt->table_name, &stmt->sem.table);
 	if (!table)
-	{
-		*error = "Table does not exist";
-		// *context = stmt->table_name.c_str();
 		return false;
-	}
-	stmt->sem.table = table;
 
 	// 2. Resolve column list or use all columns
-	if (stmt->columns.size() > 0)
+	if (!resolve_insert_columns(stmt, table))
 	{
-		// Explicit column list
-		stmt->sem.column_indices.clear();
-
-		for (uint32_t i = 0; i < stmt->columns.size(); i++)
-		{
-			bool found = false;
-			for (uint32_t j = 0; j < table->columns.size(); j++)
-			{
-				if (stmt->columns[i].compare(table->columns[j].name) == 0)
-				{
-					stmt->sem.column_indices.push(j);
-					found = true;
-					break;
-				}
-			}
-			if (!found)
-			{
-				*error = "Column does not exist in table";
-				// *context = stmt->columns[i].c_str();
-				return false;
-			}
-		}
-	}
-	else
-	{
-		// No column list - use all columns in order
-		stmt->sem.column_indices.clear();
-		for (uint32_t i = 0; i < table->columns.size(); i++)
-		{
-			stmt->sem.column_indices.push(i);
-		}
+		return false;
 	}
 
 	// 3. Validate value count matches column count
 	if (stmt->values.size() != stmt->sem.column_indices.size())
 	{
-		*error = format_error("Value count mismatch: expected %u, got %u", stmt->sem.column_indices.size(),
-							  stmt->values.size());
-		// *context = stmt->table_name.c_str();
+		set_error(format_error("Value count mismatch: expected %u, got %u", stmt->sem.column_indices.size(),
+							   stmt->values.size()),
+				  stmt->table_name);
 		return false;
 	}
 
@@ -337,29 +413,10 @@ semantic_resolve_insert(InsertStmt *stmt, const char **error, const char **conte
 		uint32_t col_idx = stmt->sem.column_indices[i];
 		DataType expected_type = table->columns[col_idx].type;
 
-		// Only literals and NULL allowed in INSERT VALUES
-		if (expr->type != EXPR_LITERAL && expr->type != EXPR_NULL)
+		if (!validate_literal_value(expr, expected_type, table->columns[col_idx].name, "INSERT"))
 		{
-			*error = "Only literal values allowed in INSERT";
-			// *context = table->columns[col_idx].name;
 			return false;
 		}
-
-		if (expr->type == EXPR_LITERAL)
-		{
-			// Check type compatibility (simple: must match exactly)
-			if (expr->lit_type != expected_type)
-			{
-				*error = format_error("Type mismatch for column '%s': expected %s, got %s",
-									  table->columns[col_idx].name, expected_type == TYPE_U32 ? "INT" : "TEXT",
-									  expr->lit_type == TYPE_U32 ? "INT" : "TEXT");
-				// *context = table->columns[col_idx].name;
-				return false;
-			}
-		}
-
-		expr->sem.resolved_type = expected_type;
-		expr->sem.is_resolved = true;
 	}
 
 	stmt->sem.is_resolved = true;
@@ -371,38 +428,17 @@ semantic_resolve_insert(InsertStmt *stmt, const char **error, const char **conte
 // ============================================================================
 
 static bool
-semantic_resolve_update(UpdateStmt *stmt, const char **error, const char **context)
+semantic_resolve_update(UpdateStmt *stmt)
 {
 	// 1. Validate table exists
-	Relation *table = lookup_table(stmt->table_name);
+	Relation *table = require_table(stmt->table_name, &stmt->sem.table);
 	if (!table)
-	{
-		*error = "Table does not exist";
-		// *context = stmt->table_name.c_str();
 		return false;
-	}
-	stmt->sem.table = table;
 
 	// 2. Resolve column indices
-	stmt->sem.column_indices.clear();
-	for (uint32_t i = 0; i < stmt->columns.size(); i++)
+	if (!resolve_column_list(table, stmt->columns, stmt->sem.column_indices))
 	{
-		bool found = false;
-		for (uint32_t j = 0; j < table->columns.size(); j++)
-		{
-			if (stmt->columns[i].compare(table->columns[j].name) == 0)
-			{
-				stmt->sem.column_indices.push(j);
-				found = true;
-				break;
-			}
-		}
-		if (!found)
-		{
-			*error = "Column does not exist in table";
-			// *context = stmt->columns[i].c_str();
-			return false;
-		}
+		return false;
 	}
 
 	// 3. Resolve value expressions
@@ -412,46 +448,16 @@ semantic_resolve_update(UpdateStmt *stmt, const char **error, const char **conte
 		uint32_t col_idx = stmt->sem.column_indices[i];
 		DataType expected_type = table->columns[col_idx].type;
 
-		// Only literals and NULL allowed in SET values
-		if (expr->type != EXPR_LITERAL && expr->type != EXPR_NULL)
+		if (!validate_literal_value(expr, expected_type, table->columns[col_idx].name, "UPDATE SET"))
 		{
-			*error = "Only literal values allowed in UPDATE SET";
-			// *context = table->columns[col_idx].name;
 			return false;
 		}
-
-		if (expr->type == EXPR_LITERAL)
-		{
-			// Check type compatibility
-			if (expr->lit_type != expected_type)
-			{
-				*error = format_error("Type mismatch for column '%s'", table->columns[col_idx].name);
-				// *context = table->columns[col_idx].name;
-				return false;
-			}
-		}
-
-		expr->sem.resolved_type = expected_type;
-		expr->sem.is_resolved = true;
 	}
 
 	// 4. Resolve WHERE clause if present
-	if (stmt->where_clause)
+	if (!resolve_where_clause(stmt->where_clause, table))
 	{
-		if (!semantic_resolve_expr(stmt->where_clause, table))
-		{
-			*error = "Invalid expression in WHERE clause";
-			*context = nullptr;
-			return false;
-		}
-
-		// WHERE should evaluate to boolean
-		if (stmt->where_clause->sem.resolved_type != TYPE_U32 && stmt->where_clause->sem.resolved_type != TYPE_NULL)
-		{
-			*error = "WHERE clause must evaluate to boolean";
-			*context = nullptr;
-			return false;
-		}
+		return false;
 	}
 
 	stmt->sem.is_resolved = true;
@@ -463,35 +469,17 @@ semantic_resolve_update(UpdateStmt *stmt, const char **error, const char **conte
 // ============================================================================
 
 static bool
-semantic_resolve_delete(DeleteStmt *stmt, const char **error, const char **context)
+semantic_resolve_delete(DeleteStmt *stmt)
 {
 	// 1. Validate table exists
-	Relation *table = lookup_table(stmt->table_name);
+	Relation *table = require_table(stmt->table_name, &stmt->sem.table);
 	if (!table)
-	{
-		*error = "Table does not exist";
-		// *context = stmt->table_name.c_str();
 		return false;
-	}
-	stmt->sem.table = table;
 
 	// 2. Resolve WHERE clause if present
-	if (stmt->where_clause)
+	if (!resolve_where_clause(stmt->where_clause, table))
 	{
-		if (!semantic_resolve_expr(stmt->where_clause, table))
-		{
-			*error = "Invalid expression in WHERE clause";
-			*context = nullptr;
-			return false;
-		}
-
-		// WHERE should evaluate to boolean
-		if (stmt->where_clause->sem.resolved_type != TYPE_U32 && stmt->where_clause->sem.resolved_type != TYPE_NULL)
-		{
-			*error = "WHERE clause must evaluate to boolean";
-			*context = nullptr;
-			return false;
-		}
+		return false;
 	}
 
 	stmt->sem.is_resolved = true;
@@ -503,22 +491,20 @@ semantic_resolve_delete(DeleteStmt *stmt, const char **error, const char **conte
 // ============================================================================
 
 static bool
-semantic_resolve_create_table(CreateTableStmt *stmt, const char **error, const char **context)
+semantic_resolve_create_table(CreateTableStmt *stmt)
 {
 	// Check if table already exists
 	Relation *existing = lookup_table(stmt->table_name);
 	if (existing)
 	{
-		*error = "Table already exists";
-		// *context = stmt->table_name.c_str();
+		set_error("Table already exists", stmt->table_name);
 		return false;
 	}
 
 	// Validate we have at least one column
 	if (stmt->columns.size() == 0)
 	{
-		*error = "Table must have at least one column";
-		// *context = stmt->table_name.c_str();
+		set_error("Table must have at least one column", stmt->table_name);
 		return false;
 	}
 
@@ -529,14 +515,13 @@ semantic_resolve_create_table(CreateTableStmt *stmt, const char **error, const c
 		{
 			if (stmt->columns[i].name.compare(stmt->columns[j].name) == 0)
 			{
-				*error = "Duplicate column name";
-				// *context = stmt->columns[i].name.c_str();
+				set_error("Duplicate column name", stmt->columns[i].name);
 				return false;
 			}
 		}
 	}
 
-	// Build Structure for pending catalog
+	// Build Relation for pending catalog
 	array<Attribute, query_arena> cols;
 	for (uint32_t i = 0; i < stmt->columns.size(); i++)
 	{
@@ -545,8 +530,7 @@ semantic_resolve_create_table(CreateTableStmt *stmt, const char **error, const c
 		// Validate type (should already be TYPE_U32 or TYPE_CHAR32 from parser)
 		if (def.type != TYPE_U32 && def.type != TYPE_CHAR32)
 		{
-			*error = "Invalid column type";
-			// *context = def.name.c_str();
+			set_error("Invalid column type", def.name);
 			return false;
 		}
 
@@ -557,15 +541,12 @@ semantic_resolve_create_table(CreateTableStmt *stmt, const char **error, const c
 		cols.push(attr);
 	}
 
-	Relation new_structure = create_relation(stmt->table_name, cols);
-
-	// copy into map
-	catalog_changes.tables_to_create.insert(new_structure.name, new_structure);
-
-	stmt->sem.created_structure = catalog_changes.tables_to_create.get(new_structure.name);
+	Relation new_relation = create_relation(stmt->table_name, cols);
 
 	// Add to pending catalog changes
+	catalog_changes.tables_to_create.insert(new_relation.name, new_relation);
 
+	stmt->sem.created_structure = stmt->table_name;
 	stmt->sem.is_resolved = true;
 	return true;
 }
@@ -575,13 +556,12 @@ semantic_resolve_create_table(CreateTableStmt *stmt, const char **error, const c
 // ============================================================================
 
 static bool
-semantic_resolve_drop_table(DropTableStmt *stmt, const char **error, const char **context)
+semantic_resolve_drop_table(DropTableStmt *stmt)
 {
 	Relation *table = lookup_table(stmt->table_name);
 	if (!table)
 	{
-		*error = "Table does not exist";
-		// *context = stmt->table_name.c_str();
+		set_error("Table does not exist", stmt->table_name);
 		return false;
 	}
 
@@ -599,27 +579,27 @@ semantic_resolve_drop_table(DropTableStmt *stmt, const char **error, const char 
 // ============================================================================
 
 static bool
-semantic_resolve_statement(Statement *stmt, const char **error, const char **context)
+semantic_resolve_statement(Statement *stmt)
 {
 	switch (stmt->type)
 	{
 	case STMT_SELECT:
-		return semantic_resolve_select(&stmt->select_stmt, error, context);
+		return semantic_resolve_select(&stmt->select_stmt);
 
 	case STMT_INSERT:
-		return semantic_resolve_insert(&stmt->insert_stmt, error, context);
+		return semantic_resolve_insert(&stmt->insert_stmt);
 
 	case STMT_UPDATE:
-		return semantic_resolve_update(&stmt->update_stmt, error, context);
+		return semantic_resolve_update(&stmt->update_stmt);
 
 	case STMT_DELETE:
-		return semantic_resolve_delete(&stmt->delete_stmt, error, context);
+		return semantic_resolve_delete(&stmt->delete_stmt);
 
 	case STMT_CREATE_TABLE:
-		return semantic_resolve_create_table(&stmt->create_table_stmt, error, context);
+		return semantic_resolve_create_table(&stmt->create_table_stmt);
 
 	case STMT_DROP_TABLE:
-		return semantic_resolve_drop_table(&stmt->drop_table_stmt, error, context);
+		return semantic_resolve_drop_table(&stmt->drop_table_stmt);
 
 	case STMT_BEGIN:
 	case STMT_COMMIT:
@@ -629,8 +609,7 @@ semantic_resolve_statement(Statement *stmt, const char **error, const char **con
 		return true;
 
 	default:
-		*error = "Unknown statement type";
-		*context = nullptr;
+		set_error("Unknown statement type");
 		return false;
 	}
 }
@@ -644,11 +623,13 @@ semantic_analyze(array<Statement *, query_arena> &statements)
 {
 	SemanticResult result;
 	result.success = true;
-	result.error = nullptr;
-	result.error_context = nullptr;
+	result.error = {};
+	result.error_context = {};
 	result.failed_statement_index = -1;
 
-	// Clear any previous pending changes
+	// Clear any previous result and pending changes
+	current_result.error = {};
+	current_result.context = {};
 	clear_catalog_changes();
 
 	// Analyze each statement
@@ -656,15 +637,16 @@ semantic_analyze(array<Statement *, query_arena> &statements)
 	{
 		Statement *stmt = statements.data()[i];
 
-		const char *error = nullptr;
-		const char *context = nullptr;
+		// Clear current result for this statement
+		current_result.error = {};
+		current_result.context = {};
 
-		if (!semantic_resolve_statement(stmt, &error, &context))
+		if (!semantic_resolve_statement(stmt))
 		{
 			// Early exit on first error
 			result.success = false;
-			result.error = error;
-			result.error_context = context;
+			result.error = current_result.error;
+			result.error_context = current_result.context;
 			result.failed_statement_index = i;
 
 			// Clear pending changes since we're not applying them
