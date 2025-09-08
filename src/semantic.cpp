@@ -2,7 +2,7 @@
 // semantic.cpp
 // ============================================================================
 #include "semantic.hpp"
-#include "arena.hpp"
+#include "arena.hpp" #include "containers.hpp"
 #include "catalog.hpp"
 #include "parser.hpp"
 #include "types.hpp"
@@ -24,15 +24,16 @@ static void
 apply_catalog_changes()
 {
 	// Remove dropped tables first
-	for (uint32_t i = 0; i < catalog_changes.tables_to_drop.size; i++)
+	for (uint32_t i = 0; i < catalog_changes.tables_to_drop.size(); i++)
 	{
 		catalog.remove(catalog_changes.tables_to_drop[i]);
 	}
 
 	// Add new tables
-	for (int i = 0; i < catalog_changes.tables_to_create.size; i++)
+	for (int i = 0; i < catalog_changes.tables_to_create.size();i++)
 	{
-		auto &entry = catalog_changes.tables_to_create.entries[i];
+		auto &entry = catalog_changes.tables_to_create.entries()[i];
+		// [i];
 		if (entry.state != hash_slot_state::OCCUPIED)
 		{
 			continue;
@@ -54,7 +55,7 @@ static Structure *
 lookup_table(const string<parser_arena> &name)
 {
 	// First check if it's pending deletion
-	for (uint32_t i = 0; i < catalog_changes.tables_to_drop.size; i++)
+	for (uint32_t i = 0; i < catalog_changes.tables_to_drop.size();i++)
 	{
 		if (catalog_changes.tables_to_drop[i].equals(name))
 		{
@@ -110,7 +111,7 @@ semantic_resolve_expr(Expr *expr, Structure *table)
 
 	case EXPR_COLUMN: {
 		// Find column in table
-		for (uint32_t i = 0; i < table->columns.size; i++)
+		for (uint32_t i = 0; i < table->columns.size();i++)
 		{
 			if (strcmp(expr->column_name.c_str(), table->columns[i].name) == 0)
 			{
@@ -205,7 +206,7 @@ semantic_resolve_select(SelectStmt *stmt, const char **error, const char **conte
 		stmt->sem.column_indices.clear();
 		stmt->sem.column_types.clear();
 
-		for (uint32_t i = 0; i < table->columns.size; i++)
+		for (uint32_t i = 0; i < table->columns.size();i++)
 		{
 			stmt->sem.column_indices.push(i);
 			stmt->sem.column_types.push(table->columns[i].type);
@@ -217,10 +218,10 @@ semantic_resolve_select(SelectStmt *stmt, const char **error, const char **conte
 		stmt->sem.column_indices.clear();
 		stmt->sem.column_types.clear();
 
-		for (uint32_t i = 0; i < stmt->columns.size; i++)
+		for (uint32_t i = 0; i < stmt->columns.size();i++)
 		{
 			bool found = false;
-			for (uint32_t j = 0; j < table->columns.size; j++)
+			for (uint32_t j = 0; j < table->columns.size();j++)
 			{
 				if (strcmp(stmt->columns[i].c_str(), table->columns[j].name) == 0)
 				{
@@ -259,10 +260,10 @@ semantic_resolve_select(SelectStmt *stmt, const char **error, const char **conte
 	}
 
 	// 4. Resolve ORDER BY column if present
-	if (stmt->order_by_column.size > 0)
+	if (stmt->order_by_column.size()> 0)
 	{
 		bool found = false;
-		for (uint32_t i = 0; i < table->columns.size; i++)
+		for (uint32_t i = 0; i < table->columns.size();i++)
 		{
 			if (strcmp(stmt->order_by_column.c_str(), table->columns[i].name) == 0)
 			{
@@ -301,15 +302,15 @@ semantic_resolve_insert(InsertStmt *stmt, const char **error, const char **conte
 	stmt->sem.table = table;
 
 	// 2. Resolve column list or use all columns
-	if (stmt->columns.size > 0)
+	if (stmt->columns.size() > 0)
 	{
 		// Explicit column list
 		stmt->sem.column_indices.clear();
 
-		for (uint32_t i = 0; i < stmt->columns.size; i++)
+		for (uint32_t i = 0; i < stmt->columns.size();i++)
 		{
 			bool found = false;
-			for (uint32_t j = 0; j < table->columns.size; j++)
+			for (uint32_t j = 0; j < table->columns.size();j++)
 			{
 				if (strcmp(stmt->columns[i].c_str(), table->columns[j].name) == 0)
 				{
@@ -330,23 +331,23 @@ semantic_resolve_insert(InsertStmt *stmt, const char **error, const char **conte
 	{
 		// No column list - use all columns in order
 		stmt->sem.column_indices.clear();
-		for (uint32_t i = 0; i < table->columns.size; i++)
+		for (uint32_t i = 0; i < table->columns.size();i++)
 		{
 			stmt->sem.column_indices.push(i);
 		}
 	}
 
 	// 3. Validate value count matches column count
-	if (stmt->values.size != stmt->sem.column_indices.size)
+	if (stmt->values.size ()!= stmt->sem.column_indices.size())
 	{
 		*error =
-			format_error("Value count mismatch: expected %u, got %u", stmt->sem.column_indices.size, stmt->values.size);
+			format_error("Value count mismatch: expected %u, got %u", stmt->sem.column_indices.size(), stmt->values.size());
 		*context = stmt->table_name.c_str();
 		return false;
 	}
 
 	// 4. Resolve value expressions and check type compatibility
-	for (uint32_t i = 0; i < stmt->values.size; i++)
+	for (uint32_t i = 0; i < stmt->values.size();i++)
 	{
 		Expr	*expr = stmt->values[i];
 		uint32_t col_idx = stmt->sem.column_indices[i];
@@ -400,10 +401,10 @@ semantic_resolve_update(UpdateStmt *stmt, const char **error, const char **conte
 
 	// 2. Resolve column indices
 	stmt->sem.column_indices.clear();
-	for (uint32_t i = 0; i < stmt->columns.size; i++)
+	for (uint32_t i = 0; i < stmt->columns.size();i++)
 	{
 		bool found = false;
-		for (uint32_t j = 0; j < table->columns.size; j++)
+		for (uint32_t j = 0; j < table->columns.size();j++)
 		{
 			if (strcmp(stmt->columns[i].c_str(), table->columns[j].name) == 0)
 			{
@@ -421,7 +422,7 @@ semantic_resolve_update(UpdateStmt *stmt, const char **error, const char **conte
 	}
 
 	// 3. Resolve value expressions
-	for (uint32_t i = 0; i < stmt->values.size; i++)
+	for (uint32_t i = 0; i < stmt->values.size();i++)
 	{
 		Expr	*expr = stmt->values[i];
 		uint32_t col_idx = stmt->sem.column_indices[i];
@@ -530,7 +531,7 @@ semantic_resolve_create_table(CreateTableStmt *stmt, const char **error, const c
 	}
 
 	// Validate we have at least one column
-	if (stmt->columns.size == 0)
+	if (stmt->columns.size() == 0)
 	{
 		*error = "Table must have at least one column";
 		*context = stmt->table_name.c_str();
@@ -538,9 +539,9 @@ semantic_resolve_create_table(CreateTableStmt *stmt, const char **error, const c
 	}
 
 	// Check for duplicate column names
-	for (uint32_t i = 0; i < stmt->columns.size; i++)
+	for (uint32_t i = 0; i < stmt->columns.size();i++)
 	{
-		for (uint32_t j = i + 1; j < stmt->columns.size; j++)
+		for (uint32_t j = i + 1; j < stmt->columns.size();j++)
 		{
 			if (stmt->columns[i].name.equals(stmt->columns[j].name))
 			{
@@ -553,7 +554,7 @@ semantic_resolve_create_table(CreateTableStmt *stmt, const char **error, const c
 
 	// Build Structure for pending catalog
 	array<Column> cols;
-	for (uint32_t i = 0; i < stmt->columns.size; i++)
+	for (uint32_t i = 0; i < stmt->columns.size();i++)
 	{
 		ColumnDef &def = stmt->columns[i];
 
@@ -671,9 +672,9 @@ semantic_analyze(array<Statement *, parser_arena> *statements)
 	clear_catalog_changes();
 
 	// Analyze each statement
-	for (uint32_t i = 0; i < statements->size; i++)
+	for (uint32_t i = 0; i < statements->size(); i++)
 	{
-		Statement *stmt = statements->data[i];
+		Statement*stmt = statements->data()[i];
 
 		const char *error = nullptr;
 		const char *context = nullptr;

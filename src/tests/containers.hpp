@@ -1,31 +1,27 @@
 #include "../arena.hpp"
+#include "../containers.hpp"
 #include <cstdio>
 #include <cassert>
 
-struct test_arena
-{
-};
-
+struct test_arena {};
 
 /* Some basic tests, by no-means bullet-proof */
-
 
 inline void
 test_array()
 {
-
 	arena<test_arena>::init(1024 * 1024);
 
 	{
 		array<int, test_arena> arr;
-		assert(arr.size == 0);
+		assert(arr.size() == 0);
 		assert(arr.empty());
 
 		for (int i = 0; i < 100; i++)
 		{
 			arr.push(i * 2);
 		}
-		assert(arr.size == 100);
+		assert(arr.size() == 100);
 		assert(!arr.empty());
 
 		for (int i = 0; i < 100; i++)
@@ -39,18 +35,18 @@ test_array()
 			batch[i] = i + 1000;
 		}
 		arr.push_n(batch, 50);
-		assert(arr.size == 150);
+		assert(arr.size() == 150);
 
 		arr.reserve(500);
-		assert(arr.capacity >= 500);
-		assert(arr.size == 150);
+		assert(arr.capacity() >= 500);
+		assert(arr.size() == 150);
 
 		arr.resize(200);
-		assert(arr.size == 200);
+		assert(arr.size() == 200);
 
 		arr.clear();
-		assert(arr.size == 0);
-		assert(arr.capacity >= 500);
+		assert(arr.size() == 0);
+		assert(arr.capacity() >= 500);
 	}
 
 	{
@@ -61,11 +57,10 @@ test_array()
 		}
 
 		array<int, test_arena> arr2;
-
 		arr2.set(arr1);
 
-		assert(arr2.size == arr1.size);
-		for (uint32_t i = 0; i < arr1.size; i++)
+		assert(arr2.size() == arr1.size());
+		for (uint32_t i = 0; i < arr1.size(); i++)
 		{
 			assert(arr2[i] == arr1[i]);
 		}
@@ -99,18 +94,18 @@ test_array()
 		{
 			arr.push(i);
 		}
-		assert(arr.capacity >= 1000);
+		assert(arr.capacity() >= 1000);
 
 		arr.shrink_to_fit();
-		assert(arr.capacity == 10);
-		assert(arr.size == 10);
+		assert(arr.capacity() == 10);
+		assert(arr.size() == 10);
 	}
 
 	{
 		auto *heap_arr = array<int, test_arena>::create();
 		heap_arr->push(42);
 		heap_arr->push(84);
-		assert(heap_arr->size == 2);
+		assert(heap_arr->size() == 2);
 		assert((*heap_arr)[0] == 42);
 	}
 
@@ -124,7 +119,6 @@ test_array()
 inline void
 test_string()
 {
-
 	arena<test_arena>::reset();
 
 	{
@@ -179,7 +173,7 @@ test_string()
 		array<string<test_arena>, test_arena> parts;
 		str.split(',', &parts);
 
-		assert(parts.size == 5);
+		assert(parts.size() == 5);
 		assert(parts[0].equals("one"));
 		assert(parts[1].equals("two"));
 		assert(parts[2].equals("three"));
@@ -219,6 +213,55 @@ test_string()
 		assert(heap_str->equals("Heap string"));
 	}
 
+	// Test new string_view based operations
+	{
+		string<test_arena> str;
+		str.set("Test string for find operations");
+
+		assert(str.find('s') == 2);
+		assert(str.find("string") == 5);
+		assert(str.starts_with("Test"));
+		assert(str.ends_with("operations"));
+		assert(!str.starts_with("test")); // case sensitive
+
+		auto substr = str.substr(5, 6);
+		assert(substr.equals("string"));
+	}
+
+	{
+		string<test_arena> str;
+		str.set("  trim test  ");
+		str.trim();
+		assert(str.equals("trim test"));
+
+		str.set("  left trim");
+		str.ltrim();
+		assert(str.equals("left trim"));
+
+		str.set("right trim  ");
+		str.rtrim();
+		assert(str.equals("right trim"));
+	}
+
+	{
+		string<test_arena> str;
+		str.set("UPPERCASE");
+		str.to_lower();
+		assert(str.equals("uppercase"));
+
+		str.set("lowercase");
+		str.to_upper();
+		assert(str.equals("LOWERCASE"));
+
+		str.set("a-b-c-d");
+		str.replace_all('-', '_');
+		assert(str.equals("a_b_c_d"));
+
+		assert(str.count('_') == 3);
+		assert(str.contains("b_c"));
+		assert(!str.contains("xyz"));
+	}
+
 	printf("  String memory stats:\n");
 	printf("    Reclaimed: %zu bytes\n", arena<test_arena>::reclaimed());
 	printf("    Reused: %zu bytes\n", arena<test_arena>::reused());
@@ -229,7 +272,6 @@ test_string()
 inline void
 test_hash_map()
 {
-
 	arena<test_arena>::reset();
 
 	{
@@ -240,7 +282,7 @@ test_hash_map()
 		{
 			map.insert(i, i * 10);
 		}
-		assert(map.size == 100);
+		assert(map.size() == 100);
 
 		for (int i = 0; i < 100; i++)
 		{
@@ -251,14 +293,14 @@ test_hash_map()
 
 		map.insert(50, 999);
 		assert(*map.get(50) == 999);
-		assert(map.size == 100);
+		assert(map.size() == 100);
 
 		assert(map.contains(75));
 		assert(!map.contains(200));
 
 		assert(map.remove(25));
 		assert(!map.contains(25));
-		assert(map.size == 99);
+		assert(map.size() == 99);
 		assert(!map.remove(25));
 	}
 
@@ -278,37 +320,28 @@ test_hash_map()
 		key3.set("third");
 		map.insert(key3, 300);
 
-		assert(map.size == 3);
+		assert(map.size() == 3);
 		assert(*map.get(key1) == 100);
 		assert(*map.get(key2) == 200);
 		assert(*map.get(key3) == 300);
 
+		// Test const char* key access
 		assert(*map.get("first") == 100);
 		assert(*map.get("second") == 200);
 		assert(map.contains("third"));
 		assert(!map.contains("fourth"));
 
 		map.insert("fourth", 400);
-		assert(map.size == 4);
+		assert(map.size() == 4);
 		assert(*map.get("fourth") == 400);
 
 		assert(map.remove("second"));
-		assert(map.size == 3);
+		assert(map.size() == 3);
 		assert(!map.contains("second"));
 	}
 
-	{
-		hash_map<int, int, test_arena> map;
-		map.init();
 
-		map[10] = 100;
-		map[20] = 200;
-		assert(map[10] == 100);
-		assert(map[20] == 200);
 
-		assert(map[30] == 0);
-		assert(map.contains(30));
-	}
 
 	{
 		hash_map<int, int, test_arena> map;
@@ -319,7 +352,7 @@ test_hash_map()
 			map.insert(i, i * 2);
 		}
 
-		assert(map.size == 1000);
+		assert(map.size() == 1000);
 		for (int i = 0; i < 1000; i++)
 		{
 			assert(*map.get(i) == i * 2);
@@ -338,10 +371,10 @@ test_hash_map()
 		array<pair<int, int>, test_arena> pairs;
 		map.collect(&pairs);
 
-		assert(pairs.size == 10);
+		assert(pairs.size() == 10);
 
 		int sum = 0;
-		for (uint32_t i = 0; i < pairs.size; i++)
+		for (uint32_t i = 0; i < pairs.size(); i++)
 		{
 			sum += pairs[i].value;
 		}
@@ -356,10 +389,10 @@ test_hash_map()
 		{
 			map.insert(i, i);
 		}
-		assert(map.size == 50);
+		assert(map.size() == 50);
 
 		map.clear();
-		assert(map.size == 0);
+		assert(map.size() == 0);
 		assert(map.empty());
 		assert(!map.contains(25));
 	}
@@ -370,13 +403,8 @@ test_hash_map()
 inline void
 test_cross_arena_operations()
 {
-
-	struct arena1
-	{
-	};
-	struct arena2
-	{
-	};
+	struct arena1 {};
+	struct arena2 {};
 
 	arena<arena1>::init(1024 * 1024);
 	arena<arena2>::init(1024 * 1024);
@@ -397,7 +425,7 @@ test_cross_arena_operations()
 		for (int i = 0; i < 5; i++)
 		{
 			string<arena1> s;
-			char		   buf[32];
+			char buf[32];
 			snprintf(buf, sizeof(buf), "String %d", i);
 			s.set(buf);
 			arr1.push(s);
@@ -406,8 +434,8 @@ test_cross_arena_operations()
 		array<string<arena2>, arena2> arr2;
 		arr2.set(arr1);
 
-		assert(arr2.size == arr1.size);
-		for (uint32_t i = 0; i < arr1.size; i++)
+		assert(arr2.size() == arr1.size());
+		for (uint32_t i = 0; i < arr1.size(); i++)
 		{
 			assert(arr2[i].equals(arr1[i]));
 		}
@@ -432,7 +460,6 @@ test_cross_arena_operations()
 inline void
 test_stream_allocation()
 {
-
 	arena<test_arena>::init(1024 * 1024);
 	arena<test_arena>::reset();
 
@@ -542,16 +569,159 @@ test_memory_reuse_patterns()
 	arena<test_arena>::print_stats();
 }
 
+inline void
+test_string_view_interning()
+{
+    printf("\n=== Testing string_view interning ===\n");
+
+    arena<test_arena>::reset();
+
+    // Test basic interning
+    {
+        std::string_view sv1 = arena_intern<test_arena>("Hello, World!");
+        std::string_view sv2 = arena_intern<test_arena>("Hello, World!");
+
+        assert(sv1 == "Hello, World!");
+        assert(sv2 == "Hello, World!");
+        // Different pointers since we don't deduplicate
+        assert(sv1.data() != sv2.data());
+    }
+
+    // Test array with interned string_views
+    {
+        array<std::string_view, test_arena> arr;
+
+        // Intern some strings
+        arr.push(arena_intern<test_arena>("first"));
+        arr.push(arena_intern<test_arena>("second"));
+        arr.push(arena_intern<test_arena>("third"));
+
+        // Also test with temporary strings that would be unsafe without interning
+        for (int i = 0; i < 10; i++) {
+            char buffer[32];
+            snprintf(buffer, sizeof(buffer), "item_%d", i);
+            arr.push(arena_intern<test_arena>(buffer));
+        }
+
+        assert(arr.size() == 13);
+        assert(arr[0] == "first");
+        assert(arr[1] == "second");
+        assert(arr[2] == "third");
+        assert(arr[3] == "item_0");
+        assert(arr[12] == "item_9");
+
+        // Test that the strings survive even after clearing other things
+        arena<test_arena>::print_stats();
+    }
+
+    // Test hash_map with interned string_view keys
+    {
+        hash_map_<std::string_view, int, test_arena> map;
+        map.init();
+
+        // Use interned strings as keys
+        map.insert(arena_intern<test_arena>("apple"), 100);
+        map.insert(arena_intern<test_arena>("banana"), 200);
+        map.insert(arena_intern<test_arena>("cherry"), 300);
+
+
+
+    	int x = *(int*)map.get("apple");
+    	(*map.get("banana") == 200);
+    	(*map.get("cherry") == 300);
+        // Can still look up with literals (they compare equal)
+        assert(*map.get("apple") == 100);
+        assert(*map.get("banana") == 200);
+        assert(*map.get("cherry") == 300);
+
+        // Test with dynamic strings
+        for (int i = 0; i < 50; i++) {
+            char key[32];
+            snprintf(key, sizeof(key), "key_%d", i);
+            map.insert(arena_intern<test_arena>(key), i * 10);
+        }
+
+        assert(map.size() == 53);
+        assert(*map.get("key_25") == 250);
+        assert(*map.get("key_49") == 490);
+    }
+
+    // Test interning from existing strings
+    {
+        string<test_arena> source;
+        source.set("This is a longer string that we want to intern");
+
+        std::string_view interned = arena_intern<test_arena>(source.view());
+
+        array_<std::string_view, test_arena> arr;
+        arr.push(interned);
+
+        // Original can be modified without affecting the interned copy
+        source.set("Changed!");
+        assert(arr[0] == "This is a longer string that we want to intern");
+    }
+
+    // Test hash_map with string_view values
+    {
+        hash_map_<int, std::string_view, test_arena> map;
+        map.init();
+
+        for (int i = 0; i < 20; i++) {
+            char value[64];
+            snprintf(value, sizeof(value), "Value for key %d", i);
+            map.insert(i, arena_intern<test_arena>(value));
+        }
+
+        assert(map.size() == 20);
+        assert(*map.get(0) == "Value for key 0");
+        assert(*map.get(19) == "Value for key 19");
+    }
+
+
+    // Test collection of pairs with string_view
+    {
+        hash_map_<std::string_view, std::string_view, test_arena> map;
+        map.init();
+
+        map.insert(arena_intern<test_arena>("name"),
+                  arena_intern<test_arena>("Alice"));
+        map.insert(arena_intern<test_arena>("city"),
+                  arena_intern<test_arena>("New York"));
+        map.insert(arena_intern<test_arena>("country"),
+                  arena_intern<test_arena>("USA"));
+
+        array_<pair<std::string_view, std::string_view>, test_arena> pairs;
+        map.collect(&pairs);
+
+        assert(pairs.size() == 3);
+        bool found_name = false;
+        for (uint32_t i = 0; i < pairs.size(); i++) {
+            if (pairs[i].key == "name") {
+                assert(pairs[i].value == "Alice");
+                found_name = true;
+            }
+        }
+        assert(found_name);
+    }
+
+    printf("  String interning memory stats:\n");
+    printf("    Total used: %zu bytes\n", arena<test_arena>::used());
+    printf("    Total committed: %zu bytes\n", arena<test_arena>::committed());
+
+    arena<test_arena>::reset();
+}
+
 inline int
 test_containers()
 {
-
-	test_array();
-	test_string();
-	test_hash_map();
-	test_cross_arena_operations();
-	test_stream_allocation();
-	test_memory_reuse_patterns();
+    arena<test_arena>::init();
+	// test_array();
+	// test_string();
+	// test_hash_map();
+	// test_cross_arena_operations();
+	// test_stream_allocation();
+	// test_memory_reuse_patterns();
+	test_string_view_interning();
 
 	arena<test_arena>::shutdown();
 

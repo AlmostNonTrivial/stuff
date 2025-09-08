@@ -1,6 +1,6 @@
 // parser.cpp - Simplified SQL Parser Implementation
 #include "parser.hpp"
-#include "arena.hpp"
+#include "arena.hpp" #include "containers.hpp"
 #include <cctype>
 #include <cstring>
 #include <cstdlib>
@@ -973,7 +973,7 @@ parse_create_table(Parser *parser, CreateTableStmt *stmt)
 		}
 
 		// First column is implicitly primary key
-		if (stmt->columns.size == 0)
+		if (stmt->columns.size()== 0)
 		{
 			col.sem.is_primary_key = true;
 		}
@@ -987,7 +987,7 @@ parse_create_table(Parser *parser, CreateTableStmt *stmt)
 		return;
 	}
 
-	if (stmt->columns.size == 0)
+	if (stmt->columns.size()== 0)
 	{
 		format_error(parser, "Table must have at least one column");
 		return;
@@ -1146,9 +1146,7 @@ array<Statement *, parser_arena>
 parser_parse_statements(Parser *parser)
 {
 	array<Statement *, parser_arena> statements;
-	statements.data = nullptr;
-	statements.size = 0;
-	statements.capacity = 0;
+	statements.reset();
 
 	while (true)
 	{
@@ -1191,7 +1189,7 @@ parse_sql(const char *sql)
 		result.error = parser.error_msg;
 		result.error_line = parser.error_line;
 		result.error_column = parser.error_column;
-		result.failed_statement_index = result.statements.size;
+		result.failed_statement_index = result.statements.size();
 	}
 	else
 	{
@@ -1364,7 +1362,7 @@ print_ast(Statement *stmt)
 		else
 		{
 			printf("  Columns: ");
-			for (uint32_t i = 0; i < s->columns.size; i++)
+			for (uint32_t i = 0; i < s->columns.size(); i++)
 			{
 				if (i > 0)
 					printf(", ");
@@ -1377,7 +1375,7 @@ print_ast(Statement *stmt)
 			printf("  WHERE:\n");
 			print_expr(s->where_clause, 4);
 		}
-		if (s->order_by_column.size > 0)
+		if (s->order_by_column.size ()> 0)
 		{
 			printf("  ORDER BY: %s %s\n", s->order_by_column.c_str(), s->order_desc ? "DESC" : "ASC");
 		}
@@ -1387,10 +1385,10 @@ print_ast(Statement *stmt)
 	case STMT_INSERT: {
 		InsertStmt *s = &stmt->insert_stmt;
 		printf("  Table: %s\n", s->table_name.c_str());
-		if (s->columns.size > 0)
+		if (s->columns.size() > 0)
 		{
 			printf("  Columns: ");
-			for (uint32_t i = 0; i < s->columns.size; i++)
+			for (uint32_t i = 0; i < s->columns.size(); i++)
 			{
 				if (i > 0)
 					printf(", ");
@@ -1399,7 +1397,7 @@ print_ast(Statement *stmt)
 			printf("\n");
 		}
 		printf("  Values:\n");
-		for (uint32_t i = 0; i < s->values.size; i++)
+		for (uint32_t i = 0; i < s->values.size(); i++)
 		{
 			print_expr(s->values[i], 4);
 		}
@@ -1410,7 +1408,7 @@ print_ast(Statement *stmt)
 		UpdateStmt *s = &stmt->update_stmt;
 		printf("  Table: %s\n", s->table_name.c_str());
 		printf("  SET:\n");
-		for (uint32_t i = 0; i < s->columns.size; i++)
+		for (uint32_t i = 0; i < s->columns.size(); i++)
 		{
 			printf("    %s = ", s->columns[i].c_str());
 			print_expr(s->values[i], 0);
@@ -1438,7 +1436,7 @@ print_ast(Statement *stmt)
 		CreateTableStmt *s = &stmt->create_table_stmt;
 		printf("  Table: %s\n", s->table_name.c_str());
 		printf("  Columns:\n");
-		for (uint32_t i = 0; i < s->columns.size; i++)
+		for (uint32_t i = 0; i < s->columns.size(); i++)
 		{
 			ColumnDef *col = &s->columns[i];
 			printf("    %s %s%s\n", col->name.c_str(), col->type == TYPE_U32 ? "INT" : "TEXT",

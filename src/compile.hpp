@@ -3,6 +3,7 @@
 #include "types.hpp"
 #include "common.hpp"
 #include "arena.hpp"
+#include "containers.hpp"
 #include "vm.hpp"
 #include <cassert>
 #include <cstdint>
@@ -16,9 +17,9 @@ struct CursorAllocator
 	int
 	allocate()
 	{
-		if (free_list.size > 0)
+		if (free_list.size()> 0)
 		{
-			return free_list.data[--free_list.size];
+			return free_list.pop_value();
 		}
 		return next_cursor++;
 	}
@@ -89,9 +90,8 @@ struct RegisterAllocator
 	void
 	pop_scope()
 	{
-		assert(scope_stack.size > 0 && "No scope to pop");
-		next_free = scope_stack.data[scope_stack.size - 1];
-		scope_stack.size--;
+		assert(scope_stack.size()> 0 && "No scope to pop");
+		next_free = scope_stack.pop_value();
 	}
 
 	int
@@ -191,7 +191,7 @@ struct ProgramBuilder
 		// Track instructions that need label resolution
 		if (inst.p2 == -1 || inst.p3 == -1)
 		{
-			unresolved_jumps.push(instructions.size - 1);
+			unresolved_jumps.push(instructions.size() - 1);
 		}
 	}
 
@@ -200,7 +200,7 @@ struct ProgramBuilder
 	{
 		string<query_arena> label_name;
 		label_name.set(name);
-		labels.insert(label_name, instructions.size);
+		labels.insert(label_name, instructions.size());
 	}
 
 	const char *
@@ -214,16 +214,16 @@ struct ProgramBuilder
 	int
 	here() const
 	{
-		return instructions.size;
+		return instructions.size();
 	}
 
 	void
 	resolve_labels()
 	{
-		for (uint32_t i = 0; i < unresolved_jumps.size; i++)
+		for (uint32_t i = 0; i < unresolved_jumps.size(); i++)
 		{
-			uint32_t	   inst_idx = unresolved_jumps.data[i];
-			VMInstruction &inst = instructions.data[inst_idx];
+			uint32_t	   inst_idx = unresolved_jumps[i];
+			VMInstruction &inst = instructions[inst_idx];
 
 			if (inst.p4)
 			{ // Label stored temporarily in p4

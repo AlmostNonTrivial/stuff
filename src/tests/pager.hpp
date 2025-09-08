@@ -1,5 +1,6 @@
 #pragma once
 #include "../arena.hpp"
+#include "../containers.hpp"
 #include "../pager.hpp"
 // #include "test_utils.hpp"
 #include <cassert>

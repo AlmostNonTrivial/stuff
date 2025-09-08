@@ -1,5 +1,6 @@
 #include "catalog.hpp"
 #include "arena.hpp"
+#include "containers.hpp"
 #include "compile.hpp"
 #include "pager.hpp"
 #include "parser.hpp"
@@ -13,8 +14,8 @@ Layout
 Structure::to_layout()
 {
 	array<DataType> column_types;
-	column_types.reserve(columns.size);
-	for (size_t i = 0; i < columns.size; i++)
+	column_types.reserve(columns.size());
+	for (size_t i = 0; i < columns.size(); i++)
 	{
 		column_types.push(columns[i].type);
 	}
@@ -26,11 +27,11 @@ Layout::create(array<DataType> &cols)
 {
 	Layout layout;
 	layout.layout = cols;
-	layout.offsets.reserve(cols.size);
+	layout.offsets.reserve(cols.size());
 
 	int offset = 0;
 	layout.offsets.push(0);
-	for (int i = 1; i < cols.size; i++)
+	for (int i = 1; i < cols.size(); i++)
 	{
 		offset += type_size(cols[i]);
 		layout.offsets.push(offset);
@@ -52,9 +53,7 @@ void
 bootstrap_master(bool create)
 {
 	array<Column> cols;
-	cols.data = nullptr;
-	cols.size = 0;
-	cols.capacity = 0;
+	cols.reset();
 
 	// type: "table" or "index"
 	cols.push(Column{MC_ID, TYPE_U32});
@@ -126,9 +125,9 @@ catalog_bootstrap_callback(TypedValue *result, size_t count)
 	{
 		// It's a table
 		CreateTableStmt &create_stmt = stmt->create_table_stmt;
-		columns.reserve(create_stmt.columns.size);
+		columns.reserve(create_stmt.columns.size());
 
-		for (uint32_t i = 0; i < create_stmt.columns.size; i++)
+		for (uint32_t i = 0; i < create_stmt.columns.size(); i++)
 		{
 			ColumnDef &col_def = create_stmt.columns[i];
 			Column	   col = {col_def.name.c_str(), col_def.type};
@@ -154,7 +153,7 @@ load_catalog_from_master()
 
 	// Run your existing master table scan
 	ProgramBuilder prog = {};
-	auto		   cctx = from_structure(catalog[MASTER_CATALOG]);
+	auto		   cctx = from_structure(*catalog.get(MASTER_CATALOG));
 	int			   cursor = prog.open_cursor(cctx);
 	int			   is_at_end = prog.rewind(cursor, false);
 	auto		   while_context = prog.begin_while(is_at_end);
@@ -166,7 +165,7 @@ load_catalog_from_master()
 	prog.halt();
 	prog.resolve_labels();
 
-	vm_execute(prog.instructions.data, prog.instructions.size);
+	vm_execute(prog.instructions.front(), prog.instructions.size());
 }
 
 void

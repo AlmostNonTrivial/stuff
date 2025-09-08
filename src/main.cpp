@@ -8,7 +8,7 @@
 #include "tests/containers.hpp"
 #include "tests/types.hpp"
 // #include "tests/ephemeral.hpp"
-#include "arena.hpp"
+#include "arena.hpp" #include "containers.hpp"
 #include "catalog.hpp"
 #include "common.hpp"
 #include "types.hpp"
@@ -75,14 +75,14 @@ print_select_headers(SelectStmt *select_stmt)
 
 	if (select_stmt->is_star)
 	{
-		for (uint32_t i = 0; i < table->columns.size; i++)
+		for (uint32_t i = 0; i < table->columns.size(); i++)
 		{
 			int width = get_column_width(table->columns[i].type);
 			printf("%-*s  ", width, table->columns[i].name);
 		}
 		printf("\n");
 
-		for (uint32_t i = 0; i < table->columns.size; i++)
+		for (uint32_t i = 0; i < table->columns.size(); i++)
 		{
 			int width = get_column_width(table->columns[i].type);
 			for (int j = 0; j < width; j++)
@@ -93,7 +93,7 @@ print_select_headers(SelectStmt *select_stmt)
 	}
 	else
 	{
-		for (uint32_t i = 0; i < select_stmt->sem.column_indices.size; i++)
+		for (uint32_t i = 0; i < select_stmt->sem.column_indices.size(); i++)
 		{
 			uint32_t	col_idx = select_stmt->sem.column_indices[i];
 			const char *name = table->columns[col_idx].name;
@@ -104,7 +104,7 @@ print_select_headers(SelectStmt *select_stmt)
 		}
 		printf("\n");
 
-		for (uint32_t i = 0; i < select_stmt->sem.column_indices.size; i++)
+		for (uint32_t i = 0; i < select_stmt->sem.column_indices.size(); i++)
 		{
 			uint32_t col_idx = select_stmt->sem.column_indices[i];
 			DataType type = table->columns[col_idx].type;
@@ -132,14 +132,14 @@ setup_result_formatting(SelectStmt *select_stmt)
 
 	if (select_stmt->is_star)
 	{
-		for (uint32_t i = 0; i < table->columns.size; i++)
+		for (uint32_t i = 0; i < table->columns.size(); i++)
 		{
 			result_column_widths.push(get_column_width(table->columns[i].type));
 		}
 	}
 	else
 	{
-		for (uint32_t i = 0; i < select_stmt->sem.column_indices.size; i++)
+		for (uint32_t i = 0; i < select_stmt->sem.column_indices.size(); i++)
 		{
 			uint32_t col_idx = select_stmt->sem.column_indices[i];
 			DataType type = table->columns[col_idx].type;
@@ -153,7 +153,7 @@ formatted_result_callback(TypedValue *result, size_t count)
 {
 	for (size_t i = 0; i < count; i++)
 	{
-		int width = (i < result_column_widths.size) ? result_column_widths[i] : 15;
+		int width = (i < result_column_widths.size()) ? result_column_widths[i] : 15;
 
 		switch (type_id(result[i].type))
 		{
@@ -232,13 +232,13 @@ execute_sql_statement(const char *sql, bool test_mode)
 		}
 
 		array<VMInstruction, query_arena> program = compile_program(stmt, !in_transaction);
-		if (program.size == 0)
+		if (program.size( )== 0)
 		{
 			printf("❌ Compilation failed: %s\n", sql);
 			return false;
 		}
 
-		VM_RESULT result = vm_execute(program.data, program.size);
+		VM_RESULT result = vm_execute(program.data(), program.size());
 		if (result != OK)
 		{
 			printf("❌ Execution failed: %s\n", sql);
@@ -291,18 +291,18 @@ run_meta_command(const char *cmd)
 	{
 		printf("\nTables:\n");
 		printf("-------\n");
-		for (int i = 0; i < catalog.size; i++)
+		for (int i = 0; i < catalog.size(); i++)
 		{
-			if (catalog.entries[i].state != hash_slot_state::OCCUPIED)
+			if (catalog.entries()[i].state != hash_slot_state::OCCUPIED)
 			{
 				continue;
 			}
-			auto &name = catalog.entries[i].key;
-			auto &structure = catalog.entries[i].value;
+			auto &name = catalog.entries()[i].key;
+			auto &structure = catalog.entries()[i].value;
 
 			if (strcmp(name.c_str(), MASTER_CATALOG) != 0)
 			{
-				printf("  %s (%d columns)\n", name.c_str(), structure.columns.size);
+				printf("  %s (%d columns)\n", name.c_str(), structure.columns.size());
 			}
 		}
 		printf("\n");
@@ -315,7 +315,7 @@ run_meta_command(const char *cmd)
 		{
 			printf("\nSchema for %s:\n", table_name);
 			printf("--------------\n");
-			for (uint32_t i = 0; i < s->columns.size; i++)
+			for (uint32_t i = 0; i < s->columns.size(); i++)
 			{
 				printf("  %-20s %s\n", s->columns[i].name, type_name(s->columns[i].type));
 			}
@@ -512,6 +512,7 @@ run_repl()
 }
 
 // #include "./tests/containers.hpp"
+#include "containers.hpp"
 
 int
 run_tests()
@@ -530,7 +531,16 @@ run_tests()
 int
 main(int argc, char **argv)
 {
+    arena<global_arena>::init();
+    arena<catalog_arena>::init();
+    arena<parser_arena>::init();
+    arena<query_arena>::init();
 
+
+
+    // hash_map<std::string_view, int> sdad;
+
+    // sdad.insert( "asdasda", 2);
 	// if (argc > 1 && strlen(argv[1]) >= 5)
 	// {
 	// 	if (strcmp("debug", argv[1]) == 0)

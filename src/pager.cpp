@@ -49,6 +49,7 @@
 
 #include "pager.hpp"
 #include "arena.hpp"
+#include "containers.hpp"
 #include "os_layer.hpp"
 #include <cstddef>
 #include <cstdint>

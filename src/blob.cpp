@@ -36,7 +36,7 @@
 #include "blob.hpp"
 #include "common.hpp"
 #include "pager.hpp"
-#include "arena.hpp"
+#include "arena.hpp" #include "containers.hpp"
 #include <cstring>
 
 #define BLOB_HEADER_SIZE 12

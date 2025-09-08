@@ -7,7 +7,7 @@
 #include <cstdio>
 
 struct test_arena {};
-using TestArena = arena<test_arena>;
+using TestArena = Arena<test_arena>;
 
 struct Allocation {
     void* ptr;

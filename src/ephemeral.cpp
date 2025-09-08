@@ -47,7 +47,7 @@
 #include <cstdio>
 #include <cstring>
 #include <unordered_set>
-#include "arena.hpp"
+#include "arena.hpp" #include "containers.hpp"
 
 
 // ============================================================================

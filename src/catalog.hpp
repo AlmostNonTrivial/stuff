@@ -4,6 +4,7 @@
 #include "types.hpp"
 #include <vector>
 #include "arena.hpp"
+#include "containers.hpp"
 
 #include <cstdint>
 struct catalog_arena
@@ -26,12 +27,10 @@ struct Layout
 	static Layout
 	create(array<DataType> &column_types);
 
-
-
 	uint32_t
 	count()
 	{
-		return layout.size;
+		return layout.size();
 	}
 	DataType
 	key_type()
@@ -41,7 +40,7 @@ struct Layout
 
 	// Create a new layout with swapped columns
 	Layout
-	reorder(std::initializer_list<uint32_t>& new_order) const
+	reorder(std::initializer_list<uint32_t> &new_order) const
 	{
 		array<DataType> types = layout;
 		int				i = 0;
@@ -56,7 +55,7 @@ struct Layout
 struct Structure
 {
 	const char *name;
-	uint32_t next_key = 0; // just for master
+	uint32_t	next_key = 0; // just for master
 	union {
 		btree btree;
 	} storage;
@@ -69,7 +68,12 @@ struct Structure
 	from(const char *name, array<Column> cols);
 
 	uint32_t
-	count(){return columns.size;} DataType key_type()
+	count()
+	{
+		return columns.size();
+	}
+	DataType
+	key_type()
 	{
 		return columns[0].type;
 	}
@@ -77,12 +81,10 @@ struct Structure
 
 extern hash_map<string<catalog_arena>, Structure, catalog_arena> catalog;
 
-
-
 #define MASTER_CATALOG "sqlite_master"
 
 // Column names for master catalog
-#define MC_ID "id"
+#define MC_ID		"id"
 #define MC_NAME		"name"
 #define MC_TBL_NAME "tbl_name"
 #define MC_ROOTPAGE "rootpage"
@@ -98,4 +100,5 @@ void
 catalog_bootstrap_callback(TypedValue *result, size_t count);
 void
 load_catalog_from_master();
-void reload_catalog();
+void
+reload_catalog();

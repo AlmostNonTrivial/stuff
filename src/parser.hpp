@@ -1,5 +1,6 @@
 #pragma once
 #include "arena.hpp"
+#include "containers.hpp"
 #include "types.hpp"
 
 struct parser_arena {};

@@ -40,7 +40,7 @@
 #include "os_layer.hpp"
 
 // Comment out the next line to use memory filesystem instead of platform-specific
-// #define USE_PLATFORM_FS
+#define USE_PLATFORM_FS
 
 #if defined(USE_PLATFORM_FS) && defined(_WIN32)
 /*
@@ -263,6 +263,7 @@ os_file_truncate(os_file_handle_t handle, os_file_offset_t size)
 */
 
 #include "arena.hpp"
+#include "containers.hpp"
 
 /* Define invalid handle for memory filesystem */
 #ifndef OS_INVALID_HANDLE
@@ -277,9 +278,9 @@ os_file_truncate(os_file_handle_t handle, os_file_offset_t size)
 */
 struct file_handle
 {
-    string<global_arena> filepath;   /* Path to file */
-    size_t               position;   /* Current read/write position */
-    bool                 read_write; /* true if opened for writing */
+	string<global_arena> filepath;	 /* Path to file */
+	size_t				 position;	 /* Current read/write position */
+	bool				 read_write; /* true if opened for writing */
 };
 
 /*
@@ -289,21 +290,22 @@ struct file_handle
 */
 struct memory_file_system
 {
-    /* Map from filepath to file contents */
-    hash_map<string<global_arena>, array<uint8_t, global_arena>, global_arena> files;
+	/* Map from filepath to file contents */
+	hash_map<string<global_arena>, array<uint8_t, global_arena>, global_arena> files;
 
-    /* Map from handle ID to handle data */
-    hash_map<os_file_handle_t, file_handle, global_arena> handles;
+	/* Map from handle ID to handle data */
+	hash_map<os_file_handle_t, file_handle, global_arena> handles;
 
-    /* Next handle ID to assign (starts at 1, 0 is invalid) */
-    os_file_handle_t next_handle = 1;
+	/* Next handle ID to assign (starts at 1, 0 is invalid) */
+	os_file_handle_t next_handle = 1;
 
-    void init()
-    {
-        files.init();
-        handles.init();
-        next_handle = 1;
-    }
+	void
+	init()
+	{
+		files.init();
+		handles.init();
+		next_handle = 1;
+	}
 };
 
 static memory_file_system g_filesystem;
@@ -311,258 +313,256 @@ static memory_file_system g_filesystem;
 os_file_handle_t
 os_file_open(const char *filename, bool read_write, bool create)
 {
-    if (!g_filesystem.files.entries)
-    {
-        g_filesystem.init();
-    }
+	if (!g_filesystem.files.size())
+	{
+		g_filesystem.init();
+	}
 
-    /* Create string key for the file */
-    string<global_arena> filepath_key = string<global_arena>::make(filename);
+	/* Create string key for the file */
+	string<global_arena> filepath_key = string<global_arena>::make(filename);
 
-    /* Check if file exists */
-    auto *file_data = g_filesystem.files.get(filepath_key);
+	/* Check if file exists */
+	auto *file_data = g_filesystem.files.get(filepath_key);
 
-    if (!file_data)
-    {
-        if (!create)
-        {
-            return OS_INVALID_HANDLE;
-        }
+	if (!file_data)
+	{
+		if (!create)
+		{
+			return OS_INVALID_HANDLE;
+		}
 
-        /* Create new file with empty byte array */
-        array<uint8_t, global_arena> new_file;
-        g_filesystem.files.insert(filepath_key, new_file);
-        file_data = g_filesystem.files.get(filepath_key);
-    }
+		/* Create new file with empty byte array */
+		array<uint8_t, global_arena> new_file;
+		g_filesystem.files.insert(filepath_key, new_file);
+		file_data = g_filesystem.files.get(filepath_key);
+	}
 
-    /* Create new handle with its own state */
-    os_file_handle_t handle = g_filesystem.next_handle++;
+	/* Create new handle with its own state */
+	os_file_handle_t handle = g_filesystem.next_handle++;
 
-    file_handle fh;
-    fh.filepath = string<global_arena>::make(filename);
-    fh.position = 0;
-    fh.read_write = read_write;
+	file_handle fh;
+	fh.filepath = string<global_arena>::make(filename);
+	fh.position = 0;
+	fh.read_write = read_write;
 
-    g_filesystem.handles.insert(handle, fh);
+	g_filesystem.handles.insert(handle, fh);
 
-    return handle;
+	return handle;
 }
 
 void
 os_file_close(os_file_handle_t handle)
 {
-    if (handle != OS_INVALID_HANDLE)
-    {
-        g_filesystem.handles.remove(handle);
-    }
+	if (handle != OS_INVALID_HANDLE)
+	{
+		g_filesystem.handles.remove(handle);
+	}
 }
 
 bool
 os_file_exists(const char *filename)
 {
-    if (!g_filesystem.files.entries)
-    {
-        return false;
-    }
+	if (!g_filesystem.files.size())
+	{
+		return false;
+	}
 
-    string<global_arena> filepath_key = string<global_arena>::make(filename);
-    return g_filesystem.files.contains(filepath_key);
+	string<global_arena> filepath_key = string<global_arena>::make(filename);
+	return g_filesystem.files.contains(filepath_key);
 }
 
 void
 os_file_delete(const char *filename)
 {
-    if (!g_filesystem.files.entries)
-    {
-        return;
-    }
+	if (!g_filesystem.files.size())
+	{
+		return;
+	}
 
-    string<global_arena> filepath_key = string<global_arena>::make(filename);
+	string<global_arena> filepath_key = string<global_arena>::make(filename);
 
-    /* Delete from the files map */
-    g_filesystem.files.remove(filepath_key);
+	/* Delete from the files map */
+	g_filesystem.files.remove(filepath_key);
 
-    /* Close any open handles to this file */
-    /* Collect handles first to avoid modifying while iterating */
-    array<os_file_handle_t, global_arena> handles_to_close;
+	/* Close any open handles to this file */
+	/* Collect handles first to avoid modifying while iterating */
+	array<os_file_handle_t, global_arena> handles_to_close;
 
-    for (uint32_t i = 0; i < g_filesystem.handles.capacity; i++)
-    {
-        auto &entry = g_filesystem.handles.entries[i];
-        if (entry.state ==hash_slot_state::OCCUPIED)
-        {
-            if (entry.value.filepath.equals(filename))
-            {
-                handles_to_close.push(entry.key);
-            }
-        }
-    }
+	for (uint32_t i = 0; i < g_filesystem.handles.capacity(); i++)
+	{
+		auto &entry = g_filesystem.handles.storage.data[i];
+		if (entry.state == hash_slot_state::OCCUPIED)
+		{
+			if (entry.value.filepath.equals(filename))
+			{
+				handles_to_close.push(entry.key);
+			}
+		}
+	}
 
-    /* Now close the collected handles */
-    for (uint32_t i = 0; i < handles_to_close.size; i++)
-    {
-        os_file_close(handles_to_close.data[i]);
-    }
+	/* Now close the collected handles */
+	for (uint32_t i = 0; i < handles_to_close.size(); i++)
+	{
+		os_file_close(handles_to_close[i]);
+	}
 }
 
 os_file_size_t
 os_file_read(os_file_handle_t handle, void *buffer, os_file_size_t size)
 {
-    auto *handle_data = g_filesystem.handles.get(handle);
-    if (!handle_data)
-    {
-        return 0;
-    }
+	auto *handle_data = g_filesystem.handles.get(handle);
+	if (!handle_data)
+	{
+		return 0;
+	}
 
-    auto *file_data = g_filesystem.files.get(handle_data->filepath);
-    if (!file_data)
-    {
-        return 0;
-    }
+	auto *file_data = g_filesystem.files.get(handle_data->filepath);
+	if (!file_data)
+	{
+		return 0;
+	}
 
-    size_t &position = handle_data->position;
-    os_file_size_t bytes_to_read = 0;
+	size_t		  &position = handle_data->position;
+	os_file_size_t bytes_to_read = 0;
 
-    if (position < file_data->size)
-    {
-        bytes_to_read = (os_file_size_t)(file_data->size - position);
-        if (size < bytes_to_read)
-        {
-            bytes_to_read = size;
-        }
-    }
+	if (position < file_data->size())
+	{
+		bytes_to_read = (os_file_size_t)(file_data->size() - position);
+		if (size < bytes_to_read)
+		{
+			bytes_to_read = size;
+		}
+	}
 
-    if (bytes_to_read > 0)
-    {
-        memcpy(buffer, file_data->data + position, bytes_to_read);
-        position += bytes_to_read;
-    }
+	if (bytes_to_read > 0)
+	{
+		memcpy(buffer, file_data->front() + position, bytes_to_read);
+		position += bytes_to_read;
+	}
 
-    return bytes_to_read;
+	return bytes_to_read;
 }
 
 os_file_size_t
 os_file_write(os_file_handle_t handle, const void *buffer, os_file_size_t size)
 {
-    auto *handle_data = g_filesystem.handles.get(handle);
-    if (!handle_data || !handle_data->read_write)
-    {
-        return 0;
-    }
+	auto *handle_data = g_filesystem.handles.get(handle);
+	if (!handle_data || !handle_data->read_write)
+	{
+		return 0;
+	}
 
-    auto *file_data = g_filesystem.files.get(handle_data->filepath);
-    if (!file_data)
-    {
-        return 0;
-    }
+	auto *file_data = g_filesystem.files.get(handle_data->filepath);
+	if (!file_data)
+	{
+		return 0;
+	}
 
-    size_t &position = handle_data->position;
-    size_t required_size = position + size;
+	size_t &position = handle_data->position;
+	size_t	required_size = position + size;
 
-    /*
-    ** SPARSE FILE HANDLING
-    **
-    ** If writing past EOF, we need to zero-fill the gap to match
-    ** POSIX sparse file behavior. This is critical for database
-    ** correctness as uninitialized pages must read as zeros.
-    */
-    if (position > file_data->size)
-    {
-        /* Writing past EOF - need to zero-fill the gap */
-        file_data->reserve(required_size);
+	/*
+	** SPARSE FILE HANDLING
+	**
+	** If writing past EOF, we need to zero-fill the gap to match
+	** POSIX sparse file behavior. This is critical for database
+	** correctness as uninitialized pages must read as zeros.
+	*/
+	// if (position > file_data->size())
+	// {
+	// 	/* Writing past EOF - need to zero-fill the gap */
+	// 	file_data->storage.grow_by(required_size - file_data->size());
 
-        /* Zero-fill from current size to write position */
-        memset(file_data->data + file_data->size, 0, position - file_data->size);
+	// 	/* Zero-fill from current size to write position */
+	// 	memset(file_data->front() + file_data->size(), 0, position - file_data->size());
+	// }
+	// else if (required_size > file_data->size())
+	// {
+	// 	/* Writing extends the file but no gap */
+	// 	file_data->reserve(required_size);
 
-        file_data->size = required_size;
-    }
-    else if (required_size > file_data->size)
-    {
-        /* Writing extends the file but no gap */
-        file_data->reserve(required_size);
-        file_data->size = required_size;
-    }
-    else
-    {
-        /* Writing within existing file bounds */
-        file_data->reserve(required_size);
-    }
+	// }
+	// else
+	// {
+	// 	/* Writing within existing file bounds */
+	// 	file_data->reserve(required_size);
+	// }
 
-    /* Perform the write */
-    memcpy(file_data->data + position, buffer, size);
-    position += size;
+	/* Perform the write */
+	// memcpy(file_data->data + position, buffer, size);
+	position += size;
 
-    return size;
+	return size;
 }
 
 void
 os_file_sync(os_file_handle_t handle)
 {
-    /* No-op for memory-based implementation */
-    (void)handle;
+	/* No-op for memory-based implementation */
+	(void)handle;
 }
 
 void
 os_file_seek(os_file_handle_t handle, os_file_offset_t offset)
 {
-    auto *handle_data = g_filesystem.handles.get(handle);
-    if (!handle_data)
-    {
-        return;
-    }
+	auto *handle_data = g_filesystem.handles.get(handle);
+	if (!handle_data)
+	{
+		return;
+	}
 
-    /* Allow seeking beyond EOF to support sparse files */
-    handle_data->position = (size_t)offset;
+	/* Allow seeking beyond EOF to support sparse files */
+	handle_data->position = (size_t)offset;
 }
 
 os_file_offset_t
 os_file_size(os_file_handle_t handle)
 {
-    auto *handle_data = g_filesystem.handles.get(handle);
-    if (!handle_data)
-    {
-        return 0;
-    }
+	auto *handle_data = g_filesystem.handles.get(handle);
+	if (!handle_data)
+	{
+		return 0;
+	}
 
-    auto *file_data = g_filesystem.files.get(handle_data->filepath);
-    if (!file_data)
-    {
-        return 0;
-    }
+	auto *file_data = g_filesystem.files.get(handle_data->filepath);
+	if (!file_data)
+	{
+		return 0;
+	}
 
-    return (os_file_offset_t)file_data->size;
+	return (os_file_offset_t)file_data->size();
 }
 
 void
 os_file_truncate(os_file_handle_t handle, os_file_offset_t size)
 {
-    auto *handle_data = g_filesystem.handles.get(handle);
-    if (!handle_data || !handle_data->read_write)
-    {
-        return;
-    }
+	auto *handle_data = g_filesystem.handles.get(handle);
+	if (!handle_data || !handle_data->read_write)
+	{
+		return;
+	}
 
-    auto *file_data = g_filesystem.files.get(handle_data->filepath);
-    if (!file_data)
-    {
-        return;
-    }
+	auto *file_data = g_filesystem.files.get(handle_data->filepath);
+	if (!file_data)
+	{
+		return;
+	}
 
-    /* Resize the file */
-    if ((size_t)size > file_data->size)
-    {
-        /* Extending - need to zero-fill */
-        file_data->reserve((size_t)size);
-        /* Zero-fill the new bytes */
-        memset(file_data->data + file_data->size, 0, (size_t)size - file_data->size);
-    }
+	/* Resize the file */
+	if ((size_t)size > file_data->size())
+	{
+		/* Extending - need to zero-fill */
+		file_data->reserve((size_t)size);
+		/* Zero-fill the new bytes */
+		memset(file_data->front()+ file_data->size(), 0, (size_t)size - file_data->size());
+	}
 
-    file_data->size = (size_t)size;
+	// file_data->size = (size_t)size;
 
-    /* Adjust position if it's beyond new size */
-    if (handle_data->position > (size_t)size)
-    {
-        handle_data->position = (size_t)size;
-    }
+	/* Adjust position if it's beyond new size */
+	if (handle_data->position > (size_t)size)
+	{
+		handle_data->position = (size_t)size;
+	}
 }
 #endif

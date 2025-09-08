@@ -107,7 +107,7 @@ static const char* reconstruct_create_sql(CreateTableStmt *stmt) {
     arena_stream_write(&stream, stmt->table_name.c_str(), stmt->table_name.length());
     arena_stream_write(&stream, " (", 2);
 
-    for (uint32_t i = 0; i < stmt->columns.size; i++) {
+    for (uint32_t i = 0; i < stmt->columns.size(); i++) {
         if (i > 0) {
             arena_stream_write(&stream, ", ", 2);
         }
@@ -194,7 +194,7 @@ array<VMInstruction, query_arena> compile_select(Statement *stmt) {
     }
 
     Structure *table = select_stmt->sem.table;
-    bool has_order_by = (select_stmt->order_by_column.size > 0);
+    bool has_order_by = (select_stmt->order_by_column.size()> 0);
 
     if (has_order_by) {
         // ====================================================================
@@ -210,13 +210,13 @@ array<VMInstruction, query_arena> compile_select(Statement *stmt) {
         // Add all output columns
         int output_column_count;
         if (select_stmt->is_star) {
-            output_column_count = table->columns.size;
-            for (uint32_t i = 0; i < table->columns.size; i++) {
+            output_column_count = table->columns.size();
+            for (uint32_t i = 0; i < table->columns.size(); i++) {
                 rb_types.push(table->columns[i].type);
             }
         } else {
-            output_column_count = select_stmt->sem.column_indices.size;
-            for (uint32_t i = 0; i < select_stmt->sem.column_indices.size; i++) {
+            output_column_count = select_stmt->sem.column_indices.size();
+            for (uint32_t i = 0; i < select_stmt->sem.column_indices.size(); i++) {
                 rb_types.push(table->columns[select_stmt->sem.column_indices[i]].type);
             }
         }
@@ -255,12 +255,12 @@ array<VMInstruction, query_arena> compile_select(Statement *stmt) {
 
                 // Remaining registers: selected columns
                 if (select_stmt->is_star) {
-                    for (uint32_t i = 0; i < table->columns.size; i++) {
+                    for (uint32_t i = 0; i < table->columns.size(); i++) {
                         int col = prog.get_column(table_cursor, i);
                         prog.move(col, rb_record + 1 + i);
                     }
                 } else {
-                    for (uint32_t i = 0; i < select_stmt->sem.column_indices.size; i++) {
+                    for (uint32_t i = 0; i < select_stmt->sem.column_indices.size(); i++) {
                         int col = prog.get_column(table_cursor, select_stmt->sem.column_indices[i]);
                         prog.move(col, rb_record + 1 + i);
                     }
@@ -334,10 +334,10 @@ array<VMInstruction, query_arena> compile_select(Statement *stmt) {
                 int result_count;
 
                 if (select_stmt->is_star) {
-                    result_start = prog.get_columns(cursor, 0, table->columns.size);
-                    result_count = table->columns.size;
+                    result_start = prog.get_columns(cursor, 0, table->columns.size());
+                    result_count = table->columns.size();
                 } else {
-                    result_count = select_stmt->sem.column_indices.size;
+                    result_count = select_stmt->sem.column_indices.size();
                     result_start = prog.regs.allocate_range(result_count);
                     for (uint32_t i = 0; i < result_count; i++) {
                         int col_reg = prog.get_column(cursor, select_stmt->sem.column_indices[i]);
@@ -378,10 +378,10 @@ array<VMInstruction, query_arena> compile_select(Statement *stmt) {
                     int result_count;
 
                     if (select_stmt->is_star) {
-                        result_start = prog.get_columns(cursor, 0, table->columns.size);
-                        result_count = table->columns.size;
+                        result_start = prog.get_columns(cursor, 0, table->columns.size());
+                        result_count = table->columns.size();
                     } else {
-                        result_count = select_stmt->sem.column_indices.size;
+                        result_count = select_stmt->sem.column_indices.size();
                         result_start = prog.regs.allocate_range(result_count);
                         for (uint32_t i = 0; i < result_count; i++) {
                             int col_reg = prog.get_column(cursor, select_stmt->sem.column_indices[i]);
@@ -430,7 +430,7 @@ array<VMInstruction, query_arena> compile_insert(Statement *stmt) {
     int cursor = prog.open_cursor(table_ctx);
 
     // Build the row in correct column order
-    int row_size = insert_stmt->sem.table->columns.size;
+    int row_size = insert_stmt->sem.table->columns.size();
     int row_start = prog.regs.allocate_range(row_size);
 
     // Initialize all columns to NULL first
@@ -439,7 +439,7 @@ array<VMInstruction, query_arena> compile_insert(Statement *stmt) {
     }
 
     // Fill in specified columns
-    for (uint32_t i = 0; i < insert_stmt->values.size; i++) {
+    for (uint32_t i = 0; i < insert_stmt->values.size(); i++) {
         Expr *expr = insert_stmt->values[i];
         uint32_t col_idx = insert_stmt->sem.column_indices[i];
 
@@ -503,10 +503,10 @@ array<VMInstruction, query_arena> compile_update(Statement *stmt) {
 
         if (should_update) {
             // Load current row
-            int row_start = prog.get_columns(cursor, 0, table->columns.size);
+            int row_start = prog.get_columns(cursor, 0, table->columns.size());
 
             // Apply updates to specific columns
-            for (uint32_t i = 0; i < update_stmt->columns.size; i++) {
+            for (uint32_t i = 0; i < update_stmt->columns.size(); i++) {
                 uint32_t col_idx = update_stmt->sem.column_indices[i];
                 Expr *value_expr = update_stmt->values[i];
 
@@ -636,7 +636,7 @@ array<VMInstruction, query_arena> compile_create_table(Statement *stmt) {
     int root_page_reg = prog.call_function(vmfunc_create_structure, table_name_reg, 1);
 
     // 2. Add entry to master catalog
-    Structure &master = catalog[MASTER_CATALOG];
+    Structure &master = *catalog.get(MASTER_CATALOG);
     auto master_ctx = from_structure(master);
     int master_cursor = prog.open_cursor(master_ctx);
 
@@ -696,7 +696,7 @@ array<VMInstruction, query_arena> compile_drop_table(Statement *stmt) {
     prog.call_function(vmfunc_drop_structure, name_reg, 1);
 
     // 2. Delete from master catalog
-    Structure &master = catalog[MASTER_CATALOG];
+    Structure &master = *catalog.get(MASTER_CATALOG);
     auto master_ctx = from_structure(master);
     int cursor = prog.open_cursor(master_ctx);
 
