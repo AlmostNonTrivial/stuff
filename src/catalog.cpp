@@ -1,178 +1,204 @@
+
+// ============================================================================
+// catalog.cpp - Implementation
+// ============================================================================
+
 #include "catalog.hpp"
 #include "arena.hpp"
+#include "common.hpp"
 #include "containers.hpp"
-#include "compile.hpp"
 #include "pager.hpp"
 #include "parser.hpp"
 #include "types.hpp"
 #include <cassert>
-#include <cstdint>
+#include <string_view>
 
-hash_map<string<catalog_arena>, Structure, catalog_arena> catalog;
+// ============================================================================
+// Global Catalog Instance
+// ============================================================================
 
-Layout
-Structure::to_layout()
-{
-	array<DataType> column_types;
-	column_types.reserve(columns.size());
-	for (size_t i = 0; i < columns.size(); i++)
-	{
-		column_types.push(columns[i].type);
-	}
-	return Layout::create(column_types);
+hash_map<string_view, Relation, catalog_arena> catalog;
+
+// ============================================================================
+// Catalog Management
+// ============================================================================
+
+/**
+ * Add a relation to the global catalog
+ *
+ * The relation's name is interned to ensure it persists in catalog memory
+ * and to enable efficient string comparison via pointer equality.
+ */
+void catalog_add_relation(Relation& relation) {
+    catalog.insert(arena_intern<catalog_arena>(relation.name), relation);
 }
 
-Layout
-Layout::create(array<DataType> &cols)
-{
-	Layout layout;
-	layout.layout = cols;
-	layout.offsets.reserve(cols.size());
+/**
+ * Remove a relation from the catalog
+ *
+ * Because hash_map::remove only marks entries as deleted (tombstones),
+ * we need to manually reclaim the interned string memory.
+ */
+void catalog_delete_relation(string_view key) {
+    if (!catalog.contains(key)) {
+        return;
+    }
 
-	int offset = 0;
-	layout.offsets.push(0);
-	for (int i = 1; i < cols.size(); i++)
-	{
-		offset += type_size(cols[i]);
-		layout.offsets.push(offset);
-	}
-	layout.record_size = offset;
-	return layout;
+    auto entry = catalog.entry(key);
+    catalog.remove(key);
+
+    // Reclaim the interned string since remove() only tombstones
+    arena_reclaim_string(entry->key);
 }
 
-Structure
-Structure::from(const char *name, array<Column> cols)
-{
-	Structure structure;
-	structure.columns.set(cols);
-	structure.name = name;
-	return structure;
+// ============================================================================
+// Tuple Format Construction
+// ============================================================================
+
+/**
+ * Build a TupleFormat from column types
+ *
+ * Creates a format descriptor for tuples with the given column types.
+ * The first column is treated as the key and stored separately in the
+ * btree, so offsets begin from the second column.
+ *
+ * @param columns Array of column types, first element is the key type
+ * @return TupleFormat describing the physical tuple layout
+ */
+TupleFormat tuple_format_from_types(array<DataType, query_arena>& columns) {
+    TupleFormat format;
+
+    // First column is always the key
+    format.key_type = columns[0];
+    format.columns.assign(columns);
+
+    // Calculate offsets for record portion (excluding key)
+    // The key is stored separately in the btree node
+    int offset = 0;
+    format.offsets.push(0);  // First record column starts at offset 0
+
+    // Start from 1 because column 0 is the key
+    for (int i = 1; i < columns.size(); i++) {
+        offset += type_size(columns[i]);
+        format.offsets.push(offset);
+    }
+
+    format.record_size = offset;
+    return format;
 }
 
-void
-bootstrap_master(bool create)
-{
-	array<Column> cols;
-	cols.reset();
+/**
+ * Extract TupleFormat from a Relation's schema
+ *
+ * Converts the logical schema (Attributes) into a physical layout
+ * descriptor (TupleFormat) for tuple processing.
+ */
+TupleFormat tuple_format_from_relation(Relation& schema) {
+    array<DataType, query_arena> column_types;
 
-	// type: "table" or "index"
-	cols.push(Column{MC_ID, TYPE_U32});
+    for (auto col : schema.columns) {
+        column_types.push(col.type);
+    }
 
-	// name: object name
-	cols.push(Column{MC_NAME, TYPE_CHAR32});
-
-	// tbl_name: table that this object belongs to
-	// (same as name for tables, parent table for indexes)
-	cols.push(Column{MC_TBL_NAME, TYPE_CHAR32});
-
-	// rootpage: root page number in the btree
-	cols.push(Column{MC_ROOTPAGE, TYPE_U32});
-
-	// sql: CREATE statement (using largest fixed char type)
-	cols.push(Column{MC_SQL, TYPE_CHAR256});
-
-	Structure structure = Structure::from(MASTER_CATALOG, cols);
-	Layout	  layout = structure.to_layout();
-
-	if (create)
-	{
-		pager_begin_transaction();
-		structure.storage.btree = btree_create(layout.key_type(), layout.record_size, create);
-		assert(1 == structure.storage.btree.root_page_index);
-		// validate
-		pager_commit();
-	}
-	else
-	{
-		structure.storage.btree = btree_create(layout.key_type(), layout.record_size, create);
-		structure.storage.btree.root_page_index = 1;
-	}
-
-	catalog.insert(MASTER_CATALOG, structure);
+    return tuple_format_from_types(column_types);
 }
 
-// In catalog.cpp or a new bootstrap file
+// ============================================================================
+// Relation Construction
+// ============================================================================
 
-// Result callback for catalog bootstrap
-void
-catalog_bootstrap_callback(TypedValue *result, size_t count)
-{
-	if (count != 5)
-		return;
+/**
+ * Create a new Relation with the given schema
+ *
+ * Performs cross-arena copying: the input columns are typically in
+ * query_arena (temporary), but the Relation stores them in catalog_arena
+ * (persistent) to ensure they survive beyond the current query.
+ */
+Relation create_relation(string_view name, array<Attribute, query_arena> columns) {
+    Relation rel;
 
-	const uint32_t key = result[0].as_u32();
-	const char	  *name = result[1].as_char();
-	const char	  *tbl_name = result[2].as_char();
-	uint32_t	   rootpage = result[3].as_u32();
-	const char	  *sql = result[4].as_char();
+    // Cross-arena copy from query to catalog arena
+    rel.columns.copy_from(columns);
+    rel.name = name;
 
-	if (strcmp(name, MASTER_CATALOG) == 0)
-		return;
-
-	auto master = catalog.get(MASTER_CATALOG);
-	if (master->next_key <= key)
-	{
-		master->next_key = key + 1;
-	}
-
-	Parser parser;
-	parser_init(&parser, sql);
-	Statement *stmt = parser_parse_statement(&parser);
-
-	array<Column> columns;
-
-	if (strcmp(tbl_name, name) == 0)
-	{
-		// It's a table
-		CreateTableStmt &create_stmt = stmt->create_table_stmt;
-		columns.reserve(create_stmt.columns.size());
-
-		for (uint32_t i = 0; i < create_stmt.columns.size(); i++)
-		{
-			ColumnDef &col_def = create_stmt.columns[i];
-			Column	   col = {col_def.name.c_str(), col_def.type};
-			columns.push(col);
-		}
-	}
-
-	// Create the structure
-	Structure structure = Structure::from(name, columns);
-
-	// Set up the btree with existing root page
-	structure.storage.btree = btree_create(structure.to_layout().key_type(), structure.to_layout().record_size, false);
-	structure.storage.btree.root_page_index = rootpage;
-
-	catalog.insert(name, structure);
+    return rel;
 }
 
-void
-load_catalog_from_master()
-{
-	// Set the callback
-	vm_set_result_callback(catalog_bootstrap_callback);
+// ============================================================================
+// Master Catalog Bootstrap
+// ============================================================================
 
-	// Run your existing master table scan
-	ProgramBuilder prog = {};
-	auto		   cctx = from_structure(*catalog.get(MASTER_CATALOG));
-	int			   cursor = prog.open_cursor(cctx);
-	int			   is_at_end = prog.rewind(cursor, false);
-	auto		   while_context = prog.begin_while(is_at_end);
-	int			   dest_reg = prog.get_columns(cursor, 0, cctx->layout.count());
-	prog.result(dest_reg, cctx->layout.count());
-	prog.next(cursor, is_at_end);
-	prog.end_while(while_context);
-	prog.close_cursor(cursor);
-	prog.halt();
-	prog.resolve_labels();
+/**
+ * Bootstrap the master catalog table
+ *
+ * The master catalog is the meta-table that stores information about
+ * all other tables. It must be at btree root page 1 for consistency.
+ *
+ * Two modes:
+ * 1. is_new_database=true:  Create new master catalog at page 1
+ * 2. is_new_database=false: Load existing master catalog from page 1
+ *
+ * The master catalog schema is compatible with SQLite for familiarity.
+ */
+static void bootstrap_master(bool is_new_database) {
+    // Define the master catalog schema
+    array<Attribute, query_arena> master_columns = {
+        {MC_ID, TYPE_U32},          // Auto-increment ID
+        {MC_NAME, TYPE_CHAR32},     // Object name
+        {MC_TBL_NAME, TYPE_CHAR32}, // Parent table name
+        {MC_ROOTPAGE, TYPE_U32},    // Root page in btree
+        {MC_SQL, TYPE_CHAR256}      // CREATE statement
+    };
 
-	vm_execute(prog.instructions.front(), prog.instructions.size());
+    Relation master_table = create_relation(MASTER_CATALOG, master_columns);
+    TupleFormat layout = tuple_format_from_relation(master_table);
+
+    if (is_new_database) {
+        // Create new master catalog
+        pager_begin_transaction();
+        master_table.storage.btree = btree_create(layout.key_type, layout.record_size, is_new_database);
+
+        // Master catalog MUST be at page 1
+        assert(1 == master_table.storage.btree.root_page_index);
+
+        pager_commit();
+    } else {
+        // Load existing master catalog from page 1
+        master_table.storage.btree = btree_create(layout.key_type, layout.record_size, is_new_database);
+        master_table.storage.btree.root_page_index = 1;
+    }
+
+    catalog.insert(MASTER_CATALOG, master_table);
 }
 
-void
-reload_catalog()
-{
-	arena<catalog_arena>::init();
-	catalog.clear();
-	bootstrap_master(false);
-	load_catalog_from_master();
+// ============================================================================
+// Catalog Lifecycle
+// ============================================================================
+
+/**
+ * Reload the entire catalog from disk
+ *
+ * This is called:
+ * 1. On database open to load the schema
+ * 2. After a rollback to reset to the committed state
+ *
+ * Process:
+ * 1. Clear and reset the catalog arena
+ * 2. Bootstrap the master catalog from page 1
+ * 3. Scan the master catalog to load all other relations
+ */
+void catalog_reload() {
+    // Ensure catalog arena is initialized
+    arena<catalog_arena>::init();
+
+    // Clear all catalog memory and return to initial state
+    arena<catalog_arena>::reset_and_decommit();
+    catalog.clear();
+
+    // Load master catalog from page 1
+    bootstrap_master(false);
+
+    // Load all other relations from master
+    // (Implementation in separate file)
+    load_catalog_from_master();
 }
