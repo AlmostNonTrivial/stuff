@@ -85,15 +85,6 @@ resolve_column_list(Relation *table, array<string_view, query_arena> &column_nam
 			return false;
 		}
 
-		for (auto out_index : out_indices)
-		{
-			if (idx == out_index)
-			{
-				set_error("Column specied twice", column_name);
-				return false;
-			}
-		}
-
 		out_indices.push(idx);
 	}
 	return true;

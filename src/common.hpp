@@ -56,19 +56,8 @@ debug_logic_op_name(logic_op op)
 	return (op >= LOGIC_AND && op <= LOGIC_OR) ? names[op] : "UNKNOWN";
 }
 
-/*Errors would only last for one query */
-template <typename arena_tag = query_arena>
-inline const char *
-format_error(const char *fmt, ...)
-{
-	size_t	len = strlen(fmt);
-	char   *buffer = (char *)arena<arena_tag>::alloc(len);
-	va_list args;
-	va_start(args, fmt);
-	vsnprintf(buffer, len, fmt, args);
-	va_end(args);
-	return buffer;
-}
+
+
 
 inline bool
 to_str(std::string_view sv, char *buffer, int size)
@@ -79,6 +68,6 @@ to_str(std::string_view sv, char *buffer, int size)
 	}
 	size_t len = sv.size();
 	memcpy(buffer, sv.data(), len);
-	buffer[len + 1] = '\0';
+	buffer[len] = '\0';
 	return true;
 }

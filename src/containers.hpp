@@ -464,8 +464,6 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		return entry(key)->value;
 	}
 
-
-
 	Entry *
 	entry(const K &key)
 	{
@@ -637,8 +635,9 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 				target->hash = hash;
 				target->state = Entry::OCCUPIED;
 
-				if (handle_tombstones && first_deleted != -1) {
-						tombstones--;
+				if (handle_tombstones && first_deleted != -1)
+				{
+					tombstones--;
 				}
 
 				_size++;
@@ -748,5 +747,4 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		return iterator(storage.data, storage.capacity, storage.capacity);
 	}
 };
-template <typename K, typename ArenaTag = global_arena>
-using hash_set  = hash_map<K, char, ArenaTag>;
+template <typename K, typename ArenaTag = global_arena> using hash_set = hash_map<K, char, ArenaTag>;

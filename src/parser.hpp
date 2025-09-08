@@ -80,7 +80,7 @@ struct Expr
 		DataType   resolved_type = TYPE_NULL;
 		int32_t	   column_index = -1; // For EXPR_COLUMN
 		Relation *table = nullptr;	  // For EXPR_COLUMN
-		bool	   is_resolved = false;
+
 	} sem;
 
 	union {
@@ -213,7 +213,7 @@ struct DeleteStmt
 	struct
 	{
 		Relation *table = nullptr;
-		bool	   is_resolved = false;
+
 	} sem;
 };
 
@@ -226,8 +226,8 @@ struct CreateTableStmt
 	// Semantic resolution
 	struct
 	{
-		Relation *created_structure = nullptr; // Built structure
-		bool	   is_resolved = false;
+		string_view created_structure; // Built structure
+
 	} sem;
 };
 
@@ -240,7 +240,7 @@ struct DropTableStmt
 	struct
 	{
 		Relation *table = nullptr;
-		bool	   is_resolved = false;
+
 	} sem;
 };
 
