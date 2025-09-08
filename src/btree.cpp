@@ -48,6 +48,7 @@
 #include <cstdint>
 #include <cstring>
 #include <sys/types.h>
+#include <utility>
 
 /*
 ** CONSTANTS AND CONFIGURATION
@@ -1986,8 +1987,8 @@ validate_node_recursive(btree *tree, btree_node *node, uint32_t expected_parent,
 
 // Add this to bplustree.cpp
 
-#include <queue>
-#include <iomanip>
+#include "containers.hpp"
+
 
 // Helper to print a single key based on type
 static void
@@ -2163,19 +2164,20 @@ btree_print_compact(btree *tree_ptr)
 
 	printf("B+Tree (page:type:keys:parent):\n");
 
-	std::queue<uint32_t> queue;
-	std::queue<uint32_t> levels;
+	struct temp_arena{};
+	queue<uint32_t,temp_arena > q;
+	queue<uint32_t, temp_arena> levels;
 
-	queue.push(tree_ptr->root_page_index);
+	q.push(tree_ptr->root_page_index);
 	levels.push(0);
 
 	uint32_t current_level = 0;
 
-	while (!queue.empty())
+	while (!q.empty())
 	{
-		uint32_t page_index = queue.front();
-		uint32_t level = levels.front();
-		queue.pop();
+		uint32_t page_index = *q.front();
+		uint32_t level = *levels.front();
+		q.pop();
 		levels.pop();
 
 		if (level != current_level)
@@ -2197,7 +2199,7 @@ btree_print_compact(btree *tree_ptr)
 			uint32_t *children = GET_CHILDREN(node);
 			for (uint32_t i = 0; i <= node->num_keys; i++)
 			{
-				queue.push(children[i]);
+				q.push(children[i]);
 				levels.push(level + 1);
 			}
 		}

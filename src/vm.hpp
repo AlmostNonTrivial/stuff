@@ -23,7 +23,7 @@ enum storage_type : uint8_t
 struct CursorContext
 {
 	storage_type type;
-	Layout	   layout;
+	TupleFormat	   layout;
 	union {
 		btree *tree;
 	} storage;
@@ -263,19 +263,8 @@ vm_execute(VMInstruction *instructions, int instruction_count);
 void
 vm_debug_print_all_registers();
 void
-vm_debug_print_cursor(int cursor_id);
-void
 vm_debug_print_program(VMInstruction *instructions, int count);
 
-// Debug helper functions for operation names
-const char *
-debug_compare_op_name(comparison_op op);
-const char *
-debug_arith_op_name(arith_op op);
-const char *
-debug_logic_op_name(logic_op op);
-const char *
-debug_cursor_type_name(storage_type type);
 
 void
 vm_set_result_callback(ResultCallback callback);

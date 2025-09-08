@@ -174,7 +174,7 @@ static struct
 	**                         (already saved or newly created)
 	*/
 	hash_map<uint32_t, uint32_t, pager_arena> page_to_cache;
-	hash_map<uint32_t, char /* use as set */, pager_arena>		       journaled_or_new_pages;
+	hash_set<uint32_t/* use as set */, pager_arena>		       journaled_or_new_pages;
 
 } PAGER = {};
 

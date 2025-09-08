@@ -67,7 +67,7 @@ print_select_headers(SelectStmt *select_stmt)
 	if (!select_stmt->sem.is_resolved)
 		return;
 
-	Structure *table = select_stmt->sem.table;
+	Relation *table = select_stmt->sem.table;
 	if (!table)
 		return;
 
@@ -126,7 +126,7 @@ setup_result_formatting(SelectStmt *select_stmt)
 	if (!select_stmt->sem.is_resolved)
 		return;
 
-	Structure *table = select_stmt->sem.table;
+	Relation *table = select_stmt->sem.table;
 	if (!table)
 		return;
 
@@ -310,7 +310,7 @@ run_meta_command(const char *cmd)
 	else if (strncmp(cmd, ".schema ", 8) == 0)
 	{
 		const char *table_name = cmd + 8;
-		Structure  *s = catalog.get(table_name);
+		Relation  *s = catalog.get(table_name);
 		if (s)
 		{
 			printf("\nSchema for %s:\n", table_name);
@@ -328,7 +328,7 @@ run_meta_command(const char *cmd)
 	}
 	else if (strcmp(cmd, ".reload") == 0)
 	{
-		reload_catalog();
+		catalog_reload();
 		printf("Catalog reloaded from disk\n");
 	}
 	else if (strcmp(cmd, ".demo1") == 0)
@@ -428,7 +428,7 @@ run_repl()
 	}
 	else
 	{
-		reload_catalog();
+		catalog_reload();
 	}
 
 	char				input[4096];
@@ -511,14 +511,14 @@ run_repl()
 	return 0;
 }
 
-// #include "./tests/containers.hpp"
+#include "./tests/parser.hpp"
 #include "containers.hpp"
 
 int
 run_tests()
 {
 	// test_arena();
-	test_containers();
+	test_parser();
 	// test_types();
 	// test_parser();
 	// test_blob();
@@ -533,8 +533,9 @@ main(int argc, char **argv)
 {
     arena<global_arena>::init();
     arena<catalog_arena>::init();
-    arena<parser_arena>::init();
     arena<query_arena>::init();
+
+
 
 
 

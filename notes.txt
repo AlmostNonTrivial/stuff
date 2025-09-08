@@ -9,3 +9,7 @@
 - can catalog structures be better?
 - move vmemory to os layer, inline everything in os_layer
 - get os_page size
+
+
+
+- clarify access semantics

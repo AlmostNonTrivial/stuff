@@ -1,6 +1,8 @@
 // blob.hpp
 #pragma once
 #include <cstdint>
+#include <string_view>
+
 
 // ============================================================================
 // BLOB OVERFLOW STORAGE
@@ -51,5 +53,5 @@ blob_get_size(uint32_t first_page);
 
 // Read entire blob into arena-allocated buffer
 
-void *
-blob_read_full(uint32_t first_page, uint64_t *size);
+std::string_view
+blob_read_full(uint32_t first_page);

@@ -106,7 +106,7 @@ load_table_from_csv_sql(const char *csv_file, const char *table_name)
 	int		  batch_count = 0;
 	const int BATCH_SIZE = 50;
 
-	Structure *structure = catalog.get(table_name);
+	Schema *structure = catalog.get(table_name);
 	if (!structure)
 		return;
 
@@ -266,11 +266,11 @@ vmfunc_create_index_structure(TypedValue *result, TypedValue *args, uint32_t arg
 	const char *index_name = args[0].as_char();
 
 	// Create composite index structure: (user_id, order_id) -> order_id
-	array<Column> columns;
-	columns.push(Column{"key", make_dual(TYPE_U32, TYPE_U32)}); // Composite key
+	array<Attribute> columns;
+	columns.push(Attribute{"key", make_dual(TYPE_U32, TYPE_U32)}); // Composite key
 
-	Structure index = Structure::from(index_name, columns);
-	Layout	  layout = index.to_layout();
+	Schema index = Schema::from(index_name, columns);
+	TupleFormat	  layout = index.to_layout();
 	index.storage.btree = btree_create(layout.key_type(), layout.record_size, false);
 
 	// Add to catalog temporarily (will be rolled back)
@@ -305,7 +305,7 @@ demo_like_pattern(const char *args)
 
 	ProgramBuilder prog;
 
-	Structure *products = catalog.get("products");
+	Schema *products = catalog.get("products");
 	if (!products)
 	{
 		printf("Products table not found!\n");
@@ -374,8 +374,8 @@ demo_nested_loop_join(const char *args)
 
 	ProgramBuilder prog;
 
-	Structure *users = catalog.get("users");
-	Structure *orders = catalog.get("orders");
+	Schema *users = catalog.get("users");
+	Schema *orders = catalog.get("orders");
 	if (!users || !orders)
 	{
 		printf("Required tables not found!\n");
@@ -486,7 +486,7 @@ demo_subquery_pattern(const char *args)
 
 	ProgramBuilder prog;
 
-	Structure *users = catalog.get("users");
+	Schema *users = catalog.get("users");
 	if (!users)
 	{
 		printf("Users table not found!\n");
@@ -494,7 +494,7 @@ demo_subquery_pattern(const char *args)
 	}
 
 	auto   users_ctx = from_structure(*users);
-	Layout temp_layout = users_ctx->layout;
+	TupleFormat temp_layout = users_ctx->layout;
 	auto   temp_ctx = red_black(temp_layout);
 
 	int users_cursor = prog.open_cursor(users_ctx);
@@ -583,7 +583,7 @@ demo_composite_index(const char *args)
 
 	{
 		ProgramBuilder prog;
-		Structure	  *orders = catalog.get("orders");
+		Schema	  *orders = catalog.get("orders");
 		if (!orders)
 		{
 			printf("Orders table not found!\n");
@@ -644,7 +644,7 @@ demo_composite_index(const char *args)
 	{
 		ProgramBuilder prog;
 
-		Structure *orders = catalog.get("orders");
+		Schema *orders = catalog.get("orders");
 		auto	   orders_ctx = from_structure(*orders);
 
 		// Create a context for the temporary index
@@ -785,7 +785,7 @@ demo_group_by_aggregate(const char *args)
 
 	ProgramBuilder prog;
 
-	Structure *users = catalog.get("users");
+	Schema *users = catalog.get("users");
 	if (!users)
 	{
 		printf("Users table not found!\n");
@@ -798,7 +798,7 @@ demo_group_by_aggregate(const char *args)
 	agg_types.push(TYPE_U32);	 // count
 	agg_types.push(TYPE_U32);	 // sum_age
 
-	Layout agg_layout = Layout::create(agg_types);
+	TupleFormat agg_layout = Layout::create(agg_types);
 
 	auto users_ctx = from_structure(*users);
 	auto agg_ctx = red_black(agg_layout);
@@ -955,14 +955,14 @@ demo_blob_storage(const char *args)
 	// Create documents table if it doesn't exist
 	if (!catalog.get("documents"))
 	{
-		array<Column> columns;
-		columns.push(Column{"doc_id", TYPE_U32});
-		columns.push(Column{"title", TYPE_CHAR32});
-		columns.push(Column{"blob_ref", TYPE_U32});
+		array<Attribute> columns;
+		columns.push(Attribute{"doc_id", TYPE_U32});
+		columns.push(Attribute{"title", TYPE_CHAR32});
+		columns.push(Attribute{"blob_ref", TYPE_U32});
 
 		pager_begin_transaction();
-		Structure docs = Structure::from("documents", columns);
-		Layout	  layout = docs.to_layout();
+		Schema docs = Schema::from("documents", columns);
+		TupleFormat	  layout = docs.to_layout();
 		docs.storage.btree = btree_create(layout.key_type(), layout.record_size, true);
 		catalog.insert("documents", docs);
 	}
@@ -970,7 +970,7 @@ demo_blob_storage(const char *args)
 	ProgramBuilder prog;
 	// prog.begin_transaction();
 
-	Structure *docs = catalog.get("documents");
+	Schema *docs = catalog.get("documents");
 	auto	   docs_ctx = from_structure(*docs);
 	int		   cursor = prog.open_cursor(docs_ctx);
 

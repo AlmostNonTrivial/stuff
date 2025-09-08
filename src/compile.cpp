@@ -1,6 +1,8 @@
 // compile.cpp - Simplified SQL compilation
 #include "compile.hpp"
+#include "arena.hpp"
 #include "catalog.hpp"
+#include "common.hpp"
 #include "parser.hpp"
 #include "vm.hpp"
 #include <cstring>
@@ -65,7 +67,7 @@ static int compile_expr(ProgramBuilder *prog, Expr *expr, int cursor_id) {
 }
 
 // Check if WHERE clause is a simple primary key lookup
-static bool is_pk_lookup(Expr *where_clause, Structure *table,
+static bool is_pk_lookup(Expr *where_clause, Relation *table,
                          comparison_op *out_op, Expr **out_literal) {
     if (!where_clause || where_clause->type != EXPR_BINARY_OP) {
         return false;
@@ -100,10 +102,10 @@ static bool is_pk_lookup(Expr *where_clause, Structure *table,
 
 // Reconstruct CREATE TABLE SQL from AST
 static const char* reconstruct_create_sql(CreateTableStmt *stmt) {
-    auto stream = arena_stream_begin<query_arena>(512);
+    auto stream = stream_writer<query_arena>::begin();
 
     const char *prefix = "CREATE TABLE ";
-    arena_stream_write(&stream, prefix, strlen(prefix));
+    stream.write(prefix, strlen(prefix));
     arena_stream_write(&stream, stmt->table_name.c_str(), stmt->table_name.length());
     arena_stream_write(&stream, " (", 2);
 
@@ -133,7 +135,7 @@ static const char* reconstruct_create_sql(CreateTableStmt *stmt) {
 static bool vmfunc_create_structure(TypedValue *result, TypedValue *args, uint32_t arg_count) {
     const char *table_name = args[0].as_char();
 
-    Structure *structure = catalog.get(table_name);
+    Relation *structure = catalog.get(table_name);
     if (!structure) {
         result->type = TYPE_U32;
         result->data = arena<query_arena>::alloc(sizeof(uint32_t));
@@ -141,7 +143,7 @@ static bool vmfunc_create_structure(TypedValue *result, TypedValue *args, uint32
         return false;
     }
 
-    Layout layout = structure->to_layout();
+    TupleFormat layout = structure->to_layout();
     structure->storage.btree = btree_create(layout.key_type(), layout.record_size, true);
 
     result->type = TYPE_U32;
@@ -156,7 +158,7 @@ static bool vmfunc_drop_structure(TypedValue *result, TypedValue *args, uint32_t
     }
 
     const char *name = args[0].as_char();
-    Structure *structure = catalog.get(name);
+    Relation *structure = catalog.get(name);
 
     if (!structure) {
         // Already gone
@@ -193,7 +195,7 @@ array<VMInstruction, query_arena> compile_select(Statement *stmt) {
         return prog.instructions;
     }
 
-    Structure *table = select_stmt->sem.table;
+    Relation *table = select_stmt->sem.table;
     bool has_order_by = (select_stmt->order_by_column.size()> 0);
 
     if (has_order_by) {
@@ -222,7 +224,7 @@ array<VMInstruction, query_arena> compile_select(Statement *stmt) {
         }
 
         // Create ephemeral red-black tree
-        Layout rb_layout = Layout::create(rb_types);
+        TupleFormat rb_layout = Layout::create(rb_types);
         auto rb_ctx = red_black(rb_layout, true);  // Allow duplicates
         int rb_cursor = prog.open_cursor(rb_ctx);
 
@@ -481,7 +483,7 @@ array<VMInstruction, query_arena> compile_update(Statement *stmt) {
 
     prog.begin_transaction();
 
-    Structure *table = update_stmt->sem.table;
+    Relation *table = update_stmt->sem.table;
     auto table_ctx = from_structure(*table);
     int cursor = prog.open_cursor(table_ctx);
 
@@ -636,7 +638,7 @@ array<VMInstruction, query_arena> compile_create_table(Statement *stmt) {
     int root_page_reg = prog.call_function(vmfunc_create_structure, table_name_reg, 1);
 
     // 2. Add entry to master catalog
-    Structure &master = *catalog.get(MASTER_CATALOG);
+    Relation &master = *catalog.get(MASTER_CATALOG);
     auto master_ctx = from_structure(master);
     int master_cursor = prog.open_cursor(master_ctx);
 
@@ -696,7 +698,7 @@ array<VMInstruction, query_arena> compile_drop_table(Statement *stmt) {
     prog.call_function(vmfunc_drop_structure, name_reg, 1);
 
     // 2. Delete from master catalog
-    Structure &master = *catalog.get(MASTER_CATALOG);
+    Relation &master = *catalog.get(MASTER_CATALOG);
     auto master_ctx = from_structure(master);
     int cursor = prog.open_cursor(master_ctx);
 
@@ -799,4 +801,78 @@ array<VMInstruction, query_arena> compile_program(Statement *stmt, bool inject_t
             return prog.instructions;
         }
     }
+}
+
+void
+catalog_bootstrap_callback(TypedValue *result, size_t count)
+{
+	if (count != 5)
+		return;
+
+	const uint32_t key = result[0].as_u32();
+	const char	  *name = result[1].as_char();
+	const char	  *tbl_name = result[2].as_char();
+	uint32_t	   rootpage = result[3].as_u32();
+	const char	  *sql = result[4].as_char();
+
+	if (strcmp(name, MASTER_CATALOG) == 0)
+		return;
+
+	auto master = catalog.get(MASTER_CATALOG);
+	if (master->next_key <= key)
+	{
+		master->next_key = key + 1;
+	}
+
+	Statement *stmt = parse_sql(sql).statements[0];
+
+	array<Attribute> columns;
+
+	if (strcmp(tbl_name, name) == 0)
+	{
+		// It's a table
+		CreateTableStmt &create_stmt = stmt->create_table_stmt;
+		columns.reserve(create_stmt.columns.size());
+
+		for (uint32_t i = 0; i < create_stmt.columns.size(); i++)
+		{
+			ColumnDef &col_def = create_stmt.columns[i];
+			Attribute	   col = {arena_intern<catalog_arena>(col_def.name), col_def.type};
+			columns.push(col);
+		}
+	}
+
+	// Create the structure
+	Relation structure = Schema::from(name, columns);
+
+	// Set up the btree with existing root page
+	structure.storage.btree = btree_create(structure.to_layout().key_type(), structure.to_layout().record_size, false);
+	structure.storage.btree.root_page_index = rootpage;
+
+	catalog.insert(name, structure);
+}
+
+void
+load_catalog_from_master()
+{
+	// Set the callback
+
+
+vm_set_result_callback(catalog_bootstrap_callback);
+
+	// Run your existing master table scan
+	ProgramBuilder prog = {};
+	auto		   cctx = from_structure(*catalog.get(MASTER_CATALOG));
+	int			   cursor = prog.open_cursor(cctx);
+	int			   is_at_end = prog.rewind(cursor, false);
+	auto		   while_context = prog.begin_while(is_at_end);
+	int			   dest_reg = prog.get_columns(cursor, 0, cctx->layout.count());
+	prog.result(dest_reg, cctx->layout.count());
+	prog.next(cursor, is_at_end);
+	prog.end_while(while_context);
+	prog.close_cursor(cursor);
+	prog.halt();
+	prog.resolve_labels();
+
+	vm_execute(prog.instructions.front(), prog.instructions.size());
 }

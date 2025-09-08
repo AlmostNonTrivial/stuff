@@ -11,7 +11,9 @@
 #include "parser.hpp"
 #include "types.hpp"
 #include <cassert>
+#include <cstring>
 #include <string_view>
+#include "compile.hpp"
 
 // ============================================================================
 // Global Catalog Instance
@@ -119,8 +121,8 @@ Relation create_relation(string_view name, array<Attribute, query_arena> columns
 
     // Cross-arena copy from query to catalog arena
     rel.columns.copy_from(columns);
-    rel.name = name;
 
+    to_str(name, rel.name, RELATION_NAME_MAX_SIZE);
     return rel;
 }
 
@@ -200,5 +202,5 @@ void catalog_reload() {
 
     // Load all other relations from master
     // (Implementation in separate file)
-    load_catalog_from_master();
+    // load_catalog_from_master();
 }

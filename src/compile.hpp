@@ -130,8 +130,8 @@ struct LoopContext
 
 struct WhileContext
 {
-	const char *condition_label;
-	const char *end_label;
+	string_view condition_label;
+	string_view end_label;
 	int			condition_reg;
 	int			saved_reg_mark;
 };
@@ -147,7 +147,7 @@ struct CondContext
 struct ProgramBuilder
 {
 	array<VMInstruction, query_arena> instructions;
-	hash_map<string<query_arena>, uint32_t, query_arena> labels;
+	hash_map<string_view, uint32_t, query_arena> labels;
 	array<uint32_t, query_arena>	  unresolved_jumps;
 	RegisterAllocator				  regs;
 	CursorAllocator					  cursors;
@@ -198,17 +198,16 @@ struct ProgramBuilder
 	void
 	label(const char *name)
 	{
-		string<query_arena> label_name;
-		label_name.set(name);
-		labels.insert(label_name, instructions.size());
+		labels.insert(arena_intern<query_arena>(name), instructions.size());
 	}
 
-	const char *
+string_view
 	generate_label(const char *prefix = "L")
 	{
-		char *name = (char *)arena<query_arena>::alloc(32);
+		char name[32];
 		snprintf(name, 32, "%s%d", prefix, label_counter++);
-		return name;
+		return arena_intern<query_arena>(name);
+
 	}
 
 	int
@@ -228,9 +227,8 @@ struct ProgramBuilder
 			if (inst.p4)
 			{ // Label stored temporarily in p4
 				const char *label_name = (const char *)inst.p4;
-				string<query_arena> key;
-				key.set(label_name);
-				uint32_t *target = labels.get(key);
+
+				uint32_t *target = labels.get(label_name);
 
 				if (target)
 				{
@@ -948,7 +946,7 @@ alloc_dual(DataType type1, const void *data1, DataType type2, const void *data2)
 
 
 inline CursorContext*
-from_structure(Structure &structure)
+from_structure(Relation &structure)
 {
 	CursorContext * cctx= (CursorContext*)arena<query_arena>::alloc(sizeof(CursorContext));
 	cctx->storage.tree = &structure.storage.btree;
@@ -959,7 +957,7 @@ from_structure(Structure &structure)
 
 
 inline CursorContext *
-red_black(Layout &layout, bool allow_duplicates = true)
+red_black(TupleFormat &layout, bool allow_duplicates = true)
 {
 	CursorContext * cctx= (CursorContext*)arena<query_arena>::alloc(sizeof(CursorContext));
 	cctx->type = RED_BLACK;

@@ -223,7 +223,7 @@ test_pager_stress()
 	{
 		uint32_t operation;
 		// Force create if no pages exist to ensure write/delete can proceed
-		if (committed_pages.size + transaction_pages.size == 0)
+		if (committed_pages.size() + transaction_pages.size == 0)
 		{
 			operation = 0;
 		}

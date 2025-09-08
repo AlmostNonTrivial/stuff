@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include "os_layer.hpp"
+#include "pager.hpp"
 #include <cstring>
 #include <cstdint>
 #include <string_view>
@@ -62,7 +63,7 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 #endif
 
 	static void
-	init(size_t initial = 4 * 1024 * 1024, size_t maximum = 0)
+	init(size_t initial = PAGE_SIZE, size_t maximum = 0)
 	{
 		if (base)
 		{
@@ -258,21 +259,10 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 		return block;
 	}
 
-	/* faster path, make sure you have enough allocated */
-	static void *
-	alloc_fast(size_t size)
-	{
-		uint8_t *aligned = (uint8_t *)(((uintptr_t)current + (Align - 1)) & ~(Align - 1));
-		uint8_t *next = aligned + size;
-		assert(next <= base + committed_capacity);
-
-		current = next;
-		return aligned;
-	}
-
 	static void *
 	alloc(size_t size)
 	{
+
 		assert(size > 0);
 		assert(size < reserved_capacity);
 
@@ -281,7 +271,12 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 		{
 			return recycled;
 		}
+		return alloc_internal(size);
+	}
 
+	static void *
+	alloc_internal(size_t size)
+	{
 		/* Bump allocator path - align the current pointer */
 		uint8_t *aligned = (uint8_t *)(((uintptr_t)current + (Align - 1)) & ~(Align - 1));
 		uint8_t *next = aligned + size;
@@ -670,45 +665,50 @@ template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8
 		other->size = tmp_size;
 		other->capacity = tmp_capacity;
 	}
- template <typename OtherTag>
-    void copy_from(const contiguous<T, OtherTag> &other)
-    {
-        clear();
-        if (other.size > 0 && other.data)
-        {
-            reserve(other.size);
-            memcpy(data, other.data, other.size * sizeof(T));
-            size = other.size;
-        }
-    }
+	template <typename OtherTag>
+	void
+	copy_from(const contiguous<T, OtherTag> &other)
+	{
+		clear();
+		if (other.size > 0 && other.data)
+		{
+			reserve(other.size);
+			memcpy(data, other.data, other.size * sizeof(T));
+			size = other.size;
+		}
+	}
 
-    // Alternative: expose raw copy for when you have raw pointers
-    void copy_from(const T *src_data, uint32_t src_size)
-    {
-        clear();
-        if (src_size > 0 && src_data)
-        {
-            reserve(src_size);
-            memcpy(data, src_data, src_size * sizeof(T));
-            size = src_size;
-        }
-    }
-    template <typename OtherTag>
-    void move_from(contiguous<T, OtherTag> &other) {
-        this->copy_from(other);
-        other.release();
-    }
+	// Alternative: expose raw copy for when you have raw pointers
+	void
+	copy_from(const T *src_data, uint32_t src_size)
+	{
+		clear();
+		if (src_size > 0 && src_data)
+		{
+			reserve(src_size);
+			memcpy(data, src_data, src_size * sizeof(T));
+			size = src_size;
+		}
+	}
+	template <typename OtherTag>
+	void
+	move_from(contiguous<T, OtherTag> &other)
+	{
+		this->copy_from(other);
+		other.release();
+	}
 
-    // Maybe also add append operations while we're at it
-    template <typename OtherTag>
-    void append_from(const contiguous<T, OtherTag> &other)
-    {
-        if (other.size > 0 && other.data)
-        {
-            T *dest = grow_by(other.size);
-            memcpy(dest, other.data, other.size * sizeof(T));
-        }
-    }
+	// Maybe also add append operations while we're at it
+	template <typename OtherTag>
+	void
+	append_from(const contiguous<T, OtherTag> &other)
+	{
+		if (other.size > 0 && other.data)
+		{
+			T *dest = grow_by(other.size);
+			memcpy(dest, other.data, other.size * sizeof(T));
+		}
+	}
 
 	void
 	release()
@@ -748,139 +748,74 @@ template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8
 };
 // Utility functions at global/namespace level
 template <typename T>
-inline T round_up_power_of_2(T n) {
-    static_assert(std::is_unsigned_v<T>);
-    n--;
-    n |= n >> 1;
-    n |= n >> 2;
-    n |= n >> 4;
-    n |= n >> 8;
-    if constexpr (sizeof(T) > 1) n |= n >> 16;
-    if constexpr (sizeof(T) > 4) n |= n >> 32;
-    return n + 1;
+inline T
+round_up_power_of_2(T n)
+{
+	static_assert(std::is_unsigned_v<T>);
+	n--;
+	n |= n >> 1;
+	n |= n >> 2;
+	n |= n >> 4;
+	n |= n >> 8;
+	if constexpr (sizeof(T) > 1)
+		n |= n >> 16;
+	if constexpr (sizeof(T) > 4)
+		n |= n >> 32;
+	return n + 1;
 }
 
-
-
-/*
- *
- * --Stream--
- */
-
-/* Streams to support contiguous allocation without knowing the size ahead of time */
-
-template <typename Tag> struct stream_alloc
+template <typename Tag = global_arena> struct stream_writer
 {
-	uint8_t *start;		// Where this allocation began
-	uint8_t *write_pos; // Current write position
-	size_t	 reserved;	// How much we've reserved so far
+	uint8_t *start;
+
+	static stream_writer
+	begin()
+	{
+		if (!arena<Tag>::base)
+		{
+			arena<Tag>::init();
+		}
+		return {arena<Tag>::current};
+	}
+
+	void
+	write(const void *data, size_t size)
+	{
+		void *dest = arena<Tag>::alloc_internal(size);
+		memcpy(dest, data, size);
+	}
+
+	template <typename T>
+	void
+	write(const T &value)
+	{
+		write(&value, sizeof(T));
+	}
+
+	void
+	write(std::string_view sv)
+	{
+		write(sv.data(), sv.size());
+	}
+
+	size_t
+	size() const
+	{
+		return arena<Tag>::current - start;
+	}
+
+	std::string_view
+	finish()
+	{
+		return std::string_view((char *)start, size());
+	}
+
+	void
+	abandon()
+	{
+		arena<Tag>::current = start;
+	}
 };
-
-template <typename Tag = global_arena>
-stream_alloc<Tag>
-arena_stream_begin(size_t initial_reserve = 1024)
-{
-	if (!arena<Tag>::base)
-	{
-		arena<Tag>::init();
-	}
-
-	// Ensure we have space for initial reservation
-	uint8_t *start = arena<Tag>::current;
-	size_t	 available = arena<Tag>::committed_capacity - (arena<Tag>::current - arena<Tag>::base);
-
-	if (initial_reserve > available)
-	{
-		// Need to commit more memory
-		size_t needed = (arena<Tag>::current - arena<Tag>::base) + initial_reserve;
-		if (needed > arena<Tag>::reserved_capacity)
-		{
-			fprintf(stderr, "Stream allocation too large\n");
-			exit(1);
-		}
-
-		size_t new_committed = virtual_memory::round_to_pages(needed);
-		if (!virtual_memory::commit(arena<Tag>::base + arena<Tag>::committed_capacity,
-									new_committed - arena<Tag>::committed_capacity))
-		{
-			fprintf(stderr, "Failed to commit memory for stream\n");
-			exit(1);
-		}
-		arena<Tag>::committed_capacity = new_committed;
-	}
-
-	arena<Tag>::current = start + initial_reserve;
-
-	return stream_alloc<Tag>{start, start, initial_reserve};
-}
-
-template <typename Tag = global_arena>
-void
-arena_stream_write(stream_alloc<Tag> *stream, const void *data, size_t size)
-{
-	size_t used = stream->write_pos - stream->start;
-	size_t remaining = stream->reserved - used;
-
-	if (size > remaining)
-	{
-
-		size_t new_reserved = stream->reserved * 2;
-		while (new_reserved - used < size)
-		{
-			new_reserved *= 2;
-		}
-
-		size_t available = arena<Tag>::committed_capacity - (stream->start - arena<Tag>::base);
-		if (new_reserved > available)
-		{
-			size_t needed = (stream->start - arena<Tag>::base) + new_reserved;
-			if (needed > arena<Tag>::reserved_capacity)
-			{
-				fprintf(stderr, "Stream allocation too large\n");
-				exit(1);
-			}
-
-			size_t new_committed = virtual_memory::round_to_pages(needed);
-			if (!virtual_memory::commit(arena<Tag>::base + arena<Tag>::committed_capacity,
-										new_committed - arena<Tag>::committed_capacity))
-			{
-				fprintf(stderr, "Failed to commit memory for stream\n");
-				exit(1);
-			}
-			arena<Tag>::committed_capacity = new_committed;
-		}
-
-		arena<Tag>::current = stream->start + new_reserved;
-		stream->reserved = new_reserved;
-	}
-
-	memcpy(stream->write_pos, data, size);
-	stream->write_pos += size;
-}
-
-template <typename Tag = global_arena>
-uint8_t *
-arena_stream_finish(stream_alloc<Tag> *stream)
-{
-
-	arena<Tag>::current = stream->write_pos;
-	return stream->start;
-}
-
-template <typename Tag = global_arena>
-void
-arena_stream_abandon(stream_alloc<Tag> *stream)
-{
-
-	arena<Tag>::current = stream->start;
-}
-
-template <typename Tag = global_arena>
-size_t
-arena_stream_size(const stream_alloc<Tag> *stream)
-{
-	return stream->write_pos - stream->start;
-}
 
 template <typename Tag = global_arena>
 std::string_view
@@ -904,4 +839,12 @@ arena_intern(const char *str, size_t len = 0, bool null_terminate = false)
 		memory[l] = '\0';
 	}
 	return std::string_view(memory, l);
+}
+
+template <typename Tag = global_arena>
+void
+arena_reclaim_string(std::string_view str)
+{
+	void *memory = (void *)(str.begin());
+	arena<Tag>::reclaim(memory, str.size());
 }

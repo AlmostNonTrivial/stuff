@@ -1,6 +1,8 @@
 // parser.cpp - Simplified SQL Parser Implementation
 #include "parser.hpp"
-#include "arena.hpp" #include "containers.hpp"
+#include "arena.hpp"
+#include "containers.hpp"
+#include "common.hpp"
 #include <cctype>
 #include <cstring>
 #include <cstdlib>
@@ -11,20 +13,20 @@
 // ERROR MESSAGE FORMATTING
 //=============================================================================
 
-static const char *
+static string_view
 format_error(Parser *parser, const char *fmt, ...)
 {
-	char   *buffer = (char *)arena<parser_arena>::alloc(256);
+	char   *buffer = (char *)arena<query_arena>::alloc(256);
 	va_list args;
 	va_start(args, fmt);
 	vsnprintf(buffer, 256, fmt, args);
 	va_end(args);
 
-	parser->error_msg = buffer;
+	parser->error_msg = string_view(buffer, strlen(buffer));
 	parser->error_line = parser->lexer.line;
 	parser->error_column = parser->lexer.column;
 
-	return buffer;
+	return parser->error_msg;
 }
 
 //=============================================================================
@@ -44,16 +46,6 @@ str_eq_ci(const char *a, uint32_t a_len, const char *b)
 			return false;
 	}
 	return true;
-}
-
-// Helper to properly copy a token's text with null termination
-static void
-set_string_from_token(string<parser_arena>& dest, const char* text, uint32_t length)
-{
-    char* buffer = (char*)arena<parser_arena>::alloc(length + 1);
-    memcpy(buffer, text, length);
-    buffer[length] = '\0';
-    dest.set(buffer);
 }
 
 //=============================================================================
@@ -319,21 +311,6 @@ lexer_peek_token(Lexer *lex)
 }
 
 //=============================================================================
-// PARSER INITIALIZATION
-//=============================================================================
-
-void
-parser_init(Parser *parser, const char *input)
-{
-	arena<parser_arena>::init();
-
-	lexer_init(&parser->lexer, input);
-	parser->error_msg = nullptr;
-	parser->error_line = -1;
-	parser->error_column = -1;
-}
-
-//=============================================================================
 // PARSER HELPERS
 //=============================================================================
 
@@ -434,7 +411,7 @@ parse_or_expr(Parser *parser)
 			return nullptr;
 		}
 
-		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
+		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
 		expr->type = EXPR_BINARY_OP;
 		expr->op = OP_OR;
 		expr->left = left;
@@ -461,7 +438,7 @@ parse_and_expr(Parser *parser)
 			return nullptr;
 		}
 
-		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
+		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
 		expr->type = EXPR_BINARY_OP;
 		expr->op = OP_AND;
 		expr->left = left;
@@ -520,7 +497,7 @@ parse_comparison_expr(Parser *parser)
 			return nullptr;
 		}
 
-		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
+		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
 		expr->type = EXPR_BINARY_OP;
 		expr->op = op;
 		expr->left = left;
@@ -543,7 +520,7 @@ parse_unary_expr(Parser *parser)
 			return nullptr;
 		}
 
-		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
+		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
 		expr->type = EXPR_UNARY_OP;
 		expr->unary_op = OP_NOT;
 		expr->operand = operand;
@@ -561,7 +538,7 @@ parse_primary_expr(Parser *parser)
 	// NULL literal
 	if (consume_keyword(parser, "NULL"))
 	{
-		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
+		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
 		expr->type = EXPR_NULL;
 		return expr;
 	}
@@ -570,11 +547,12 @@ parse_primary_expr(Parser *parser)
 	if (token.type == TOKEN_NUMBER)
 	{
 		lexer_next_token(&parser->lexer);
-		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
+		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
+
 		expr->type = EXPR_LITERAL;
 		expr->lit_type = TYPE_U32;
 
-		char *num_str = (char *)arena<parser_arena>::alloc(token.length + 1);
+		char *num_str = (char *)arena<query_arena>::alloc(token.length + 1);
 		memcpy(num_str, token.text, token.length);
 		num_str[token.length] = '\0';
 
@@ -586,10 +564,10 @@ parse_primary_expr(Parser *parser)
 	if (token.type == TOKEN_STRING)
 	{
 		lexer_next_token(&parser->lexer);
-		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
+		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
 		expr->type = EXPR_LITERAL;
 		expr->lit_type = TYPE_CHAR32;
-		set_string_from_token(expr->str_val, token.text, token.length);
+		expr->str_val = string_view(token.text, token.length);
 		return expr;
 	}
 
@@ -616,9 +594,9 @@ parse_primary_expr(Parser *parser)
 	if (token.type == TOKEN_IDENTIFIER)
 	{
 		lexer_next_token(&parser->lexer);
-		Expr *expr = (Expr *)arena<parser_arena>::alloc(sizeof(Expr));
+		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
 		expr->type = EXPR_COLUMN;
-		set_string_from_token(expr->column_name, token.text, token.length);
+		expr->column_name = string_view(token.text, token.length);
 		return expr;
 	}
 
@@ -677,8 +655,7 @@ parse_select(Parser *parser, SelectStmt *stmt)
 				return;
 			}
 
-			string<parser_arena> col_name;
-			set_string_from_token(col_name, token.text, token.length);
+			string_view col_name = string_view(token.text, token.length);
 			stmt->columns.push(col_name);
 		} while (consume_token(parser, TOKEN_COMMA));
 	}
@@ -697,7 +674,7 @@ parse_select(Parser *parser, SelectStmt *stmt)
 		return;
 	}
 
-	set_string_from_token(stmt->table_name, token.text, token.length);
+	stmt->table_name = string_view(token.text, token.length);
 
 	// Optional WHERE clause
 	stmt->where_clause = parse_where_clause(parser);
@@ -718,7 +695,7 @@ parse_select(Parser *parser, SelectStmt *stmt)
 			return;
 		}
 
-		set_string_from_token(stmt->order_by_column, token.text, token.length);
+		stmt->order_by_column = string_view(token.text, token.length);
 
 		// Optional ASC/DESC
 		if (consume_keyword(parser, "DESC"))
@@ -761,7 +738,7 @@ parse_insert(Parser *parser, InsertStmt *stmt)
 		return;
 	}
 
-	set_string_from_token(stmt->table_name, token.text, token.length);
+	stmt->table_name = string_view(token.text, token.length);
 
 	// Optional column list
 	if (consume_token(parser, TOKEN_LPAREN))
@@ -775,8 +752,7 @@ parse_insert(Parser *parser, InsertStmt *stmt)
 				return;
 			}
 
-			string<parser_arena> col_name;
-			set_string_from_token(col_name, token.text, token.length);
+			string_view col_name = string_view(token.text, token.length);
 			stmt->columns.push(col_name);
 		} while (consume_token(parser, TOKEN_COMMA));
 
@@ -840,7 +816,7 @@ parse_update(Parser *parser, UpdateStmt *stmt)
 		return;
 	}
 
-	set_string_from_token(stmt->table_name, token.text, token.length);
+	stmt->table_name = string_view(token.text, token.length);
 
 	if (!consume_keyword(parser, "SET"))
 	{
@@ -858,8 +834,7 @@ parse_update(Parser *parser, UpdateStmt *stmt)
 			return;
 		}
 
-		string<parser_arena> col_name;
-		set_string_from_token(col_name, token.text, token.length);
+		string_view col_name = string_view(token.text, token.length);
 		stmt->columns.push(col_name);
 
 		if (!consume_operator(parser, "="))
@@ -909,7 +884,7 @@ parse_delete(Parser *parser, DeleteStmt *stmt)
 		return;
 	}
 
-	set_string_from_token(stmt->table_name, token.text, token.length);
+	stmt->table_name = string_view(token.text, token.length);
 
 	// Optional WHERE clause
 	stmt->where_clause = parse_where_clause(parser);
@@ -943,7 +918,7 @@ parse_create_table(Parser *parser, CreateTableStmt *stmt)
 		return;
 	}
 
-	set_string_from_token(stmt->table_name, token.text, token.length);
+	stmt->table_name = string_view(token.text, token.length);
 
 	if (!consume_token(parser, TOKEN_LPAREN))
 	{
@@ -964,7 +939,7 @@ parse_create_table(Parser *parser, CreateTableStmt *stmt)
 		ColumnDef col;
 		memset(&col, 0, sizeof(ColumnDef));
 
-		set_string_from_token(col.name, token.text, token.length);
+		col.name = string_view(token.text, token.length);
 
 		col.type = parse_data_type(parser);
 		if (col.type == TYPE_NULL)
@@ -973,7 +948,7 @@ parse_create_table(Parser *parser, CreateTableStmt *stmt)
 		}
 
 		// First column is implicitly primary key
-		if (stmt->columns.size()== 0)
+		if (stmt->columns.size() == 0)
 		{
 			col.sem.is_primary_key = true;
 		}
@@ -987,7 +962,7 @@ parse_create_table(Parser *parser, CreateTableStmt *stmt)
 		return;
 	}
 
-	if (stmt->columns.size()== 0)
+	if (stmt->columns.size() == 0)
 	{
 		format_error(parser, "Table must have at least one column");
 		return;
@@ -1022,7 +997,7 @@ parse_drop_table(Parser *parser, DropTableStmt *stmt)
 		return;
 	}
 
-	set_string_from_token(stmt->table_name, token.text, token.length);
+	stmt->table_name = string_view(token.text, token.length);
 }
 
 //=============================================================================
@@ -1064,9 +1039,9 @@ parse_rollback(Parser *parser, RollbackStmt *stmt)
 //=============================================================================
 
 Statement *
-parser_parse_statement(Parser *parser)
+parse_statement(Parser *parser)
 {
-	Statement *stmt = (Statement *)arena<parser_arena>::alloc(sizeof(Statement));
+	Statement *stmt = (Statement *)arena<query_arena>::alloc(sizeof(Statement));
 	memset(stmt, 0, sizeof(Statement));
 
 	Token token = lexer_peek_token(&parser->lexer);
@@ -1131,7 +1106,7 @@ parser_parse_statement(Parser *parser)
 	}
 
 	// Check if parsing failed
-	if (parser->error_msg)
+	if (!parser->error_msg.empty())
 	{
 		return nullptr;
 	}
@@ -1142,10 +1117,10 @@ parser_parse_statement(Parser *parser)
 	return stmt;
 }
 
-array<Statement *, parser_arena>
-parser_parse_statements(Parser *parser)
+array<Statement *, query_arena>
+parse_statements(Parser *parser)
 {
-	array<Statement *, parser_arena> statements;
+	array<Statement *, query_arena> statements;
 	statements.reset();
 
 	while (true)
@@ -1157,7 +1132,7 @@ parser_parse_statements(Parser *parser)
 			break;
 		}
 
-		Statement *stmt = parser_parse_statement(parser);
+		Statement *stmt = parse_statement(parser);
 		if (!stmt)
 		{
 			// Return what we've parsed so far with error info
@@ -1179,14 +1154,21 @@ parse_sql(const char *sql)
 {
 	ParseResult result;
 	Parser		parser;
-	parser_init(&parser, sql);
 
-	result.statements = parser_parse_statements(&parser);
+	arena<query_arena>::init();
 
-	if (parser.error_msg)
+	lexer_init(&parser.lexer, sql);
+
+	parser.error_msg = string_view{};
+	parser.error_line = -1;
+	parser.error_column = -1;
+
+	result.statements = parse_statements(&parser);
+
+	if (!parser.error_msg.empty())
 	{
 		result.success = false;
-		result.error = parser.error_msg;
+		result.error = parser.error_msg.data();
 		result.error_line = parser.error_line;
 		result.error_column = parser.error_column;
 		result.failed_statement_index = result.statements.size();
@@ -1285,12 +1267,12 @@ print_expr(Expr *expr, int indent)
 		}
 		else
 		{
-			printf("%*sLiteral(TEXT): '%s'\n", indent, "", expr->str_val.c_str());
+			printf("%*sLiteral(TEXT): '%.*s'\n", indent, "", (int)expr->str_val.size(), expr->str_val.data());
 		}
 		break;
 
 	case EXPR_COLUMN:
-		printf("%*sColumn: %s\n", indent, "", expr->column_name.c_str());
+		printf("%*sColumn: %.*s\n", indent, "", (int)expr->column_name.size(), expr->column_name.data());
 		break;
 
 	case EXPR_BINARY_OP: {
@@ -1354,7 +1336,7 @@ print_ast(Statement *stmt)
 	{
 	case STMT_SELECT: {
 		SelectStmt *s = &stmt->select_stmt;
-		printf("  Table: %s\n", s->table_name.c_str());
+		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		if (s->is_star)
 		{
 			printf("  Columns: *\n");
@@ -1366,7 +1348,7 @@ print_ast(Statement *stmt)
 			{
 				if (i > 0)
 					printf(", ");
-				printf("%s", s->columns[i].c_str());
+				printf("%.*s", (int)s->columns[i].size(), s->columns[i].data());
 			}
 			printf("\n");
 		}
@@ -1375,16 +1357,17 @@ print_ast(Statement *stmt)
 			printf("  WHERE:\n");
 			print_expr(s->where_clause, 4);
 		}
-		if (s->order_by_column.size ()> 0)
+		if (!s->order_by_column.empty())
 		{
-			printf("  ORDER BY: %s %s\n", s->order_by_column.c_str(), s->order_desc ? "DESC" : "ASC");
+			printf("  ORDER BY: %.*s %s\n", (int)s->order_by_column.size(), s->order_by_column.data(),
+				   s->order_desc ? "DESC" : "ASC");
 		}
 		break;
 	}
 
 	case STMT_INSERT: {
 		InsertStmt *s = &stmt->insert_stmt;
-		printf("  Table: %s\n", s->table_name.c_str());
+		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		if (s->columns.size() > 0)
 		{
 			printf("  Columns: ");
@@ -1392,7 +1375,7 @@ print_ast(Statement *stmt)
 			{
 				if (i > 0)
 					printf(", ");
-				printf("%s", s->columns[i].c_str());
+				printf("%.*s", (int)s->columns[i].size(), s->columns[i].data());
 			}
 			printf("\n");
 		}
@@ -1406,11 +1389,11 @@ print_ast(Statement *stmt)
 
 	case STMT_UPDATE: {
 		UpdateStmt *s = &stmt->update_stmt;
-		printf("  Table: %s\n", s->table_name.c_str());
+		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		printf("  SET:\n");
 		for (uint32_t i = 0; i < s->columns.size(); i++)
 		{
-			printf("    %s = ", s->columns[i].c_str());
+			printf("    %.*s = ", (int)s->columns[i].size(), s->columns[i].data());
 			print_expr(s->values[i], 0);
 		}
 		if (s->where_clause)
@@ -1423,7 +1406,7 @@ print_ast(Statement *stmt)
 
 	case STMT_DELETE: {
 		DeleteStmt *s = &stmt->delete_stmt;
-		printf("  Table: %s\n", s->table_name.c_str());
+		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		if (s->where_clause)
 		{
 			printf("  WHERE:\n");
@@ -1434,12 +1417,12 @@ print_ast(Statement *stmt)
 
 	case STMT_CREATE_TABLE: {
 		CreateTableStmt *s = &stmt->create_table_stmt;
-		printf("  Table: %s\n", s->table_name.c_str());
+		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		printf("  Columns:\n");
 		for (uint32_t i = 0; i < s->columns.size(); i++)
 		{
 			ColumnDef *col = &s->columns[i];
-			printf("    %s %s%s\n", col->name.c_str(), col->type == TYPE_U32 ? "INT" : "TEXT",
+			printf("    %.*s %s%s\n", (int)col->name.size(), col->name.data(), col->type == TYPE_U32 ? "INT" : "TEXT",
 				   col->sem.is_primary_key ? " (PRIMARY KEY)" : "");
 		}
 		break;
@@ -1447,7 +1430,7 @@ print_ast(Statement *stmt)
 
 	case STMT_DROP_TABLE: {
 		DropTableStmt *s = &stmt->drop_table_stmt;
-		printf("  Table: %s\n", s->table_name.c_str());
+		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		break;
 	}
 

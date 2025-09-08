@@ -234,10 +234,10 @@ blob_get_size(uint32_t first_page)
  * @param first_page First page index of blob chain
  * @return Buffer with complete blob data, or {nullptr, 0} on failure
  */
-void *
-blob_read_full(uint32_t first_page, uint64_t *size)
+string_view
+blob_read_full(uint32_t first_page)
 {
-	auto stream = arena_stream_begin<query_arena>(BLOB_DATA_SIZE);
+	auto stream = stream_writer<query_arena>::begin();
 
 	uint32_t current = first_page;
 	while (current)
@@ -245,17 +245,13 @@ blob_read_full(uint32_t first_page, uint64_t *size)
 		blob_node *node = GET_BLOB_NODE(current);
 		if (!node)
 		{
-			arena_stream_abandon(&stream);
-			size = 0;
-			return nullptr;
+            stream.abandon();
+			return string_view();
 		}
 
-		arena_stream_write(&stream, node->data, node->size);
+		stream.write(node->data, node->size);
 		current = node->next;
 	}
 
-	*size = arena_stream_size<query_arena>(&stream);
-
-	auto data = arena_stream_finish(&stream);
-	return data;
+	return stream.finish();
 }
