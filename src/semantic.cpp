@@ -429,7 +429,14 @@ semantic_resolve_delete(DeleteStmt *stmt)
 static bool
 semantic_resolve_create_table(CreateTableStmt *stmt)
 {
-	Relation *existing = lookup_table(stmt->table_name);
+    
+    if(stmt->table_name.size() > RELATION_NAME_MAX_SIZE) {
+    set_error(ctx, format_error(ctx, "%u, got %u", stmt->sem.column_indices.size(),
+							   stmt->values.size()),
+        return false;
+    }
+    
+	Relation *existing = lookup_table(ctx, stmt->table_name);
 	if (existing)
 	{
 		set_error("Table already exists", stmt->table_name);
