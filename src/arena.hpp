@@ -56,8 +56,10 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 	 */
 	static inline free_block *freelists[32] = {};
 	static inline uint32_t	  occupied_buckets = 0; // Bitmask: which buckets have blocks
-	static inline size_t	  reclaimed_bytes = 0;
-	static inline size_t	  reused_bytes = 0;
+#ifdef DEBUG
+	static inline size_t reclaimed_bytes = 0;
+	static inline size_t reused_bytes = 0;
+#endif
 
 	static void
 	init(size_t initial = 4 * 1024 * 1024, size_t maximum = 0)
@@ -107,8 +109,11 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 			freelists[i] = nullptr;
 		}
 		occupied_buckets = 0;
+#ifdef DEBUG
+
 		reclaimed_bytes = 0;
 		reused_bytes = 0;
+#endif
 	}
 
 	static void
@@ -128,8 +133,13 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 				freelists[i] = nullptr;
 			}
 			occupied_buckets = 0;
+
+#ifdef DEBUG
+
 			reclaimed_bytes = 0;
 			reused_bytes = 0;
+
+#endif
 		}
 	}
 
@@ -187,7 +197,9 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 		freelists[size_class] = block;
 
 		occupied_buckets |= (1u << size_class);
+#ifdef DEBUG
 		reclaimed_bytes += size;
+#endif
 	}
 
 	/*
@@ -239,8 +251,9 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 		{
 			occupied_buckets &= ~(1u << cls); // Bucket now empty
 		}
-
+#ifdef DEBUG
 		reused_bytes += block->size;
+#endif
 
 		return block;
 	}
@@ -251,6 +264,8 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 	{
 		uint8_t *aligned = (uint8_t *)(((uintptr_t)current + (Align - 1)) & ~(Align - 1));
 		uint8_t *next = aligned + size;
+		assert(next <= base + committed_capacity);
+
 		current = next;
 		return aligned;
 	}
@@ -353,8 +368,12 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 			freelists[i] = nullptr;
 		}
 		occupied_buckets = 0;
+
+#ifdef DEBUG
+
 		reclaimed_bytes = 0;
 		reused_bytes = 0;
+#endif
 	}
 
 	static void
@@ -381,8 +400,13 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 			freelists[i] = nullptr;
 		}
 		occupied_buckets = 0;
+
+#ifdef DEBUG
+
 		reclaimed_bytes = 0;
 		reused_bytes = 0;
+
+#endif
 	}
 
 	static size_t
@@ -403,12 +427,21 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 	static size_t
 	reclaimed()
 	{
+#ifdef DEBUG
 		return reclaimed_bytes;
+#else
+		return 0;
+#endif
 	}
+
 	static size_t
 	reused()
 	{
+#ifdef DEBUG
 		return reused_bytes;
+#else
+		return 0;
+#endif
 	}
 
 	static size_t
@@ -438,8 +471,10 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 		{
 			printf("  Maximum:   %zu bytes (%.2f MB)\n", max_capacity, max_capacity / (1024.0 * 1024.0));
 		}
+#ifdef DEBUG
 		printf("  Reclaimed: %zu bytes (%.2f MB)\n", reclaimed_bytes, reclaimed_bytes / (1024.0 * 1024.0));
 		printf("  Reused:    %zu bytes (%.2f MB)\n", reused_bytes, reused_bytes / (1024.0 * 1024.0));
+#endif
 		printf("  In freelists: %zu bytes (%.2f MB)\n", freelist_bytes(), freelist_bytes() / (1024.0 * 1024.0));
 
 		if (occupied_buckets)
@@ -635,6 +670,45 @@ template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8
 		other->size = tmp_size;
 		other->capacity = tmp_capacity;
 	}
+ template <typename OtherTag>
+    void copy_from(const contiguous<T, OtherTag> &other)
+    {
+        clear();
+        if (other.size > 0 && other.data)
+        {
+            reserve(other.size);
+            memcpy(data, other.data, other.size * sizeof(T));
+            size = other.size;
+        }
+    }
+
+    // Alternative: expose raw copy for when you have raw pointers
+    void copy_from(const T *src_data, uint32_t src_size)
+    {
+        clear();
+        if (src_size > 0 && src_data)
+        {
+            reserve(src_size);
+            memcpy(data, src_data, src_size * sizeof(T));
+            size = src_size;
+        }
+    }
+    template <typename OtherTag>
+    void move_from(contiguous<T, OtherTag> &other) {
+        this->copy_from(other);
+        other.release();
+    }
+
+    // Maybe also add append operations while we're at it
+    template <typename OtherTag>
+    void append_from(const contiguous<T, OtherTag> &other)
+    {
+        if (other.size > 0 && other.data)
+        {
+            T *dest = grow_by(other.size);
+            memcpy(dest, other.data, other.size * sizeof(T));
+        }
+    }
 
 	void
 	release()
@@ -672,6 +746,21 @@ template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8
 		capacity = 0;
 	}
 };
+// Utility functions at global/namespace level
+template <typename T>
+inline T round_up_power_of_2(T n) {
+    static_assert(std::is_unsigned_v<T>);
+    n--;
+    n |= n >> 1;
+    n |= n >> 2;
+    n |= n >> 4;
+    n |= n >> 8;
+    if constexpr (sizeof(T) > 1) n |= n >> 16;
+    if constexpr (sizeof(T) > 4) n |= n >> 32;
+    return n + 1;
+}
+
+
 
 /*
  *
@@ -810,8 +899,9 @@ arena_intern(const char *str, size_t len = 0, bool null_terminate = false)
 	size_t alloc_size = null_terminate ? l + 1 : l;
 	char  *memory = (char *)arena<Tag>::alloc(alloc_size);
 	memcpy(memory, str, l);
-	if (null_terminate) {
-			memory[l] = '\0';
+	if (null_terminate)
+	{
+		memory[l] = '\0';
 	}
 	return std::string_view(memory, l);
 }
