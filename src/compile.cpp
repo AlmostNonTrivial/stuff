@@ -916,7 +916,7 @@ compile_program(Statement *stmt, bool inject_transaction)
 
 	default: {
 		ProgramBuilder prog;
-		prog.halt(1); // Error
+		prog.rollback_transaction();
 		return prog.instructions;
 	}
 	}

@@ -427,9 +427,9 @@ run_repl()
 	execute_sql_statement("INSERT INTO users VALUES (111, 'markymarky', 'marko', 22, 'boomtown');");
 	execute_sql_statement("DELETE FROM users WHERE username = 'lilah';");
 	_debug = true;
-	execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 51;");
+	execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 99;");
 	_debug = false;
-	execute_sql_statement("SELECT * FROM users WHERE user_id > 50;");
+	execute_sql_statement("SELECT * FROM users WHERE user_id > 50 AND NOT NOT user_id > 75;");
 
 
 

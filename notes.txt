@@ -39,3 +39,4 @@ BUGS_FIXED:
 I was comparing the entry key "users" to "users VALUES ..."
 - my stream writer was wasn't incrementing the memory in the arena
 - type system couldn't handle null
+- off by one that the compiler gave
