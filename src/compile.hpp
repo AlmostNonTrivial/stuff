@@ -1,4 +1,5 @@
 #pragma once
+#include "catalog.hpp"
 #include "parser.hpp"
 #include "types.hpp"
 #include "common.hpp"
@@ -17,7 +18,7 @@ struct CursorAllocator
 	int
 	allocate()
 	{
-		if (free_list.size()> 0)
+		if (free_list.size() > 0)
 		{
 			return free_list.pop_value();
 		}
@@ -90,7 +91,7 @@ struct RegisterAllocator
 	void
 	pop_scope()
 	{
-		assert(scope_stack.size()> 0 && "No scope to pop");
+		assert(scope_stack.size() > 0 && "No scope to pop");
 		next_free = scope_stack.pop_value();
 	}
 
@@ -146,12 +147,12 @@ struct CondContext
 
 struct ProgramBuilder
 {
-	array<VMInstruction, query_arena> instructions;
+	array<VMInstruction, query_arena>			 instructions;
 	hash_map<string_view, uint32_t, query_arena> labels;
-	array<uint32_t, query_arena>	  unresolved_jumps;
-	RegisterAllocator				  regs;
-	CursorAllocator					  cursors;
-	int								  label_counter = 0;
+	array<uint32_t, query_arena>				 unresolved_jumps;
+	RegisterAllocator							 regs;
+	CursorAllocator								 cursors;
+	int											 label_counter = 0;
 
 	LoopContext current_loop;
 
@@ -161,26 +162,41 @@ struct ProgramBuilder
 
 	template <typename T>
 	T *
-	alloc_value(T value)
+	alloc(const T &value)
 	{
+		static_assert(std::is_trivially_copyable_v<T>, "Type must be trivially copyable");
 		T *ptr = (T *)arena<query_arena>::alloc(sizeof(T));
-		*ptr = value;
+		memcpy(ptr, &value, sizeof(T));
 		return ptr;
 	}
 
-	char *
-	alloc_string(const char *str, size_t size)
+	TypedValue
+	alloc_data_type(DataType type, const void *src, size_t src_len = 0)
 	{
-		char *ptr = (char *)arena<query_arena>::alloc(size);
-		memset(ptr, 0, size); // Zero entire buffer
-		if (str)
+
+	    assert(src);
+		TypedValue tv;
+		tv.type = type;
+		uint32_t size = type_size(type);
+		void	*ptr = arena<query_arena>::alloc(size);
+
+		if (type_is_string(type))
 		{
-			size_t len = strlen(str);
-			size_t copy_len = (len < size - 1) ? len : size - 1;
-			memcpy(ptr, str, copy_len); // Copy only what fits
+
+			size_t len = src_len ? src_len : strlen((char *)src);
+			assert(len < size && "String literal too long for column type");
+			memcpy(ptr, src, len);
+			((char *)ptr)[len] = '\0';
+
+			((char *)ptr)[0] = '\0';
 		}
-		ptr[size - 1] = '\0'; // Ensure null termination
-		return ptr;
+		else
+		{
+			memcpy(ptr, src, size);
+		}
+
+		tv.data = ptr;
+		return tv;
 	}
 
 	void
@@ -201,13 +217,12 @@ struct ProgramBuilder
 		labels.insert(arena_intern<query_arena>(name), instructions.size());
 	}
 
-string_view
+const char*
 	generate_label(const char *prefix = "L")
 	{
 		char name[32];
 		snprintf(name, 32, "%s%d", prefix, label_counter++);
-		return arena_intern<query_arena>(name);
-
+		return arena_intern<query_arena>(name).data();
 	}
 
 	int
@@ -328,16 +343,16 @@ string_view
 	{
 		WhileContext ctx = {generate_label("while_check"), generate_label("while_end"), condition_reg, regs.mark()};
 
-		label(ctx.condition_label);
-		jumpif_zero(condition_reg, ctx.end_label);
+		label(ctx.condition_label.data());
+		jumpif_zero(condition_reg, ctx.end_label.data());
 		return ctx;
 	}
 
 	void
 	end_while(const WhileContext &ctx)
 	{
-		goto_label(ctx.condition_label);
-		label(ctx.end_label);
+		goto_label(ctx.condition_label.data());
+		label(ctx.end_label.data());
 		regs.restore(ctx.saved_reg_mark);
 	}
 
@@ -348,15 +363,15 @@ string_view
 							-1, // No condition reg yet
 							regs.mark()};
 
-		label(ctx.condition_label);
+		label(ctx.condition_label.data());
 		return ctx;
 	}
 
 	void
 	end_while_condition(const WhileContext &ctx, int condition_reg)
 	{
-		jumpif_not_zero(condition_reg, ctx.condition_label);
-		label(ctx.end_label);
+		jumpif_not_zero(condition_reg, ctx.condition_label.data());
+		label(ctx.end_label.data());
 		regs.restore(ctx.saved_reg_mark);
 	}
 
@@ -711,8 +726,10 @@ string_view
 		emit(ROLLBACK_MAKE());
 	}
 
-	void debug() {
-	    emit({OP_Debug});
+	void
+	debug()
+	{
+		emit({OP_Debug});
 	}
 
 	// ========================================================================
@@ -753,220 +770,27 @@ string_view
 	}
 };
 
-// ============================================================================
-// Arena-allocated factory methods
-// ============================================================================
-
-// Allocate and initialize a value in the specified arena
-
-static TypedValue
-alloc(DataType type, const void *src = nullptr)
-{
-	uint32_t size = type_size(type);
-	uint8_t *data = (uint8_t *)arena<query_arena>::alloc(size);
-
-	if (src)
-	{
-		type_copy(type, data, (const uint8_t *)src);
-	}
-	else
-	{
-		type_zero(type, data);
-	}
-
-	return {data, type};
-}
-
-// Allocate scalar types
-template <typename query_arena, typename T>
-static TypedValue
-alloc_scalar(DataType type, T value)
-{
-	static_assert(sizeof(T) <= 8, "Scalar too large");
-	uint8_t *data = (uint8_t *)arena<query_arena>::alloc(sizeof(T));
-	*(T *)data = value;
-	return {data, type};
-}
-
-// Specialized allocators for common types
-
-static TypedValue
-alloc_u8(uint8_t val)
-{
-	return alloc_scalar<query_arena>(TYPE_U8, val);
-}
-
-static TypedValue
-alloc_u16(uint16_t val)
-{
-	return alloc_scalar<query_arena>(TYPE_U16, val);
-}
-
-static TypedValue
-alloc_u32(uint32_t val)
-{
-	return alloc_scalar<query_arena>(TYPE_U32, val);
-}
-
-static TypedValue
-alloc_u64(uint64_t val)
-{
-	return alloc_scalar<query_arena>(TYPE_U64, val);
-}
-
-static TypedValue
-alloc_i32(int32_t val)
-{
-	return alloc_scalar<query_arena>(TYPE_I32, val);
-}
-
-static TypedValue
-alloc_i64(int64_t val)
-{
-	return alloc_scalar<query_arena>(TYPE_I64, val);
-}
-
-static TypedValue
-alloc_f32(float val)
-{
-	return alloc_scalar<query_arena>(TYPE_F32, val);
-}
-
-static TypedValue
-alloc_f64(double val)
-{
-	return alloc_scalar<query_arena>(TYPE_F64, val);
-}
-
-// String allocators - handles proper null termination and sizing
-
-static TypedValue
-alloc_char(const char *str, uint32_t size)
-{
-
-	// mem
-	char *data = (char *)arena<query_arena>::alloc(size);
-	if (str)
-	{
-		strncpy(data, str, size - 1);
-	}
-	return {(uint8_t *)data, make_char(size)};
-}
-
-static TypedValue
-alloc_char8(const char *str)
-{
-	return alloc_char(str, 8);
-}
-
-static TypedValue
-alloc_char16(const char *str)
-{
-	return alloc_char(str, 16);
-}
-
-static TypedValue
-alloc_char32(const char *str)
-{
-	return alloc_char(str, 32);
-}
-
-static TypedValue
-alloc_char64(const char *str)
-{
-	return alloc_char(str, 64);
-}
-
-static TypedValue
-alloc_char128(const char *str)
-{
-	return alloc_char(str, 128);
-}
-
-static TypedValue
-alloc_char256(const char *str)
-{
-	return alloc_char(str, 256);
-}
-
-// VARCHAR - dynamically sized
-
-static TypedValue
-alloc_varchar(const char *str, size_t size)
-{
-	size_t len;
-	if (str)
-	{
-		if (size)
-		{
-			len = size;
-		}
-		else
-		{
-			len = strlen(str) + 1;
-		}
-	}
-	else
-	{
-		len = 1;
-	}
-
-	char *data = (char *)arena<query_arena>::alloc(len);
-	if (str)
-	{
-		strcpy(data, str);
-	}
-	else
-	{
-		data[0] = '\0';
-	}
-	return {(uint8_t *)data, TYPE_VARCHAR(len)};
-}
-
-// Null value
-
-static TypedValue
-alloc_null()
-{
-	return {nullptr, TYPE_NULL};
-}
-
-// Dual type allocator
-
-static TypedValue
-alloc_dual(DataType type1, const void *data1, DataType type2, const void *data2)
-{
-	DataType dual_type = make_dual(type1, type2);
-	uint32_t total_size = type_size(dual_type);
-	uint8_t *data = (uint8_t *)arena<query_arena>::alloc(total_size);
-
-	pack_dual(data, type1, (const uint8_t *)data1, type2, (const uint8_t *)data2);
-	return {data, dual_type};
-}
-
-
-inline CursorContext*
+inline CursorContext *
 from_structure(Relation &structure)
 {
-	CursorContext * cctx= (CursorContext*)arena<query_arena>::alloc(sizeof(CursorContext));
+	CursorContext *cctx = (CursorContext *)arena<query_arena>::alloc(sizeof(CursorContext));
 	cctx->storage.tree = &structure.storage.btree;
 	cctx->type = BPLUS;
-	cctx->layout = structure.to_layout();
+	cctx->layout = tuple_format_from_relation(structure);
 	return cctx;
 }
-
 
 inline CursorContext *
 red_black(TupleFormat &layout, bool allow_duplicates = true)
 {
-	CursorContext * cctx= (CursorContext*)arena<query_arena>::alloc(sizeof(CursorContext));
+	CursorContext *cctx = (CursorContext *)arena<query_arena>::alloc(sizeof(CursorContext));
 	cctx->type = RED_BLACK;
 	cctx->layout = layout;
 	cctx->flags = allow_duplicates;
 	return cctx;
 }
 
-
-
-
-array<VMInstruction, query_arena> compile_program(Statement*stmt, bool inject_transaction);
+array<VMInstruction, query_arena>
+compile_program(Statement *stmt, bool inject_transaction);
+void
+load_catalog_from_master();

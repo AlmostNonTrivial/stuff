@@ -1,15 +1,20 @@
-- need to validate names are within size limits
 
 
-- allow for specific programs to run
-- repl
-- validation infra, with no noallocations,
-- get rid of all containers
-- benchmark?
-- can catalog structures be better?
-- move vmemory to os layer, inline everything in os_layer
+- fix memory fs
 - get os_page size
+- benchmark?
+- get rid of csv, come with prepopulated OR generic utils with special command
+- key generation: we don't want to have to handle it
 
 
+- alloc strategy for vm
+- there might be problems with the catalog map keys
+- need to be explict with 31 available characters
 
-- clarify access semantics
+- should I always return a TypedValue?
+
+
+-put static asserts places
+
+
+- move program builder methods internal

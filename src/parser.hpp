@@ -166,7 +166,6 @@ struct SelectStmt
 		array<int32_t, query_arena>  column_indices;	   // Indices of selected columns
 		array<DataType, query_arena> column_types;		   // Types of selected columns
 		int32_t						  order_by_index = -1; // Index of ORDER BY column
-		bool						  is_resolved = false;
 	} sem;
 };
 

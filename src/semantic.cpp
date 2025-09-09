@@ -8,45 +8,42 @@
 #include <cstring>
 #include <cstdio>
 
-static struct
+struct SemanticContext
 {
-	string_view error;
-	string_view context;
-} current_result;
-
-static struct
-{
+	string_view									 error;
+	string_view									 context;
 	hash_map<string_view, Relation, query_arena> tables_to_create;
 	hash_set<string_view, query_arena>			 tables_to_drop;
-} catalog_changes;
+	char										 error_buffer[256];
+	char										 context_buffer[256];
+};
 
 char *
-format_error(const char *fmt, ...)
+format_error(SemanticContext *ctx, const char *fmt, ...)
 {
-	char   *buffer = (char *)arena<query_arena>::alloc(256);
 	va_list args;
 	va_start(args, fmt);
-	vsnprintf(buffer, 256, fmt, args);
+	vsnprintf(ctx->error_buffer, 256, fmt, args);
 	va_end(args);
-	return buffer;
+	return ctx->error_buffer;
 }
 
 static void
-set_error(string_view error, string_view context = {})
+set_error(SemanticContext *ctx, string_view error, string_view context = {})
 {
-	current_result.error = error;
-	current_result.context = context;
+	ctx->error = error;
+	ctx->context = context;
 }
 
 static Relation *
-lookup_table(string_view name)
+lookup_table(SemanticContext *ctx, string_view name)
 {
-	if (catalog_changes.tables_to_drop.contains(name))
+	if (ctx->tables_to_drop.contains(name))
 	{
 		return nullptr;
 	}
 
-	Relation *pending = catalog_changes.tables_to_create.get(name);
+	Relation *pending = ctx->tables_to_create.get(name);
 	if (pending)
 	{
 		return pending;
@@ -69,7 +66,7 @@ find_column_index(Relation *table, string_view column_name)
 }
 
 static bool
-resolve_column_list(Relation *table, array<string_view, query_arena> &column_names,
+resolve_column_list(SemanticContext *ctx, Relation *table, array<string_view, query_arena> &column_names,
 					array<int32_t, query_arena> &out_indices)
 {
 
@@ -81,7 +78,7 @@ resolve_column_list(Relation *table, array<string_view, query_arena> &column_nam
 
 		if (idx < 0)
 		{
-			set_error("Column does not exist in table", column_name);
+			set_error(ctx, "Column does not exist in table", column_name);
 			return false;
 		}
 
@@ -97,12 +94,12 @@ sql_type_name(DataType type)
 }
 
 static Relation *
-require_table(string_view table_name, Relation **out_field)
+require_table(SemanticContext *ctx, string_view table_name, Relation **out_field)
 {
-	Relation *table = lookup_table(table_name);
+	Relation *table = lookup_table(ctx, table_name);
 	if (!table)
 	{
-		set_error("Table does not exist", table_name);
+		set_error(ctx, "Table does not exist", table_name);
 		return nullptr;
 	}
 	if (out_field)
@@ -113,23 +110,22 @@ require_table(string_view table_name, Relation **out_field)
 }
 
 static bool
-validate_literal_value(Expr *expr, DataType expected_type, const char *column_name, const char *operation)
+validate_literal_value(SemanticContext *ctx, Expr *expr, DataType expected_type, const char *column_name,
+					   const char *operation)
 {
 	if (expr->type != EXPR_LITERAL)
 	{
-		set_error(format_error("Only literal values allowed in %s", operation), column_name);
+		set_error(ctx, format_error(ctx, "Only literal values allowed in %s", operation), column_name);
 		return false;
 	}
 
-	if (expr->type == EXPR_LITERAL)
+	if (expr->lit_type != expected_type)
 	{
-		if (expr->lit_type != expected_type)
-		{
-			set_error(format_error("Type mismatch for column '%s': expected %s, got %s", column_name,
-								   sql_type_name(expected_type), sql_type_name(expr->lit_type)),
-					  column_name);
-			return false;
-		}
+		set_error(ctx,
+				  format_error(ctx, "Type mismatch for column '%s': expected %s, got %s", column_name,
+							   sql_type_name(expected_type), sql_type_name(expr->lit_type)),
+				  column_name);
+		return false;
 	}
 
 	expr->sem.resolved_type = expected_type;
@@ -137,28 +133,28 @@ validate_literal_value(Expr *expr, DataType expected_type, const char *column_na
 }
 
 static void
-apply_catalog_changes()
+apply_catalog_changes(SemanticContext *ctx)
 {
-	for (auto [name, _] : catalog_changes.tables_to_drop)
+	for (auto [name, _] : ctx->tables_to_drop)
 	{
 		catalog_delete_relation(name);
 	}
 
-	for (auto [name, relation] : catalog_changes.tables_to_create)
+	for (auto [name, relation] : ctx->tables_to_create)
 	{
 		catalog_add_relation(relation);
 	}
 }
 
 static void
-clear_catalog_changes()
+clear_catalog_changes(SemanticContext *ctx)
 {
-	catalog_changes.tables_to_create.clear();
-	catalog_changes.tables_to_drop.clear();
+	ctx->tables_to_create.clear();
+	ctx->tables_to_drop.clear();
 }
 
 static bool
-semantic_resolve_expr(Expr *expr, Relation *table)
+semantic_resolve_expr(SemanticContext *ctx, Expr *expr, Relation *table)
 {
 	if (!expr)
 	{
@@ -175,7 +171,7 @@ semantic_resolve_expr(Expr *expr, Relation *table)
 		int32_t idx = find_column_index(table, expr->column_name);
 		if (idx < 0)
 		{
-			set_error("Column not found", expr->column_name);
+			set_error(ctx, "Column not found", expr->column_name);
 			return false;
 		}
 
@@ -186,11 +182,11 @@ semantic_resolve_expr(Expr *expr, Relation *table)
 	}
 
 	case EXPR_BINARY_OP: {
-		if (!semantic_resolve_expr(expr->left, table))
+		if (!semantic_resolve_expr(ctx, expr->left, table))
 		{
 			return false;
 		}
-		if (!semantic_resolve_expr(expr->right, table))
+		if (!semantic_resolve_expr(ctx, expr->right, table))
 		{
 			return false;
 		}
@@ -200,7 +196,7 @@ semantic_resolve_expr(Expr *expr, Relation *table)
 
 		if (left_type != right_type)
 		{
-			set_error("Types need to match");
+			set_error(ctx, "Types need to match");
 			return false;
 		}
 
@@ -221,7 +217,7 @@ semantic_resolve_expr(Expr *expr, Relation *table)
 		return true;
 	}
 	case EXPR_UNARY_OP: {
-		if (!semantic_resolve_expr(expr->operand, table))
+		if (!semantic_resolve_expr(ctx, expr->operand, table))
 		{
 			return false;
 		}
@@ -239,31 +235,31 @@ semantic_resolve_expr(Expr *expr, Relation *table)
 	}
 
 	default:
-		set_error("Unknown expression type");
+		set_error(ctx, "Unknown expression type");
 		return false;
 	}
 }
 
 static bool
-resolve_where_clause(Expr *where_clause, Relation *table)
+resolve_where_clause(SemanticContext *ctx, Expr *where_clause, Relation *table)
 {
 	if (!where_clause)
 	{
 		return true;
 	}
 
-	if (!semantic_resolve_expr(where_clause, table))
+	if (!semantic_resolve_expr(ctx, where_clause, table))
 	{
-		if (current_result.error.empty())
+		if (ctx->error.empty())
 		{
-			set_error("Invalid expression in WHERE clause");
+			set_error(ctx, "Invalid expression in WHERE clause");
 		}
 		return false;
 	}
 
 	if (where_clause->sem.resolved_type != TYPE_U32)
 	{
-		set_error("WHERE clause must evaluate to boolean");
+		set_error(ctx, "WHERE clause must evaluate to boolean");
 		return false;
 	}
 
@@ -271,11 +267,11 @@ resolve_where_clause(Expr *where_clause, Relation *table)
 }
 
 static bool
-resolve_insert_columns(InsertStmt *stmt, Relation *table)
+resolve_insert_columns(SemanticContext *ctx, InsertStmt *stmt, Relation *table)
 {
 	if (stmt->columns.size() > 0)
 	{
-		return resolve_column_list(table, stmt->columns, stmt->sem.column_indices);
+		return resolve_column_list(ctx, table, stmt->columns, stmt->sem.column_indices);
 	}
 
 	stmt->sem.column_indices.clear();
@@ -287,9 +283,9 @@ resolve_insert_columns(InsertStmt *stmt, Relation *table)
 }
 
 static bool
-semantic_resolve_select(SelectStmt *stmt)
+semantic_resolve_select(SemanticContext *ctx, SelectStmt *stmt)
 {
-	Relation *table = require_table(stmt->table_name, &stmt->sem.table);
+	Relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
 	if (!table)
 	{
 		return false;
@@ -308,7 +304,7 @@ semantic_resolve_select(SelectStmt *stmt)
 	}
 	else
 	{
-		if (!resolve_column_list(table, stmt->columns, stmt->sem.column_indices))
+		if (!resolve_column_list(ctx, table, stmt->columns, stmt->sem.column_indices))
 		{
 			return false;
 		}
@@ -320,7 +316,7 @@ semantic_resolve_select(SelectStmt *stmt)
 		}
 	}
 
-	if (!resolve_where_clause(stmt->where_clause, table))
+	if (!resolve_where_clause(ctx, stmt->where_clause, table))
 	{
 		return false;
 	}
@@ -330,7 +326,7 @@ semantic_resolve_select(SelectStmt *stmt)
 		stmt->sem.order_by_index = find_column_index(table, stmt->order_by_column);
 		if (stmt->sem.order_by_index < 0)
 		{
-			set_error("ORDER BY column does not exist in table", stmt->order_by_column);
+			set_error(ctx, "ORDER BY column does not exist in table", stmt->order_by_column);
 			return false;
 		}
 	}
@@ -339,22 +335,23 @@ semantic_resolve_select(SelectStmt *stmt)
 }
 
 static bool
-semantic_resolve_insert(InsertStmt *stmt)
+semantic_resolve_insert(SemanticContext *ctx, InsertStmt *stmt)
 {
-	Relation *table = require_table(stmt->table_name, &stmt->sem.table);
+	Relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
 	if (!table)
 	{
 		return false;
 	}
 
-	if (!resolve_insert_columns(stmt, table))
+	if (!resolve_insert_columns(ctx, stmt, table))
 	{
 		return false;
 	}
 
 	if (stmt->values.size() != stmt->sem.column_indices.size())
 	{
-		set_error(format_error("Value count mismatch: expected %u, got %u", stmt->sem.column_indices.size(),
+		set_error(ctx,
+				  format_error(ctx, "Value count mismatch: expected %u, got %u", stmt->sem.column_indices.size(),
 							   stmt->values.size()),
 				  stmt->table_name);
 		return false;
@@ -366,7 +363,7 @@ semantic_resolve_insert(InsertStmt *stmt)
 		uint32_t col_idx = stmt->sem.column_indices[i];
 		DataType expected_type = table->columns[col_idx].type;
 
-		if (!validate_literal_value(expr, expected_type, table->columns[col_idx].name, "INSERT"))
+		if (!validate_literal_value(ctx, expr, expected_type, table->columns[col_idx].name, "INSERT"))
 		{
 			return false;
 		}
@@ -376,15 +373,15 @@ semantic_resolve_insert(InsertStmt *stmt)
 }
 
 static bool
-semantic_resolve_update(UpdateStmt *stmt)
+semantic_resolve_update(SemanticContext *ctx, UpdateStmt *stmt)
 {
-	Relation *table = require_table(stmt->table_name, &stmt->sem.table);
+	Relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
 	if (!table)
 	{
 		return false;
 	}
 
-	if (!resolve_column_list(table, stmt->columns, stmt->sem.column_indices))
+	if (!resolve_column_list(ctx, table, stmt->columns, stmt->sem.column_indices))
 	{
 		return false;
 	}
@@ -395,13 +392,13 @@ semantic_resolve_update(UpdateStmt *stmt)
 		uint32_t col_idx = stmt->sem.column_indices[i];
 		DataType expected_type = table->columns[col_idx].type;
 
-		if (!validate_literal_value(expr, expected_type, table->columns[col_idx].name, "UPDATE SET"))
+		if (!validate_literal_value(ctx, expr, expected_type, table->columns[col_idx].name, "UPDATE SET"))
 		{
 			return false;
 		}
 	}
 
-	if (!resolve_where_clause(stmt->where_clause, table))
+	if (!resolve_where_clause(ctx, stmt->where_clause, table))
 	{
 		return false;
 	}
@@ -410,15 +407,15 @@ semantic_resolve_update(UpdateStmt *stmt)
 }
 
 static bool
-semantic_resolve_delete(DeleteStmt *stmt)
+semantic_resolve_delete(SemanticContext *ctx, DeleteStmt *stmt)
 {
-	Relation *table = require_table(stmt->table_name, &stmt->sem.table);
+	Relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
 	if (!table)
 	{
 		return false;
 	}
 
-	if (!resolve_where_clause(stmt->where_clause, table))
+	if (!resolve_where_clause(ctx, stmt->where_clause, table))
 	{
 		return false;
 	}
@@ -427,35 +424,45 @@ semantic_resolve_delete(DeleteStmt *stmt)
 }
 
 static bool
-semantic_resolve_create_table(CreateTableStmt *stmt)
+semantic_resolve_create_table(SemanticContext *ctx, CreateTableStmt *stmt)
 {
-    
-    if(stmt->table_name.size() > RELATION_NAME_MAX_SIZE) {
-    set_error(ctx, format_error(ctx, "%u, got %u", stmt->sem.column_indices.size(),
-							   stmt->values.size()),
-        return false;
-    }
-    
+	if (stmt->table_name.size() > RELATION_NAME_MAX_SIZE)
+	{
+		set_error(ctx, format_error(ctx, "Table name max size is %u, got %u", RELATION_NAME_MAX_SIZE,
+									stmt->table_name.size()));
+		return false;
+	}
+
 	Relation *existing = lookup_table(ctx, stmt->table_name);
 	if (existing)
 	{
-		set_error("Table already exists", stmt->table_name);
+		set_error(ctx, "Table already exists", stmt->table_name);
 		return false;
 	}
 
 	if (stmt->columns.size() == 0)
 	{
-		set_error("Table must have at least one column", stmt->table_name);
+		set_error(ctx, "Table must have at least one column", stmt->table_name);
 		return false;
 	}
 
 	for (uint32_t i = 0; i < stmt->columns.size(); i++)
 	{
+
+		if (stmt->columns[i].name.size() > ATTRIBUTE_NAME_MAX_SIZE)
+		{
+			set_error(ctx,
+					  format_error(ctx, "Column name max size is %u, got %u", ATTRIBUTE_NAME_MAX_SIZE,
+								   stmt->columns[i].name.size()),
+					  stmt->columns[i].name);
+			return false;
+		}
+
 		for (uint32_t j = i + 1; j < stmt->columns.size(); j++)
 		{
 			if (stmt->columns[i].name.compare(stmt->columns[j].name) == 0)
 			{
-				set_error("Duplicate column name", stmt->columns[i].name);
+				set_error(ctx, "Duplicate column name", stmt->columns[i].name);
 				return false;
 			}
 		}
@@ -466,7 +473,7 @@ semantic_resolve_create_table(CreateTableStmt *stmt)
 	{
 		if (def.type != TYPE_U32 && def.type != TYPE_CHAR32)
 		{
-			set_error("Invalid column type", def.name);
+			set_error(ctx, "Invalid column type", def.name);
 			return false;
 		}
 
@@ -479,51 +486,51 @@ semantic_resolve_create_table(CreateTableStmt *stmt)
 
 	Relation new_relation = create_relation(stmt->table_name, cols);
 
-	catalog_changes.tables_to_create.insert(new_relation.name, new_relation);
+	ctx->tables_to_create.insert(new_relation.name, new_relation);
 
 	stmt->sem.created_structure = stmt->table_name;
 	return true;
 }
 
 static bool
-semantic_resolve_drop_table(DropTableStmt *stmt)
+semantic_resolve_drop_table(SemanticContext *ctx, DropTableStmt *stmt)
 {
-	Relation *table = lookup_table(stmt->table_name);
+	Relation *table = lookup_table(ctx, stmt->table_name);
 	if (!table)
 	{
-		set_error("Table does not exist", stmt->table_name);
+		set_error(ctx, "Table does not exist", stmt->table_name);
 		return false;
 	}
 
 	stmt->sem.table = table;
 
-	catalog_changes.tables_to_drop.insert(stmt->table_name, 1);
+	ctx->tables_to_drop.insert(stmt->table_name, 1);
 
 	return true;
 }
 
 static bool
-semantic_resolve_statement(Statement *stmt)
+semantic_resolve_statement(SemanticContext *ctx, Statement *stmt)
 {
 	switch (stmt->type)
 	{
 	case STMT_SELECT:
-		return semantic_resolve_select(&stmt->select_stmt);
+		return semantic_resolve_select(ctx, &stmt->select_stmt);
 
 	case STMT_INSERT:
-		return semantic_resolve_insert(&stmt->insert_stmt);
+		return semantic_resolve_insert(ctx, &stmt->insert_stmt);
 
 	case STMT_UPDATE:
-		return semantic_resolve_update(&stmt->update_stmt);
+		return semantic_resolve_update(ctx, &stmt->update_stmt);
 
 	case STMT_DELETE:
-		return semantic_resolve_delete(&stmt->delete_stmt);
+		return semantic_resolve_delete(ctx, &stmt->delete_stmt);
 
 	case STMT_CREATE_TABLE:
-		return semantic_resolve_create_table(&stmt->create_table_stmt);
+		return semantic_resolve_create_table(ctx, &stmt->create_table_stmt);
 
 	case STMT_DROP_TABLE:
-		return semantic_resolve_drop_table(&stmt->drop_table_stmt);
+		return semantic_resolve_drop_table(ctx, &stmt->drop_table_stmt);
 
 	case STMT_BEGIN:
 	case STMT_COMMIT:
@@ -531,7 +538,7 @@ semantic_resolve_statement(Statement *stmt)
 		return true;
 
 	default:
-		set_error("Unknown statement type");
+		set_error(ctx, "Unknown statement type");
 		return false;
 	}
 }
@@ -545,31 +552,32 @@ semantic_analyze(array<Statement *, query_arena> &statements)
 	result.error_context = {};
 	result.failed_statement_index = -1;
 
-	current_result.error = {};
-	current_result.context = {};
-	clear_catalog_changes();
+	SemanticContext ctx;
+	ctx.error = {};
+	ctx.context = {};
+	clear_catalog_changes(&ctx);
 
 	for (uint32_t i = 0; i < statements.size(); i++)
 	{
 		Statement *stmt = statements[i];
 
-		current_result.error = {};
-		current_result.context = {};
+		ctx.error = {};
+		ctx.context = {};
 
-		if (!semantic_resolve_statement(stmt))
+		if (!semantic_resolve_statement(&ctx, stmt))
 		{
 			result.success = false;
-			result.error = current_result.error;
-			result.error_context = current_result.context;
+			result.error = ctx.error;
+			result.error_context = ctx.context;
 			result.failed_statement_index = i;
 
-			clear_catalog_changes();
+			clear_catalog_changes(&ctx);
 
 			return result;
 		}
 	}
 
-	apply_catalog_changes();
+	apply_catalog_changes(&ctx);
 
 	return result;
 }

@@ -60,14 +60,14 @@ debug_logic_op_name(logic_op op)
 
 
 inline bool
-to_str(std::string_view sv, char *buffer, int size)
+to_str(std::string_view sv, char *dst, int size)
 {
 	if (sv.size() >= size)
 	{
 		return false;
 	}
 	size_t len = sv.size();
-	memcpy(buffer, sv.data(), len);
-	buffer[len] = '\0';
+	memcpy(dst, sv.data(), len);
+	dst[len] = '\0';
 	return true;
 }

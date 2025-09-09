@@ -5,10 +5,11 @@
 // #include "tests/blob.hpp"
 #include "tests/btree.hpp"
 // #include "tests/pager.hpp"
-#include "tests/containers.hpp"
+// #include "tests/containers.hpp"
 #include "tests/types.hpp"
 // #include "tests/ephemeral.hpp"
-#include "arena.hpp" #include "containers.hpp"
+#include "arena.hpp"
+#include "containers.hpp"
 #include "catalog.hpp"
 #include "common.hpp"
 #include "types.hpp"
@@ -64,8 +65,7 @@ static array<int, query_arena> result_column_widths;
 void
 print_select_headers(SelectStmt *select_stmt)
 {
-	if (!select_stmt->sem.is_resolved)
-		return;
+
 
 	Relation *table = select_stmt->sem.table;
 	if (!table)
@@ -123,8 +123,6 @@ setup_result_formatting(SelectStmt *select_stmt)
 {
 	result_column_widths.clear();
 
-	if (!select_stmt->sem.is_resolved)
-		return;
 
 	Relation *table = select_stmt->sem.table;
 	if (!table)
@@ -206,7 +204,7 @@ execute_sql_statement(const char *sql, bool test_mode)
 	}
 
 	auto		   statements = result.statements;
-	SemanticResult res = semantic_analyze(&statements);
+	SemanticResult res = semantic_analyze(statements);
 	if (!res.success)
 	{
 		printf("%s\n", res.error);
@@ -291,20 +289,12 @@ run_meta_command(const char *cmd)
 	{
 		printf("\nTables:\n");
 		printf("-------\n");
-		for (int i = 0; i < catalog.size(); i++)
-		{
-			if (catalog.entries()[i].state != hash_slot_state::OCCUPIED)
-			{
-				continue;
-			}
-			auto &name = catalog.entries()[i].key;
-			auto &structure = catalog.entries()[i].value;
 
-			if (strcmp(name.c_str(), MASTER_CATALOG) != 0)
-			{
-				printf("  %s (%d columns)\n", name.c_str(), structure.columns.size());
-			}
+
+		for(auto [name, relation] : catalog ) {
+			printf("  %s (%d columns)\n", name.data(), relation.columns.size());
 		}
+
 		printf("\n");
 	}
 	else if (strncmp(cmd, ".schema ", 8) == 0)
@@ -432,7 +422,7 @@ run_repl()
 	}
 
 	char				input[4096];
-	string<query_arena> sql_buffer;
+	auto sql_buffer = stream_writer<query_arena>::begin();
 
 	printf("SQL Engine v0.1\n");
 	printf("Type .help for commands or start typing SQL\n\n");
@@ -469,9 +459,9 @@ run_repl()
 		}
 
 		// SQL - collect until semicolon
-		sql_buffer.set(input);
+		sql_buffer.write(input);
 
-		while (!strchr(sql_buffer.c_str(), ';'))
+		while (!strchr((char*)sql_buffer.start, ';'))
 		{
 			printf("   ...> ");
 			fflush(stdout);
@@ -489,13 +479,13 @@ run_repl()
 				input[len - 1] = '\0';
 			}
 
-			sql_buffer.append(" ");
-			sql_buffer.append(input);
+			sql_buffer.write(" ");
+			sql_buffer.write(input);
 		}
 
 		// Execute the SQL
 		auto start = std::chrono::high_resolution_clock::now();
-		bool success = execute_sql_statement(sql_buffer.c_str());
+		bool success = execute_sql_statement((char*)sql_buffer.start);
 		auto end = std::chrono::high_resolution_clock::now();
 
 		if (_debug && success)
@@ -504,21 +494,21 @@ run_repl()
 			printf("Query executed in %ld ms\n", ms.count());
 		}
 
-		sql_buffer.clear();
+		sql_buffer.abandon();
 	}
 
 	pager_close();
 	return 0;
 }
 
-#include "./tests/parser.hpp"
-#include "containers.hpp"
+// #include "./tests/parser.hpp"
+// #include "containers.hpp"
 
 int
 run_tests()
 {
 	// test_arena();
-	test_parser();
+	// test_parser();
 	// test_types();
 	// test_parser();
 	// test_blob();

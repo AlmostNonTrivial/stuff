@@ -40,8 +40,8 @@
 
 
 
-#define ATTRIBUTE_NAME_MAX_SIZE 32
-#define RELATION_NAME_MAX_SIZE 32
+#define ATTRIBUTE_NAME_MAX_SIZE 32 - 1
+#define RELATION_NAME_MAX_SIZE 32 - 1
 // ============================================================================
 // Memory Arenas
 // ============================================================================
@@ -65,7 +65,7 @@ struct catalog_arena {};
  * catalog arena to ensure it persists and to enable pointer comparison.
  */
 struct Attribute {
-    char name[ATTRIBUTE_NAME_MAX_SIZE + 1];  // Interned string in catalog arena
+    char name[ATTRIBUTE_NAME_MAX_SIZE ];  // Interned string in catalog arena
     DataType type;     // Column data type
 };
 
@@ -80,8 +80,8 @@ struct Attribute {
  * SQL calls a "table".
  */
 struct Relation {
-    char name[RELATION_NAME_MAX_SIZE + 1];      // Interned table name
-    TypedValue next_key;   // Next auto-increment value (supports various key types)
+    char name[RELATION_NAME_MAX_SIZE];      // Interned table name
+    uint32_t next_key;   // Next auto-increment value (supports various key types)
 
     // Physical storage handle
     union {
@@ -178,3 +178,5 @@ TupleFormat tuple_format_from_relation(Relation& schema);
  * to ensure the schema persists beyond the current query.
  */
 Relation create_relation(string_view name, array<Attribute, query_arena> columns);
+
+void bootstrap_master(bool is_new_database);

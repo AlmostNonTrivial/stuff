@@ -975,7 +975,11 @@ unpack_dual(DataType dual_type, const void *src, void *data1, void *data2)
 
 struct TypedValue
 {
-	void	*data;
+
+		void *data;
+
+
+
 	DataType type;
 
 	// Property accessors

@@ -142,7 +142,7 @@ Relation create_relation(string_view name, array<Attribute, query_arena> columns
  *
  * The master catalog schema is compatible with SQLite for familiarity.
  */
-static void bootstrap_master(bool is_new_database) {
+void bootstrap_master(bool is_new_database) {
     // Define the master catalog schema
     array<Attribute, query_arena> master_columns = {
         {MC_ID, TYPE_U32},          // Auto-increment ID
@@ -202,5 +202,5 @@ void catalog_reload() {
 
     // Load all other relations from master
     // (Implementation in separate file)
-    // load_catalog_from_master();
+    load_catalog_from_master();
 }

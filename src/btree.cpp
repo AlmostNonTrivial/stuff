@@ -2023,8 +2023,8 @@ btree_print(btree *tree_ptr)
 	printf("------------------------------------\n\n");
 
 	// BFS traversal using two queues (current level and next level)
-	std::queue<uint32_t> current_level;
-	std::queue<uint32_t> next_level;
+	queue<uint32_t, query_arena> current_level;
+	queue<uint32_t, query_arena> next_level;
 
 	current_level.push(tree_ptr->root_page_index);
 	uint32_t depth = 0;
@@ -2036,7 +2036,7 @@ btree_print(btree *tree_ptr)
 
 		while (!current_level.empty())
 		{
-			uint32_t page_index = current_level.front();
+			uint32_t page_index = *current_level.front();
 			current_level.pop();
 
 			btree_node *node = GET_NODE(page_index);
