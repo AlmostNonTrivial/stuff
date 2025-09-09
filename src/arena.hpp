@@ -821,6 +821,14 @@ template <typename Tag = global_arena> struct stream_writer
 		write(sv.data(), sv.size());
 	}
 
+
+	void
+	write(const char *str)
+	{
+		write(str, strlen(str));
+	}
+
+
 	size_t
 	size() const
 	{

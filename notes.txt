@@ -1,17 +1,13 @@
 
 
-- fix memory fs
+
 - get os_page size
-- benchmark?
+
 - get rid of csv, come with prepopulated OR generic utils with special command
 - key generation: we don't want to have to handle it
 
-
 - alloc strategy for vm
 - there might be problems with the catalog map keys
-
-
-- should I always return a TypedValue?
 
 
 -put static asserts places
@@ -20,8 +16,24 @@
 - move program builder methods internal
 
 
-
 IMPORTANT
 if no null terminator in 32, compare all 32 bytes with memcmp, otherwise up to the null terminator
 
 Need to remove Relation from sem, as a reshash could move pointer in multi-statement
+
+Deleting non-intered string from master,
+
+
+TESTS:
+- create from scratch, veryify .tables output:
+Tables:
+-------
+  users (5 columns)
+  sqlite_master (5 columns)
+  orders (5 columns)
+  products (6 columns)
+
+
+BUGS_FIXED:
+- not allocated a specific sized string on create table, meant in the vm_create table callback
+I was comparing the entry key "users" to "users VALUES ..."

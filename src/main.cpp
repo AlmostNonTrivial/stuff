@@ -292,8 +292,8 @@ run_meta_command(const char *cmd)
 
 
 		for(auto [name, relation] : catalog ) {
-			printf("  %s (%d columns)\n", name.data(), relation.columns.size());
-		}
+    printf("  %.*s (%d columns)\n", (int)name.size(), name.data(), relation.columns.size());
+}
 
 		printf("\n");
 	}
@@ -412,8 +412,9 @@ run_repl()
 	{
 		printf("Creating new database...\n");
 		bootstrap_master(true);
+
 		create_all_tables_sql(true);
-		load_all_data_sql();
+		// load_all_data_sql();
 		printf("Database initialized with sample data.\n\n");
 	}
 	else
@@ -533,20 +534,13 @@ main(int argc, char **argv)
 
 
 
+	if (argc > 1 && strlen(argv[1]) >= 5)
+	{
+		if (strcmp("debug", argv[1]) == 0)
+		{
+			return run_tests();
+		}
+	}
 
-
-    // hash_map<std::string_view, int> sdad;
-
-    // sdad.insert( "asdasda", 2);
-	// if (argc > 1 && strlen(argv[1]) >= 5)
-	// {
-	// 	if (strcmp("debug", argv[1]) == 0)
-	// 	{
-	// 		return run_tests();
-	// 	}
-	// }
-
-	// return run_repl();
-
-	return run_tests();
+	return run_repl();
 }

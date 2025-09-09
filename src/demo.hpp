@@ -62,7 +62,9 @@ inline void
 create_all_tables_sql(bool create)
 {
 	if (!create)
+	{
 		return;
+	}
 
 	const char *create_users_sql = "CREATE TABLE users ("
 								   "user_id INT, "
@@ -73,8 +75,12 @@ create_all_tables_sql(bool create)
 								   ");";
 
 	if (!execute_sql_statement(create_users_sql))
-		return;
+	{
 
+		return;
+	}
+
+	_debug = true;
 	const char *create_products_sql = "CREATE TABLE products ("
 									  "product_id INT, "
 									  "title TEXT, "
@@ -85,7 +91,9 @@ create_all_tables_sql(bool create)
 									  ");";
 
 	if (!execute_sql_statement(create_products_sql))
+	{
 		return;
+	}
 
 	const char *create_orders_sql = "CREATE TABLE orders ("
 									"order_id INT, "
@@ -96,7 +104,9 @@ create_all_tables_sql(bool create)
 									");";
 
 	if (!execute_sql_statement(create_orders_sql))
+	{
 		return;
+	}
 }
 
 inline void
@@ -111,13 +121,18 @@ load_table_from_csv_sql(const char *csv_file, const char *table_name)
 
 	Relation *structure = catalog.get(table_name);
 	if (!structure)
+	{
 		return;
+	}
 
 	auto column_list = stream_writer<query_arena>::begin();
 	for (uint32_t i = 0; i < structure->columns.size(); i++)
 	{
 		if (i > 0)
+		{
 			column_list.write(", ");
+		}
+
 		column_list.write(structure->columns[i].name);
 	}
 
@@ -948,7 +963,7 @@ vmfunc_read_blob(TypedValue *result, TypedValue *args, uint32_t arg_count)
 	uint32_t page_idx = args[0].as_u32();
 
 	size_t size;
-	auto data = blob_read_full(page_idx, &size);
+	auto   data = blob_read_full(page_idx, &size);
 
 	if (!size)
 		return false;
@@ -977,9 +992,7 @@ demo_blob_storage(const char *args)
 	// Create documents table if it doesn't exist
 	if (!catalog.get("documents"))
 	{
-		array<Attribute, query_arena> columns = {
-			{"doc_id", TYPE_U32}, {"title", TYPE_CHAR32}, {"blob_ref", TYPE_U32}};
-
+		array<Attribute, query_arena> columns = {{"doc_id", TYPE_U32}, {"title", TYPE_CHAR32}, {"blob_ref", TYPE_U32}};
 
 		pager_begin_transaction();
 		Relation	docs = create_relation("documents", columns);

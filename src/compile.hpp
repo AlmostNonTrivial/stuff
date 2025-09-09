@@ -187,8 +187,6 @@ struct ProgramBuilder
 			assert(len < size && "String literal too long for column type");
 			memcpy(ptr, src, len);
 			((char *)ptr)[len] = '\0';
-
-			((char *)ptr)[0] = '\0';
 		}
 		else
 		{

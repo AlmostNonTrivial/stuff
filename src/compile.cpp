@@ -775,7 +775,8 @@ compile_create_table(Statement *stmt)
 	prog.begin_transaction();
 
 	// 1. Create the actual table structure
-	int table_name_reg = prog.load(TYPE_CHAR32, (void *)create_stmt->table_name.data());
+	// int table_name_reg = prog.load(TYPE_CHAR32, (void *)create_stmt->table_name.data());
+	int table_name_reg = prog.load(prog.alloc_data_type(TYPE_CHAR32, create_stmt->table_name.data(), create_stmt->table_name.size()));
 	int root_page_reg = prog.call_function(vmfunc_create_structure, table_name_reg, 1);
 
 	// 2. Add entry to master catalog
