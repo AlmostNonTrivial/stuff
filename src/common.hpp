@@ -6,11 +6,10 @@
 using std::string_view;
 
 
-
 struct query_arena
 {
 };
-// #define FAIL(msg) ((std::cout << msg << std::endl; exit(1)))
+
 
 enum arith_op : uint8_t
 {
@@ -38,16 +37,11 @@ enum comparison_op : uint8_t
 };
 
 
-
-inline bool
-to_str(std::string_view sv, char *dst, int size)
+inline void
+sv_to_cstr(std::string_view sv, char *dst, int size)
 {
-	if (sv.size() >= size)
-	{
-		return false;
-	}
+	assert(sv.size() < size);
 	size_t len = sv.size();
 	memcpy(dst, sv.data(), len);
 	dst[len] = '\0';
-	return true;
 }

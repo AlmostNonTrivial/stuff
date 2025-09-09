@@ -39,7 +39,7 @@ test_btree_sequential_ops()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	btree tree = btree_create(TYPE_U32, sizeof(uint32_t), true);
+	btree tree = bt_create(TYPE_U32, sizeof(uint32_t), true);
 	bt_cursor cursor = {.tree = &tree};
 
 	const int COUNT = 5000;
@@ -51,7 +51,7 @@ test_btree_sequential_ops()
 		uint32_t key = i;
 		uint32_t value = i * 100;
 		bt_cursorinsert(&cursor, &key, (void *)&value);
-		btree_validate(&tree);
+		bt_validate(&tree);
 	}
 	std::cout << " OK\n";
 
@@ -71,7 +71,7 @@ test_btree_sequential_ops()
 		uint32_t key = i;
 		assert(bt_cursorseek(&cursor, &key));
 		bt_cursordelete(&cursor);
-		btree_validate(&tree);
+		bt_validate(&tree);
 	}
 	std::cout << " OK\n";
 
@@ -96,7 +96,7 @@ test_btree_sequential_ops()
 		uint32_t key = i;
 		assert(bt_cursorseek(&cursor, &key));
 		bt_cursordelete(&cursor);
-		btree_validate(&tree);
+		bt_validate(&tree);
 	}
 	std::cout << " OK\n";
 
@@ -116,7 +116,7 @@ test_btree_random_ops()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	btree tree = btree_create(TYPE_U32, sizeof(uint64_t), true);
+	btree tree = bt_create(TYPE_U32, sizeof(uint64_t), true);
 	bt_cursor cursor = {.tree = &tree};
 
 	const int COUNT = 5000;
@@ -137,7 +137,7 @@ test_btree_random_ops()
 	for (auto &[key, value] : data)
 	{
 		bt_cursorinsert(&cursor, &key, (void *)&value);
-		btree_validate(&tree);
+		bt_validate(&tree);
 	}
 	std::cout << " OK (" << COUNT << " unique keys)\n";
 
@@ -167,7 +167,7 @@ test_btree_random_ops()
 		uint32_t key = keys_to_delete[i];
 		assert(bt_cursorseek(&cursor, &key));
 		bt_cursordelete(&cursor);
-		btree_validate(&tree);
+		bt_validate(&tree);
 		deleted_keys.insert(key);
 	}
 	std::cout << " OK (deleted keys: " << delete_count << ")\n";
@@ -196,7 +196,7 @@ test_btree_random_ops()
 		uint32_t key = keys_to_delete[i];
 		assert(bt_cursorseek(&cursor, &key));
 		bt_cursordelete(&cursor);
-		btree_validate(&tree);
+		bt_validate(&tree);
 	}
 	std::cout << " OK\n";
 
@@ -218,7 +218,7 @@ test_btree_mixed_ops()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	btree tree = btree_create(TYPE_U64, sizeof(uint32_t), true);
+	btree tree = bt_create(TYPE_U64, sizeof(uint32_t), true);
 	bt_cursor cursor = {.tree = &tree};
 
 	std::set<uint64_t> keys_in_tree;
@@ -239,7 +239,7 @@ test_btree_mixed_ops()
 
 			bt_cursorinsert(&cursor, &key, (void *)&value);
 			keys_in_tree.insert(key);
-			btree_validate(&tree);
+			bt_validate(&tree);
 		}
 		else
 		{ // Delete
@@ -251,7 +251,7 @@ test_btree_mixed_ops()
 			assert(bt_cursorseek(&cursor, &key));
 			bt_cursordelete(&cursor);
 			keys_in_tree.erase(key);
-			btree_validate(&tree);
+			bt_validate(&tree);
 		}
 
 		// Periodically verify tree contents
@@ -274,7 +274,7 @@ test_btree_mixed_ops()
 	{
 		assert(bt_cursorseek(&cursor, &key));
 		bt_cursordelete(&cursor);
-		btree_validate(&tree);
+		bt_validate(&tree);
 	}
 	std::cout << " OK\n";
 
@@ -293,7 +293,7 @@ test_btree_edge_cases()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	btree tree = btree_create(TYPE_U32, sizeof(uint32_t), true);
+	btree tree = bt_create(TYPE_U32, sizeof(uint32_t), true);
 	bt_cursor cursor = {.tree = &tree};
 
 	// Delete from empty tree
@@ -301,17 +301,17 @@ test_btree_edge_cases()
 	uint32_t key = 42;
 	assert(!bt_cursorseek(&cursor, &key));
 	assert(!bt_cursordelete(&cursor));
-	btree_validate(&tree);
+	bt_validate(&tree);
 	std::cout << " OK\n";
 
 	// Single element operations
 	std::cout << "Single element..." << std::flush;
 	uint32_t value = 100;
 	bt_cursorinsert(&cursor, &key, (void *)&value);
-	btree_validate(&tree);
+	bt_validate(&tree);
 	assert(bt_cursorseek(&cursor, &key));
 	bt_cursordelete(&cursor);
-	btree_validate(&tree);
+	bt_validate(&tree);
 	assert(!bt_cursorfirst(&cursor));
 	std::cout << " OK\n";
 
@@ -321,18 +321,18 @@ test_btree_edge_cases()
 	uint32_t max_key = UINT32_MAX;
 
 	bt_cursorinsert(&cursor, &min_key, (void *)&value);
-	btree_validate(&tree);
+	bt_validate(&tree);
 	bt_cursorinsert(&cursor, &max_key, (void *)&value);
-	btree_validate(&tree);
+	bt_validate(&tree);
 
 	assert(bt_cursorseek(&cursor, &min_key));
 	assert(bt_cursorseek(&cursor, &max_key));
 
 	bt_cursordelete(&cursor);
-	btree_validate(&tree);
+	bt_validate(&tree);
 	assert(bt_cursorseek(&cursor, &min_key));
 	bt_cursordelete(&cursor);
-	btree_validate(&tree);
+	bt_validate(&tree);
 
 	std::cout << " OK\n";
 
@@ -372,7 +372,7 @@ inline void test_btree_u32_u64() {
     pager_begin_transaction();
 
     DataType key_type = make_dual(TYPE_U32, TYPE_U64);
-    btree tree = btree_create(key_type, 0, true);
+    btree tree = bt_create(key_type, 0, true);
     bt_cursor cursor = {.tree = &tree};
 
     uint8_t key_data[12];
@@ -535,7 +535,7 @@ test_btree_large_records()
 
 	// Create tree with very large records (forces MIN_ENTRY_COUNT)
 	const uint32_t LARGE_RECORD = PAGE_SIZE / 4; // Close to page size limit
-	btree	   tree = btree_create(TYPE_U32, LARGE_RECORD, true);
+	btree	   tree = bt_create(TYPE_U32, LARGE_RECORD, true);
 	bt_cursor	   cursor = {.tree = &tree};
 
 	// Should have minimum keys per node
@@ -548,7 +548,7 @@ test_btree_large_records()
 	{
 		memset(large_data, i, LARGE_RECORD);
 		assert(bt_cursorinsert(&cursor, &i, large_data));
-		btree_validate(&tree);
+		bt_validate(&tree);
 	}
 
 	// Verify data integrity
@@ -575,7 +575,7 @@ test_btree_multiple_cursors()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	btree tree = btree_create(TYPE_U32, sizeof(uint32_t), true);
+	btree tree = bt_create(TYPE_U32, sizeof(uint32_t), true);
 	bt_cursor cursor1 = {.tree = &tree};
 	bt_cursor cursor2 = {.tree = &tree};
 	bt_cursor cursor3 = {.tree = &tree};
@@ -636,7 +636,7 @@ test_btree_page_eviction()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	btree tree = btree_create(TYPE_U32, sizeof(uint32_t), true);
+	btree tree = bt_create(TYPE_U32, sizeof(uint32_t), true);
 	bt_cursor cursor = {.tree = &tree};
 
 	// Insert enough data to create many pages
@@ -673,7 +673,7 @@ test_btree_page_eviction()
 		}
 	}
 
-	btree_validate(&tree);
+	bt_validate(&tree);
 	std::cout << "Page eviction OK\n";
 
 	pager_rollback();
@@ -690,7 +690,7 @@ test_btree_varchar_collation()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	btree tree = btree_create(TYPE_CHAR32, sizeof(uint32_t), true);
+	btree tree = bt_create(TYPE_CHAR32, sizeof(uint32_t), true);
 	bt_cursor cursor = {.tree = &tree};
 
 	// Test strings that expose comparison edge cases
@@ -773,7 +773,7 @@ test_update_parent_keys_condition()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	btree tree = btree_create(TYPE_U32, sizeof(uint32_t), true);
+	btree tree = bt_create(TYPE_U32, sizeof(uint32_t), true);
 	bt_cursor cursor = {.tree = &tree};
 
 	const int COUNT = tree.leaf_max_keys * 3;
@@ -810,7 +810,7 @@ test_merge_empty_root()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	btree tree = btree_create(TYPE_U32, sizeof(uint32_t), true);
+	btree tree = bt_create(TYPE_U32, sizeof(uint32_t), true);
 	bt_cursor cursor = {.tree = &tree};
 
 	const int COUNT = tree.leaf_max_keys + 1;
@@ -850,7 +850,7 @@ test_btree_single_key_leaf_delete()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	btree tree = btree_create(TYPE_U32, sizeof(uint32_t), true);
+	btree tree = bt_create(TYPE_U32, sizeof(uint32_t), true);
 	bt_cursor cursor = {.tree = &tree};
 
 	// Insert enough keys to create internal nodes and multiple leaves
@@ -886,7 +886,7 @@ test_btree_single_key_leaf_delete()
 	assert(bt_cursorseek(&cursor, &first_key));
 	bt_cursordelete(&cursor);
 
-	btree_validate(&tree);
+	bt_validate(&tree);
 
 	pager_rollback();
 	pager_close();
@@ -901,7 +901,7 @@ test_btree_collapse_root()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	btree tree = btree_create(TYPE_U32, sizeof(uint32_t), true);
+	btree tree = bt_create(TYPE_U32, sizeof(uint32_t), true);
 	bt_cursor cursor = {.tree = &tree};
 
 	// Insert just enough to create a 2-level tree
@@ -915,7 +915,7 @@ test_btree_collapse_root()
 	{
 		assert(bt_cursorseek(&cursor, &i));
 		bt_cursordelete(&cursor);
-		btree_validate(&tree);
+		bt_validate(&tree);
 	}
 
 	pager_rollback();
@@ -933,7 +933,7 @@ test_btree_deep_tree_coverage()
 
 	// Create tree with 64-byte records to force smaller node capacity
 	const uint32_t RECORD_SIZE = 64;
-	btree	   tree = btree_create(TYPE_U32, RECORD_SIZE, true);
+	btree	   tree = bt_create(TYPE_U32, RECORD_SIZE, true);
 	bt_cursor	   cursor = {.tree = &tree};
 
 	std::cout << "Tree config: leaf_max=" << tree.leaf_max_keys << ", internal_max=" << tree.internal_max_keys << "\n";
@@ -981,7 +981,7 @@ test_btree_deep_tree_coverage()
 	// This key should be a separator in the parent
 	// Delete it to trigger parent key update
 	assert(bt_cursordelete(&cursor));
-	btree_validate(&tree);
+	bt_validate(&tree);
 	std::cout << " OK\n";
 
 	// Test cursor operations on invalid cursor (various if_7x, if_8x, if_9x)
@@ -999,7 +999,7 @@ test_btree_deep_tree_coverage()
 
 	// Test cursor on empty tree (if_79)
 	std::cout << "Testing empty tree seek..." << std::flush;
-	btree empty_tree = btree_create(TYPE_U32, sizeof(uint32_t), false); // Don't init
+	btree empty_tree = bt_create(TYPE_U32, sizeof(uint32_t), false); // Don't init
 	bt_cursor empty_cursor = {.tree = &empty_tree};
 	uint32_t  test_key = 42;
 	assert(!bt_cursorseek(&empty_cursor, &test_key)); // if_79
@@ -1040,7 +1040,7 @@ test_btree_deep_tree_coverage()
 	// This is tricky - need to delete such that the node itself changes
 	// Usually happens during merges where the node gets deallocated
 	// Set up a scenario with minimal keys
-	btree small_tree = btree_create(TYPE_U32, sizeof(uint32_t), true);
+	btree small_tree = bt_create(TYPE_U32, sizeof(uint32_t), true);
 	bt_cursor small_cursor = {.tree = &small_tree};
 
 	// Insert just enough to split once
@@ -1082,7 +1082,7 @@ test_btree_remaining_coverage()
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
-		btree tree = btree_create(TYPE_U32, sizeof(uint32_t), true);
+		btree tree = bt_create(TYPE_U32, sizeof(uint32_t), true);
 		bt_cursor cursor = {.tree = &tree};
 
 		// Build a 3-level tree
@@ -1099,7 +1099,7 @@ test_btree_remaining_coverage()
 			if (bt_cursorseek(&cursor, &i))
 			{
 				bt_cursordelete(&cursor);
-				btree_validate(&tree);
+				bt_validate(&tree);
 			}
 		}
 
@@ -1144,7 +1144,7 @@ test_btree_remaining_coverage()
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
-		btree tree = btree_create(TYPE_U32, sizeof(uint32_t), true);
+		btree tree = bt_create(TYPE_U32, sizeof(uint32_t), true);
 		bt_cursor cursor = {.tree = &tree};
 
 		// Insert enough for multiple leaves
@@ -1180,7 +1180,7 @@ test_btree_remaining_coverage()
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
-		btree tree = btree_create(TYPE_U32, sizeof(uint32_t), true);
+		btree tree = bt_create(TYPE_U32, sizeof(uint32_t), true);
 		bt_cursor cursor = {.tree = &tree};
 
 		// Insert sparse keys
@@ -1212,7 +1212,7 @@ test_btree_remaining_coverage()
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
-		btree tree = btree_create(TYPE_U32, sizeof(uint32_t), true);
+		btree tree = bt_create(TYPE_U32, sizeof(uint32_t), true);
 
 		// Create a tree with internal nodes
 		bt_cursor cursor = {.tree = &tree};
@@ -1231,7 +1231,7 @@ test_btree_remaining_coverage()
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
-		btree tree = btree_create(TYPE_U32, sizeof(uint32_t), true);
+		btree tree = bt_create(TYPE_U32, sizeof(uint32_t), true);
 		bt_cursor cursor = {.tree = &tree};
 
 		// Create minimal tree that will merge on delete

@@ -1237,7 +1237,7 @@ bt_clear(btree *tree)
 ** Returns: Initialized BTree structure (zero-initialized on failure)
 */
 btree
-btree_create(DataType key, uint32_t record_size, bool init = false)
+bt_create(DataType key, uint32_t record_size, bool init = false)
 {
 	btree tree = {0};
 
@@ -1758,7 +1758,7 @@ validate_node_recursive(btree *tree, btree_node *node, uint32_t expected_parent,
 
 // Main validation function
 void
-btree_validate(btree *tree_ptr)
+bt_validate(btree *tree_ptr)
 {
 
 	btree *tree = tree_ptr;

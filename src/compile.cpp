@@ -79,7 +79,7 @@ compile_expr(ProgramBuilder *prog, Expr *expr, int cursor_id)
 	}
 
 	default:
-	assert(false);
+		assert(false);
 	}
 }
 
@@ -183,7 +183,7 @@ vmfunc_create_structure(TypedValue *result, TypedValue *args, uint32_t arg_count
 	}
 
 	TupleFormat layout = tuple_format_from_relation(*structure);
-	structure->storage.btree = btree_create(layout.key_type, layout.record_size, true);
+	structure->storage.btree = bt_create(layout.key_type, layout.record_size, true);
 
 	result->type = TYPE_U32;
 	result->data = arena<query_arena>::alloc(sizeof(uint32_t));
@@ -257,7 +257,7 @@ vmfunc_catalog_bootstrap(TypedValue *result, size_t count)
 		{
 			ColumnDef &col_def = create_stmt.columns[i];
 			Attribute  col;
-			to_str(col_def.name, col.name, ATTRIBUTE_NAME_MAX_SIZE);
+			sv_to_cstr(col_def.name, col.name, ATTRIBUTE_NAME_MAX_SIZE);
 			columns.push(col);
 		}
 	}
@@ -266,7 +266,7 @@ vmfunc_catalog_bootstrap(TypedValue *result, size_t count)
 	Relation	structure = create_relation(name, columns);
 	TupleFormat format = tuple_format_from_relation(structure);
 	// Set up the btree with existing root page
-	structure.storage.btree = btree_create(format.key_type, format.record_size, false);
+	structure.storage.btree = bt_create(format.key_type, format.record_size, false);
 	structure.storage.btree.root_page_index = rootpage;
 
 	catalog.insert(name, structure);
@@ -555,8 +555,6 @@ compile_insert(Statement *stmt)
 	// Build the row in correct column order
 	int row_size = insert_stmt->sem.table->columns.size();
 	int row_start = prog.regs.allocate_range(row_size);
-
-
 
 	// Fill in specified columns
 	for (uint32_t i = 0; i < insert_stmt->values.size(); i++)

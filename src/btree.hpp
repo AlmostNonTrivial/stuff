@@ -116,7 +116,7 @@ struct btree
 **   - Returns invalid tree (root_page_index=0) if record_size too large
 */
 btree
-btree_create(DataType key, uint32_t record_size, bool init);
+bt_create(DataType key, uint32_t record_size, bool init);
 
 /*
 ** Clear all nodes in a B+Tree.
@@ -409,7 +409,7 @@ bt_cursorhas_previous(bt_cursor *cursor);
 ** Assertion failures indicate tree corruption.
 */
 void
-btree_validate(btree *tree);
+bt_validate(btree *tree);
 
 /*
 ** Print tree structure for debugging.

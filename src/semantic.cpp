@@ -478,7 +478,7 @@ semantic_resolve_create_table(SemanticContext *ctx, CreateTableStmt *stmt)
 		}
 
 		Attribute attr;
-		to_str(def.name, attr.name, ATTRIBUTE_NAME_MAX_SIZE);
+		sv_to_cstr(def.name, attr.name, ATTRIBUTE_NAME_MAX_SIZE);
 		attr.type = def.type;
 
 		cols.push(attr);

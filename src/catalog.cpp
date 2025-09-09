@@ -95,7 +95,7 @@ Relation create_relation(string_view name, array<Attribute, query_arena> columns
     // Cross-arena copy from query to catalog arena
     rel.columns.copy_from(columns);
 
-    to_str(name, rel.name, RELATION_NAME_MAX_SIZE);
+    sv_to_cstr(name, rel.name, RELATION_NAME_MAX_SIZE);
     return rel;
 }
 
@@ -131,7 +131,7 @@ void bootstrap_master(bool is_new_database) {
     if (is_new_database) {
         // Create new master catalog
         pager_begin_transaction();
-        master_table.storage.btree = btree_create(layout.key_type, layout.record_size, is_new_database);
+        master_table.storage.btree = bt_create(layout.key_type, layout.record_size, is_new_database);
 
         // Master catalog MUST be at page 1
         assert(1 == master_table.storage.btree.root_page_index);
@@ -139,7 +139,7 @@ void bootstrap_master(bool is_new_database) {
         pager_commit();
     } else {
         // Load existing master catalog from page 1
-        master_table.storage.btree = btree_create(layout.key_type, layout.record_size, is_new_database);
+        master_table.storage.btree = bt_create(layout.key_type, layout.record_size, is_new_database);
         master_table.storage.btree.root_page_index = 1;
     }
 

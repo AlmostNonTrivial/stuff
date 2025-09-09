@@ -297,7 +297,7 @@ vmfunc_create_index_structure(TypedValue *result, TypedValue *args, uint32_t arg
 	// Relation index = Schema::from(index_name, columns);
 	Relation	index = create_relation(index_name, columns);
 	TupleFormat layout = tuple_format_from_relation(index);
-	index.storage.btree = btree_create(layout.key_type, layout.record_size, false);
+	index.storage.btree = bt_create(layout.key_type, layout.record_size, false);
 
 	// Add to catalog temporarily (will be rolled back)
 	catalog.insert(index_name, index);
@@ -675,7 +675,7 @@ demo_composite_index(const char *args)
 
 	// Create temporary index structure directly (not in catalog)
 	DataType composite_key_type = make_dual(TYPE_U32, TYPE_U32);
-	btree	 index_btree = btree_create(composite_key_type, 0, true); // No record, just key
+	btree	 index_btree = bt_create(composite_key_type, 0, true); // No record, just key
 
 	// Populate index from orders table
 	{
@@ -1002,7 +1002,7 @@ demo_blob_storage(const char *args)
 		pager_begin_transaction();
 		Relation	docs = create_relation("documents", columns);
 		TupleFormat layout = tuple_format_from_relation(docs);
-		docs.storage.btree = btree_create(layout.key_type, layout.record_size, true);
+		docs.storage.btree = bt_create(layout.key_type, layout.record_size, true);
 		catalog.insert("documents", docs);
 	}
 
