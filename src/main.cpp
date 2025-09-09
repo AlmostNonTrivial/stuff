@@ -502,7 +502,7 @@ run_repl()
 }
 
 #include "./tests/parser.hpp"
-// #include "./tests/blob.hpp"
+#include "./tests/blob.hpp"
 #include "./tests/pager.hpp"
 #include "./tests/ephemeral.hpp"
 #include "./tests/btree.hpp"
@@ -513,14 +513,14 @@ run_tests()
 {
 
     arena<global_arena>::init();
-	// test_arena();
-	test_parser();
-	test_types();
+	// // test_arena();
+	// test_parser();
+	// test_types();
 
-	// test_blob();
-	test_pager();
-	test_ephemeral();
-	test_btree();
+	test_blob();
+	// test_pager();
+	// test_ephemeral();
+	// test_btree();
 	return 0;
 }
 

@@ -51,12 +51,12 @@ test_single_page_blob()
 	assert(size == text_len);
 
 	// Read back full blob
-	uint64_t read_size;
-	auto result = blob_read_full(blob_id);
-	assert(result != nullptr);
-	assert(read_size == text_len);
+
+	auto	 result = blob_read_full(blob_id);
+	assert(result.data() != nullptr);
+	assert(result.size()== text_len);
 	assert(memcmp(result.data(), small_text, text_len) == 0);
-	printf("  Successfully read back %lu bytes\n", read_size);
+
 
 	// Test page-by-page read
 	blob_page page = blob_read_page(blob_id);
@@ -91,11 +91,13 @@ test_multi_page_blob()
 	assert(blob_get_size(blob_id) == three_pages_size);
 
 	// Read back full blob
-	uint64_t read_size;
-	auto result = blob_read_full(blob_id);
-	assert(read_size == three_pages_size);
+
+	std::cout << text_3pages << " \n";
+
+	auto	 result = blob_read_full(blob_id);
+	std::cout << result.data() << "  " <<three_pages_size;
+	assert(result.size()== three_pages_size);
 	assert(memcmp(result.data(), text_3pages, three_pages_size) == 0);
-	printf("  Successfully read back %lu bytes across 3 pages\n", read_size);
 
 	// Test page chain navigation
 	uint32_t current = blob_id;
@@ -130,7 +132,6 @@ test_boundary_cases()
 	uint32_t	id1 = blob_create((void *)text_exact, page_capacity);
 	assert(blob_get_size(id1) == page_capacity);
 
-
 	auto result1 = blob_read_full(id1);
 	assert(result1.size() == page_capacity);
 	printf("  %zu bytes (exact page) - OK\n", page_capacity);
@@ -140,7 +141,6 @@ test_boundary_cases()
 	const char *text_over = generate_text(page_capacity + 1, 'D');
 	uint32_t	id2 = blob_create((void *)text_over, page_capacity + 1);
 	assert(blob_get_size(id2) == page_capacity + 1);
-
 
 	auto result2 = blob_read_full(id2);
 	assert(result2.size() == page_capacity + 1);
@@ -160,9 +160,8 @@ test_boundary_cases()
 	uint32_t	id3 = blob_create((void *)text_under, page_capacity - 1);
 	assert(blob_get_size(id3) == page_capacity - 1);
 
-	uint64_t size3;
-	void *result3 = blob_read_full(id3, &size3);
-	assert(size3 == page_capacity - 1);
+	auto result3 = blob_read_full(id3);
+	assert(result3.size() == page_capacity - 1);
 	printf("  %zu bytes (fits in 1 page) - OK\n", page_capacity - 1);
 	blob_delete(id3);
 }
@@ -189,12 +188,12 @@ test_large_blob()
 	assert(blob_get_size(blob_id) == large_size);
 
 	// Verify content
-	uint64_t read_size;
-	auto result = blob_read_full(blob_id, &read_size);
-	assert(read_size == large_size);
+
+	auto result = blob_read_full(blob_id);
+	assert(result.size() == large_size);
 
 	// Spot check some bytes
-	uint8_t *data = (uint8_t*)result;
+	uint8_t *data = (uint8_t *)result.data();
 	assert(data[0] == 'L');
 	assert(data[large_size / 2] == 'L');
 	assert(data[large_size - 1] == 'L');
@@ -232,34 +231,35 @@ test_multiple_blobs()
 	printf("  Created 3 blobs: %u, %u, %u\n", id1, id2, id3);
 
 	// Verify each can be read independently
-	uint64_t size1;
-	void *r1 = blob_read_full(id1, &size1);
-	assert(size1 == strlen(text1));
-	assert(memcmp(r1, text1, size1) == 0);
 
-	uint64_t size2;
-	void *r2 = blob_read_full(id2, &size2);
-	assert(size2 == 750);
-	assert(memcmp(r2, text2, size2) == 0);
+	auto r1 = blob_read_full(id1);
+	assert(r1.size() == strlen(text1));
+	assert(memcmp(r1.data(), text1, r1.size()) == 0);
 
-	uint64_t size3;
-	void *r3 = blob_read_full(id3, &size3);
-	assert(size3 == strlen(text3));
-	assert(memcmp(r3, text3, size3) == 0);
+	auto r2 = blob_read_full(id2);
+	assert(r2.size() == 750);
+	assert(memcmp(r2.data(), text2, r2.size()) == 0);
+
+	auto r3 = blob_read_full(id3);
+	assert(r3.size() == strlen(text3));
+	assert(memcmp(r3.data(), text3, r3.size()) == 0);
 
 	printf("  All blobs verified independently\n");
 
 	// Delete middle blob and verify others still work
 	blob_delete(id2);
+	{
 
-	r1 = blob_read_full(id1, &size1);
-	assert(size1 == strlen(text1));
-	assert(memcmp(r1, text1, size1) == 0);
+		auto r1 = blob_read_full(id1);
+		assert(r1.size() == strlen(text1));
+		assert(memcmp(r1.data(), text1, r1.size()) == 0);
+	}
+	{
 
-	r3 = blob_read_full(id3, &size3);
-	assert(size3 == strlen(text3));
-	assert(memcmp(r3, text3, size3) == 0);
-
+		auto r3 = blob_read_full(id3);
+		assert(r3.size() == strlen(text3));
+		assert(memcmp(r3.data(), text3, r3.size()) == 0);
+	}
 	printf("  After deleting blob 2, blobs 1 and 3 still accessible\n");
 
 	// Clean up
@@ -299,13 +299,12 @@ test_binary_data()
 	uint32_t id = blob_create((void *)binary_data, 512);
 	assert(id != 0);
 
-	uint64_t read_size;
-	auto result = blob_read_full(id, &read_size);
-	assert(read_size == 512);
-	assert(memcmp(result, binary_data, 512) == 0);
+	auto result = blob_read_full(id);
+	assert(result.size() == 512);
+	assert(memcmp(result.data(), binary_data, 512) == 0);
 
 	// Verify some specific bytes including nulls
-	uint8_t *data = (uint8_t *)result;
+	uint8_t *data = (uint8_t *)result.data();
 	assert(data[0] == 0);
 	assert(data[255] == 255);
 	assert(data[256] == 0);

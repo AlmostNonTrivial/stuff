@@ -343,8 +343,11 @@ cache_reset()
 		PAGER.cache_meta[i].lru_prev = INVALID_SLOT;
 	}
 
-	PAGER.journaled_or_new_pages.clear();
-	PAGER.page_to_cache.clear();
+	PAGER.page_to_cache.reset();
+	PAGER.journaled_or_new_pages.reset();
+
+	PAGER.page_to_cache.init();
+	PAGER.journaled_or_new_pages.init();
 
 	PAGER.lru_head = INVALID_SLOT;
 	PAGER.lru_tail = INVALID_SLOT;
@@ -775,8 +778,8 @@ pager_rollback()
 	os_file_delete(PAGER.journal_file);
 	PAGER.journal_fd = OS_INVALID_HANDLE;
 
-	cache_reset();
 	arena<pager_arena>::reset_and_decommit();
+	cache_reset();
 
 	PAGER.in_transaction = false;
 
