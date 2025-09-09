@@ -94,14 +94,7 @@ template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8
 		storage.copy_from(other.storage);
 	}
 
-	template <typename OtherTag>
-	void
-	assign(const array<T, OtherTag> &other)
-	{
-		storage.data = other.data();
-		storage.size = other.size();
-		storage.capacity = other.capacity();
-	}
+
 
 	T &
 	operator[](uint32_t index)
@@ -461,7 +454,7 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	V *
 	get(const K &key)
 	{
-		return entry(key)->value;
+		return &entry(key)->value;
 	}
 
 	Entry *

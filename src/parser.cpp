@@ -1176,7 +1176,7 @@ parse_sql(const char *sql)
 	else
 	{
 		result.success = true;
-		result.error = nullptr;
+		result.error = {};
 		result.error_line = -1;
 		result.error_column = -1;
 		result.failed_statement_index = -1;

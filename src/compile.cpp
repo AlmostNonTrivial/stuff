@@ -25,7 +25,7 @@ compile_literal(ProgramBuilder *prog, Expr *expr)
 	case TYPE_U32:
 		return prog->load(prog->alloc_data_type(TYPE_U32, &expr->int_val));
 	case TYPE_CHAR32:
-		return prog->load(prog->alloc_data_type(TYPE_CHAR32, expr->str_val.data(), expr->str_val.size())
+		return prog->load(prog->alloc_data_type(TYPE_CHAR32, expr->str_val.data(), expr->str_val.size()));
 	}
 
 	return prog->load_null();

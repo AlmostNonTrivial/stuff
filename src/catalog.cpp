@@ -72,7 +72,7 @@ TupleFormat tuple_format_from_types(array<DataType, query_arena>& columns) {
 
     // First column is always the key
     format.key_type = columns[0];
-    format.columns.assign(columns);
+    format.columns.copy_from(columns);
 
     // Calculate offsets for record portion (excluding key)
     // The key is stored separately in the btree node

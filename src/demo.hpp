@@ -1,9 +1,12 @@
 #pragma once
 
 #include "btree.hpp"
+#include "common.hpp"
 #include "types.hpp"
 #include "vm.hpp"
+#include "catalog.hpp"
 #include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -106,17 +109,19 @@ load_table_from_csv_sql(const char *csv_file, const char *table_name)
 	int		  batch_count = 0;
 	const int BATCH_SIZE = 50;
 
-	Schema *structure = catalog.get(table_name);
+	Relation *structure = catalog.get(table_name);
 	if (!structure)
 		return;
 
-	string<query_arena> column_list;
+	auto column_list = stream_writer<query_arena>::begin();
 	for (uint32_t i = 0; i < structure->columns.size(); i++)
 	{
 		if (i > 0)
-			column_list.append(", ");
-		column_list.append(structure->columns[i].name);
+			column_list.write(", ");
+		column_list.write(structure->columns[i].name);
 	}
+
+	auto list = column_list.finish();
 
 	while (reader.next_row(fields))
 	{
@@ -126,45 +131,45 @@ load_table_from_csv_sql(const char *csv_file, const char *table_name)
 			continue;
 		}
 
-		string<query_arena> sql;
-		sql.append("INSERT INTO ");
-		sql.append(table_name);
-		sql.append(" (");
-		sql.append(column_list);
-		sql.append(") VALUES (");
+		auto sql = stream_writer<query_arena>::begin();
+		sql.write("INSERT INTO ");
+		sql.write(table_name);
+		sql.write(" (");
+		sql.write(list);
+		sql.write(") VALUES (");
 
 		for (size_t i = 0; i < fields.size(); i++)
 		{
 			if (i > 0)
-				sql.append(", ");
+				sql.write(", ");
 
 			DataType col_type = structure->columns[i].type;
 
 			if (type_is_numeric(col_type))
 			{
-				sql.append(fields[i].c_str());
+				sql.write(fields[i].c_str());
 			}
 			else if (type_is_string(col_type))
 			{
-				sql.append("'");
+				sql.write("'");
 				for (char c : fields[i])
 				{
 					if (c == '\'')
 					{
-						sql.append("''");
+						sql.write("''");
 					}
 					else
 					{
-						sql.append(&c);
+						sql.write(&c);
 					}
 				}
-				sql.append("'");
+				sql.write("'");
 			}
 		}
 
-		sql.append(");");
+		sql.write(");");
 
-		if (execute_sql_statement(sql.c_str()))
+		if (execute_sql_statement(sql.finish().begin()))
 		{
 			count++;
 		}
@@ -266,12 +271,13 @@ vmfunc_create_index_structure(TypedValue *result, TypedValue *args, uint32_t arg
 	const char *index_name = args[0].as_char();
 
 	// Create composite index structure: (user_id, order_id) -> order_id
-	array<Attribute> columns;
+	array<Attribute, query_arena> columns;
 	columns.push(Attribute{"key", make_dual(TYPE_U32, TYPE_U32)}); // Composite key
 
-	Schema index = Schema::from(index_name, columns);
-	TupleFormat	  layout = index.to_layout();
-	index.storage.btree = btree_create(layout.key_type(), layout.record_size, false);
+	// Relation index = Schema::from(index_name, columns);
+	Relation	index = create_relation(index_name, columns);
+	TupleFormat layout = tuple_format_from_relation(index);
+	index.storage.btree = btree_create(layout.key_type, layout.record_size, false);
 
 	// Add to catalog temporarily (will be rolled back)
 	catalog.insert(index_name, index);
@@ -305,7 +311,7 @@ demo_like_pattern(const char *args)
 
 	ProgramBuilder prog;
 
-	Schema *products = catalog.get("products");
+	Relation *products = catalog.get("products");
 	if (!products)
 	{
 		printf("Products table not found!\n");
@@ -316,7 +322,8 @@ demo_like_pattern(const char *args)
 	int	 cursor = prog.open_cursor(products_ctx);
 
 	// Load pattern into register
-	int pattern_reg = prog.load(TYPE_CHAR32, prog.alloc_string(pattern, 32));
+	// int pattern_reg = prog.load(TYPE_CHAR32, prog.alloc_string(pattern, 32));
+	int pattern_reg = prog.load(prog.alloc_data_type(TYPE_CHAR32, pattern, 32));
 
 	// Scan products
 	int	 at_end = prog.first(cursor);
@@ -374,8 +381,8 @@ demo_nested_loop_join(const char *args)
 
 	ProgramBuilder prog;
 
-	Schema *users = catalog.get("users");
-	Schema *orders = catalog.get("orders");
+	Relation *users = catalog.get("users");
+	Relation *orders = catalog.get("orders");
 	if (!users || !orders)
 	{
 		printf("Required tables not found!\n");
@@ -389,9 +396,15 @@ demo_nested_loop_join(const char *args)
 	int orders_cursor = prog.open_cursor(orders_ctx);
 
 	// Counter for LIMIT
-	int count_reg = prog.load(TYPE_U32, prog.alloc_value(0U));
-	int limit_reg = prog.load(TYPE_U32, prog.alloc_value((uint32_t)limit));
-	int one_reg = prog.load(TYPE_U32, prog.alloc_value(1U));
+	// int count_reg = prog.load(TYPE_U32, prog.alloc_value(0U));
+	uint32_t x = 0U;
+	int		 count_reg = prog.load(prog.alloc_data_type(TYPE_U32, &x));
+
+	// int limit_reg = prog.load(TYPE_U32, prog.alloc_value((uint32_t)limit));
+	int limit_reg = prog.load(prog.alloc_data_type(TYPE_U32, &limit));
+	// int one_reg = prog.load(TYPE_U32, prog.alloc_value(1U));
+	uint32_t xx = 1U;
+	int		 one_reg = prog.load(prog.alloc_data_type(TYPE_U32, &xx));
 
 	// Outer loop: scan users
 	int	 at_end_users = prog.first(users_cursor);
@@ -486,16 +499,16 @@ demo_subquery_pattern(const char *args)
 
 	ProgramBuilder prog;
 
-	Schema *users = catalog.get("users");
+	Relation *users = catalog.get("users");
 	if (!users)
 	{
 		printf("Users table not found!\n");
 		return;
 	}
 
-	auto   users_ctx = from_structure(*users);
+	auto		users_ctx = from_structure(*users);
 	TupleFormat temp_layout = users_ctx->layout;
-	auto   temp_ctx = red_black(temp_layout);
+	auto		temp_ctx = red_black(temp_layout);
 
 	int users_cursor = prog.open_cursor(users_ctx);
 	int temp_cursor = prog.open_cursor(temp_ctx);
@@ -503,7 +516,8 @@ demo_subquery_pattern(const char *args)
 	// Phase 1: Materialize subquery (age > threshold) into temp tree
 	{
 		prog.regs.push_scope();
-		int age_const = prog.load(TYPE_U32, prog.alloc_value((uint32_t)age));
+		// int age_const = prog.load(TYPE_U32, prog.alloc_value((uint32_t)age));
+		int age_const = prog.load(prog.alloc_data_type(TYPE_U32, &age));
 
 		int	 at_end = prog.first(users_cursor);
 		auto scan_loop = prog.begin_while(at_end);
@@ -529,7 +543,8 @@ demo_subquery_pattern(const char *args)
 	// Phase 2: Scan temp tree and filter by city
 	{
 		prog.regs.push_scope();
-		int city_const = prog.load(TYPE_CHAR16, prog.alloc_string(city, 16));
+		// int city_const = prog.load(TYPE_CHAR16, prog.alloc_string(city, 16));
+		int city_const = prog.load(prog.alloc_data_type(TYPE_CHAR32, city, 16));
 
 		int	 at_end = prog.first(temp_cursor);
 		auto scan_loop = prog.begin_while(at_end);
@@ -583,7 +598,7 @@ demo_composite_index(const char *args)
 
 	{
 		ProgramBuilder prog;
-		Schema	  *orders = catalog.get("orders");
+		Relation	  *orders = catalog.get("orders");
 		if (!orders)
 		{
 			printf("Orders table not found!\n");
@@ -593,8 +608,10 @@ demo_composite_index(const char *args)
 		auto orders_ctx = from_structure(*orders);
 		int	 cursor = prog.open_cursor(orders_ctx);
 
-		int target_user = prog.load(TYPE_U32, prog.alloc_value((uint32_t)user_id));
-		int threshold = prog.load(TYPE_U32, prog.alloc_value((uint32_t)min_order_id));
+		// int target_user = prog.load(TYPE_U32, prog.alloc_value((uint32_t)user_id));
+		int target_user = prog.load(prog.alloc_data_type(TYPE_U32, &user_id));
+		// int threshold = prog.load(TYPE_U32, prog.alloc_value((uint32_t)min_order_id));
+		int threshold = prog.load(prog.alloc_data_type(TYPE_U32, &min_order_id));
 
 		int	 at_end = prog.first(cursor);
 		auto loop = prog.begin_while(at_end);
@@ -644,16 +661,16 @@ demo_composite_index(const char *args)
 	{
 		ProgramBuilder prog;
 
-		Schema *orders = catalog.get("orders");
-		auto	   orders_ctx = from_structure(*orders);
+		Relation *orders = catalog.get("orders");
+		auto	  orders_ctx = from_structure(*orders);
 
 		// Create a context for the temporary index
 		CursorContext index_context;
 		index_context.type = BPLUS;
 		index_context.storage.tree = &index_btree;
-		array<DataType> index_types;
-		index_types.push(composite_key_type);
-		index_context.layout = Layout::create(index_types);
+		array<DataType, query_arena> index_types = {composite_key_type};
+
+		index_context.layout = tuple_format_from_types(index_types);
 
 		int orders_cursor = prog.open_cursor(orders_ctx);
 		int index_cursor = prog.open_cursor(&index_context);
@@ -694,16 +711,18 @@ demo_composite_index(const char *args)
 		CursorContext index_context;
 		index_context.type = BPLUS;
 		index_context.storage.tree = &index_btree;
-		array<DataType> index_types;
-		index_types.push(composite_key_type);
-		index_context.layout = Layout::create(index_types);
+		array<DataType, query_arena> index_types = {composite_key_type};
+		index_context.layout = tuple_format_from_types(index_types);
 
 		int cursor = prog.open_cursor(&index_context);
 
 		prog.regs.push_scope();
 
-		int user_reg = prog.load(TYPE_U32, prog.alloc_value((uint32_t)user_id));
-		int order_threshold = prog.load(TYPE_U32, prog.alloc_value((uint32_t)(min_order_id + 1)));
+		// int user_reg = prog.load(TYPE_U32, prog.alloc_value((uint32_t)user_id));
+		int user_reg = prog.load(prog.alloc_data_type(TYPE_U32, &user_id));
+		// int order_threshold = prog.load(TYPE_U32, prog.alloc_value((uint32_t)(min_order_id + 1)));
+		auto x = min_order_id + 1;
+		int	 order_threshold = prog.load(prog.alloc_data_type(TYPE_U32, &x));
 
 		// Create composite seek key
 		int seek_key = prog.pack2(user_reg, order_threshold);
@@ -785,7 +804,7 @@ demo_group_by_aggregate(const char *args)
 
 	ProgramBuilder prog;
 
-	Schema *users = catalog.get("users");
+	Relation *users = catalog.get("users");
 	if (!users)
 	{
 		printf("Users table not found!\n");
@@ -793,12 +812,12 @@ demo_group_by_aggregate(const char *args)
 	}
 
 	// Create layout for aggregation tree
-	array<DataType> agg_types;
-	agg_types.push(TYPE_CHAR16); // city (key)
-	agg_types.push(TYPE_U32);	 // count
-	agg_types.push(TYPE_U32);	 // sum_age
-
-	TupleFormat agg_layout = Layout::create(agg_types);
+	array<DataType, query_arena> agg_types = {
+		(TYPE_CHAR16), // city (key)
+		(TYPE_U32),	   // count
+		(TYPE_U32),	   // sum_age
+	};
+	TupleFormat agg_layout = tuple_format_from_types(agg_types);
 
 	auto users_ctx = from_structure(*users);
 	auto agg_ctx = red_black(agg_layout);
@@ -809,7 +828,9 @@ demo_group_by_aggregate(const char *args)
 	// Phase 1: Scan users and build aggregates
 	{
 		prog.regs.push_scope();
-		int one_const = prog.load(TYPE_U32, prog.alloc_value(1U));
+		// int one_const = prog.load(TYPE_U32, prog.alloc_value(1U));
+		auto ss = 1U;
+		int	 one_const = prog.load(prog.alloc_data_type(TYPE_U32, &ss));
 
 		int	 at_end = prog.first(users_cursor);
 		auto scan_loop = prog.begin_while(at_end);
@@ -925,14 +946,14 @@ vmfunc_read_blob(TypedValue *result, TypedValue *args, uint32_t arg_count)
 		return false;
 
 	uint32_t page_idx = args[0].as_u32();
-	uint64_t size;
-	void	*data = blob_read_full(page_idx, &size);
 
-	if (!data)
+	string_view data = blob_read_full(page_idx);
+
+	if (!data.size())
 		return false;
 
-	result->type = TYPE_VARCHAR(size);
-	result->data = (uint8_t *)data;
+	result->type = TYPE_VARCHAR(data.size());
+	result->data = (uint8_t *)data.data();
 	return true;
 }
 
@@ -955,24 +976,23 @@ demo_blob_storage(const char *args)
 	// Create documents table if it doesn't exist
 	if (!catalog.get("documents"))
 	{
-		array<Attribute> columns;
-		columns.push(Attribute{"doc_id", TYPE_U32});
-		columns.push(Attribute{"title", TYPE_CHAR32});
-		columns.push(Attribute{"blob_ref", TYPE_U32});
+		array<Attribute, query_arena> columns = {
+			{"doc_id", TYPE_U32}, {"title", TYPE_CHAR32}, {"blob_ref", TYPE_U32}};
+
 
 		pager_begin_transaction();
-		Schema docs = Schema::from("documents", columns);
-		TupleFormat	  layout = docs.to_layout();
-		docs.storage.btree = btree_create(layout.key_type(), layout.record_size, true);
+		Relation	docs = create_relation("documents", columns);
+		TupleFormat layout = tuple_format_from_relation(docs);
+		docs.storage.btree = btree_create(layout.key_type, layout.record_size, true);
 		catalog.insert("documents", docs);
 	}
 
 	ProgramBuilder prog;
 	// prog.begin_transaction();
 
-	Schema *docs = catalog.get("documents");
-	auto	   docs_ctx = from_structure(*docs);
-	int		   cursor = prog.open_cursor(docs_ctx);
+	Relation *docs = catalog.get("documents");
+	auto	  docs_ctx = from_structure(*docs);
+	int		  cursor = prog.open_cursor(docs_ctx);
 
 	// Insert a document with blob
 	{
@@ -988,14 +1008,21 @@ demo_blob_storage(const char *args)
 									"databases handle TEXT and BLOB columns.";
 
 		// Write blob and get reference
-		int content_ptr = prog.load(TYPE_U64, prog.alloc_value((uint64_t)large_content));
-		int content_size = prog.load(TYPE_U32, prog.alloc_value((uint32_t)strlen(large_content)));
-		int blob_ref = prog.call_function(vmfunc_write_blob, content_ptr, 2);
+		// int content_ptr = prog.load(TYPE_U64, prog.alloc_value((uint64_t)large_content));
+		int content_ptr = prog.load(prog.alloc_data_type(TYPE_U64, large_content));
+		// int content_size = prog.load(TYPE_U32, prog.alloc_value((uint32_t)strlen(large_content)));
+		auto xxx = strlen(large_content);
+		int	 content_size = prog.load(prog.alloc_data_type(TYPE_U32, &xxx));
+		int	 blob_ref = prog.call_function(vmfunc_write_blob, content_ptr, 2);
 
 		// Prepare document row
 		int row_start = prog.regs.allocate_range(3);
-		prog.load(TYPE_U32, prog.alloc_value((uint32_t)doc_id), row_start);
-		prog.load(TYPE_CHAR32, prog.alloc_string("Technical Manual", 32), row_start + 1);
+		// prog.load(TYPE_U32, prog.alloc_value((uint32_t)doc_id), row_start);
+		prog.load(prog.alloc_data_type(TYPE_U32, &doc_id), row_start);
+		// prog.load(TYPE_CHAR32, prog.alloc_string("Technical Manual", 32), row_start + 1);
+		auto s = "Technical Manual";
+		auto sl = strlen(s);
+		prog.load(prog.alloc_data_type(TYPE_CHAR32, s, sl), row_start + 1);
 		prog.move(blob_ref, row_start + 2);
 
 		prog.insert_record(cursor, row_start, 3);
@@ -1010,7 +1037,8 @@ demo_blob_storage(const char *args)
 	{
 		prog.regs.push_scope();
 
-		int search_key = prog.load(TYPE_U32, prog.alloc_value((uint32_t)doc_id));
+		// int search_key = prog.load(TYPE_U32, prog.alloc_value((uint32_t)doc_id));
+		int search_key = prog.load(prog.alloc_data_type(TYPE_U32, &doc_id));
 		int found = prog.seek(cursor, search_key, EQ);
 
 		auto if_found = prog.begin_if(found);

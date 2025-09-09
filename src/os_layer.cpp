@@ -40,7 +40,7 @@
 #include "os_layer.hpp"
 
 // Comment out the next line to use memory filesystem instead of platform-specific
-#define USE_PLATFORM_FS
+// #define USE_PLATFORM_FS
 
 #if defined(USE_PLATFORM_FS) && defined(_WIN32)
 /*
@@ -261,9 +261,15 @@ os_file_truncate(os_file_handle_t handle, os_file_offset_t size)
 **   Uses arena allocator for all dynamic memory. The arena is configured
 **   for the global_arena tag.
 */
+/*
+** MEMORY FILESYSTEM IMPLEMENTATION - FIXED
+**
+** In-memory filesystem for testing and development using arena-based containers.
+*/
 
 #include "arena.hpp"
 #include "containers.hpp"
+#include <cstring>
 
 /* Define invalid handle for memory filesystem */
 #ifndef OS_INVALID_HANDLE
@@ -278,9 +284,9 @@ os_file_truncate(os_file_handle_t handle, os_file_offset_t size)
 */
 struct file_handle
 {
-	string<global_arena> filepath;	 /* Path to file */
-	size_t				 position;	 /* Current read/write position */
-	bool				 read_write; /* true if opened for writing */
+	const char *filepath;  /* Path to file (interned in arena) */
+	size_t position;       /* Current read/write position */
+	bool read_write;       /* true if opened for writing */
 };
 
 /*
@@ -291,7 +297,7 @@ struct file_handle
 struct memory_file_system
 {
 	/* Map from filepath to file contents */
-	hash_map<string<global_arena>, array<uint8_t, global_arena>, global_arena> files;
+	hash_map<std::string_view, array<uint8_t, global_arena>, global_arena> files;
 
 	/* Map from handle ID to handle data */
 	hash_map<os_file_handle_t, file_handle, global_arena> handles;
@@ -299,8 +305,7 @@ struct memory_file_system
 	/* Next handle ID to assign (starts at 1, 0 is invalid) */
 	os_file_handle_t next_handle = 1;
 
-	void
-	init()
+	void init()
 	{
 		files.init();
 		handles.init();
@@ -313,13 +318,13 @@ static memory_file_system g_filesystem;
 os_file_handle_t
 os_file_open(const char *filename, bool read_write, bool create)
 {
-	if (!g_filesystem.files.size())
+	if (!g_filesystem.files.capacity())
 	{
 		g_filesystem.init();
 	}
 
-	/* Create string key for the file */
-	string<global_arena> filepath_key = string<global_arena>::make(filename);
+	/* Intern the filename string for consistent key usage */
+	std::string_view filepath_key = arena_intern<global_arena>(filename);
 
 	/* Check if file exists */
 	auto *file_data = g_filesystem.files.get(filepath_key);
@@ -341,7 +346,7 @@ os_file_open(const char *filename, bool read_write, bool create)
 	os_file_handle_t handle = g_filesystem.next_handle++;
 
 	file_handle fh;
-	fh.filepath = string<global_arena>::make(filename);
+	fh.filepath = filepath_key.data(); /* Store the interned pointer */
 	fh.position = 0;
 	fh.read_write = read_write;
 
@@ -362,24 +367,24 @@ os_file_close(os_file_handle_t handle)
 bool
 os_file_exists(const char *filename)
 {
-	if (!g_filesystem.files.size())
+	if (!g_filesystem.files.capacity())
 	{
 		return false;
 	}
 
-	string<global_arena> filepath_key = string<global_arena>::make(filename);
+	std::string_view filepath_key = arena_intern<global_arena>(filename);
 	return g_filesystem.files.contains(filepath_key);
 }
 
 void
 os_file_delete(const char *filename)
 {
-	if (!g_filesystem.files.size())
+	if (!g_filesystem.files.capacity())
 	{
 		return;
 	}
 
-	string<global_arena> filepath_key = string<global_arena>::make(filename);
+	std::string_view filepath_key = arena_intern<global_arena>(filename);
 
 	/* Delete from the files map */
 	g_filesystem.files.remove(filepath_key);
@@ -388,15 +393,13 @@ os_file_delete(const char *filename)
 	/* Collect handles first to avoid modifying while iterating */
 	array<os_file_handle_t, global_arena> handles_to_close;
 
-	for (uint32_t i = 0; i < g_filesystem.handles.capacity(); i++)
+	/* Iterate through hash_map entries properly */
+	for (auto it = g_filesystem.handles.begin(); it != g_filesystem.handles.end(); ++it)
 	{
-		auto &entry = g_filesystem.handles.storage.data[i];
-		if (entry.state == hash_slot_state::OCCUPIED)
+		auto [handle_id, handle_data] = *it;
+		if (strcmp(handle_data.filepath, filename) == 0)
 		{
-			if (entry.value.filepath.equals(filename))
-			{
-				handles_to_close.push(entry.key);
-			}
+			handles_to_close.push(handle_id);
 		}
 	}
 
@@ -416,13 +419,14 @@ os_file_read(os_file_handle_t handle, void *buffer, os_file_size_t size)
 		return 0;
 	}
 
-	auto *file_data = g_filesystem.files.get(handle_data->filepath);
+	std::string_view filepath_key(handle_data->filepath);
+	auto *file_data = g_filesystem.files.get(filepath_key);
 	if (!file_data)
 	{
 		return 0;
 	}
 
-	size_t		  &position = handle_data->position;
+	size_t &position = handle_data->position;
 	os_file_size_t bytes_to_read = 0;
 
 	if (position < file_data->size())
@@ -436,7 +440,7 @@ os_file_read(os_file_handle_t handle, void *buffer, os_file_size_t size)
 
 	if (bytes_to_read > 0)
 	{
-		memcpy(buffer, file_data->front() + position, bytes_to_read);
+		memcpy(buffer, file_data->data() + position, bytes_to_read);
 		position += bytes_to_read;
 	}
 
@@ -452,44 +456,36 @@ os_file_write(os_file_handle_t handle, const void *buffer, os_file_size_t size)
 		return 0;
 	}
 
-	auto *file_data = g_filesystem.files.get(handle_data->filepath);
+	std::string_view filepath_key(handle_data->filepath);
+	auto *file_data = g_filesystem.files.get(filepath_key);
 	if (!file_data)
 	{
 		return 0;
 	}
 
 	size_t &position = handle_data->position;
-	size_t	required_size = position + size;
+	size_t required_size = position + size;
 
 	/*
 	** SPARSE FILE HANDLING
 	**
 	** If writing past EOF, we need to zero-fill the gap to match
-	** POSIX sparse file behavior. This is critical for database
-	** correctness as uninitialized pages must read as zeros.
+	** POSIX sparse file behavior.
 	*/
-	// if (position > file_data->size())
-	// {
-	// 	/* Writing past EOF - need to zero-fill the gap */
-	// 	file_data->storage.grow_by(required_size - file_data->size());
+	if (required_size > file_data->size())
+	{
+		size_t old_size = file_data->size();
+		file_data->resize(required_size);
 
-	// 	/* Zero-fill from current size to write position */
-	// 	memset(file_data->front() + file_data->size(), 0, position - file_data->size());
-	// }
-	// else if (required_size > file_data->size())
-	// {
-	// 	/* Writing extends the file but no gap */
-	// 	file_data->reserve(required_size);
-
-	// }
-	// else
-	// {
-	// 	/* Writing within existing file bounds */
-	// 	file_data->reserve(required_size);
-	// }
+		/* Zero-fill gap if writing past EOF */
+		if (position > old_size)
+		{
+			memset(file_data->data() + old_size, 0, position - old_size);
+		}
+	}
 
 	/* Perform the write */
-	// memcpy(file_data->data + position, buffer, size);
+	memcpy(file_data->data() + position, buffer, size);
 	position += size;
 
 	return size;
@@ -524,7 +520,8 @@ os_file_size(os_file_handle_t handle)
 		return 0;
 	}
 
-	auto *file_data = g_filesystem.files.get(handle_data->filepath);
+	std::string_view filepath_key(handle_data->filepath);
+	auto *file_data = g_filesystem.files.get(filepath_key);
 	if (!file_data)
 	{
 		return 0;
@@ -542,27 +539,32 @@ os_file_truncate(os_file_handle_t handle, os_file_offset_t size)
 		return;
 	}
 
-	auto *file_data = g_filesystem.files.get(handle_data->filepath);
+	std::string_view filepath_key(handle_data->filepath);
+	auto *file_data = g_filesystem.files.get(filepath_key);
 	if (!file_data)
 	{
 		return;
 	}
 
+	size_t new_size = (size_t)size;
+	size_t old_size = file_data->size();
+
 	/* Resize the file */
-	if ((size_t)size > file_data->size())
+	if (new_size != old_size)
 	{
-		/* Extending - need to zero-fill */
-		file_data->reserve((size_t)size);
-		/* Zero-fill the new bytes */
-		memset(file_data->front()+ file_data->size(), 0, (size_t)size - file_data->size());
+		file_data->resize(new_size);
+
+		/* Zero-fill if extending */
+		if (new_size > old_size)
+		{
+			memset(file_data->data() + old_size, 0, new_size - old_size);
+		}
 	}
 
-	// file_data->size = (size_t)size;
-
 	/* Adjust position if it's beyond new size */
-	if (handle_data->position > (size_t)size)
+	if (handle_data->position > new_size)
 	{
-		handle_data->position = (size_t)size;
+		handle_data->position = new_size;
 	}
 }
 #endif
