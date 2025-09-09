@@ -141,20 +141,6 @@ extern hash_map<string_view, Relation, catalog_arena> catalog;
 void catalog_reload();
 
 /**
- * Add a relation to the catalog
- *
- * Interns the relation name and inserts it into the global catalog map.
- */
-void catalog_add_relation(Relation& relation);
-
-/**
- * Remove a relation from the catalog
- *
- * Removes the relation and reclaims the interned name string.
- */
-void catalog_delete_relation(string_view key);
-
-/**
  * Create a tuple format from raw column types
  *
  * Builds a TupleFormat from an array of data types. The first type

@@ -5,6 +5,8 @@
 
 using std::string_view;
 
+
+
 struct query_arena
 {
 };
@@ -34,28 +36,6 @@ enum comparison_op : uint8_t
 	GT = 4,
 	GE = 5,
 };
-
-inline const char *
-debug_compare_op_name(comparison_op op)
-{
-	static const char *names[] = {"==", "!=", "<", "<=", ">", ">="};
-	return (op >= EQ && op <= GE) ? names[op] : "UNKNOWN";
-}
-
-inline const char *
-debug_arith_op_name(arith_op op)
-{
-	static const char *names[] = {"+", "-", "*", "/", "%"};
-	return (op >= ARITH_ADD && op <= ARITH_MOD) ? names[op] : "UNKNOWN";
-}
-
-inline const char *
-debug_logic_op_name(logic_op op)
-{
-	static const char *names[] = {"AND", "OR"};
-	return (op >= LOGIC_AND && op <= LOGIC_OR) ? names[op] : "UNKNOWN";
-}
-
 
 
 

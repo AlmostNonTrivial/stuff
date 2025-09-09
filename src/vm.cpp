@@ -20,6 +20,8 @@
 
 bool _debug = false;
 
+
+
 struct VmCursor
 {
 	storage_type type;

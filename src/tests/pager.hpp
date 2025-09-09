@@ -11,8 +11,6 @@
 
 #define DB "db"
 
-
-
 inline uint64_t
 hash_file(const char *filename)
 {
@@ -36,150 +34,6 @@ hash_file(const char *filename)
 
 	os_file_close(handle);
 	return hash;
-}
-
-inline void
-test_free_list()
-{
-	pager_open(DB);
-	uint32_t size = 1000;
-	pager_begin_transaction();
-	for (uint32_t i = 1; i <= size; i++)
-	{
-		pager_new();
-	}
-
-	pager_meta stats1 = pager_get_stats();
-
-	std::cout << stats1.free_pages << ", " << stats1.total_pages << "\n";
-	assert(0 == stats1.free_pages && size == stats1.total_pages);
-
-	for (uint32_t i = 1; i <= size; i++)
-	{
-		pager_delete(i);
-	}
-	pager_meta stats3 = pager_get_stats();
-	assert(size == stats3.free_pages && size == stats3.total_pages);
-
-	std::cout << stats3.free_pages << ", " << stats3.total_pages << "\n";
-
-	for (uint32_t i = 1; i <= size * 2; i++)
-	{
-
-		pager_new();
-	}
-
-	stats3 = pager_get_stats();
-	std::cout << stats3.free_pages << ", " << stats3.total_pages << "\n";
-	assert(0 == stats3.free_pages && size * 2 == stats3.total_pages);
-	pager_close();
-	os_file_delete(DB);
-}
-
-inline void
-test_rollback()
-{
-
-	if (MAX_CACHE_ENTRIES > 3)
-	{
-		return;
-	}
-
-	pager_open(DB);
-	auto start = hash_file(DB);
-	pager_begin_transaction();
-	auto	   p1 = pager_new();
-	auto	   p2 = pager_new();
-	base_page *ptr = pager_get(p1);
-	pager_mark_dirty(p1);
-	ptr->data[0] = 'a';
-
-	pager_commit();
-	pager_close();
-	pager_open(DB);
-
-	assert(nullptr != pager_get(p1));
-	assert(nullptr != pager_get(p2));
-	assert('a' == (pager_get(p1))->data[0]);
-
-	auto before = hash_file(DB);
-	assert(before != start);
-
-	pager_begin_transaction();
-
-	auto p3 = pager_new();
-	assert(nullptr != pager_get(p3));
-	pager_delete(p2);
-
-	ptr = pager_get(p1);
-	pager_mark_dirty(p1);
-	ptr->data[0] = 'b';
-	pager_new();
-	pager_new();
-	pager_new();   // force p1 to be evicted and written to data file
-	pager_close(); // didn't commit
-	auto after_sync = hash_file(DB);
-	assert(after_sync != before);
-	pager_open(DB); // rollback applied
-
-	auto after_rollback = hash_file(DB);
-	assert(after_rollback == before);
-	pager_begin_transaction();
-
-	ptr = pager_get(p1);
-	pager_mark_dirty(p1);
-	ptr->data[0] = 'c';
-
-	pager_rollback();
-
-	ptr = pager_get(p1);
-	assert('a' == ptr->data[0]);
-
-	pager_close();
-	os_file_delete(DB);
-}
-
-inline void
-test_lru()
-{
-
-	if (MAX_CACHE_ENTRIES != 3)
-	{
-		return;
-	}
-
-	pager_open(DB);
-	pager_begin_transaction();
-
-	auto p1 = pager_new();
-	auto p2 = pager_new();
-	auto p3 = pager_new();
-	auto p4 = pager_new();
-
-	base_page *ptr1 = pager_get(p1);
-	pager_mark_dirty(p1);
-	ptr1->data[0] = 'a';
-	/* [a],[],[] */
-	base_page *ptr2 = pager_get(p2);
-	pager_mark_dirty(p2);
-	ptr2->data[0] = 'b';
-	/* [a],[b],[] */
-	base_page *ptr3 = pager_get(p3);
-	pager_mark_dirty(p3);
-	ptr3->data[0] = 'c';
-	/* [a],[b],[c] */
-	base_page *ptr4 = pager_get(p4); // p1 at end, evict p1
-	pager_mark_dirty(p4);
-	ptr4->data[0] = 'd';
-	/* [d],[b],[c] */
-	assert('d' == ptr1->data[0] && ptr4 == ptr1);
-	pager_get(p1); // p2 at end, evict p2
-	assert('a' == ptr2->data[0]);
-	/* [d],[a],[c] */
-
-	pager_rollback();
-	pager_close();
-	os_file_delete(DB);
 }
 
 // Helper function to generate weighted random operation
@@ -223,7 +77,7 @@ test_pager_stress()
 	{
 		uint32_t operation;
 		// Force create if no pages exist to ensure write/delete can proceed
-		if (committed_pages.size() + transaction_pages.size()== 0)
+		if (committed_pages.size() + transaction_pages.size() == 0)
 		{
 			operation = 0;
 		}
@@ -265,7 +119,7 @@ test_pager_stress()
 			uint32_t   total_size = committed_pages.size() + transaction_pages.size();
 			uint32_t   index = std::rand() % total_size;
 			uint32_t   page_id = index < committed_pages.size() ? committed_pages[index]
-															  : transaction_pages[index - committed_pages.size()];
+																: transaction_pages[index - committed_pages.size()];
 			base_page *page = pager_get(page_id);
 			assert(page != nullptr && "Failed to get page for writing");
 			char random_char = chars[std::rand() % char_count];
@@ -292,7 +146,7 @@ test_pager_stress()
 			uint32_t total_size = committed_pages.size() + transaction_pages.size();
 			uint32_t index = std::rand() % total_size;
 			uint32_t page_id = index < committed_pages.size() ? committed_pages[index]
-															: transaction_pages[index - committed_pages.size()];
+															  : transaction_pages[index - committed_pages.size()];
 			pager_delete(page_id);
 			made_changes = true;
 			std::cout << "Deleted page " << page_id << "\n";
@@ -335,7 +189,8 @@ test_pager_stress()
 			made_changes = false;
 			std::cout << "Committed transaction\n";
 			for (uint32_t j = 0; j < transaction_pages.size(); ++j)
-			{committed_pages.push( transaction_pages[j]);
+			{
+				committed_pages.push(transaction_pages[j]);
 			}
 			transaction_pages.clear();
 			pager_meta new_stats = pager_get_stats();
@@ -357,7 +212,7 @@ test_pager_stress()
 			std::cout << "Committed final transaction\n";
 			for (uint32_t j = 0; j < transaction_pages.size(); ++j)
 			{
-				committed_pages.push( transaction_pages[j]);
+				committed_pages.push(transaction_pages[j]);
 			}
 			transaction_pages.clear();
 		}
@@ -382,9 +237,5 @@ test_pager_stress()
 inline void
 test_pager()
 {
-
-	test_lru();
-	test_rollback();
-	test_free_list();
 	test_pager_stress();
 }

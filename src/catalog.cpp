@@ -25,33 +25,6 @@ hash_map<string_view, Relation, catalog_arena> catalog;
 // Catalog Management
 // ============================================================================
 
-/**
- * Add a relation to the global catalog
- *
- * The relation's name is interned to ensure it persists in catalog memory
- * and to enable efficient string comparison via pointer equality.
- */
-void catalog_add_relation(Relation& relation) {
-    catalog.insert(arena_intern<catalog_arena>(relation.name), relation);
-}
-
-/**
- * Remove a relation from the catalog
- *
- * Because hash_map::remove only marks entries as deleted (tombstones),
- * we need to manually reclaim the interned string memory.
- */
-void catalog_delete_relation(string_view key) {
-    if (!catalog.contains(key)) {
-        return;
-    }
-
-    auto entry = catalog.entry(key);
-    catalog.remove(key);
-
-    // Reclaim the interned string since remove() only tombstones
-    arena_reclaim_string(entry->key);
-}
 
 // ============================================================================
 // Tuple Format Construction
@@ -194,8 +167,8 @@ void catalog_reload() {
     arena<catalog_arena>::init();
 
     // Clear all catalog memory and return to initial state
+    catalog.reset();
     arena<catalog_arena>::reset_and_decommit();
-    catalog.clear();
 
     // Load master catalog from page 1
     bootstrap_master(false);

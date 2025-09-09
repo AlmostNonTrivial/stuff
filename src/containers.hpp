@@ -477,15 +477,6 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	V *
 	get(const K &key)
 	{
-		if (nullptr == entry(key)) {
-			return nullptr;
-		}
-		return &entry(key)->value;
-	}
-
-	Entry *
-	entry(const K &key)
-	{
 		if (!storage.data || _size == 0)
 		{
 			return nullptr;
@@ -506,7 +497,7 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 
 			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
 			{
-				return &entry;
+				return &entry.value;
 			}
 
 			idx = (idx + 1) & mask;

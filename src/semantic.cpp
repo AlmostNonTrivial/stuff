@@ -137,12 +137,12 @@ apply_catalog_changes(SemanticContext *ctx)
 {
 	for (auto [name, _] : ctx->tables_to_drop)
 	{
-		catalog_delete_relation(name);
+		catalog.remove(name);
 	}
 
 	for (auto [name, relation] : ctx->tables_to_create)
 	{
-		catalog_add_relation(relation);
+		catalog.insert(relation.name, relation);
 	}
 }
 

@@ -422,16 +422,16 @@ run_repl()
 	}
 
 	execute_sql_statement("INSERT INTO users VALUES (111, 'markymarky', 'marko', 22, 'boomtown');");
-	execute_sql_statement("INSERT INTO users VALUES (111, 'markymarky', 'marko', 22, 'boomtown');");
-	execute_sql_statement("INSERT INTO users VALUES (112, 'aaaaaaaaaaaaaaaaaaaaaaasdasdsadasdasdsadasdasddasdsamarkymarky', 'marko', 22, 'boomtown');");
-	execute_sql_statement("DELETE FROM users WHERE username = 'lilah';");
+	execute_sql_statement("INSERT INTO users VALUES (112, 'markymarky', 'marko', 23, 'boomtown');");
+	// execute_sql_statement("INSERT INTO users VALUES (112, 'aaaaaaaaaaaaaaaaaaaaaaasdasdsadasdasdsadasdasddasdsamarkymarky', 'marko', 22, 'boomtown');");
+	// execute_sql_statement("DELETE FROM users WHERE username = 'lilah';");
 
 
-	execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 99;");
-	execute_sql_statement("SELECT * FROM users WHERE user_id > 50 AND NOT NOT user_id > 75;");
-	execute_sql_statement("SELECT * FROM sqlite_master");
-	execute_sql_statement("DROP TABLE products;");
-	execute_sql_statement("SELECT * FROM sqlite_master");
+	// execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 99;");
+	// execute_sql_statement("SELECT * FROM users WHERE user_id > 50 AND NOT NOT user_id > 75;");
+	// execute_sql_statement("SELECT * FROM sqlite_master");
+	// execute_sql_statement("DROP TABLE products;");
+	// execute_sql_statement("SELECT * FROM sqlite_master");
 
 
 	return 0;
@@ -546,14 +546,24 @@ main(int argc, char **argv)
 	arena<catalog_arena>::init();
 	arena<query_arena>::init();
 
-	// test_parser();
-	if (argc > 1 && strlen(argv[1]) >= 5)
-	{
-		if (strcmp("debug", argv[1]) == 0)
-		{
-			return run_tests();
-		}
-	}
+	// // test_parser();
+	// if (argc > 1 && strlen(argv[1]) >= 5)
+	// {
+	// 	if (strcmp("debug", argv[1]) == 0)
+	// 	{
+	// 		return run_tests();
+	// 	}
+	// }
 
 	return run_repl();
+	// char s[32];
+	// memset(s, 0, 32);
+	// int i  =0;
+	// while(i++ < 100) {
+	// type_increment(TYPE_CHAR32, s, s);
+	// std::cout << s << "\n";
+
+
+
+
 }

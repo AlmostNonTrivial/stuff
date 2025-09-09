@@ -26,7 +26,12 @@ TODO
 assert print and finish pager tests
 assert print and clean up btree tests
 
-convert types to use union
+
+vm error
+
+hash map thing to char[32]
+
+and put static asserts everywhere
 
 Get good error messages
 
@@ -34,7 +39,7 @@ More rows?
 
 print arena stats make sure their okay
 
-
+op codes should be sequential
 
 
 

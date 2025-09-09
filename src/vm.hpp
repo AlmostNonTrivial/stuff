@@ -272,6 +272,28 @@ vm_set_result_callback(ResultCallback callback);
 // VM Runtime Definitions
 #define REGISTERS 40
 
+
+inline const char *
+debug_compare_op_name(comparison_op op)
+{
+	static const char *names[] = {"==", "!=", "<", "<=", ">", ">="};
+	return (op >= EQ && op <= GE) ? names[op] : "UNKNOWN";
+}
+
+inline const char *
+debug_arith_op_name(arith_op op)
+{
+	static const char *names[] = {"+", "-", "*", "/", "%"};
+	return (op >= ARITH_ADD && op <= ARITH_MOD) ? names[op] : "UNKNOWN";
+}
+
+inline const char *
+debug_logic_op_name(logic_op op)
+{
+	static const char *names[] = {"AND", "OR"};
+	return (op >= LOGIC_AND && op <= LOGIC_OR) ? names[op] : "UNKNOWN";
+}
+
 inline void
 vm_debug_print_instruction(const VMInstruction *inst, int pc)
 {
