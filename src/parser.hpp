@@ -53,35 +53,34 @@ enum ExprType : uint8_t
 
 enum BinaryOp : uint8_t
 {
-	// Comparison operators
-	OP_EQ = 0, // =
-	OP_NE,	   // != or <>
-	OP_LT,	   //
-	OP_LE,	   // <=
-	OP_GT,	   // >
-	OP_GE,	   // >=
 
-	// Logical operators
-	OP_AND, // AND
-	OP_OR	// OR
+	OP_EQ = 0,
+	OP_NE,
+	OP_LT,
+	OP_LE,
+	OP_GT,
+	OP_GE,
+
+
+	OP_AND,
+	OP_OR
 };
 
 enum UnaryOp : uint8_t
 {
-	OP_NOT = 0, // NOT
-	OP_NEG		// - (unary minus)
+	OP_NOT = 0,
+	OP_NEG
 };
 
 struct Expr
 {
 	ExprType type;
 
-	// Semantic resolution info (populated during semantic pass)
 	struct
 	{
 		DataType   resolved_type = TYPE_NULL;
-		int32_t	   column_index = -1; // For EXPR_COLUMN
-		Relation *table = nullptr;	  // For EXPR_COLUMN
+		int32_t	   column_index = -1;
+		Relation *table = nullptr;
 
 	} sem;
 
@@ -89,41 +88,38 @@ struct Expr
 		// EXPR_LITERAL
 		struct
 		{
-			DataType lit_type; // TYPE_U32 or TYPE_CHAR32 only
+			DataType lit_type;
 			union {
-				uint32_t	int_val; // For INT (TYPE_U32)
-				string_view str_val; // For TEXT (TYPE_CHAR32)
+				uint32_t	int_val;
+				string_view str_val;
 			};
 		};
 
-		// EXPR_COLUMN
+
 		struct
 		{
 			string_view column_name;
 		};
 
-		// EXPR_BINARY_OP
+
 		struct
 		{
 			BinaryOp op;
-			Expr	*left; // Still need pointers for recursive structures
+			Expr	*left;
 			Expr	*right;
 		};
 
-		// EXPR_UNARY_OP
+
 		struct
 		{
 			UnaryOp unary_op;
 			Expr   *operand;
 		};
 
-		// EXPR_NULL has no data
+
 	};
 };
 
-//=============================================================================
-// STATEMENT AST NODES
-//=============================================================================
 
 enum StmtType : uint8_t
 {
@@ -138,20 +134,19 @@ enum StmtType : uint8_t
 	STMT_ROLLBACK
 };
 
-// Column definition for CREATE TABLE
+
 struct ColumnDef
 {
 	string_view name;
-	DataType	type; // TYPE_U32 for INT, TYPE_CHAR32 for TEXT (only options)
+	DataType	type;
 
-	// Semantic info
 	struct
 	{
 		bool is_primary_key = false; // First column is implicitly PK
 	} sem;
 };
 
-// SELECT statement - simplified
+
 struct SelectStmt
 {
 	bool							 is_star;		  // SELECT *
@@ -161,7 +156,7 @@ struct SelectStmt
 	string_view						 order_by_column; // Optional ORDER BY column
 	bool							 order_desc;	  // DESC if true, ASC if false
 
-	// Semantic resolution
+
 	struct
 	{
 		Relation					 *table = nullptr;
@@ -171,31 +166,14 @@ struct SelectStmt
 	} sem;
 };
 
-// INSERT statement - single row only
+
 struct InsertStmt
 {
 	string_view						 table_name;
-	array<string_view, query_arena> columns; // Optional column list
-	array<Expr *, query_arena>		 values;  // Value expressions
+	array<string_view, query_arena> columns;
+	array<Expr *, query_arena>		 values;
 
-	// Semantic resolution
-	struct
-	{
-		Relation					*table = nullptr;
-		array<int32_t, query_arena> column_indices; // Target column indices
 
-	} sem;
-};
-
-// UPDATE statement
-struct UpdateStmt
-{
-	string_view						 table_name;
-	array<string_view, query_arena> columns;	   // SET columns
-	array<Expr *, query_arena>		 values;	   // SET values
-	Expr							*where_clause; // Optional WHERE
-
-	// Semantic resolution
 	struct
 	{
 		Relation					*table = nullptr;
@@ -204,13 +182,30 @@ struct UpdateStmt
 	} sem;
 };
 
-// DELETE statement
+
+struct UpdateStmt
+{
+	string_view						 table_name;
+	array<string_view, query_arena> columns;
+	array<Expr *, query_arena>		 values;
+	Expr							*where_clause;
+
+
+	struct
+	{
+		Relation					*table = nullptr;
+		array<int32_t, query_arena> column_indices;
+
+	} sem;
+};
+
+
 struct DeleteStmt
 {
 	string_view table_name;
-	Expr	   *where_clause; // Optional WHERE
+	Expr	   *where_clause;
 
-	// Semantic resolution
+
 	struct
 	{
 		Relation *table = nullptr;
@@ -218,26 +213,26 @@ struct DeleteStmt
 	} sem;
 };
 
-// CREATE TABLE statement
+
 struct CreateTableStmt
 {
 	string_view					   table_name;
-	array<ColumnDef, query_arena> columns; // Direct storage, not pointers
+	array<ColumnDef, query_arena> columns;
 
-	// Semantic resolution
+
 	struct
 	{
-		string_view created_structure; // Built structure
+		string_view created_structure;
 
 	} sem;
 };
 
-// DROP TABLE statement
+
 struct DropTableStmt
 {
 	string_view table_name;
 
-	// Semantic resolution
+
 	struct
 	{
 		Relation *table = nullptr;
@@ -245,7 +240,7 @@ struct DropTableStmt
 	} sem;
 };
 
-// Transaction statements (empty structs)
+
 struct BeginStmt
 {
 };
@@ -256,12 +251,12 @@ struct RollbackStmt
 {
 };
 
-// Main statement - still needs to be allocated because of union
+
 struct Statement
 {
 	StmtType type;
 
-	// Semantic resolution
+
 	struct
 	{
 		bool has_errors = false;
@@ -280,9 +275,7 @@ struct Statement
 	};
 };
 
-//=============================================================================
-// PARSER RESULT STRUCTURE
-//=============================================================================
+
 
 struct parser_result
 {
@@ -294,17 +287,7 @@ struct parser_result
 	int								 failed_statement_index; // Which statement failed (-1 if none)
 };
 
-//=============================================================================
-// LEXER STATE
-//=============================================================================
 
-
-
-//=============================================================================
-// PUBLIC FUNCTIONS
-//=============================================================================
-
-// Main entry point - returns result by value
 parser_result
 parse_sql(const char *sql);
 

@@ -1,4 +1,3 @@
-// parser.cpp - Simplified SQL Parser Implementation
 #include "parser.hpp"
 #include "arena.hpp"
 #include "containers.hpp"
@@ -9,8 +8,6 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstdarg>
-
-
 
 enum TokenType : uint8_t
 {
@@ -30,13 +27,11 @@ enum TokenType : uint8_t
 struct Token
 {
 	TokenType	type;
-	const char *text; // Points into original input
+	const char *text;
 	uint32_t	length;
 	uint32_t	line;
 	uint32_t	column;
 };
-
-
 
 struct Lexer
 {
@@ -47,22 +42,13 @@ struct Lexer
 	Token		current_token;
 };
 
-//=============================================================================
-// PARSER STATE
-//=============================================================================
-
 struct Parser
 {
-	Lexer		lexer; // Embed directly, not a pointer
+	Lexer		lexer;
 	string_view error_msg;
 	int			error_line;
 	int			error_column;
 };
-
-
-//=============================================================================
-// ERROR MESSAGE FORMATTING
-//=============================================================================
 
 static string_view
 format_error(Parser *parser, const char *fmt, ...)
@@ -80,10 +66,6 @@ format_error(Parser *parser, const char *fmt, ...)
 	return parser->error_msg;
 }
 
-//=============================================================================
-// STRING UTILITIES
-//=============================================================================
-
 static bool
 str_eq_ci(const char *a, uint32_t a_len, const char *b)
 {
@@ -98,10 +80,6 @@ str_eq_ci(const char *a, uint32_t a_len, const char *b)
 	}
 	return true;
 }
-
-//=============================================================================
-// KEYWORD LIST
-//=============================================================================
 
 static const char *sql_keywords[] = {"SELECT",	 "FROM",   "WHERE",	 "INSERT", "INTO", "VALUES", "UPDATE",
 									 "SET",		 "DELETE", "CREATE", "TABLE",  "DROP", "BEGIN",	 "COMMIT",
@@ -120,10 +98,6 @@ is_keyword(const char *text, uint32_t length)
 	}
 	return false;
 }
-
-//=============================================================================
-// LEXER IMPLEMENTATION
-//=============================================================================
 
 void
 lexer_init(Lexer *lex, const char *input)
@@ -184,7 +158,6 @@ lexer_next_token(Lexer *lex)
 		return token;
 	}
 
-	// Single character tokens
 	char c = *lex->current;
 	switch (c)
 	{
@@ -297,7 +270,6 @@ lexer_next_token(Lexer *lex)
 		return token;
 	}
 
-	// Numbers
 	if (isdigit(c))
 	{
 		const char *start = lex->current;
@@ -361,10 +333,6 @@ lexer_peek_token(Lexer *lex)
 	return token;
 }
 
-//=============================================================================
-// PARSER HELPERS
-//=============================================================================
-
 bool
 consume_token(Parser *parser, TokenType type)
 {
@@ -424,32 +392,22 @@ parse_data_type(Parser *parser)
 	return TYPE_NULL;
 }
 
-//=============================================================================
-// EXPRESSION PARSING
-//=============================================================================
-
-// In parser.cpp, modify the precedence chain:
-
-// Forward declarations (update these)
 Expr *
 parse_or_expr(Parser *parser);
 Expr *
 parse_and_expr(Parser *parser);
 Expr *
-parse_not_expr(Parser *parser); // NEW - between AND and comparison
+parse_not_expr(Parser *parser);
 Expr *
 parse_comparison_expr(Parser *parser);
 Expr *
-parse_primary_expr(Parser *parser); // Remove parse_unary_expr
-
-// The main entry point remains the same
+parse_primary_expr(Parser *parser);
 Expr *
 parse_expression(Parser *parser)
 {
 	return parse_or_expr(parser);
 }
 
-// OR expression (lowest precedence)
 Expr *
 parse_or_expr(Parser *parser)
 {
@@ -477,17 +435,16 @@ parse_or_expr(Parser *parser)
 	return left;
 }
 
-// AND expression
 Expr *
 parse_and_expr(Parser *parser)
 {
-	Expr *left = parse_not_expr(parser); // Changed from parse_comparison_expr
+	Expr *left = parse_not_expr(parser);
 	if (!left)
 		return nullptr;
 
 	while (consume_keyword(parser, "AND"))
 	{
-		Expr *right = parse_not_expr(parser); // Changed from parse_comparison_expr
+		Expr *right = parse_not_expr(parser);
 		if (!right)
 		{
 			format_error(parser, "Expected expression after AND");
@@ -505,7 +462,6 @@ parse_and_expr(Parser *parser)
 	return left;
 }
 
-// NEW: NOT expression (between AND and comparison)
 Expr *
 parse_not_expr(Parser *parser)
 {
@@ -528,11 +484,10 @@ parse_not_expr(Parser *parser)
 	return parse_comparison_expr(parser);
 }
 
-// Comparison expression (higher precedence than NOT)
 Expr *
 parse_comparison_expr(Parser *parser)
 {
-	Expr *left = parse_primary_expr(parser); // Changed from parse_unary_expr
+	Expr *left = parse_primary_expr(parser);
 	if (!left)
 		return nullptr;
 
@@ -567,10 +522,10 @@ parse_comparison_expr(Parser *parser)
 		}
 		else
 		{
-			return left; // Not a comparison operator
+			return left;
 		}
 
-		Expr *right = parse_primary_expr(parser); // Changed from parse_unary_expr
+		Expr *right = parse_primary_expr(parser);
 		if (!right)
 		{
 			format_error(parser, "Expected expression after comparison operator");
@@ -593,7 +548,6 @@ parse_primary_expr(Parser *parser)
 {
 	Token token = lexer_peek_token(&parser->lexer);
 
-	// Number literal
 	if (token.type == TOKEN_NUMBER)
 	{
 		lexer_next_token(&parser->lexer);
@@ -610,7 +564,6 @@ parse_primary_expr(Parser *parser)
 		return expr;
 	}
 
-	// String literal
 	if (token.type == TOKEN_STRING)
 	{
 
@@ -629,7 +582,6 @@ parse_primary_expr(Parser *parser)
 		return expr;
 	}
 
-	// Parenthesized expression
 	if (consume_token(parser, TOKEN_LPAREN))
 	{
 		Expr *expr = parse_expression(parser);
@@ -648,7 +600,6 @@ parse_primary_expr(Parser *parser)
 		return expr;
 	}
 
-	// Column reference
 	if (token.type == TOKEN_IDENTIFIER)
 	{
 		lexer_next_token(&parser->lexer);
@@ -667,7 +618,7 @@ parse_where_clause(Parser *parser)
 {
 	if (!consume_keyword(parser, "WHERE"))
 	{
-		return nullptr; // No WHERE clause
+		return nullptr;
 	}
 
 	Expr *expr = parse_expression(parser);
@@ -686,7 +637,6 @@ parse_where_clause(Parser *parser)
 void
 parse_select(Parser *parser, SelectStmt *stmt)
 {
-	memset(stmt, 0, sizeof(SelectStmt));
 
 	if (!consume_keyword(parser, "SELECT"))
 	{
@@ -694,14 +644,13 @@ parse_select(Parser *parser, SelectStmt *stmt)
 		return;
 	}
 
-	// Check for SELECT *
 	if (consume_token(parser, TOKEN_STAR))
 	{
 		stmt->is_star = true;
 	}
 	else
 	{
-		// Parse column list
+
 		stmt->is_star = false;
 
 		do
@@ -718,7 +667,6 @@ parse_select(Parser *parser, SelectStmt *stmt)
 		} while (consume_token(parser, TOKEN_COMMA));
 	}
 
-	// FROM clause
 	if (!consume_keyword(parser, "FROM"))
 	{
 		format_error(parser, "Expected FROM after SELECT list");
@@ -734,10 +682,8 @@ parse_select(Parser *parser, SelectStmt *stmt)
 
 	stmt->table_name = string_view(token.text, token.length);
 
-	// Optional WHERE clause
 	stmt->where_clause = parse_where_clause(parser);
 
-	// Optional ORDER BY clause
 	if (consume_keyword(parser, "ORDER"))
 	{
 		if (!consume_keyword(parser, "BY"))
@@ -755,7 +701,6 @@ parse_select(Parser *parser, SelectStmt *stmt)
 
 		stmt->order_by_column = string_view(token.text, token.length);
 
-		// Optional ASC/DESC
 		if (consume_keyword(parser, "DESC"))
 		{
 			stmt->order_desc = true;
@@ -768,14 +713,9 @@ parse_select(Parser *parser, SelectStmt *stmt)
 	}
 }
 
-//=============================================================================
-// INSERT STATEMENT PARSING
-//=============================================================================
-
 void
 parse_insert(Parser *parser, InsertStmt *stmt)
 {
-	memset(stmt, 0, sizeof(InsertStmt));
 
 	if (!consume_keyword(parser, "INSERT"))
 	{
@@ -798,7 +738,6 @@ parse_insert(Parser *parser, InsertStmt *stmt)
 
 	stmt->table_name = string_view(token.text, token.length);
 
-	// Optional column list
 	if (consume_token(parser, TOKEN_LPAREN))
 	{
 		do
@@ -833,7 +772,6 @@ parse_insert(Parser *parser, InsertStmt *stmt)
 		return;
 	}
 
-	// Parse value list
 	do
 	{
 		Expr *expr = parse_expression(parser);
@@ -852,14 +790,9 @@ parse_insert(Parser *parser, InsertStmt *stmt)
 	}
 }
 
-//=============================================================================
-// UPDATE STATEMENT PARSING
-//=============================================================================
-
 void
 parse_update(Parser *parser, UpdateStmt *stmt)
 {
-	memset(stmt, 0, sizeof(UpdateStmt));
 
 	if (!consume_keyword(parser, "UPDATE"))
 	{
@@ -882,7 +815,6 @@ parse_update(Parser *parser, UpdateStmt *stmt)
 		return;
 	}
 
-	// Parse SET assignments
 	do
 	{
 		token = lexer_next_token(&parser->lexer);
@@ -910,18 +842,12 @@ parse_update(Parser *parser, UpdateStmt *stmt)
 		stmt->values.push(expr);
 	} while (consume_token(parser, TOKEN_COMMA));
 
-	// Optional WHERE clause
 	stmt->where_clause = parse_where_clause(parser);
 }
-
-//=============================================================================
-// DELETE STATEMENT PARSING
-//=============================================================================
 
 void
 parse_delete(Parser *parser, DeleteStmt *stmt)
 {
-	memset(stmt, 0, sizeof(DeleteStmt));
 
 	if (!consume_keyword(parser, "DELETE"))
 	{
@@ -944,19 +870,12 @@ parse_delete(Parser *parser, DeleteStmt *stmt)
 
 	stmt->table_name = string_view(token.text, token.length);
 
-	// Optional WHERE clause
 	stmt->where_clause = parse_where_clause(parser);
 }
-
-//=============================================================================
-// CREATE TABLE STATEMENT PARSING
-//=============================================================================
 
 void
 parse_create_table(Parser *parser, CreateTableStmt *stmt)
 {
-	memset(stmt, 0, sizeof(CreateTableStmt));
-
 	if (!consume_keyword(parser, "CREATE"))
 	{
 		format_error(parser, "Expected CREATE");
@@ -984,7 +903,6 @@ parse_create_table(Parser *parser, CreateTableStmt *stmt)
 		return;
 	}
 
-	// Parse column definitions
 	do
 	{
 		token = lexer_next_token(&parser->lexer);
@@ -994,15 +912,14 @@ parse_create_table(Parser *parser, CreateTableStmt *stmt)
 			return;
 		}
 
-		ColumnDef col;
-		memset(&col, 0, sizeof(ColumnDef));
+		ColumnDef col = {};
 
 		col.name = string_view(token.text, token.length);
 
 		col.type = parse_data_type(parser);
 		if (col.type == TYPE_NULL)
 		{
-			return; // Error already set by parse_data_type
+			return;
 		}
 
 		// First column is implicitly primary key
@@ -1027,14 +944,9 @@ parse_create_table(Parser *parser, CreateTableStmt *stmt)
 	}
 }
 
-//=============================================================================
-// DROP TABLE STATEMENT PARSING
-//=============================================================================
-
 void
 parse_drop_table(Parser *parser, DropTableStmt *stmt)
 {
-	memset(stmt, 0, sizeof(DropTableStmt));
 
 	if (!consume_keyword(parser, "DROP"))
 	{
@@ -1057,10 +969,6 @@ parse_drop_table(Parser *parser, DropTableStmt *stmt)
 
 	stmt->table_name = string_view(token.text, token.length);
 }
-
-//=============================================================================
-// TRANSACTION STATEMENT PARSING
-//=============================================================================
 
 void
 parse_begin(Parser *parser, BeginStmt *stmt)
@@ -1092,19 +1000,13 @@ parse_rollback(Parser *parser, RollbackStmt *stmt)
 	}
 }
 
-//=============================================================================
-// MAIN STATEMENT PARSING
-//=============================================================================
-
 Statement *
 parse_statement(Parser *parser)
 {
 	Statement *stmt = (Statement *)arena<query_arena>::alloc(sizeof(Statement));
-	memset(stmt, 0, sizeof(Statement));
 
 	Token token = lexer_peek_token(&parser->lexer);
 
-	// Identify statement type by first keyword
 	if (peek_keyword(parser, "SELECT"))
 	{
 		stmt->type = STMT_SELECT;
@@ -1163,13 +1065,11 @@ parse_statement(Parser *parser)
 		return nullptr;
 	}
 
-	// Check if parsing failed
 	if (!parser->error_msg.empty())
 	{
 		return nullptr;
 	}
 
-	// Consume optional semicolon
 	consume_token(parser, TOKEN_SEMICOLON);
 
 	return stmt;
@@ -1183,7 +1083,7 @@ parse_statements(Parser *parser)
 
 	while (true)
 	{
-		// Skip whitespace and check for EOF
+
 		skip_whitespace(&parser->lexer);
 		if (lexer_peek_token(&parser->lexer).type == TOKEN_EOF)
 		{
@@ -1193,7 +1093,7 @@ parse_statements(Parser *parser)
 		Statement *stmt = parse_statement(parser);
 		if (!stmt)
 		{
-			// Return what we've parsed so far with error info
+
 			return statements;
 		}
 
@@ -1211,7 +1111,7 @@ parser_result
 parse_sql(const char *sql)
 {
 	parser_result result;
-	Parser		parser;
+	Parser		  parser;
 
 	arena<query_arena>::init();
 
