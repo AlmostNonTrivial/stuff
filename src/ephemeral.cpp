@@ -41,13 +41,13 @@
 
 #include "ephemeral.hpp"
 #include <cstdint>
-#include <queue>
+#include "containers.hpp"
+
 #include "common.hpp"
 #include <cassert>
 #include <cstdio>
 #include <cstring>
-#include <unordered_set>
-#include "arena.hpp" #include "containers.hpp"
+#include "arena.hpp"
 
 
 // ============================================================================
@@ -745,7 +745,8 @@ et_create(DataType key_type, uint32_t record_size, uint8_t flags)
 	tree.record_size = record_size;
 	tree.data_size = tree.key_size + record_size;
 	tree.allow_duplicates = flags & 0x01;
-	tree.rebalance = (flags & 0x02) >> 1;
+	// tree.rebalance = (flags & 0x02) >> 1;
+	tree.rebalance = true;
 	return tree;
 }
 
@@ -1190,7 +1191,7 @@ et_is_empty(const ephemeral_tree *tree)
 */
 static int
 validate_node_recursive(const ephemeral_tree *tree, ephemeral_tree_node *node, ephemeral_tree_node *expected_parent,
-						void *min_bound, void *max_bound, std::unordered_set<ephemeral_tree_node *> &visited)
+						void *min_bound, void *max_bound, hash_set<ephemeral_tree_node *, query_arena> &visited)
 {
 	if (!node)
 	{
@@ -1198,8 +1199,8 @@ validate_node_recursive(const ephemeral_tree *tree, ephemeral_tree_node *node, e
 	}
 
 	// Check for cycles
-	assert(visited.find(node) == visited.end() && "Cycle detected in tree");
-	visited.insert(node);
+	assert(!visited.contains(node) && "Cycle detected in tree");
+	visited.insert(node, 1);
 
 	// Verify parent pointer
 	assert(node->parent == expected_parent && "Parent pointer mismatch");
@@ -1259,7 +1260,7 @@ et_validate(const ephemeral_tree *tree)
 	assert(IS_ROOT(tree->root) && "Root has parent");
 
 	// Track visited nodes to detect cycles
-	std::unordered_set<ephemeral_tree_node *> visited;
+	hash_set<ephemeral_tree_node *, query_arena> visited;
 
 	// Validate recursively and get black height
 	int black_height = validate_node_recursive(tree, tree->root, nullptr, nullptr, nullptr, visited);
@@ -1392,7 +1393,7 @@ et_print(const ephemeral_tree *tree)
 		bool is_left;
 	};
 
-	std::queue<NodeLevel> queue;
+	queue<NodeLevel, query_arena> queue;
 	queue.push({tree->root, 0, false});
 
 	int current_level = -1;
@@ -1401,7 +1402,7 @@ et_print(const ephemeral_tree *tree)
 	printf("Level-Order Traversal:\n");
 	while (!queue.empty())
 	{
-		NodeLevel nl = queue.front();
+		NodeLevel &nl = *queue.front();
 		queue.pop();
 
 		if (nl.level != current_level)

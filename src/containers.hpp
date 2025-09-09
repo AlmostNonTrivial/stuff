@@ -375,6 +375,29 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 			}
 			return h ? h : 1;
 		}
+  else if constexpr (std::is_pointer_v<K>)
+    {
+        // Hash pointer address
+        uintptr_t addr = reinterpret_cast<uintptr_t>(key);
+
+        // Mix bits using same algorithm as integers
+        if constexpr (sizeof(uintptr_t) <= 4)
+        {
+            uint32_t ux = static_cast<uint32_t>(addr);
+            ux = ((ux >> 16) ^ ux) * 0x45d9f3b;
+            ux = ((ux >> 16) ^ ux) * 0x45d9f3b;
+            ux = (ux >> 16) ^ ux;
+            return ux ? ux : 1;  // Ensure non-zero
+        }
+        else
+        {
+            uint64_t ux = static_cast<uint64_t>(addr);
+            ux = (ux ^ (ux >> 30)) * 0xbf58476d1ce4e5b9ULL;
+            ux = (ux ^ (ux >> 27)) * 0x94d049bb133111ebULL;
+            ux = ux ^ (ux >> 31);
+            return static_cast<uint32_t>(ux) ? static_cast<uint32_t>(ux) : 1;  // Ensure non-zero
+        }
+    }
 		else if constexpr (std::is_integral_v<K>)
 		{
 			using U = typename std::make_unsigned<K>::type;

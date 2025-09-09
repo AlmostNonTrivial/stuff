@@ -6,349 +6,225 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
+#include <cstdio>
 
-// Test data generators
-static const char *
-generate_text(size_t target_size, char fill_char = 'A')
+#define ASSERT_PRINT(cond, ...)                                               \
+    do {                                                                       \
+        if (!(cond)) {                                                        \
+            fprintf(stderr, "Assertion failed: %s\n", #cond);                 \
+            fprintf(stderr, "  at %s:%d\n", __FILE__, __LINE__);             \
+            fprintf(stderr, __VA_ARGS__);                                     \
+            abort();                                                           \
+        }                                                                      \
+    } while (0)
+
+static void
+dump_bytes(const uint8_t* data, size_t len, const char* label)
 {
-	static char buffer[8192];
-	memset(buffer, fill_char, target_size);
-	buffer[target_size] = '\0';
-	return buffer;
+    fprintf(stderr, "%s (%zu bytes): ", label, len);
+    for (size_t i = 0; i < len && i < 32; i++) {
+        fprintf(stderr, "%02x ", data[i]);
+    }
+    if (len > 32) {
+        fprintf(stderr, "...");
+    }
+    fprintf(stderr, "\n");
 }
 
-static const char *LOREM_IPSUM_1K = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod "
-									"tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, "
-									"quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo "
-									"consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse "
-									"cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non "
-									"proident, sunt in culpa qui officia deserunt mollit anim id est laborum. "
-									"Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium "
-									"doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore "
-									"veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim "
-									"ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia "
-									"consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque "
-									"porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, "
-									"adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore "
-									"et dolore magnam aliquam quaerat voluptatem.";
-
-inline static void
-test_single_page_blob()
-{
-	printf("Testing single-page blob...\n");
-
-	// Single page can hold PAGE_SIZE - 12 bytes of data
-	const char *small_text = "This is a small blob that fits in a single page.";
-	size_t		text_len = strlen(small_text);
-
-	// Create blob
-	uint32_t blob_id = blob_create((void *)small_text, text_len);
-	assert(blob_id != 0);
-	printf("  Created blob with ID: %u\n", blob_id);
-
-	// Get size
-	uint32_t size = blob_get_size(blob_id);
-	assert(size == text_len);
-
-	// Read back full blob
-	size_t read_size;
-	auto result = (char*)blob_read_full(blob_id, &read_size);
-	assert(result != nullptr);
-	assert(read_size == text_len);
-	assert(memcmp(result, small_text, text_len) == 0);
-	printf("  Successfully read back %lu bytes\n", read_size);
-
-	// Test page-by-page read
-	blob_page page = blob_read_page(blob_id);
-	assert(page.data != nullptr);
-	assert(page.size == text_len);
-	assert(page.next == 0); // Single page, no next
-	assert(memcmp(page.data, small_text, text_len) == 0);
-	printf("  Page-by-page read successful\n");
-
-	// Delete
-	blob_delete(blob_id);
-	printf("  Blob deleted successfully\n");
-}
-
-inline static void
-test_multi_page_blob()
-{
-	printf("\nTesting multi-page blob...\n");
-
-	// Create text that spans exactly 3 pages
-	// Assuming PAGE_SIZE - 12 bytes per page
-	const size_t page_capacity = PAGE_SIZE - 12;
-	const size_t three_pages_size = page_capacity * 3;
-	const char	*text_3pages = generate_text(three_pages_size, 'B');
-
-	// Insert
-	uint32_t blob_id = blob_create((void *)text_3pages, three_pages_size);
-	assert(blob_id != 0);
-	printf("  Created 3-page blob with ID: %u\n", blob_id);
-
-	// Verify size
-	assert(blob_get_size(blob_id) == three_pages_size);
-
-	// Read back full blob
-	size_t read_size;
-	uint8_t*result = blob_read_full(blob_id, &read_size);
-	// std::cout << result << "\n\n" << text_3pages;
-	result[read_size] = '\0';
-	assert(read_size == three_pages_size);
-	assert(memcmp(result, text_3pages, read_size) == 0);
-	printf("  Successfully read back %lu bytes across 3 pages\n", read_size);
-
-	// Test page chain navigation
-	uint32_t current = blob_id;
-	int		 page_count = 0;
-	size_t	 total_read = 0;
-
-	while (current)
-	{
-		blob_page page = blob_read_page(current);
-		page_count++;
-		total_read += page.size;
-		current = page.next;
-	}
-
-	assert(page_count == 3);
-	assert(total_read == three_pages_size);
-	printf("  Page chain navigation verified: %d pages\n", page_count);
-
-	// Clean up
-	blob_delete(blob_id);
-}
-
-inline static void
-test_boundary_cases()
-{
-	printf("\nTesting boundary cases...\n");
-
-	const size_t page_capacity = PAGE_SIZE - 12;
-
-	// Test exact page boundary
-	const char *text_exact = generate_text(page_capacity, 'C');
-	uint32_t	id1 = blob_create((void *)text_exact, page_capacity);
-	assert(blob_get_size(id1) == page_capacity);
-
-	size_t size1;
-	void *result1 = blob_read_full(id1, &size1);
-	assert(size1 == page_capacity);
-	printf("  %zu bytes (exact page) - OK\n", page_capacity);
-	blob_delete(id1);
-
-	// Test one byte over page boundary
-	const char *text_over = generate_text(page_capacity + 1, 'D');
-	uint32_t	id2 = blob_create((void *)text_over, page_capacity + 1);
-	assert(blob_get_size(id2) == page_capacity + 1);
-
-	size_t size2;
-	void *result2 = blob_read_full(id2, &size2);
-	assert(size2 == page_capacity + 1);
-
-	// Verify it spans 2 pages
-	blob_page page1 = blob_read_page(id2);
-	assert(page1.size == page_capacity);
-	assert(page1.next != 0);
-	blob_page page2 = blob_read_page(page1.next);
-	assert(page2.size == 1);
-	assert(page2.next == 0);
-	printf("  %zu bytes (spans 2 pages) - OK\n", page_capacity + 1);
-	blob_delete(id2);
-
-	// Test one byte under page boundary
-	const char *text_under = generate_text(page_capacity - 1, 'E');
-	uint32_t	id3 = blob_create((void *)text_under, page_capacity - 1);
-	assert(blob_get_size(id3) == page_capacity - 1);
-
-	size_t size3;
-	void *result3 = blob_read_full(id3, &size3);
-	assert(size3 == page_capacity - 1);
-	printf("  %zu bytes (fits in 1 page) - OK\n", page_capacity - 1);
-	blob_delete(id3);
-}
-
-inline static void
-test_large_blob()
-{
-	printf("\nTesting large blob (10KB)...\n");
-
-	// 10KB blob
-	const size_t large_size = 10240;
-	char		*large_text = (char *)arena<query_arena>::alloc(large_size + 1);
-	memset(large_text, 'L', large_size);
-	large_text[large_size] = '\0';
-
-	uint32_t blob_id = blob_create((void *)large_text, large_size);
-	assert(blob_id != 0);
-
-	const size_t page_capacity = PAGE_SIZE - 12;
-	int			 pages_expected = (large_size + page_capacity - 1) / page_capacity;
-	printf("  Created %zu byte blob using ~%d pages\n", large_size, pages_expected);
-
-	// Verify size
-	assert(blob_get_size(blob_id) == large_size);
-
-	// Verify content
-	size_t read_size;
-	void *result = blob_read_full(blob_id, &read_size);
-	assert(read_size == large_size);
-
-	// Spot check some bytes
-	uint8_t *data = (uint8_t*)result;
-	assert(data[0] == 'L');
-	assert(data[large_size / 2] == 'L');
-	assert(data[large_size - 1] == 'L');
-	printf("  Content verification passed\n");
-
-	// Count actual pages
-	uint32_t current = blob_id;
-	int		 page_count = 0;
-	while (current)
-	{
-		blob_page page = blob_read_page(current);
-		page_count++;
-		current = page.next;
-	}
-	assert(page_count == pages_expected);
-	printf("  Page count verified: %d pages\n", page_count);
-
-	blob_delete(blob_id);
-}
-
-inline static void
-test_multiple_blobs()
-{
-	printf("\nTesting multiple concurrent blobs...\n");
-
-	// Create three different blobs
-	const char *text1 = "First blob with unique content AAA";
-	const char *text2 = generate_text(750, 'X');
-	const char *text3 = LOREM_IPSUM_1K;
-
-	uint32_t id1 = blob_create((void *)text1, strlen(text1));
-	uint32_t id2 = blob_create((void *)text2, 750);
-	uint32_t id3 = blob_create((void *)text3, strlen(text3));
-
-	printf("  Created 3 blobs: %u, %u, %u\n", id1, id2, id3);
-
-	// Verify each can be read independently
-	size_t size1;
-	void *r1 = blob_read_full(id1, &size1);
-	assert(size1 == strlen(text1));
-	assert(memcmp(r1, text1, size1) == 0);
-
-	size_t size2;
-	void *r2 = blob_read_full(id2, &size2);
-	assert(size2 == 750);
-	assert(memcmp(r2, text2, size2) == 0);
-
-	size_t size3;
-	void *r3 = blob_read_full(id3, &size3);
-	assert(size3 == strlen(text3));
-	assert(memcmp(r3, text3, size3) == 0);
-
-	printf("  All blobs verified independently\n");
-
-	// Delete middle blob and verify others still work
-	blob_delete(id2);
-
-	r1 = blob_read_full(id1, &size1);
-	assert(size1 == strlen(text1));
-	assert(memcmp(r1, text1, size1) == 0);
-
-	r3 = blob_read_full(id3, &size3);
-	assert(size3 == strlen(text3));
-	assert(memcmp(r3, text3, size3) == 0);
-
-	printf("  After deleting blob 2, blobs 1 and 3 still accessible\n");
-
-	// Clean up
-	blob_delete(id1);
-	blob_delete(id3);
-}
-
-inline static void
+static void
 test_empty_blob()
 {
-	printf("\nTesting edge case: empty blob...\n");
+    // Empty blob should return 0
+    uint32_t id = blob_create(nullptr, 0);
+    ASSERT_PRINT(id == 0, "Empty blob should return ID 0, got %u\n", id);
 
-	// Empty blob should return 0
-	uint32_t id = blob_create((void *)nullptr, 0);
-	assert(id == 0);
-	printf("  Empty blob correctly rejected\n");
-
-	// Zero-length data
-	const char *empty = "";
-	id = blob_create((void *)empty, 0);
-	assert(id == 0);
-	printf("  Zero-length blob correctly rejected\n");
+    // Zero-length data
+    const char* empty = "";
+    id = blob_create((void*)empty, 0);
+    ASSERT_PRINT(id == 0, "Zero-length blob should return ID 0, got %u\n", id);
 }
 
-inline static void
+static void
+test_single_page_blob()
+{
+    const char* text = "Single page test data - fits comfortably in one page";
+    size_t text_len = strlen(text);
+
+    // Create blob
+    uint32_t blob_id = blob_create((void*)text, text_len);
+    ASSERT_PRINT(blob_id != 0, "Failed to create blob\n");
+
+    // Verify size
+    uint32_t size = blob_get_size(blob_id);
+    ASSERT_PRINT(size == text_len, "Size mismatch: expected %zu, got %u\n", text_len, size);
+
+    // Read back and verify
+    size_t read_size;
+    uint8_t* result = blob_read_full(blob_id, &read_size);
+    ASSERT_PRINT(result != nullptr, "Failed to read blob\n");
+    ASSERT_PRINT(read_size == text_len, "Read size mismatch: expected %zu, got %zu\n", text_len, read_size);
+
+    if (memcmp(result, text, text_len) != 0) {
+        dump_bytes((const uint8_t*)text, text_len, "Expected");
+        dump_bytes(result, read_size, "Got");
+        ASSERT_PRINT(false, "Content mismatch\n");
+    }
+
+    // Verify single page (no chain)
+    blob_page page = blob_read_page(blob_id);
+    ASSERT_PRINT(page.data != nullptr, "Page data is null\n");
+    ASSERT_PRINT(page.size == text_len, "Page size mismatch: expected %zu, got %u\n", text_len, page.size);
+    ASSERT_PRINT(page.next == 0, "Single page should have next=0, got %u\n", page.next);
+
+    blob_delete(blob_id);
+}
+
+static void
+test_page_boundary()
+{
+    // Test exact page capacity
+    const size_t page_capacity = PAGE_SIZE - 12;
+    uint8_t* data = (uint8_t*)arena<query_arena>::alloc(page_capacity);
+    memset(data, 'B', page_capacity);
+
+    uint32_t blob_id = blob_create(data, page_capacity);
+    ASSERT_PRINT(blob_id != 0, "Failed to create boundary blob\n");
+
+    // Should fit exactly in one page
+    blob_page page = blob_read_page(blob_id);
+    ASSERT_PRINT(page.size == page_capacity, "Boundary size mismatch: expected %zu, got %u\n", page_capacity, page.size);
+    ASSERT_PRINT(page.next == 0, "Boundary blob should fit in one page, but has next=%u\n", page.next);
+
+    // Verify content
+    size_t read_size;
+    uint8_t* result = blob_read_full(blob_id, &read_size);
+    ASSERT_PRINT(read_size == page_capacity, "Boundary read size mismatch: expected %zu, got %zu\n", page_capacity, read_size);
+
+    if (memcmp(result, data, page_capacity) != 0) {
+        dump_bytes(data, 32, "Expected");
+        dump_bytes(result, 32, "Got");
+        ASSERT_PRINT(false, "Boundary content mismatch\n");
+    }
+
+    blob_delete(blob_id);
+}
+
+static void
+test_multi_page_blob()
+{
+    // Create blob that spans exactly 3 pages
+    const size_t page_capacity = PAGE_SIZE - 12;
+    const size_t total_size = page_capacity * 3;
+    uint8_t* data = (uint8_t*)arena<query_arena>::alloc(total_size);
+
+    // Fill with pattern to detect corruption
+    for (size_t i = 0; i < total_size; i++) {
+        data[i] = (uint8_t)(i % 251);  // Prime number for better pattern
+    }
+
+    uint32_t blob_id = blob_create(data, total_size);
+    ASSERT_PRINT(blob_id != 0, "Failed to create multi-page blob\n");
+
+    // Verify size
+    uint32_t size = blob_get_size(blob_id);
+    ASSERT_PRINT(size == total_size, "Multi-page size mismatch: expected %zu, got %u\n", total_size, size);
+
+    // Count pages and verify chain
+    uint32_t current = blob_id;
+    int page_count = 0;
+    size_t bytes_read = 0;
+
+    while (current) {
+        blob_page page = blob_read_page(current);
+        page_count++;
+        bytes_read += page.size;
+
+        // Verify each page except last is full
+        if (page.next != 0) {
+            ASSERT_PRINT(page.size == page_capacity,
+                        "Non-final page should be full: expected %zu, got %u\n",
+                        page_capacity, page.size);
+        }
+
+        current = page.next;
+    }
+
+    ASSERT_PRINT(page_count == 3, "Expected 3 pages, got %d\n", page_count);
+    ASSERT_PRINT(bytes_read == total_size, "Total bytes mismatch: expected %zu, got %zu\n", total_size, bytes_read);
+
+    // Read full and verify content
+    size_t read_size;
+    uint8_t* result = blob_read_full(blob_id, &read_size);
+    ASSERT_PRINT(read_size == total_size, "Multi-page read size mismatch: expected %zu, got %zu\n", total_size, read_size);
+
+    if (memcmp(result, data, total_size) != 0) {
+        // Find first difference
+        for (size_t i = 0; i < total_size; i++) {
+            if (result[i] != data[i]) {
+                fprintf(stderr, "First difference at byte %zu: expected %02x, got %02x\n",
+                        i, data[i], result[i]);
+                break;
+            }
+        }
+        ASSERT_PRINT(false, "Multi-page content mismatch\n");
+    }
+
+    blob_delete(blob_id);
+}
+
+static void
 test_binary_data()
 {
-	printf("\nTesting binary data with null bytes...\n");
+    // Test with binary data including nulls
+    uint8_t binary[512];
+    for (int i = 0; i < 512; i++) {
+        binary[i] = (uint8_t)(i % 256);
+    }
 
-	// Create binary data with nulls and all byte values
-	uint8_t binary_data[512];
-	for (int i = 0; i < 512; i++)
-	{
-		binary_data[i] = i % 256;
-	}
+    uint32_t blob_id = blob_create(binary, 512);
+    ASSERT_PRINT(blob_id != 0, "Failed to create binary blob\n");
 
-	uint32_t id = blob_create((void *)binary_data, 512);
-	assert(id != 0);
+    size_t read_size;
+    uint8_t* result = blob_read_full(blob_id, &read_size);
+    ASSERT_PRINT(read_size == 512, "Binary size mismatch: expected 512, got %zu\n", read_size);
 
-	size_t read_size;
-	void *result = blob_read_full(id, &read_size);
-	assert(read_size == 512);
-	assert(memcmp(result, binary_data, 512) == 0);
+    // Check specific bytes including nulls
+    ASSERT_PRINT(result[0] == 0, "Binary[0] should be 0, got %u\n", result[0]);
+    ASSERT_PRINT(result[255] == 255, "Binary[255] should be 255, got %u\n", result[255]);
+    ASSERT_PRINT(result[256] == 0, "Binary[256] should be 0, got %u\n", result[256]);
+    ASSERT_PRINT(result[511] == 255, "Binary[511] should be 255, got %u\n", result[511]);
 
-	// Verify some specific bytes including nulls
-	uint8_t *data = (uint8_t *)result;
-	assert(data[0] == 0);
-	assert(data[255] == 255);
-	assert(data[256] == 0);
-	assert(data[511] == 255);
+    if (memcmp(result, binary, 512) != 0) {
+        dump_bytes(binary, 32, "Expected binary");
+        dump_bytes(result, 32, "Got binary");
+        ASSERT_PRINT(false, "Binary content mismatch\n");
+    }
 
-	printf("  Binary data with null bytes handled correctly\n");
-
-	// Also test page-by-page reading for binary data
-	blob_page page = blob_read_page(id);
-	assert(page.data[0] == 0);
-
-	blob_delete(id);
+    blob_delete(blob_id);
 }
 
-int
+inline int
 test_blob()
 {
-	// Initialize systems
-	arena<query_arena>::init(16 * 1024 * 1024);
-	pager_open("test_blob.db");
+    // Initialize systems
+    arena<query_arena>::init(16 * 1024 * 1024);
+    pager_open("test_blob.db");
 
-	printf("=== BLOB STORAGE TESTS ===\n");
+    pager_begin_transaction();
 
-	pager_begin_transaction();
+    test_empty_blob();
+    test_single_page_blob();
+    test_page_boundary();
+    test_multi_page_blob();
+    test_binary_data();
 
-	test_single_page_blob();
-	test_multi_page_blob();
-	test_boundary_cases();
-	test_large_blob();
-	test_multiple_blobs();
-	test_empty_blob();
-	test_binary_data();
+    pager_commit();
 
-	pager_commit();
+    printf("blob_tests_passed\n");
 
-	printf("\n=== ALL TESTS PASSED ===\n");
+    // Cleanup
+    pager_close();
+    arena<query_arena>::shutdown();
 
-	// Cleanup
-	pager_close();
-	arena<query_arena>::shutdown();
-
-	return 0;
+    return 0;
 }

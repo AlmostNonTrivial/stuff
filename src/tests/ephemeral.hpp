@@ -1,213 +1,224 @@
 #pragma once
 #include "../ephemeral.hpp"
 #include "../arena.hpp"
-#include <algorithm>
-#include <cassert>
 #include <cstdint>
-#include <iostream>
-#include <random>
-#include <set>
-#include <vector>
+#include <cstdio>
+#include <cstring>
 
+#define ASSERT_PRINT(tree_ptr, cond, ...)                                     \
+    do {                                                                       \
+        if (!(cond)) {                                                        \
+            fprintf(stderr, "Assertion failed: %s\n", #cond);                 \
+            fprintf(stderr, "  at %s:%d\n", __FILE__, __LINE__);             \
+            fprintf(stderr, __VA_ARGS__);                                     \
+            fprintf(stderr, "Tree state:\n");                                 \
+            et_print(tree_ptr);                                               \
+            abort();                                                           \
+        }                                                                      \
+    } while (0)
 
+// Simple LCG for deterministic randomness
+struct simple_rng {
+    uint32_t state;
 
+    simple_rng(uint32_t seed) : state(seed) {}
+
+    uint32_t next() {
+        state = state * 1664525u + 1013904223u;
+        return state;
+    }
+
+    uint32_t next_range(uint32_t max) {
+        return next() % max;
+    }
+};
+
+// Fisher-Yates shuffle
+template<typename T>
+void shuffle_array(T* arr, size_t n, simple_rng& rng) {
+    for (size_t i = n - 1; i > 0; i--) {
+        size_t j = rng.next_range(i + 1);
+        T temp = arr[i];
+        arr[i] = arr[j];
+        arr[j] = temp;
+    }
+}
 
 inline void test_ephemeral_tree_sequential_ops() {
-    std::cout << "\n=== MemTree Sequential Operations ===\n";
-
     arena<query_arena>::init();
-
 
     et_cursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint32_t), false)};
     ephemeral_tree &tree = cursor.tree;
     const int COUNT = 1000;
 
-    // Sequential forward insertion
-    std::cout << "Forward sequential insert..." << std::flush;
     for (int i = 0; i < COUNT; i++) {
         uint32_t key = i;
         uint32_t value = i * 100;
-        assert(et_insert(&tree, (uint8_t*)&key, (uint8_t*)&value));
+        ASSERT_PRINT(&tree, et_insert(&tree, (uint8_t*)&key, (uint8_t*)&value),
+                    "Failed to insert key %u\n", key);
     }
-    std::cout << " OK (" << tree.node_count << " nodes)\n";
 
-    // Verify all keys exist
     for (int i = 0; i < COUNT; i++) {
         uint32_t key = i;
-        assert(et_cursor_seek(&cursor, &key));
+        ASSERT_PRINT(&tree, et_cursor_seek(&cursor, &key),
+                    "Failed to find key %u after insertion\n", key);
         uint32_t* val = (uint32_t*)et_cursor_record(&cursor);
-        assert(*val == i * 100);
+        ASSERT_PRINT(&tree, *val == i * 100,
+                    "Value mismatch for key %u: expected %u, got %u\n", key, i * 100, *val);
     }
 
-    // Sequential forward deletion
-    std::cout << "Forward sequential delete..." << std::flush;
     for (int i = 0; i < COUNT / 2; i++) {
         uint32_t key = i;
-        assert(et_delete(&tree, (uint8_t*)&key));
+        ASSERT_PRINT(&tree, et_delete(&tree, (uint8_t*)&key),
+                    "Failed to delete key %u\n", key);
     }
-    std::cout << " OK (remaining: " << tree.node_count << ")\n";
 
-    // Verify deleted keys don't exist
     for (int i = 0; i < COUNT / 2; i++) {
         uint32_t key = i;
-        assert(!et_cursor_seek(&cursor, &key));
+        ASSERT_PRINT(&tree, !et_cursor_seek(&cursor, &key),
+                    "Key %u should not exist after deletion\n", key);
     }
 
-    // Verify remaining keys exist
     for (int i = COUNT / 2; i < COUNT; i++) {
         uint32_t key = i;
-        assert(et_cursor_seek(&cursor, &key));
+        ASSERT_PRINT(&tree, et_cursor_seek(&cursor, &key),
+                    "Key %u should still exist\n", key);
     }
 
-    // Backward sequential deletion
-    std::cout << "Backward sequential delete..." << std::flush;
     for (int i = COUNT - 1; i >= COUNT / 2; i--) {
         uint32_t key = i;
-        assert(et_delete(&tree, (uint8_t*)&key));
+        ASSERT_PRINT(&tree, et_delete(&tree, (uint8_t*)&key),
+                    "Failed to delete key %u in backward pass\n", key);
     }
-    std::cout << " OK\n";
 
-    // Tree should be empty
-    assert(et_is_empty(&tree));
+    ASSERT_PRINT(&tree, et_is_empty(&tree),
+                "Tree should be empty after deleting all keys\n");
 
     arena<query_arena>::reset();
 }
 
 inline void test_ephemeral_tree_random_ops() {
-    std::cout << "\n=== MemTree Random Operations ===\n";
-
     arena<query_arena>::init();
-
 
     et_cursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint64_t), false)};
     ephemeral_tree &tree = cursor.tree;
 
     const int COUNT = 1000;
 
-    // Generate unique keys and values
-    std::vector<std::pair<uint32_t, uint64_t>> data;
+    struct kv_pair {
+        uint32_t key;
+        uint64_t value;
+    };
+
+    kv_pair* data = (kv_pair*)arena<query_arena>::alloc(sizeof(kv_pair) * COUNT);
     for (int i = 0; i < COUNT; i++) {
-        data.push_back({i, (uint64_t)i * 1000});
+        data[i].key = i;
+        data[i].value = (uint64_t)i * 1000;
     }
 
-    // Shuffle for random insertion order
-    std::mt19937 rng(42); // Deterministic seed
-    std::shuffle(data.begin(), data.end(), rng);
+    simple_rng rng(42);
+    shuffle_array(data, COUNT, rng);
 
-    // Random insertions
-    std::cout << "Random insert..." << std::flush;
-    for (auto& [key, value] : data) {
-        assert(et_insert(&tree, (uint8_t*)&key, (uint8_t*)&value));
+    for (int i = 0; i < COUNT; i++) {
+        ASSERT_PRINT(&tree, et_insert(&tree, (uint8_t*)&data[i].key, (uint8_t*)&data[i].value),
+                    "Failed to insert key %u with value %lu\n", data[i].key, data[i].value);
     }
-    std::cout << " OK (" << COUNT << " unique keys)\n";
 
-    // Verify all entries
-    for (auto& [key, value] : data) {
-        assert(et_cursor_seek(&cursor, &key));
+    for (int i = 0; i < COUNT; i++) {
+        uint32_t key = i;
+        uint64_t expected_value = (uint64_t)i * 1000;
+        ASSERT_PRINT(&tree, et_cursor_seek(&cursor, &key),
+                    "Failed to find randomly inserted key %u\n", key);
         uint64_t* val = (uint64_t*)et_cursor_record(&cursor);
-        assert(*val == value);
+        ASSERT_PRINT(&tree, *val == expected_value,
+                    "Value mismatch for key %u: expected %lu, got %lu\n", key, expected_value, *val);
     }
 
-    // Create list of keys for deletion
-    std::vector<uint32_t> keys_to_delete;
-    for (auto& [key, _] : data) {
-        keys_to_delete.push_back(key);
+    uint32_t* keys_to_delete = (uint32_t*)arena<query_arena>::alloc(sizeof(uint32_t) * COUNT);
+    for (int i = 0; i < COUNT; i++) {
+        keys_to_delete[i] = i;
     }
 
-    // Delete half the keys randomly
-    std::shuffle(keys_to_delete.begin(), keys_to_delete.end(), rng);
-    int delete_count = keys_to_delete.size() / 2;
+    shuffle_array(keys_to_delete, COUNT, rng);
+    int delete_count = COUNT / 2;
 
-    std::cout << "Random delete..." << std::flush;
-    std::set<uint32_t> deleted_keys;
+    bool* deleted = (bool*)arena<query_arena>::alloc(sizeof(bool) * COUNT);
+    memset(deleted, 0, sizeof(bool) * COUNT);
+
     for (int i = 0; i < delete_count; i++) {
         uint32_t key = keys_to_delete[i];
-        assert(et_delete(&tree, (uint8_t*)&key));
-        deleted_keys.insert(key);
+        ASSERT_PRINT(&tree, et_delete(&tree, (uint8_t*)&key),
+                    "Failed to delete key %u\n", key);
+        deleted[key] = true;
+        et_validate(&tree);
     }
-    std::cout << " OK (deleted: " << delete_count << ")\n";
 
-    // Verify correct keys remain
-    for (auto& [key, value] : data) {
-        if (deleted_keys.find(key) == deleted_keys.end()) {
-            assert(et_cursor_seek(&cursor, &key));
+    for (int i = 0; i < COUNT; i++) {
+        uint32_t key = i;
+        if (!deleted[key]) {
+            ASSERT_PRINT(&tree, et_cursor_seek(&cursor, &key),
+                        "Key %u should exist after partial deletion\n", key);
             uint64_t* val = (uint64_t*)et_cursor_record(&cursor);
-            assert(*val == value);
+            uint64_t expected = (uint64_t)i * 1000;
+            ASSERT_PRINT(&tree, *val == expected,
+                        "Value mismatch after deletion for key %u\n", key);
         } else {
-            assert(!et_cursor_seek(&cursor, &key));
+            ASSERT_PRINT(&tree, !et_cursor_seek(&cursor, &key),
+                        "Deleted key %u should not exist\n", key);
         }
     }
+
+
+
+    et_validate(&tree);
 
     arena<query_arena>::reset();
 }
 
-// inline void test_ephemeral_tree_duplicates() {
-//     std::cout << "\n=== MemTree Duplicate Keys ===\n";
-
-//     Arena<query_arena>::init();
-//
-
-//     MemCursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint32_t), true)};
-//     MemTree &tree = cursor.tree;
-
-//     // Insert multiple records with same key
-//     std::cout << "Insert duplicates..." << std::flush;
-//     uint32_t key = 42;
-//     for (uint32_t i = 0; i < 10; i++) {
-//         uint32_t record = i * 100;
-//         assert(et_insert(&tree, (uint8_t*)&key, (uint8_t*)&record));
-//     }
-//     std::cout << " OK (10 duplicates)\n";
-
-//     // Count duplicates
-//     uint32_t count = ephemeral_tree_count(&cursor.tree);
-//     assert(count == 10);
-
-//     // Iterate through all duplicates
-//     std::cout << "Iterate duplicates..." << std::flush;
-//     assert(et_cursor_seek(&cursor, &key));
-//     std::set<uint32_t> found_records;
-//     do {
-//         uint32_t* curr_key = (uint32_t*)et_cursor_key(&cursor);
-//         if (!curr_key || *curr_key != key) break;
-
-//         uint32_t* record = (uint32_t*)et_cursor_record(&cursor);
-//         found_records.insert(*record);
-//     } while (et_cursor_next(&cursor));
-
-//     assert(found_records.size() == 10);
-//     std::cout << " OK\n";
-
-//     // Delete specific duplicate
-//     std::cout << "Delete exact duplicate..." << std::flush;
-//     uint32_t target_record = 500;
-//     assert(et_delete_exact(&tree, (uint8_t*)&key, (uint8_t*)&target_record));
-//     count = et_cursor_count_duplicates(&cursor, &key);
-//     assert(count == 9);
-//     std::cout << " OK\n";
-
-//     // Delete first occurrence
-//     std::cout << "Delete first occurrence..." << std::flush;
-//     assert(et_delete(&tree, (uint8_t*)&key));
-//     count = et_cursor_count_duplicates(&cursor, &key);
-//     assert(count == 8);
-//     std::cout << " OK\n";
-
-//     Arena<query_arena>::reset();
-// }
-
-inline void test_ephemeral_tree_composite_keys() {
-    std::cout << "\n=== MemTree Composite Keys ===\n";
-
+inline void test_ephemeral_tree_duplicates() {
     arena<query_arena>::init();
 
+    et_cursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint32_t), true)};
+    ephemeral_tree &tree = cursor.tree;
 
-    // For TYPE_U64 comparison to work correctly with composite keys,
-    // we need to pack them into a uint64_t with the primary sort field
-    // in the most significant bits
+    uint32_t key = 42;
+    for (uint32_t i = 0; i < 10; i++) {
+        uint32_t record = i * 100;
+        ASSERT_PRINT(&tree, et_insert(&tree, (uint8_t*)&key, (uint8_t*)&record),
+                    "Failed to insert duplicate %u with record %u\n", key, record);
+    }
+
+    ASSERT_PRINT(&tree, et_cursor_seek(&cursor, &key),
+                "Failed to seek to duplicate key %u\n", key);
+
+    uint32_t found_records[10];
+    int found_count = 0;
+
+    do {
+        uint32_t* curr_key = (uint32_t*)et_cursor_key(&cursor);
+        if (!curr_key || *curr_key != key) break;
+
+        uint32_t* record = (uint32_t*)et_cursor_record(&cursor);
+        found_records[found_count++] = *record;
+    } while (et_cursor_next(&cursor));
+
+    ASSERT_PRINT(&tree, found_count == 10,
+                "Expected 10 duplicates, found %d\n", found_count);
+
+    uint32_t target_record = 500;
+    ASSERT_PRINT(&tree, et_delete_exact(&tree, (uint8_t*)&key, (uint8_t*)&target_record),
+                "Failed to delete exact duplicate with record %u\n", target_record);
+
+    ASSERT_PRINT(&tree, et_delete(&tree, (uint8_t*)&key),
+                "Failed to delete first occurrence of key %u\n", key);
+
+    arena<query_arena>::reset();
+}
+
+inline void test_ephemeral_tree_composite_keys() {
+    arena<query_arena>::init();
 
     auto make_composite_key = [](uint32_t user_id, uint32_t timestamp) -> uint64_t {
-        // Pack user_id in high 32 bits, timestamp in low 32 bits
         return ((uint64_t)user_id << 32) | timestamp;
     };
 
@@ -222,23 +233,22 @@ inline void test_ephemeral_tree_composite_keys() {
     et_cursor cursor = {.tree = et_create(TYPE_U64, sizeof(uint64_t), false)};
     ephemeral_tree &tree = cursor.tree;
 
-    // Insert composite keys
-    std::cout << "Insert composite keys..." << std::flush;
     for (uint32_t user = 1; user <= 10; user++) {
         for (uint32_t time = 100; time <= 110; time++) {
             uint64_t key = make_composite_key(user, time);
-            uint64_t value = key; // Just use key as value for simplicity
-            assert(et_insert(&tree, (uint8_t*)&key, (uint8_t*)&value));
+            uint64_t value = key;
+            ASSERT_PRINT(&tree, et_insert(&tree, (uint8_t*)&key, (uint8_t*)&value),
+                        "Failed to insert composite key for user %u, time %u\n", user, time);
+
+            et_validate(&tree);
         }
     }
-    std::cout << " OK (110 keys)\n";
 
-    // Range query for specific user
-    std::cout << "Range query..." << std::flush;
     uint64_t start_key = make_composite_key(5, 0);
     uint64_t end_key = make_composite_key(6, 0);
 
-    assert(et_cursor_seek(&cursor, &start_key, GE));
+    ASSERT_PRINT(&tree, et_cursor_seek(&cursor, &start_key, GE),
+                "Failed to seek to start of range\n");
     int count = 0;
     do {
         uint64_t* found = (uint64_t*)et_cursor_key(&cursor);
@@ -247,150 +257,158 @@ inline void test_ephemeral_tree_composite_keys() {
         uint32_t user_id = extract_user_id(*found);
         if (user_id >= 6) break;
 
-        assert(user_id == 5);
+        ASSERT_PRINT(&tree, user_id == 5,
+                    "Expected user_id 5, got %u\n", user_id);
         count++;
     } while (et_cursor_next(&cursor));
 
-    assert(count == 11); // 11 timestamps for user 5
-    std::cout << " OK\n";
+    ASSERT_PRINT(&tree, count == 11,
+                "Expected 11 timestamps for user 5, got %d\n", count);
 
+    et_validate(&tree);
     arena<query_arena>::reset();
 }
 
 inline void test_ephemeral_tree_cursor_operations() {
-    std::cout << "\n=== MemTree Cursor Operations ===\n";
-
     arena<query_arena>::init();
-
 
     et_cursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint32_t), false)};
     ephemeral_tree &tree = cursor.tree;
 
-    // Insert test data
     for (uint32_t i = 0; i < 100; i += 10) {
         uint32_t value = i;
-        assert(et_cursor_insert(&cursor, &i, (uint8_t*)&value));
+        ASSERT_PRINT(&tree, et_cursor_insert(&cursor, &i, (uint8_t*)&value),
+                    "Failed to insert key %u\n", i);
     }
 
-    // Test seek operations
-    std::cout << "Seek operations..." << std::flush;
-
     uint32_t key = 25;
-    assert(et_cursor_seek(&cursor, &key, GT));
-    assert(*(uint32_t*)et_cursor_key(&cursor) == 30);
+    ASSERT_PRINT(&tree, et_cursor_seek(&cursor, &key, GT),
+                "Failed to seek GT %u\n", key);
+    ASSERT_PRINT(&tree, *(uint32_t*)et_cursor_key(&cursor) == 30,
+                "GT seek: expected 30, got %u\n", *(uint32_t*)et_cursor_key(&cursor));
 
-    assert(et_cursor_seek(&cursor, &key, GE));
-    assert(*(uint32_t*)et_cursor_key(&cursor) == 30);
+    ASSERT_PRINT(&tree, et_cursor_seek(&cursor, &key, GE),
+                "Failed to seek GE %u\n", key);
+    ASSERT_PRINT(&tree, *(uint32_t*)et_cursor_key(&cursor) == 30,
+                "GE seek: expected 30, got %u\n", *(uint32_t*)et_cursor_key(&cursor));
 
     key = 30;
-    assert(et_cursor_seek(&cursor, &key, GE));
-    assert(*(uint32_t*)et_cursor_key(&cursor) == 30);
+    ASSERT_PRINT(&tree, et_cursor_seek(&cursor, &key, GE),
+                "Failed to seek GE %u\n", key);
+    ASSERT_PRINT(&tree, *(uint32_t*)et_cursor_key(&cursor) == 30,
+                "GE seek exact: expected 30, got %u\n", *(uint32_t*)et_cursor_key(&cursor));
 
     key = 35;
-    assert(et_cursor_seek(&cursor, &key, LT));
-    assert(*(uint32_t*)et_cursor_key(&cursor) == 30);
+    ASSERT_PRINT(&tree, et_cursor_seek(&cursor, &key, LT),
+                "Failed to seek LT %u\n", key);
+    ASSERT_PRINT(&tree, *(uint32_t*)et_cursor_key(&cursor) == 30,
+                "LT seek: expected 30, got %u\n", *(uint32_t*)et_cursor_key(&cursor));
 
-    assert(et_cursor_seek(&cursor, &key, LE));
-    assert(*(uint32_t*)et_cursor_key(&cursor) == 30);
+    ASSERT_PRINT(&tree, et_cursor_seek(&cursor, &key, LE),
+                "Failed to seek LE %u\n", key);
+    ASSERT_PRINT(&tree, *(uint32_t*)et_cursor_key(&cursor) == 30,
+                "LE seek: expected 30, got %u\n", *(uint32_t*)et_cursor_key(&cursor));
 
-    std::cout << " OK\n";
+    ASSERT_PRINT(&tree, et_cursor_first(&cursor),
+                "Failed to move to first\n");
+    ASSERT_PRINT(&tree, *(uint32_t*)et_cursor_key(&cursor) == 0,
+                "First: expected 0, got %u\n", *(uint32_t*)et_cursor_key(&cursor));
 
-    // Test cursor navigation
-    std::cout << "Cursor navigation..." << std::flush;
+    ASSERT_PRINT(&tree, et_cursor_last(&cursor),
+                "Failed to move to last\n");
+    ASSERT_PRINT(&tree, *(uint32_t*)et_cursor_key(&cursor) == 90,
+                "Last: expected 90, got %u\n", *(uint32_t*)et_cursor_key(&cursor));
 
-    assert(et_cursor_first(&cursor));
-    assert(*(uint32_t*)et_cursor_key(&cursor) == 0);
+    ASSERT_PRINT(&tree, et_cursor_previous(&cursor),
+                "Failed to move to previous\n");
+    ASSERT_PRINT(&tree, *(uint32_t*)et_cursor_key(&cursor) == 80,
+                "Previous: expected 80, got %u\n", *(uint32_t*)et_cursor_key(&cursor));
 
-    assert(et_cursor_last(&cursor));
-    assert(*(uint32_t*)et_cursor_key(&cursor) == 90);
+    ASSERT_PRINT(&tree, et_cursor_next(&cursor),
+                "Failed to move to next\n");
+    ASSERT_PRINT(&tree, *(uint32_t*)et_cursor_key(&cursor) == 90,
+                "Next: expected 90, got %u\n", *(uint32_t*)et_cursor_key(&cursor));
 
-    assert(et_cursor_previous(&cursor));
-    assert(*(uint32_t*)et_cursor_key(&cursor) == 80);
-
-    assert(et_cursor_next(&cursor));
-    assert(*(uint32_t*)et_cursor_key(&cursor) == 90);
-
-    std::cout << " OK\n";
-
-    // Test cursor update
-    std::cout << "Cursor update..." << std::flush;
     key = 50;
-    assert(et_cursor_seek(&cursor, &key));
+    ASSERT_PRINT(&tree, et_cursor_seek(&cursor, &key),
+                "Failed to seek to %u for update\n", key);
     uint32_t new_value = 5000;
-    assert(et_cursor_update(&cursor, (uint8_t*)&new_value));
-    assert(*(uint32_t*)et_cursor_record(&cursor) == 5000);
-    std::cout << " OK\n";
+    ASSERT_PRINT(&tree, et_cursor_update(&cursor, (uint8_t*)&new_value),
+                "Failed to update cursor\n");
+    ASSERT_PRINT(&tree, *(uint32_t*)et_cursor_record(&cursor) == 5000,
+                "Update: expected 5000, got %u\n", *(uint32_t*)et_cursor_record(&cursor));
 
-    // Test cursor delete
-    std::cout << "Cursor delete..." << std::flush;
-    assert(et_cursor_seek(&cursor, &key));
-    assert(et_cursor_delete(&cursor));
-    assert(!et_cursor_seek(&cursor, &key));
-    std::cout << " OK\n";
+    ASSERT_PRINT(&tree, et_cursor_seek(&cursor, &key),
+                "Failed to seek to %u for delete\n", key);
+    ASSERT_PRINT(&tree, et_cursor_delete(&cursor),
+                "Failed to delete via cursor\n");
+    ASSERT_PRINT(&tree, !et_cursor_seek(&cursor, &key),
+                "Key %u should not exist after cursor delete\n", key);
 
+    et_validate(&tree);
     arena<query_arena>::reset();
 }
 
 inline void test_ephemeral_tree_edge_cases() {
-    std::cout << "\n=== MemTree Edge Cases ===\n";
-
     arena<query_arena>::init();
-
 
     et_cursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint32_t), false)};
     ephemeral_tree &tree = cursor.tree;
 
-    // Empty tree operations
-    std::cout << "Empty tree..." << std::flush;
-    assert(et_is_empty(&tree));
-    assert(!et_cursor_first(&cursor));
-    assert(!et_cursor_last(&cursor));
+    ASSERT_PRINT(&tree, et_is_empty(&tree),
+                "New tree should be empty\n");
+    ASSERT_PRINT(&tree, !et_cursor_first(&cursor),
+                "Empty tree should have no first element\n");
+    ASSERT_PRINT(&tree, !et_cursor_last(&cursor),
+                "Empty tree should have no last element\n");
     uint32_t key = 42;
-    assert(!et_delete(&tree, (uint8_t*)&key));
-    std::cout << " OK\n";
+    ASSERT_PRINT(&tree, !et_delete(&tree, (uint8_t*)&key),
+                "Delete from empty tree should fail\n");
 
-    // Single element
-    std::cout << "Single element..." << std::flush;
     uint32_t value = 100;
-    assert(et_insert(&tree, (uint8_t*)&key, (uint8_t*)&value));
-    assert(!et_is_empty(&tree));
-    assert(et_cursor_first(&cursor));
-    assert(et_cursor_last(&cursor));
-    assert(*(uint32_t*)et_cursor_key(&cursor) == 42);
-    assert(et_delete(&tree, (uint8_t*)&key));
-    assert(et_is_empty(&tree));
-    std::cout << " OK\n";
+    ASSERT_PRINT(&tree, et_insert(&tree, (uint8_t*)&key, (uint8_t*)&value),
+                "Failed to insert single element\n");
+    ASSERT_PRINT(&tree, !et_is_empty(&tree),
+                "Tree should not be empty after insert\n");
+    ASSERT_PRINT(&tree, et_cursor_first(&cursor),
+                "Should find first in single-element tree\n");
+    ASSERT_PRINT(&tree, et_cursor_last(&cursor),
+                "Should find last in single-element tree\n");
+    ASSERT_PRINT(&tree, *(uint32_t*)et_cursor_key(&cursor) == 42,
+                "Single element key should be 42, got %u\n", *(uint32_t*)et_cursor_key(&cursor));
+    ASSERT_PRINT(&tree, et_delete(&tree, (uint8_t*)&key),
+                "Failed to delete single element\n");
+    ASSERT_PRINT(&tree, et_is_empty(&tree),
+                "Tree should be empty after deleting single element\n");
 
-    // Boundary values
-    std::cout << "Boundary values..." << std::flush;
     uint32_t min_key = 0;
     uint32_t max_key = UINT32_MAX;
 
-    assert(et_insert(&tree, (uint8_t*)&min_key, (uint8_t*)&value));
-    assert(et_insert(&tree, (uint8_t*)&max_key, (uint8_t*)&value));
+    ASSERT_PRINT(&tree, et_insert(&tree, (uint8_t*)&min_key, (uint8_t*)&value),
+                "Failed to insert min key\n");
+    ASSERT_PRINT(&tree, et_insert(&tree, (uint8_t*)&max_key, (uint8_t*)&value),
+                "Failed to insert max key\n");
 
-    assert(et_cursor_first(&cursor));
-    assert(*(uint32_t*)et_cursor_key(&cursor) == 0);
+    ASSERT_PRINT(&tree, et_cursor_first(&cursor),
+                "Failed to find first with boundary values\n");
+    ASSERT_PRINT(&tree, *(uint32_t*)et_cursor_key(&cursor) == 0,
+                "First should be 0, got %u\n", *(uint32_t*)et_cursor_key(&cursor));
 
-    assert(et_cursor_last(&cursor));
-    assert(*(uint32_t*)et_cursor_key(&cursor) == UINT32_MAX);
+    ASSERT_PRINT(&tree, et_cursor_last(&cursor),
+                "Failed to find last with boundary values\n");
+    ASSERT_PRINT(&tree, *(uint32_t*)et_cursor_key(&cursor) == UINT32_MAX,
+                "Last should be UINT32_MAX, got %u\n", *(uint32_t*)et_cursor_key(&cursor));
 
-    std::cout << " OK\n";
-
-    // Clear tree
-    std::cout << "Clear tree..." << std::flush;
     et_clear(&tree);
-    assert(et_is_empty(&tree));
-    std::cout << " OK\n";
+    ASSERT_PRINT(&tree, et_is_empty(&tree),
+                "Tree should be empty after clear\n");
 
+    et_validate(&tree);
     arena<query_arena>::reset();
 }
 
 inline void test_ephemeral_tree_varchar_keys() {
-    std::cout << "\n=== MemTree VARCHAR Keys ===\n";
-
     arena<query_arena>::init();
-
 
     et_cursor cursor = {.tree = et_create(TYPE_CHAR32, sizeof(uint32_t), false)};
     ephemeral_tree &tree = cursor.tree;
@@ -400,45 +418,44 @@ inline void test_ephemeral_tree_varchar_keys() {
         "fig", "grape", "honeydew", "ice cream", "jackfruit"
     };
 
-    // Insert strings
-    std::cout << "Insert strings..." << std::flush;
     for (int i = 0; i < 10; i++) {
         char key[32] = {0};
         strncpy(key, test_strings[i], 31);
         uint32_t value = i;
-        assert(et_insert(&tree, (uint8_t*)key, (uint8_t*)&value));
+        ASSERT_PRINT(&tree, et_insert(&tree, (uint8_t*)key, (uint8_t*)&value),
+                    "Failed to insert string key '%s'\n", test_strings[i]);
     }
-    std::cout << " OK\n";
 
-    // Verify sorted order
-    std::cout << "Verify order..." << std::flush;
-    std::vector<std::string> sorted_order;
+    char* sorted_strings[10];
+    int sorted_count = 0;
+
     if (et_cursor_first(&cursor)) {
         do {
             char* key = (char*)et_cursor_key(&cursor);
-            sorted_order.push_back(std::string(key, strnlen(key, 32)));
-        } while (et_cursor_next(&cursor));
+            sorted_strings[sorted_count] = (char*)arena<query_arena>::alloc(32);
+            strncpy(sorted_strings[sorted_count], key, 31);
+            sorted_count++;
+        } while (et_cursor_next(&cursor) && sorted_count < 10);
     }
 
-    // Check ordering
-    for (size_t i = 1; i < sorted_order.size(); i++) {
-        assert(sorted_order[i-1] < sorted_order[i]);
+    for (int i = 1; i < sorted_count; i++) {
+        ASSERT_PRINT(&tree, strcmp(sorted_strings[i-1], sorted_strings[i]) < 0,
+                    "String ordering violated: '%s' should be < '%s'\n",
+                    sorted_strings[i-1], sorted_strings[i]);
     }
-    std::cout << " OK\n";
 
+    et_validate(&tree);
     arena<query_arena>::reset();
 }
 
 inline void test_ephemeral() {
-    std::cout << "\n========== MemTree Tests ==========\n";
-
     test_ephemeral_tree_sequential_ops();
     test_ephemeral_tree_random_ops();
-    // test_ephemeral_tree_duplicates();
+    test_ephemeral_tree_duplicates();
     test_ephemeral_tree_composite_keys();
     test_ephemeral_tree_cursor_operations();
     test_ephemeral_tree_edge_cases();
     test_ephemeral_tree_varchar_keys();
 
-    std::cout << "\n========== All MemTree tests passed! ==========\n";
+    printf("ephemeral_tests_passed\n");
 }

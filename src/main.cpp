@@ -513,13 +513,13 @@ run_tests()
 {
 
     arena<global_arena>::init();
-	// // test_arena();
-	// test_parser();
-	// test_types();
+	// test_arena();
+	test_parser();
+	test_types();
 
-	test_blob();
+	// test_blob();
 	// test_pager();
-	// test_ephemeral();
+	test_ephemeral();
 	// test_btree();
 	return 0;
 }
