@@ -592,17 +592,17 @@ test_error_handling()
 	// Invalid statement
 	result = parse_sql("INVALID SQL HERE");
 	assert(result.success == false);
-	assert(result.error != nullptr);
+	assert(!result.error.empty());
 
 	// Incomplete statement
 	result = parse_sql("SELECT * FROM");
 	assert(result.success == false);
-	assert(result.error != nullptr);
+	assert(!result.error.empty());
 
 	// Missing closing paren
 	result = parse_sql("INSERT INTO users (id, name VALUES (1, 'test')");
 	assert(result.success == false);
-	assert(result.error != nullptr);
+	assert(!result.error.empty());
 
 	printf("  ✓ Error handling passed\n");
 }

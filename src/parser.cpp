@@ -377,30 +377,26 @@ parse_data_type(Parser *parser)
 // EXPRESSION PARSING
 //=============================================================================
 
-// Forward declarations
-Expr *
-parse_or_expr(Parser *parser);
-Expr *
-parse_and_expr(Parser *parser);
-Expr *
-parse_comparison_expr(Parser *parser);
-Expr *
-parse_unary_expr(Parser *parser);
-Expr *
-parse_primary_expr(Parser *parser);
+// In parser.cpp, modify the precedence chain:
 
-Expr *
-parse_expression(Parser *parser)
+// Forward declarations (update these)
+Expr *parse_or_expr(Parser *parser);
+Expr *parse_and_expr(Parser *parser);
+Expr *parse_not_expr(Parser *parser);     // NEW - between AND and comparison
+Expr *parse_comparison_expr(Parser *parser);
+Expr *parse_primary_expr(Parser *parser);  // Remove parse_unary_expr
+
+// The main entry point remains the same
+Expr *parse_expression(Parser *parser)
 {
 	return parse_or_expr(parser);
 }
 
-Expr *
-parse_or_expr(Parser *parser)
+// OR expression (lowest precedence)
+Expr *parse_or_expr(Parser *parser)
 {
 	Expr *left = parse_and_expr(parser);
-	if (!left)
-		return nullptr;
+	if (!left) return nullptr;
 
 	while (consume_keyword(parser, "OR"))
 	{
@@ -422,16 +418,15 @@ parse_or_expr(Parser *parser)
 	return left;
 }
 
-Expr *
-parse_and_expr(Parser *parser)
+// AND expression
+Expr *parse_and_expr(Parser *parser)
 {
-	Expr *left = parse_comparison_expr(parser);
-	if (!left)
-		return nullptr;
+	Expr *left = parse_not_expr(parser);  // Changed from parse_comparison_expr
+	if (!left) return nullptr;
 
 	while (consume_keyword(parser, "AND"))
 	{
-		Expr *right = parse_comparison_expr(parser);
+		Expr *right = parse_not_expr(parser);  // Changed from parse_comparison_expr
 		if (!right)
 		{
 			format_error(parser, "Expected expression after AND");
@@ -449,12 +444,33 @@ parse_and_expr(Parser *parser)
 	return left;
 }
 
-Expr *
-parse_comparison_expr(Parser *parser)
+// NEW: NOT expression (between AND and comparison)
+Expr *parse_not_expr(Parser *parser)
 {
-	Expr *left = parse_unary_expr(parser);
-	if (!left)
-		return nullptr;
+	if (consume_keyword(parser, "NOT"))
+	{
+		Expr *operand = parse_not_expr(parser);  // Recursive for NOT NOT case
+		if (!operand)
+		{
+			format_error(parser, "Expected expression after NOT");
+			return nullptr;
+		}
+
+		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
+		expr->type = EXPR_UNARY_OP;
+		expr->unary_op = OP_NOT;
+		expr->operand = operand;
+		return expr;
+	}
+
+	return parse_comparison_expr(parser);
+}
+
+// Comparison expression (higher precedence than NOT)
+Expr *parse_comparison_expr(Parser *parser)
+{
+	Expr *left = parse_primary_expr(parser);  // Changed from parse_unary_expr
+	if (!left) return nullptr;
 
 	Token token = lexer_peek_token(&parser->lexer);
 	if (token.type == TOKEN_OPERATOR)
@@ -490,7 +506,7 @@ parse_comparison_expr(Parser *parser)
 			return left; // Not a comparison operator
 		}
 
-		Expr *right = parse_unary_expr(parser);
+		Expr *right = parse_primary_expr(parser);  // Changed from parse_unary_expr
 		if (!right)
 		{
 			format_error(parser, "Expected expression after comparison operator");
@@ -508,27 +524,7 @@ parse_comparison_expr(Parser *parser)
 	return left;
 }
 
-Expr *
-parse_unary_expr(Parser *parser)
-{
-	if (consume_keyword(parser, "NOT"))
-	{
-		Expr *operand = parse_unary_expr(parser);
-		if (!operand)
-		{
-			format_error(parser, "Expected expression after NOT");
-			return nullptr;
-		}
 
-		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
-		expr->type = EXPR_UNARY_OP;
-		expr->unary_op = OP_NOT;
-		expr->operand = operand;
-		return expr;
-	}
-
-	return parse_primary_expr(parser);
-}
 
 Expr *
 parse_primary_expr(Parser *parser)
