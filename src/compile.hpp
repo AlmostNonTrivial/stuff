@@ -184,7 +184,7 @@ struct ProgramBuilder
 		{
 
 			size_t len = src_len ? src_len : strlen((char *)src);
-			assert(len < size && "String literal too long for column type");
+			assert(len <= size && "String literal too long for column type");
 			memcpy(ptr, src, len);
 			((char *)ptr)[len] = '\0';
 		}
@@ -431,11 +431,7 @@ const char*
 		return dest_reg;
 	}
 
-	int
-	load_null(int dest_reg = -1)
-	{
-		return load(TypedValue::make(TYPE_NULL, nullptr), dest_reg);
-	}
+
 
 	int
 	move(int src_reg, int dest_reg = -1)

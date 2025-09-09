@@ -826,18 +826,12 @@ void
 parse_insert(Parser *parser, InsertStmt *stmt)
 {
 
-	printf("DEBUG: lexer.input='%.20s'\n", parser->lexer.input);
-	printf("DEBUG: lexer.current='%.20s'\n", parser->lexer.current);
-
 	if (!consume_keyword(parser, "INSERT"))
 	{
 		format_error(parser, "Expected INSERT");
-		// return;
+		return;
 	}
 
-	printf("DEBUG AFTER: lexer.input='%.20s'\n", parser->lexer.input);
-	printf("DEBUG AFTER: lexer.current='%.20s'\n", parser->lexer.current);
-	// exit(0);
 	if (!consume_keyword(parser, "INTO"))
 	{
 		format_error(parser, "Expected INTO after INSERT");
@@ -1228,8 +1222,6 @@ parse_sql(const char *sql)
 	parser_result result;
 	Parser		  parser;
 	lexer_init(&parser.lexer, sql);
-
-
 
 	parser.error_msg = string_view{};
 	parser.error_line = -1;

@@ -850,7 +850,8 @@ step()
 		uint8_t	  data[cursor->layout.record_size];
 		uint32_t  record_count = cursor->layout.columns.size() - 1;
 
-		build_record(data, record_reg, record_count);
+		// record reg = key, but we need to build the record from the non key so plus 1
+		build_record(data, record_reg + 1, record_count);
 		bool success = vmcursor_update(cursor, data);
 
 		if (_debug)

@@ -9,9 +9,6 @@
 #include <cstring>
 #include <string_view>
 
-
-
-
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -28,7 +25,7 @@ compile_literal(ProgramBuilder *prog, Expr *expr)
 		return prog->load(prog->alloc_data_type(TYPE_CHAR32, expr->str_val.data(), expr->str_val.size()));
 	}
 
-	return prog->load_null();
+	assert(false);
 }
 
 // Compile any expression (for WHERE clauses)
@@ -42,9 +39,6 @@ compile_expr(ProgramBuilder *prog, Expr *expr, int cursor_id)
 
 	case EXPR_LITERAL:
 		return compile_literal(prog, expr);
-
-	case EXPR_NULL:
-		return prog->load_null();
 
 	case EXPR_BINARY_OP: {
 		int left_reg = compile_expr(prog, expr->left, cursor_id);
@@ -69,7 +63,7 @@ compile_expr(ProgramBuilder *prog, Expr *expr, int cursor_id)
 		case OP_OR:
 			return prog->logic_or(left_reg, right_reg);
 		default:
-			return prog->load_null();
+			assert(false);
 		}
 	}
 
@@ -85,7 +79,7 @@ compile_expr(ProgramBuilder *prog, Expr *expr, int cursor_id)
 	}
 
 	default:
-		return prog->load_null();
+	assert(false);
 	}
 }
 
@@ -228,8 +222,6 @@ vmfunc_drop_structure(TypedValue *result, TypedValue *args, uint32_t arg_count)
 	return true;
 }
 
-
-
 void
 vmfunc_catalog_bootstrap(TypedValue *result, size_t count)
 {
@@ -265,13 +257,13 @@ vmfunc_catalog_bootstrap(TypedValue *result, size_t count)
 		{
 			ColumnDef &col_def = create_stmt.columns[i];
 			Attribute  col;
-			to_str(col_def.name,col.name, ATTRIBUTE_NAME_MAX_SIZE);
+			to_str(col_def.name, col.name, ATTRIBUTE_NAME_MAX_SIZE);
 			columns.push(col);
 		}
 	}
 
 	// Create the structure
-	Relation structure =  create_relation(name, columns);
+	Relation	structure = create_relation(name, columns);
 	TupleFormat format = tuple_format_from_relation(structure);
 	// Set up the btree with existing root page
 	structure.storage.btree = btree_create(format.key_type, format.record_size, false);
@@ -279,7 +271,6 @@ vmfunc_catalog_bootstrap(TypedValue *result, size_t count)
 
 	catalog.insert(name, structure);
 }
-
 
 // ============================================================================
 // SELECT Compilation with ORDER BY via Red-Black Tree
@@ -555,7 +546,6 @@ compile_insert(Statement *stmt)
 	ProgramBuilder prog;
 	InsertStmt	  *insert_stmt = &stmt->insert_stmt;
 
-
 	prog.begin_transaction();
 
 	// Open cursor to target table
@@ -566,11 +556,7 @@ compile_insert(Statement *stmt)
 	int row_size = insert_stmt->sem.table->columns.size();
 	int row_start = prog.regs.allocate_range(row_size);
 
-	// Initialize all columns to NULL first
-	for (int i = 0; i < row_size; i++)
-	{
-		prog.load_null(row_start + i);
-	}
+
 
 	// Fill in specified columns
 	for (uint32_t i = 0; i < insert_stmt->values.size(); i++)
@@ -582,14 +568,6 @@ compile_insert(Statement *stmt)
 		if (expr->type == EXPR_LITERAL)
 		{
 			value_reg = compile_literal(&prog, expr);
-		}
-		else if (expr->type == EXPR_NULL)
-		{
-			value_reg = prog.load_null();
-		}
-		else
-		{
-			value_reg = prog.load_null();
 		}
 
 		prog.move(value_reg, row_start + col_idx);
@@ -615,7 +593,6 @@ compile_update(Statement *stmt)
 {
 	ProgramBuilder prog;
 	UpdateStmt	  *update_stmt = &stmt->update_stmt;
-
 
 	prog.begin_transaction();
 
@@ -655,14 +632,6 @@ compile_update(Statement *stmt)
 				if (value_expr->type == EXPR_LITERAL)
 				{
 					new_value = compile_literal(&prog, value_expr);
-				}
-				else if (value_expr->type == EXPR_NULL)
-				{
-					new_value = prog.load_null();
-				}
-				else
-				{
-					new_value = prog.load_null();
 				}
 
 				prog.move(new_value, row_start + col_idx);
@@ -776,7 +745,8 @@ compile_create_table(Statement *stmt)
 
 	// 1. Create the actual table structure
 	// int table_name_reg = prog.load(TYPE_CHAR32, (void *)create_stmt->table_name.data());
-	int table_name_reg = prog.load(prog.alloc_data_type(TYPE_CHAR32, create_stmt->table_name.data(), create_stmt->table_name.size()));
+	int table_name_reg =
+		prog.load(prog.alloc_data_type(TYPE_CHAR32, create_stmt->table_name.data(), create_stmt->table_name.size()));
 	int root_page_reg = prog.call_function(vmfunc_create_structure, table_name_reg, 1);
 
 	// 2. Add entry to master catalog
@@ -792,11 +762,13 @@ compile_create_table(Statement *stmt)
 	master.next_key++;
 	// name
 	// prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->table_name.c_str(), 32), row_start + 1);
-	prog.load(prog.alloc_data_type(TYPE_CHAR32, create_stmt->table_name.data(), create_stmt->table_name.size()), row_start + 1);
+	prog.load(prog.alloc_data_type(TYPE_CHAR32, create_stmt->table_name.data(), create_stmt->table_name.size()),
+			  row_start + 1);
 
 	// tbl_name (same as name for tables)
 	// prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->table_name.c_str(), 32), row_start + 2);
-	prog.load(prog.alloc_data_type(TYPE_CHAR32, create_stmt->table_name.data(), create_stmt->table_name.size()), row_start + 2);
+	prog.load(prog.alloc_data_type(TYPE_CHAR32, create_stmt->table_name.data(), create_stmt->table_name.size()),
+			  row_start + 2);
 
 	// rootpage
 	prog.move(root_page_reg, row_start + 3);
@@ -827,13 +799,12 @@ compile_drop_table(Statement *stmt)
 	ProgramBuilder prog;
 	DropTableStmt *drop_stmt = &stmt->drop_table_stmt;
 
-
-
 	prog.begin_transaction();
 
 	// 1. Drop the table structure
 	// int name_reg = prog.load(TYPE_CHAR32, prog.alloc_string(drop_stmt->table_name.c_str(), 32));
-	int name_reg = prog.load(prog.alloc_data_type(TYPE_CHAR32, drop_stmt->table_name.data(), drop_stmt->table_name.size()));
+	int name_reg =
+		prog.load(prog.alloc_data_type(TYPE_CHAR32, drop_stmt->table_name.data(), drop_stmt->table_name.size()));
 	prog.call_function(vmfunc_drop_structure, name_reg, 1);
 
 	// 2. Delete from master catalog

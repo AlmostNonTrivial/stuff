@@ -37,3 +37,5 @@ Tables:
 BUGS_FIXED:
 - not allocated a specific sized string on create table, meant in the vm_create table callback
 I was comparing the entry key "users" to "users VALUES ..."
+- my stream writer was wasn't incrementing the memory in the arena
+- type system couldn't handle null

@@ -422,6 +422,19 @@ run_repl()
 		catalog_reload();
 	}
 
+
+
+	execute_sql_statement("INSERT INTO users VALUES (111, 'markymarky', 'marko', 22, 'boomtown');");
+	execute_sql_statement("DELETE FROM users WHERE username = 'lilah';");
+	_debug = true;
+	execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 51;");
+	_debug = false;
+	execute_sql_statement("SELECT * FROM users WHERE user_id > 50;");
+
+
+
+	return 0;
+
 	char				input[4096];
 	auto sql_buffer = stream_writer<query_arena>::begin();
 
