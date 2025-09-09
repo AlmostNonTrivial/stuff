@@ -8,6 +8,7 @@
 #include "pager.hpp"
 #include <cstring>
 #include <cstdint>
+#include <iterator>
 #include <string_view>
 #include <typeinfo>
 #include <type_traits>
@@ -767,24 +768,46 @@ round_up_power_of_2(T n)
 template <typename Tag = global_arena> struct stream_writer
 {
 	uint8_t *start;
+	uint8_t *write_ptr; // Add this to track write position
 
 	static stream_writer
 	begin()
-	{
-		if (!arena<Tag>::base)
-		{
-			arena<Tag>::init();
-		}
-		return {arena<Tag>::current};
-	}
+    {
+        if (!arena<Tag>::base)
+        {
+            arena<Tag>::init();
+        }
+        return {arena<Tag>::current, arena<Tag>::current};
+    }
 
 	void
 	write(const void *data, size_t size)
 	{
-		void *dest = arena<Tag>::alloc_internal(size);
-		memcpy(dest, data, size);
-	}
+		// Ensure we have committed memory for this write
+		if (write_ptr + size > arena<Tag>::base + arena<Tag>::committed_capacity)
+		{
+			size_t needed = (write_ptr - arena<Tag>::base) + size;
+			size_t new_committed = virtual_memory::round_to_pages(needed);
 
+			if (new_committed > arena<Tag>::reserved_capacity)
+			{
+				fprintf(stderr, "Arena exhausted\n");
+				exit(1);
+			}
+
+			size_t commit_size = new_committed - arena<Tag>::committed_capacity;
+			if (!virtual_memory::commit(arena<Tag>::base + arena<Tag>::committed_capacity, commit_size))
+			{
+				fprintf(stderr, "Failed to commit memory\n");
+				exit(1);
+			}
+			arena<Tag>::committed_capacity = new_committed;
+		}
+
+		// Write contiguously at write_ptr
+		memcpy(write_ptr, data, size);
+		write_ptr += size;
+	}
 	template <typename T>
 	void
 	write(const T &value)
@@ -808,6 +831,12 @@ template <typename Tag = global_arena> struct stream_writer
 	finish()
 	{
 		return std::string_view((char *)start, size());
+	}
+
+	void *
+	fin()
+	{
+		return start;
 	}
 
 	void

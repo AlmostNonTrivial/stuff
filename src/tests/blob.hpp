@@ -4,6 +4,7 @@
 #include "../pager.hpp"
 #include "../arena.hpp"
 #include <cassert>
+#include <cstdint>
 #include <cstring>
 #include <iostream>
 
@@ -92,9 +93,11 @@ test_multi_page_blob()
 
 	// Read back full blob
 	size_t read_size;
-	void *result = blob_read_full(blob_id, &read_size);
+	uint8_t*result = blob_read_full(blob_id, &read_size);
+	// std::cout << result << "\n\n" << text_3pages;
+	result[read_size] = '\0';
 	assert(read_size == three_pages_size);
-	assert(memcmp(result, text_3pages, three_pages_size) == 0);
+	assert(memcmp(result, text_3pages, read_size) == 0);
 	printf("  Successfully read back %lu bytes across 3 pages\n", read_size);
 
 	// Test page chain navigation

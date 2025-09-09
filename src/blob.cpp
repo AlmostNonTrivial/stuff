@@ -40,6 +40,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <sys/_types/_ssize_t.h>
 
 #define BLOB_HEADER_SIZE 12
 #define BLOB_DATA_SIZE	 (PAGE_SIZE - BLOB_HEADER_SIZE)
@@ -242,20 +243,20 @@ blob_read_full(uint32_t first_page, size_t *size)
 	auto stream = stream_writer<query_arena>::begin();
 
 	uint32_t current = first_page;
+	*size = 0;
 	while (current)
 	{
 		blob_node *node = GET_BLOB_NODE(current);
 		if (!node)
 		{
             stream.abandon();
-            *size = 0;
             return nullptr;
 		}
 
+        *size +=node->size;
 		stream.write(node->data, node->size);
 		current = node->next;
 	}
 
-	*size = stream.size();
-	stream.finish().data();
+	return (uint8_t*)stream.start;
 }
