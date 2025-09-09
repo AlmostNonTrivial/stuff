@@ -223,7 +223,7 @@ test_pager_stress()
 	{
 		uint32_t operation;
 		// Force create if no pages exist to ensure write/delete can proceed
-		if (committed_pages.size() + transaction_pages.size == 0)
+		if (committed_pages.size() + transaction_pages.size()== 0)
 		{
 			operation = 0;
 		}
@@ -252,7 +252,7 @@ test_pager_stress()
 			std::cout << "Stats: free_pages=" << new_stats.free_pages << ", total_pages=" << new_stats.total_pages
 					  << "\n";
 		}
-		else if (operation == 1 && (committed_pages.size + transaction_pages.size > 0))
+		else if (operation == 1 && (committed_pages.size() + transaction_pages.size() > 0))
 		{ // Write to random page
 			if (!in_transaction)
 			{
@@ -262,10 +262,10 @@ test_pager_stress()
 				in_transaction = true;
 				std::cout << "Began transaction\n";
 			}
-			uint32_t   total_size = committed_pages.size + transaction_pages.size;
+			uint32_t   total_size = committed_pages.size() + transaction_pages.size();
 			uint32_t   index = std::rand() % total_size;
-			uint32_t   page_id = index < committed_pages.size ? committed_pages.data[index]
-															  : transaction_pages.data[index - committed_pages.size];
+			uint32_t   page_id = index < committed_pages.size() ? committed_pages[index]
+															  : transaction_pages[index - committed_pages.size()];
 			base_page *page = pager_get(page_id);
 			assert(page != nullptr && "Failed to get page for writing");
 			char random_char = chars[std::rand() % char_count];
@@ -279,7 +279,7 @@ test_pager_stress()
 			std::cout << "Stats: free_pages=" << new_stats.free_pages << ", total_pages=" << new_stats.total_pages
 					  << "\n";
 		}
-		else if (operation == 2 && (committed_pages.size + transaction_pages.size > 0))
+		else if (operation == 2 && (committed_pages.size() + transaction_pages.size() > 0))
 		{ // Delete random page
 			if (!in_transaction)
 			{
@@ -289,23 +289,23 @@ test_pager_stress()
 				in_transaction = true;
 				std::cout << "Began transaction\n";
 			}
-			uint32_t total_size = committed_pages.size + transaction_pages.size;
+			uint32_t total_size = committed_pages.size() + transaction_pages.size();
 			uint32_t index = std::rand() % total_size;
-			uint32_t page_id = index < committed_pages.size ? committed_pages.data[index]
-															: transaction_pages.data[index - committed_pages.size];
+			uint32_t page_id = index < committed_pages.size() ? committed_pages[index]
+															: transaction_pages[index - committed_pages.size()];
 			pager_delete(page_id);
 			made_changes = true;
 			std::cout << "Deleted page " << page_id << "\n";
-			if (index < committed_pages.size)
+			if (index < committed_pages.size())
 			{
-				committed_pages.data[index] = committed_pages.data[committed_pages.size - 1];
-				committed_pages.size--;
+				committed_pages[index] = committed_pages[committed_pages.size() - 1];
+				committed_pages.pop_back();
 			}
 			else
 			{
-				index -= committed_pages.size;
-				transaction_pages.data[index] = transaction_pages.data[transaction_pages.size - 1];
-				transaction_pages.size--;
+				index -= committed_pages.size();
+				transaction_pages[index] = transaction_pages[transaction_pages.size() - 1];
+				transaction_pages.pop_back();
 			}
 			pager_meta new_stats = pager_get_stats();
 			std::cout << "Stats: free_pages=" << new_stats.free_pages << ", total_pages=" << new_stats.total_pages
@@ -334,8 +334,8 @@ test_pager_stress()
 			in_transaction = false;
 			made_changes = false;
 			std::cout << "Committed transaction\n";
-			for (uint32_t j = 0; j < transaction_pages.size; ++j)
-			{committed_pages.push( transaction_pages.data[j]);
+			for (uint32_t j = 0; j < transaction_pages.size(); ++j)
+			{committed_pages.push( transaction_pages[j]);
 			}
 			transaction_pages.clear();
 			pager_meta new_stats = pager_get_stats();
@@ -355,9 +355,9 @@ test_pager_stress()
 		{
 			pager_commit();
 			std::cout << "Committed final transaction\n";
-			for (uint32_t j = 0; j < transaction_pages.size; ++j)
+			for (uint32_t j = 0; j < transaction_pages.size(); ++j)
 			{
-				committed_pages.push( transaction_pages.data[j]);
+				committed_pages.push( transaction_pages[j]);
 			}
 			transaction_pages.clear();
 		}

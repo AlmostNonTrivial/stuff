@@ -524,4 +524,5 @@ inline void test_types() {
     test_string_operations();
     test_type_names();
     test_hot_path_operations();
+    printf("types tests passed\n");
 }

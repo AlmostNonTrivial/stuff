@@ -1,43 +1,68 @@
+/*
+** parser.hpp - SQL Parser Interface
+**
+** OVERVIEW
+**
+** This parser implements a subset of SQL suitable for educational purposes.
+** It produces an Abstract Syntax Tree (AST) that can be analyzed and compiled
+** into VM bytecode.
+**
+** SUPPORTED SQL GRAMMAR
+**
+** Data Definition Language (DDL):
+**   CREATE TABLE table_name (column_name INT|TEXT, ...)
+**   DROP TABLE table_name
+**
+** Data Manipulation Language (DML):
+**   SELECT * FROM table_name [WHERE expr] [ORDER BY column [ASC|DESC]]
+**   SELECT col1, col2, ... FROM table_name [WHERE expr] [ORDER BY column [ASC|DESC]]
+**   INSERT INTO table_name VALUES (val1, val2, ...)
+**   INSERT INTO table_name (col1, col2, ...) VALUES (val1, val2, ...)
+**   UPDATE table_name SET col1 = val1, col2 = val2, ... [WHERE expr]
+**   DELETE FROM table_name [WHERE expr]
+**
+** Transaction Control:
+**   BEGIN
+**   COMMIT
+**   ROLLBACK
+**
+** Expression Grammar:
+**   Literals: 42, 'string'
+**   Columns: column_name
+**   Comparisons: =, !=, <>, <, <=, >, >=
+**   Logical: AND, OR, NOT
+**   Grouping: (expression)
+**
+** LIMITATIONS
+**
+** - Single table operations only (no JOINs)
+** - INSERT supports single row only
+** - Data types limited to INT (stored as u32) and TEXT (max 32 bytes)
+** - No aggregates (COUNT, SUM, etc.)
+** - No GROUP BY or HAVING
+** - No subqueries
+** - No NULL values in expressions (though NULL type exists internally)
+** - String literals must be under 32 bytes
+**
+** AST STRUCTURE
+**
+** The parser produces a two-level AST:
+**   1. Statement level - represents complete SQL statements
+**   2. Expression level - represents WHERE clauses and values
+**
+** Each AST node contains:
+**   - Parsed data from the SQL text
+**   - A 'sem' struct for semantic analysis results (filled by semantic.cpp)
+**
+** The AST uses arena allocation, so individual nodes don't need cleanup.
+*/
+
 #pragma once
 #include "common.hpp"
 #include "containers.hpp"
 #include "types.hpp"
 
-
-
-/*
-BEGIN
-COMMIT
-ROLLBACK
--- CREATE
-CREATE TABLE table_name (column_name INT|TEXT, ...)
--- DROP
-DROP TABLE table_name
--- INSERT (single row only)
-INSERT INTO table_name VALUES (value, ...)
-INSERT INTO table_name (column, ...) VALUES (value, ...)
--- DELETE
-DELETE FROM table_name
-DELETE FROM table_name WHERE expression
--- UPDATE (all matching rows)
-UPDATE table_name SET column = value, ...
-UPDATE table_name SET column = value, ... WHERE expression
--- SELECT
-SELECT * FROM table_name
-SELECT * FROM table_name WHERE expression
-SELECT * FROM table_name ORDER BY column
-SELECT * FROM table_name WHERE expression ORDER BY column
-SELECT column, ... FROM table_name
-SELECT column, ... FROM table_name WHERE expression
-SELECT column, ... FROM table_name ORDER BY column
-SELECT column, ... FROM table_name WHERE expression ORDER BY column
- */
-
-
-
 struct Relation;
-
-
 //=============================================================================
 // EXPRESSION AST NODES
 //=============================================================================

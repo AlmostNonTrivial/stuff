@@ -454,6 +454,9 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	V *
 	get(const K &key)
 	{
+		if (nullptr == entry(key)) {
+			return nullptr;
+		}
 		return &entry(key)->value;
 	}
 

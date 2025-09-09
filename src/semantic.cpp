@@ -543,10 +543,10 @@ semantic_resolve_statement(SemanticContext *ctx, Statement *stmt)
 	}
 }
 
-SemanticResult
+semantic_result
 semantic_analyze(array<Statement *, query_arena> &statements)
 {
-	SemanticResult result;
+	semantic_result result;
 	result.success = true;
 	result.error = {};
 	result.error_context = {};

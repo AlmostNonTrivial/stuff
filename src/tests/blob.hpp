@@ -52,10 +52,10 @@ test_single_page_blob()
 
 	// Read back full blob
 	uint64_t read_size;
-	void *result = blob_read_full(blob_id, &read_size);
+	auto result = blob_read_full(blob_id);
 	assert(result != nullptr);
 	assert(read_size == text_len);
-	assert(memcmp(result, small_text, text_len) == 0);
+	assert(memcmp(result.data(), small_text, text_len) == 0);
 	printf("  Successfully read back %lu bytes\n", read_size);
 
 	// Test page-by-page read
@@ -92,9 +92,9 @@ test_multi_page_blob()
 
 	// Read back full blob
 	uint64_t read_size;
-	void *result = blob_read_full(blob_id, &read_size);
+	auto result = blob_read_full(blob_id);
 	assert(read_size == three_pages_size);
-	assert(memcmp(result, text_3pages, three_pages_size) == 0);
+	assert(memcmp(result.data(), text_3pages, three_pages_size) == 0);
 	printf("  Successfully read back %lu bytes across 3 pages\n", read_size);
 
 	// Test page chain navigation
@@ -130,9 +130,9 @@ test_boundary_cases()
 	uint32_t	id1 = blob_create((void *)text_exact, page_capacity);
 	assert(blob_get_size(id1) == page_capacity);
 
-	uint64_t size1;
-	void *result1 = blob_read_full(id1, &size1);
-	assert(size1 == page_capacity);
+
+	auto result1 = blob_read_full(id1);
+	assert(result1.size() == page_capacity);
 	printf("  %zu bytes (exact page) - OK\n", page_capacity);
 	blob_delete(id1);
 
@@ -141,9 +141,9 @@ test_boundary_cases()
 	uint32_t	id2 = blob_create((void *)text_over, page_capacity + 1);
 	assert(blob_get_size(id2) == page_capacity + 1);
 
-	uint64_t size2;
-	void *result2 = blob_read_full(id2, &size2);
-	assert(size2 == page_capacity + 1);
+
+	auto result2 = blob_read_full(id2);
+	assert(result2.size() == page_capacity + 1);
 
 	// Verify it spans 2 pages
 	blob_page page1 = blob_read_page(id2);
@@ -190,7 +190,7 @@ test_large_blob()
 
 	// Verify content
 	uint64_t read_size;
-	void *result = blob_read_full(blob_id, &read_size);
+	auto result = blob_read_full(blob_id, &read_size);
 	assert(read_size == large_size);
 
 	// Spot check some bytes
@@ -300,7 +300,7 @@ test_binary_data()
 	assert(id != 0);
 
 	uint64_t read_size;
-	void *result = blob_read_full(id, &read_size);
+	auto result = blob_read_full(id, &read_size);
 	assert(read_size == 512);
 	assert(memcmp(result, binary_data, 512) == 0);
 

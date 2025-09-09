@@ -23,3 +23,5 @@
 
 IMPORTANT
 if no null terminator in 32, compare all 32 bytes with memcmp, otherwise up to the null terminator
+
+Need to remove Relation from sem, as a reshash could move pointer in multi-statement

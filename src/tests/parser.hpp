@@ -712,12 +712,13 @@ test_parser()
 	test_string_literal_size_limits();
 	test_integer_literal_limits();
 
-	parser_result select =
-		parse_sql("SELECT col1, col2, col3 FROM t WHERE a = 1 AND b != 2 OR c < 3 AND d <= 4 AND e > 5 AND f >= 6");
-	parser_result insert = parse_sql("INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')");
+	// parser_result select =
+	// 	parse_sql("SELECT col1, col2, col3 FROM t WHERE a = 1 AND b != 2 OR c < 3 AND d <= 4 AND e > 5 AND f >= 6");
+	// parser_result insert = parse_sql("INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')");
 
-	printf("\nSELECT AST:\n");
-	print_ast(select.statements[0]);
-	printf("\nINSERT AST:\n");
-	print_ast(insert.statements[0]);
+	// printf("\nSELECT AST:\n");
+	// print_ast(select.statements[0]);
+	// printf("\nINSERT AST:\n");
+	// print_ast(insert.statements[0]);
+	printf("parser tests passed\n");
 }

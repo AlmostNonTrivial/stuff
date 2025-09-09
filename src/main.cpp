@@ -204,7 +204,7 @@ execute_sql_statement(const char *sql, bool test_mode)
 	}
 
 	auto		   statements = result.statements;
-	SemanticResult res = semantic_analyze(statements);
+	semantic_result res = semantic_analyze(statements);
 	if (!res.success)
 	{
 		printf("%s\n", res.error);
@@ -502,19 +502,25 @@ run_repl()
 }
 
 #include "./tests/parser.hpp"
+// #include "./tests/blob.hpp"
+#include "./tests/pager.hpp"
+#include "./tests/ephemeral.hpp"
+#include "./tests/btree.hpp"
 // #include "containers.hpp"
 
 int
 run_tests()
 {
+
+    arena<global_arena>::init();
 	// test_arena();
 	test_parser();
-	// test_types();
-	// test_parser();
+	test_types();
+
 	// test_blob();
-	// test_pager();
-	// test_ephemeral();
-	// test_btree();
+	test_pager();
+	test_ephemeral();
+	test_btree();
 	return 0;
 }
 
