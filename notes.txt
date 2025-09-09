@@ -9,7 +9,7 @@
 
 - alloc strategy for vm
 - there might be problems with the catalog map keys
-- need to be explict with 31 available characters
+
 
 - should I always return a TypedValue?
 
@@ -18,3 +18,8 @@
 
 
 - move program builder methods internal
+
+
+
+IMPORTANT
+if no null terminator in 32, compare all 32 bytes with memcmp, otherwise up to the null terminator

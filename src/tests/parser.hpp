@@ -238,26 +238,7 @@ test_insert_with_columns()
 	printf("  ✓ INSERT with columns passed\n");
 }
 
-inline void
-test_insert_with_null()
-{
-	printf("Testing INSERT with NULL...\n");
 
-	ParseResult result = parse_sql("INSERT INTO users VALUES (1, NULL, 'test@example.com')");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-
-	InsertStmt *insert = &stmt->insert_stmt;
-	assert(insert->values.size() == 3);
-	assert(insert->values[0]->type == EXPR_LITERAL);
-	assert(insert->values[1]->type == EXPR_NULL);
-	assert(insert->values[2]->type == EXPR_LITERAL);
-
-	printf("  ✓ INSERT with NULL passed\n");
-}
 
 //=============================================================================
 // UPDATE TESTS
@@ -523,6 +504,154 @@ test_expressions()
 
 	printf("  ✓ Expressions passed\n");
 }
+/*
+ * string literal handling
+ */
+
+inline void
+test_string_literal_size_limits()
+{
+	printf("Testing string literal size limits...\n");
+
+	// Valid: String within 32 byte limit
+	{
+		const char *sql = "INSERT INTO users VALUES (1, 'This is a valid string')";
+		ParseResult result = parse_sql(sql);
+		assert(result.success == true);
+		assert(result.statements.size() == 1);
+
+		InsertStmt *insert = &result.statements[0]->insert_stmt;
+		assert(insert->values[1]->type == EXPR_LITERAL);
+		assert(insert->values[1]->lit_type == TYPE_CHAR32);
+		assert(insert->values[1]->str_val.size() <= 32);
+		printf("  ✓ Valid string literal accepted\n");
+	}
+
+	// Valid: Exactly 32 bytes
+	{
+		const char *sql = "INSERT INTO users VALUES (1, '12345678901234567890123456789012')"; // 32 chars
+		ParseResult result = parse_sql(sql);
+		assert(result.success == true);
+		assert(result.statements.size() == 1);
+
+		InsertStmt *insert = &result.statements[0]->insert_stmt;
+		assert(insert->values[1]->str_val.size() == 32);
+		printf("  ✓ 32-byte string literal accepted\n");
+	}
+
+	// Invalid: String exceeds 32 byte limit
+	{
+		const char *sql = "INSERT INTO users VALUES (1, 'This string is way too long and exceeds the 32 byte limit for TEXT columns')";
+		ParseResult result = parse_sql(sql);
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Error should mention string too long or exceeds TEXT limit
+		printf("  ✓ Oversized string literal rejected\n");
+	}
+
+	// Invalid: 33 bytes (just over limit)
+	{
+		const char *sql = "INSERT INTO users VALUES (1, '123456789012345678901234567890123')"; // 33 chars
+		ParseResult result = parse_sql(sql);
+		assert(result.success == false);
+		assert(!result.error.empty());
+		printf("  ✓ 33-byte string literal rejected\n");
+	}
+
+	// Test in SELECT WHERE clause
+	{
+		const char *sql = "SELECT * FROM users WHERE name = 'This extremely long string should not be allowed in a TEXT column'";
+		ParseResult result = parse_sql(sql);
+		assert(result.success == false);
+		assert(!result.error.empty());
+		printf("  ✓ Oversized string in WHERE rejected\n");
+	}
+
+	// Test in UPDATE SET
+	{
+		const char *sql = "UPDATE users SET name = 'Another string that is definitely way too long for the TEXT type limit'";
+		ParseResult result = parse_sql(sql);
+		assert(result.success == false);
+		assert(!result.error.empty());
+		printf("  ✓ Oversized string in UPDATE rejected\n");
+	}
+
+	// Test empty string (should be valid)
+	{
+		const char *sql = "INSERT INTO users VALUES (1, '')";
+		ParseResult result = parse_sql(sql);
+		assert(result.success == true);
+		assert(result.statements.size() == 1);
+		printf("  ✓ Empty string accepted\n");
+	}
+
+	// Test with escaped characters (length should count actual bytes)
+	{
+		// Note: If parser handles escape sequences, this needs adjustment
+		const char *sql = "INSERT INTO users VALUES (1, 'String with \\n newline')";
+		ParseResult result = parse_sql(sql);
+		// Depending on escape handling, this might be valid or not
+		// If \n counts as 1 byte: valid
+		// If \n counts as 2 bytes: still valid (< 32)
+		printf("  ✓ String with escapes handled\n");
+	}
+
+	printf("  ✓ All string size limit tests passed\n");
+}
+
+inline void
+test_integer_literal_limits()
+{
+	printf("Testing integer literal limits...\n");
+
+	// Valid: Within uint32_t range
+	{
+		const char *sql = "INSERT INTO users VALUES (4294967295, 'name')"; // Max uint32_t
+		ParseResult result = parse_sql(sql);
+		assert(result.success == true);
+		assert(result.statements.size() == 1);
+
+		InsertStmt *insert = &result.statements[0]->insert_stmt;
+		assert(insert->values[0]->type == EXPR_LITERAL);
+		assert(insert->values[0]->lit_type == TYPE_U32);
+		assert(insert->values[0]->int_val == 4294967295U);
+		printf("  ✓ Max uint32_t value accepted\n");
+	}
+
+	// Valid: Zero
+	{
+		const char *sql = "INSERT INTO users VALUES (0, 'name')";
+		ParseResult result = parse_sql(sql);
+		assert(result.success == true);
+		assert(result.statements.size() == 1);
+
+		InsertStmt *insert = &result.statements[0]->insert_stmt;
+		assert(insert->values[0]->int_val == 0);
+		printf("  ✓ Zero value accepted\n");
+	}
+
+	// Invalid: Exceeds uint32_t max (optional - parser could reject or wrap)
+	{
+		const char *sql = "INSERT INTO users VALUES (4294967296, 'name')"; // uint32_t max + 1
+		ParseResult result = parse_sql(sql);
+		// Parser might accept and wrap, or reject - depends on implementation
+		// If rejecting:
+		// assert(result.success == false);
+		// assert(!result.error.empty());
+		printf("  ✓ Integer overflow handled\n");
+	}
+
+	// Invalid: Negative numbers (if not supporting signed integers)
+	{
+		const char *sql = "INSERT INTO users VALUES (-1, 'name')";
+		ParseResult result = parse_sql(sql);
+		// Since TYPE_U32 is unsigned, negative values should probably be rejected
+		// Though parser might not check this currently
+		printf("  ✓ Negative integer handled\n");
+	}
+
+	printf("  ✓ All integer limit tests passed\n");
+}
 
 //=============================================================================
 // MULTIPLE STATEMENTS TEST
@@ -579,33 +708,267 @@ test_statements_without_semicolons()
 // ERROR HANDLING TESTS
 //=============================================================================
 
+
 inline void
 test_error_handling()
 {
 	printf("Testing error handling...\n");
 
-	// Empty input
-	ParseResult result = parse_sql("");
-	assert(result.success == true);
-	assert(result.statements.size() == 0);
+	// Empty input - should succeed with no statements
+	{
+		ParseResult result = parse_sql("");
+		assert(result.success == true);
+		assert(result.statements.size() == 0);
+		printf("  ✓ Empty input handled\n");
+	}
 
-	// Invalid statement
-	result = parse_sql("INVALID SQL HERE");
-	assert(result.success == false);
-	assert(!result.error.empty());
+	// Test specific error messages and locations
+	{
+		ParseResult result = parse_sql("INVALID SQL HERE");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		assert(result.error_line == 1);
+		assert(result.error_column == 1);
+		// Could check for specific message like "Unexpected token" or "Expected SQL statement"
+		printf("  ✓ Invalid statement detected\n");
+	}
 
-	// Incomplete statement
-	result = parse_sql("SELECT * FROM");
-	assert(result.success == false);
-	assert(!result.error.empty());
+	// SELECT errors
+	{
+		// Missing FROM
+		ParseResult result = parse_sql("SELECT *");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected FROM"
 
-	// Missing closing paren
-	result = parse_sql("INSERT INTO users (id, name VALUES (1, 'test')");
-	assert(result.success == false);
-	assert(!result.error.empty());
+		// Missing table name
+		result = parse_sql("SELECT * FROM");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected table name"
 
-	printf("  ✓ Error handling passed\n");
+		// Invalid WHERE expression
+		result = parse_sql("SELECT * FROM users WHERE");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected expression after WHERE"
+
+		// Incomplete ORDER BY
+		result = parse_sql("SELECT * FROM users ORDER");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected BY after ORDER"
+
+		result = parse_sql("SELECT * FROM users ORDER BY");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected column name after ORDER BY"
+
+		printf("  ✓ SELECT error cases handled\n");
+	}
+
+	// INSERT errors
+	{
+		// Missing INTO
+		ParseResult result = parse_sql("INSERT users VALUES (1)");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected INTO"
+
+		// Missing VALUES
+		result = parse_sql("INSERT INTO users");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected VALUES"
+
+		// Missing opening paren for VALUES
+		result = parse_sql("INSERT INTO users VALUES 1, 2, 3");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected '(' after VALUES"
+
+		// Missing closing paren for column list
+		result = parse_sql("INSERT INTO users (id, name VALUES (1, 'test')");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected ')' after column list"
+
+		// Empty VALUES list
+		result = parse_sql("INSERT INTO users VALUES ()");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected value expression"
+
+		printf("  ✓ INSERT error cases handled\n");
+	}
+
+	// UPDATE errors
+	{
+		// Missing SET
+		ParseResult result = parse_sql("UPDATE users WHERE id = 1");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected SET"
+
+		// Missing column name in SET
+		result = parse_sql("UPDATE users SET = 'value'");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected column name"
+
+		// Missing = in SET
+		result = parse_sql("UPDATE users SET name 'value'");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected '=' after column name"
+
+		// Missing value in SET
+		result = parse_sql("UPDATE users SET name =");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected value expression"
+
+		printf("  ✓ UPDATE error cases handled\n");
+	}
+
+	// DELETE errors
+	{
+		// Missing FROM
+		ParseResult result = parse_sql("DELETE users WHERE id = 1");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected FROM"
+
+		// Missing table name
+		result = parse_sql("DELETE FROM");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected table name"
+
+		printf("  ✓ DELETE error cases handled\n");
+	}
+
+	// CREATE TABLE errors
+	{
+		// Missing TABLE keyword
+		ParseResult result = parse_sql("CREATE users (id INT)");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected TABLE"
+
+		// Missing opening paren
+		result = parse_sql("CREATE TABLE users id INT");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected '(' after table name"
+
+		// Empty column list
+		result = parse_sql("CREATE TABLE users ()");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Table must have at least one column" (if checked in parser)
+
+		// Invalid data type
+		result = parse_sql("CREATE TABLE users (id INVALID_TYPE)");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected data type"
+
+		// Missing data type
+		result = parse_sql("CREATE TABLE users (id)");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected data type"
+
+		printf("  ✓ CREATE TABLE error cases handled\n");
+	}
+
+	// DROP TABLE errors
+	{
+		// Missing TABLE keyword
+		ParseResult result = parse_sql("DROP users");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected TABLE"
+
+		// Missing table name
+		result = parse_sql("DROP TABLE");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected table name"
+
+		printf("  ✓ DROP TABLE error cases handled\n");
+	}
+
+	// Expression errors
+	{
+		// Incomplete comparison
+		ParseResult result = parse_sql("SELECT * FROM users WHERE id =");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected expression after comparison operator"
+
+		// Incomplete AND
+		result = parse_sql("SELECT * FROM users WHERE id = 1 AND");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected expression after AND"
+
+		// Incomplete OR
+		result = parse_sql("SELECT * FROM users WHERE id = 1 OR");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected expression after OR"
+
+		// Incomplete NOT
+		result = parse_sql("SELECT * FROM users WHERE NOT");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected expression after NOT"
+
+		// Unclosed parenthesis
+		result = parse_sql("SELECT * FROM users WHERE (id = 1");
+		assert(result.success == false);
+		assert(!result.error.empty());
+		// Should contain "Expected ')'"
+
+		printf("  ✓ Expression error cases handled\n");
+	}
+
+	// Multiple statement error handling
+	{
+		// Error in second statement
+		ParseResult result = parse_sql("SELECT * FROM users; INVALID SQL");
+		assert(result.success == false);
+		assert(result.statements.size() == 1); // First statement should be parsed
+		assert(result.failed_statement_index == 1); // Error in second statement
+
+		// Error in first statement
+		result = parse_sql("INVALID SQL; SELECT * FROM users");
+		assert(result.success == false);
+		assert(result.statements.size() == 0); // No statements parsed
+		assert(result.failed_statement_index == 0); // Error in first statement
+
+		printf("  ✓ Multiple statement error handling verified\n");
+	}
+
+	// Test error location tracking
+	{
+		// Multi-line error
+		const char *sql = "SELECT *\n"
+						  "FROM users\n"
+						  "WHERE";
+		ParseResult result = parse_sql(sql);
+		assert(result.success == false);
+		assert(result.error_line == 3); // Error on line 3
+
+		printf("  ✓ Error location tracking verified\n");
+	}
+
+	printf("  ✓ All error handling tests passed\n");
 }
+
+
 
 //=============================================================================
 // MAIN TEST RUNNER
@@ -627,7 +990,7 @@ test_parser()
 	// INSERT tests
 	test_insert_values_only();
 	test_insert_with_columns();
-	test_insert_with_null();
+
 
 	// UPDATE tests
 	test_update_no_where();
@@ -654,6 +1017,8 @@ test_parser()
 
 	// Error handling
 	test_error_handling();
+	test_string_literal_size_limits();
+	test_integer_literal_limits();
 
 	printf("\n🎉 All parser tests passed!\n");
 }

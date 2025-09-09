@@ -501,14 +501,14 @@ run_repl()
 	return 0;
 }
 
-// #include "./tests/parser.hpp"
+#include "./tests/parser.hpp"
 // #include "containers.hpp"
 
 int
 run_tests()
 {
 	// test_arena();
-	// test_parser();
+	test_parser();
 	// test_types();
 	// test_parser();
 	// test_blob();
