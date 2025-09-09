@@ -37,6 +37,8 @@
 #include "common.hpp"
 #include "pager.hpp"
 #include "arena.hpp" #include "containers.hpp"
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 
 #define BLOB_HEADER_SIZE 12
@@ -234,8 +236,8 @@ blob_get_size(uint32_t first_page)
  * @param first_page First page index of blob chain
  * @return Buffer with complete blob data, or {nullptr, 0} on failure
  */
-string_view
-blob_read_full(uint32_t first_page)
+ uint8_t*
+blob_read_full(uint32_t first_page, size_t *size)
 {
 	auto stream = stream_writer<query_arena>::begin();
 
@@ -246,12 +248,14 @@ blob_read_full(uint32_t first_page)
 		if (!node)
 		{
             stream.abandon();
-			return string_view();
+            *size = 0;
+            return nullptr;
 		}
 
 		stream.write(node->data, node->size);
 		current = node->next;
 	}
 
-	return stream.finish();
+	*size = stream.size();
+	stream.finish().data();
 }

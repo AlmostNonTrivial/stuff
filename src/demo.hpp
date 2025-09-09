@@ -947,13 +947,14 @@ vmfunc_read_blob(TypedValue *result, TypedValue *args, uint32_t arg_count)
 
 	uint32_t page_idx = args[0].as_u32();
 
-	string_view data = blob_read_full(page_idx);
+	size_t size;
+	auto data = blob_read_full(page_idx, &size);
 
-	if (!data.size())
+	if (!size)
 		return false;
 
-	result->type = TYPE_VARCHAR(data.size());
-	result->data = (uint8_t *)data.data();
+	result->type = TYPE_VARCHAR(size);
+	result->data = (uint8_t *)data;
 	return true;
 }
 
