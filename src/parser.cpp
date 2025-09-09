@@ -1,3 +1,29 @@
+/*
+** parser.cpp - Recursive Descent SQL Parser
+**
+** OVERVIEW
+**
+** This parser uses recursive descent - a top-down parsing technique where each
+** grammar rule becomes a function. The parser "descends" through the grammar
+** by calling functions that match progressively smaller parts of the input.
+**
+** ARCHITECTURE
+**
+** Lexer: Converts character stream → tokens (SELECT → TOKEN_KEYWORD)
+** Parser: Converts tokens → Abstract Syntax Tree (AST)
+**
+** Example flow for "SELECT * FROM users":
+**   1. Lexer produces: [SELECT keyword] [* star] [FROM keyword] [users identifier]
+**   2. Parser recognizes SELECT pattern, calls parse_select()
+**   3. parse_select() consumes tokens and builds SelectStmt AST node
+**
+** ERROR RECOVERY
+**
+** On error, we return what we've successfully parsed so far. This allows
+** partial parsing for better error messages and potential future recovery
+** strategies.
+*/
+
 #include "parser.hpp"
 #include "arena.hpp"
 #include "containers.hpp"
@@ -66,17 +92,24 @@ format_error(Parser *parser, const char *fmt, ...)
 	return parser->error_msg;
 }
 
+/*
+** Case-insensitive string comparison for SQL keywords
+*/
 static bool
 str_eq_ci(const char *a, uint32_t a_len, const char *b)
 {
 	size_t b_len = strlen(b);
 	if (a_len != b_len)
+	{
 		return false;
+	}
 
 	for (uint32_t i = 0; i < a_len; i++)
 	{
 		if (toupper(a[i]) != toupper(b[i]))
+		{
 			return false;
+		}
 	}
 	return true;
 }
@@ -109,6 +142,9 @@ lexer_init(Lexer *lex, const char *input)
 	lex->current_token = {TOKEN_EOF, nullptr, 0, 0, 0};
 }
 
+/*
+** Skips whitespace, newlines, and SQL comments (-- to end of line)
+*/
 static void
 skip_whitespace(Lexer *lex)
 {
@@ -315,6 +351,11 @@ lexer_next_token(Lexer *lex)
 	return token;
 }
 
+/*
+** Preserves lexer state to support lookahead.
+** This enables the parser to make decisions without committing to consume tokens.
+** Critical for distinguishing statement types and handling optional clauses.
+*/
 Token
 lexer_peek_token(Lexer *lex)
 {
@@ -392,6 +433,26 @@ parse_data_type(Parser *parser)
 	return TYPE_NULL;
 }
 
+/*
+** EXPRESSION PARSING
+**
+** Expression parsing uses operator precedence climbing to handle precedence
+** without explicit grammar rules for each level.
+**
+** Precedence (lowest to highest):
+**   OR → AND → NOT → Comparisons (=, <, >, etc)
+**
+** Example: "a = 1 AND b = 2 OR c = 3" parses as:
+**   OR
+**   ├── AND
+**   │   ├── (a = 1)
+**   │   └── (b = 2)
+**   └── (c = 3)
+**
+** Each precedence level calls the next higher level for its operands,
+** naturally building the correct tree structure.
+*/
+
 Expr *
 parse_or_expr(Parser *parser);
 Expr *
@@ -402,12 +463,22 @@ Expr *
 parse_comparison_expr(Parser *parser);
 Expr *
 parse_primary_expr(Parser *parser);
+
 Expr *
 parse_expression(Parser *parser)
 {
 	return parse_or_expr(parser);
 }
 
+/*
+** OR has lowest precedence, builds tree right-to-left
+** Pattern: expr OR expr OR expr
+** Tree:    OR
+**         /  \
+**        OR   expr3
+**       /  \
+**    expr1  expr2
+*/
 Expr *
 parse_or_expr(Parser *parser)
 {
@@ -435,6 +506,15 @@ parse_or_expr(Parser *parser)
 	return left;
 }
 
+/*
+** AND binds tighter than OR
+** Pattern: expr AND expr AND expr
+** Tree:    AND
+**         /   \
+**       AND    expr3
+**      /   \
+**   expr1  expr2
+*/
 Expr *
 parse_and_expr(Parser *parser)
 {
@@ -462,6 +542,14 @@ parse_and_expr(Parser *parser)
 	return left;
 }
 
+/*
+** NOT is unary prefix operator
+** Pattern: NOT expr
+** Tree:    NOT
+**           |
+**         expr
+** Note: NOT NOT expr is valid and creates nested nodes
+*/
 Expr *
 parse_not_expr(Parser *parser)
 {
@@ -484,6 +572,14 @@ parse_not_expr(Parser *parser)
 	return parse_comparison_expr(parser);
 }
 
+/*
+** Comparison operators - single level, no chaining
+** Pattern: expr [= | != | < | <= | > | >=] expr
+** Tree:    OP
+**         /  \
+**      expr1  expr2
+** Note: Does NOT handle a = b = c (would need to chain)
+*/
 Expr *
 parse_comparison_expr(Parser *parser)
 {
@@ -543,6 +639,14 @@ parse_comparison_expr(Parser *parser)
 	return left;
 }
 
+/*
+** Primary expressions - the leaves of our expression tree
+** Matches:
+**   42           → LITERAL(42)
+**   'text'       → LITERAL('text')
+**   column_name  → COLUMN(column_name)
+**   (expr)       → expr (parentheses just for grouping)
+*/
 Expr *
 parse_primary_expr(Parser *parser)
 {
@@ -613,6 +717,15 @@ parse_primary_expr(Parser *parser)
 	return nullptr;
 }
 
+/*
+** Parses optional WHERE clause
+** Example: WHERE age > 18 AND city = 'NYC' OR status = 'active'
+** Tree:           OR
+**                /  \
+**             AND    (status = 'active')
+**            /   \
+**    (age > 18)  (city = 'NYC')
+*/
 Expr *
 parse_where_clause(Parser *parser)
 {
@@ -629,10 +742,6 @@ parse_where_clause(Parser *parser)
 
 	return expr;
 }
-
-//=============================================================================
-// SELECT STATEMENT PARSING
-//=============================================================================
 
 void
 parse_select(Parser *parser, SelectStmt *stmt)
@@ -717,12 +826,18 @@ void
 parse_insert(Parser *parser, InsertStmt *stmt)
 {
 
+	printf("DEBUG: lexer.input='%.20s'\n", parser->lexer.input);
+	printf("DEBUG: lexer.current='%.20s'\n", parser->lexer.current);
+
 	if (!consume_keyword(parser, "INSERT"))
 	{
 		format_error(parser, "Expected INSERT");
-		return;
+		// return;
 	}
 
+	printf("DEBUG AFTER: lexer.input='%.20s'\n", parser->lexer.input);
+	printf("DEBUG AFTER: lexer.current='%.20s'\n", parser->lexer.current);
+	// exit(0);
 	if (!consume_keyword(parser, "INTO"))
 	{
 		format_error(parser, "Expected INTO after INSERT");
@@ -1000,11 +1115,16 @@ parse_rollback(Parser *parser, RollbackStmt *stmt)
 	}
 }
 
+/*
+** Statement type dispatch uses lookahead to avoid backtracking.
+** We identify the statement type once, then commit to parsing it.
+** This is more efficient than try-parse-and-backtrack approaches.
+*/
 Statement *
 parse_statement(Parser *parser)
 {
 	Statement *stmt = (Statement *)arena<query_arena>::alloc(sizeof(Statement));
-
+	// memset(stmt, 0, sizeof(Statement));
 	Token token = lexer_peek_token(&parser->lexer);
 
 	if (peek_keyword(parser, "SELECT"))
@@ -1012,11 +1132,7 @@ parse_statement(Parser *parser)
 		stmt->type = STMT_SELECT;
 		parse_select(parser, &stmt->select_stmt);
 	}
-	else if (peek_keyword(parser, "INSERT"))
-	{
-		stmt->type = STMT_INSERT;
-		parse_insert(parser, &stmt->insert_stmt);
-	}
+
 	else if (peek_keyword(parser, "UPDATE"))
 	{
 		stmt->type = STMT_UPDATE;
@@ -1031,6 +1147,12 @@ parse_statement(Parser *parser)
 	{
 		stmt->type = STMT_CREATE_TABLE;
 		parse_create_table(parser, &stmt->create_table_stmt);
+	}
+
+	else if (peek_keyword(parser, "INSERT"))
+	{
+		stmt->type = STMT_INSERT;
+		parse_insert(parser, &stmt->insert_stmt);
 	}
 	else if (peek_keyword(parser, "DROP"))
 	{
@@ -1083,8 +1205,6 @@ parse_statements(Parser *parser)
 
 	while (true)
 	{
-
-		skip_whitespace(&parser->lexer);
 		if (lexer_peek_token(&parser->lexer).type == TOKEN_EOF)
 		{
 			break;
@@ -1093,7 +1213,6 @@ parse_statements(Parser *parser)
 		Statement *stmt = parse_statement(parser);
 		if (!stmt)
 		{
-
 			return statements;
 		}
 
@@ -1103,19 +1222,14 @@ parse_statements(Parser *parser)
 	return statements;
 }
 
-//=============================================================================
-// PUBLIC API
-//=============================================================================
-
 parser_result
 parse_sql(const char *sql)
 {
 	parser_result result;
 	Parser		  parser;
-
-	arena<query_arena>::init();
-
 	lexer_init(&parser.lexer, sql);
+
+
 
 	parser.error_msg = string_view{};
 	parser.error_line = -1;
@@ -1142,10 +1256,6 @@ parse_sql(const char *sql)
 
 	return result;
 }
-
-//=============================================================================
-// DEBUG UTILITIES
-//=============================================================================
 
 const char *
 token_type_to_string(TokenType type)

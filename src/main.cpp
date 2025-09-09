@@ -414,7 +414,7 @@ run_repl()
 		bootstrap_master(true);
 
 		create_all_tables_sql(true);
-		// load_all_data_sql();
+		load_all_data_sql();
 		printf("Database initialized with sample data.\n\n");
 	}
 	else
@@ -533,7 +533,7 @@ main(int argc, char **argv)
     arena<query_arena>::init();
 
 
-
+    // test_parser();
 	if (argc > 1 && strlen(argv[1]) >= 5)
 	{
 		if (strcmp("debug", argv[1]) == 0)

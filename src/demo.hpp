@@ -80,7 +80,7 @@ create_all_tables_sql(bool create)
 		return;
 	}
 
-	_debug = true;
+
 	const char *create_products_sql = "CREATE TABLE products ("
 									  "product_id INT, "
 									  "title TEXT, "
@@ -136,8 +136,9 @@ load_table_from_csv_sql(const char *csv_file, const char *table_name)
 		column_list.write(structure->columns[i].name);
 	}
 
-	auto list = column_list.finish();
 
+	char* list = (char*)column_list.finish().data();
+	std::cout << list << std::endl;
 	while (reader.next_row(fields))
 	{
 		if (fields.size() != structure->columns.size())
@@ -155,8 +156,10 @@ load_table_from_csv_sql(const char *csv_file, const char *table_name)
 
 		for (size_t i = 0; i < fields.size(); i++)
 		{
-			if (i > 0)
+			if (i > 0) {
 				sql.write(", ");
+			}
+
 
 			DataType col_type = structure->columns[i].type;
 
@@ -171,20 +174,22 @@ load_table_from_csv_sql(const char *csv_file, const char *table_name)
 				{
 					if (c == '\'')
 					{
-						sql.write("''");
+						sql.write("''", 1);
 					}
 					else
 					{
-						sql.write(&c);
+						sql.write(&c, 1);
 					}
 				}
-				sql.write("'");
+				sql.write("'", 1);
 			}
 		}
 
 		sql.write(");");
 
-		if (execute_sql_statement(sql.finish().begin()))
+		auto x = (char*)sql.finish().data();
+
+		if (execute_sql_statement(x))
 		{
 			count++;
 		}
@@ -208,7 +213,8 @@ load_all_data_sql()
 	load_table_from_csv_sql("../orders.csv", "orders");
 }
 
-#include "arena.hpp" #include "containers.hpp"
+#include "arena.hpp"
+#include "containers.hpp"
 #include "catalog.hpp"
 #include "compile.hpp"
 #include "vm.hpp"

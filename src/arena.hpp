@@ -767,11 +767,10 @@ round_up_power_of_2(T n)
 
 template <typename Tag = global_arena> struct stream_writer
 {
-	uint8_t *start;
-	uint8_t *write_ptr; // Add this to track write position
+    uint8_t *start;
+    uint8_t *write_ptr;
 
-	static stream_writer
-	begin()
+    static stream_writer begin()
     {
         if (!arena<Tag>::base)
         {
@@ -780,78 +779,67 @@ template <typename Tag = global_arena> struct stream_writer
         return {arena<Tag>::current, arena<Tag>::current};
     }
 
-	void
-	write(const void *data, size_t size)
-	{
-		// Ensure we have committed memory for this write
-		if (write_ptr + size > arena<Tag>::base + arena<Tag>::committed_capacity)
-		{
-			size_t needed = (write_ptr - arena<Tag>::base) + size;
-			size_t new_committed = virtual_memory::round_to_pages(needed);
+    void write(const void *data, size_t size)
+    {
+        // Ensure we have committed memory for this write
+        if (write_ptr + size > arena<Tag>::base + arena<Tag>::committed_capacity)
+        {
+            size_t needed = (write_ptr - arena<Tag>::base) + size;
+            size_t new_committed = virtual_memory::round_to_pages(needed);
+            if (new_committed > arena<Tag>::reserved_capacity)
+            {
+                fprintf(stderr, "Arena exhausted\n");
+                exit(1);
+            }
+            size_t commit_size = new_committed - arena<Tag>::committed_capacity;
+            if (!virtual_memory::commit(arena<Tag>::base + arena<Tag>::committed_capacity, commit_size))
+            {
+                fprintf(stderr, "Failed to commit memory\n");
+                exit(1);
+            }
+            arena<Tag>::committed_capacity = new_committed;
+        }
+        // Write contiguously at write_ptr
+        memcpy(write_ptr, data, size);
+        write_ptr += size;
+    }
 
-			if (new_committed > arena<Tag>::reserved_capacity)
-			{
-				fprintf(stderr, "Arena exhausted\n");
-				exit(1);
-			}
+    void write(std::string_view sv)
+    {
+        write(sv.data(), sv.size());
+    }
 
-			size_t commit_size = new_committed - arena<Tag>::committed_capacity;
-			if (!virtual_memory::commit(arena<Tag>::base + arena<Tag>::committed_capacity, commit_size))
-			{
-				fprintf(stderr, "Failed to commit memory\n");
-				exit(1);
-			}
-			arena<Tag>::committed_capacity = new_committed;
-		}
+    void write(const char *str)
+    {
+        write(str, strlen(str));
+    }
 
-		// Write contiguously at write_ptr
-		memcpy(write_ptr, data, size);
-		write_ptr += size;
-	}
-	template <typename T>
-	void
-	write(const T &value)
-	{
-		write(&value, sizeof(T));
-	}
+    size_t size() const
+    {
+        return write_ptr - start;  // Fixed: use write_ptr not arena<Tag>::current
+    }
 
-	void
-	write(std::string_view sv)
-	{
-		write(sv.data(), sv.size());
-	}
+    std::string_view finish()
+    {
+        // Null terminate
+        *write_ptr = '\0';
+        size_t len = write_ptr - start;
 
+        // Critical: advance arena past what we wrote (including null terminator)
+        arena<Tag>::current = write_ptr + 1;
 
-	void
-	write(const char *str)
-	{
-		write(str, strlen(str));
-	}
+        return std::string_view((char *)start, len);
+    }
 
+    void* fin()
+    {
+        return start;
+    }
 
-	size_t
-	size() const
-	{
-		return arena<Tag>::current - start;
-	}
-
-	std::string_view
-	finish()
-	{
-		return std::string_view((char *)start, size());
-	}
-
-	void *
-	fin()
-	{
-		return start;
-	}
-
-	void
-	abandon()
-	{
-		arena<Tag>::current = start;
-	}
+    void abandon()
+    {
+        arena<Tag>::current = start;
+    }
 };
 
 template <typename Tag = global_arena>
