@@ -1,40 +1,42 @@
 #pragma once
-#include "arena.hpp"
+#include "common.hpp"
 #include "containers.hpp"
 #include "types.hpp"
 
-using std::string_view;
 
-// Forward declarations
+
+/*
+BEGIN
+COMMIT
+ROLLBACK
+-- CREATE
+CREATE TABLE table_name (column_name INT|TEXT, ...)
+-- DROP
+DROP TABLE table_name
+-- INSERT (single row only)
+INSERT INTO table_name VALUES (value, ...)
+INSERT INTO table_name (column, ...) VALUES (value, ...)
+-- DELETE
+DELETE FROM table_name
+DELETE FROM table_name WHERE expression
+-- UPDATE (all matching rows)
+UPDATE table_name SET column = value, ...
+UPDATE table_name SET column = value, ... WHERE expression
+-- SELECT
+SELECT * FROM table_name
+SELECT * FROM table_name WHERE expression
+SELECT * FROM table_name ORDER BY column
+SELECT * FROM table_name WHERE expression ORDER BY column
+SELECT column, ... FROM table_name
+SELECT column, ... FROM table_name WHERE expression
+SELECT column, ... FROM table_name ORDER BY column
+SELECT column, ... FROM table_name WHERE expression ORDER BY column
+ */
+
+
+
 struct Relation;
 
-//=============================================================================
-// TOKEN TYPES
-//=============================================================================
-
-enum TokenType : uint8_t
-{
-	TOKEN_EOF = 0,
-	TOKEN_IDENTIFIER,
-	TOKEN_NUMBER,
-	TOKEN_STRING,
-	TOKEN_KEYWORD,
-	TOKEN_OPERATOR,
-	TOKEN_LPAREN,
-	TOKEN_RPAREN,
-	TOKEN_COMMA,
-	TOKEN_SEMICOLON,
-	TOKEN_STAR
-};
-
-struct Token
-{
-	TokenType	type;
-	const char *text; // Points into original input
-	uint32_t	length;
-	uint32_t	line;
-	uint32_t	column;
-};
 
 //=============================================================================
 // EXPRESSION AST NODES
@@ -181,7 +183,7 @@ struct InsertStmt
 	{
 		Relation					*table = nullptr;
 		array<int32_t, query_arena> column_indices; // Target column indices
-		bool						 is_resolved = false;
+
 	} sem;
 };
 
@@ -198,7 +200,7 @@ struct UpdateStmt
 	{
 		Relation					*table = nullptr;
 		array<int32_t, query_arena> column_indices;
-		bool						 is_resolved = false;
+
 	} sem;
 };
 
@@ -262,7 +264,6 @@ struct Statement
 	// Semantic resolution
 	struct
 	{
-		bool is_resolved = false;
 		bool has_errors = false;
 	} sem;
 
@@ -283,7 +284,7 @@ struct Statement
 // PARSER RESULT STRUCTURE
 //=============================================================================
 
-struct ParseResult
+struct parser_result
 {
 	bool							 success;
 	string_view						 error;					 // Error message (nullptr if success)
@@ -297,39 +298,16 @@ struct ParseResult
 // LEXER STATE
 //=============================================================================
 
-struct Lexer
-{
-	const char *input;
-	const char *current;
-	uint32_t	line;
-	uint32_t	column;
-	Token		current_token;
-};
 
-//=============================================================================
-// PARSER STATE
-//=============================================================================
-
-struct Parser
-{
-	Lexer		lexer; // Embed directly, not a pointer
-	string_view error_msg;
-	int			error_line;
-	int			error_column;
-};
 
 //=============================================================================
 // PUBLIC FUNCTIONS
 //=============================================================================
 
 // Main entry point - returns result by value
-ParseResult
+parser_result
 parse_sql(const char *sql);
 
-// Debug/utility
+
 void
 print_ast(Statement *stmt);
-const char *
-token_type_to_string(TokenType type);
-const char *
-stmt_type_to_string(StmtType type);

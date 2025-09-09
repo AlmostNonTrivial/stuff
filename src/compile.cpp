@@ -555,11 +555,6 @@ compile_insert(Statement *stmt)
 	ProgramBuilder prog;
 	InsertStmt	  *insert_stmt = &stmt->insert_stmt;
 
-	if (!insert_stmt->sem.is_resolved)
-	{
-		prog.halt(1);
-		return prog.instructions;
-	}
 
 	prog.begin_transaction();
 
@@ -621,11 +616,6 @@ compile_update(Statement *stmt)
 	ProgramBuilder prog;
 	UpdateStmt	  *update_stmt = &stmt->update_stmt;
 
-	if (!update_stmt->sem.is_resolved)
-	{
-		prog.halt(1);
-		return prog.instructions;
-	}
 
 	prog.begin_transaction();
 

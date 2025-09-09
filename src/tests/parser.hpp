@@ -1,4 +1,4 @@
-// test_parser.cpp - Simplified SQL Parser Test Suite
+
 #include "../parser.hpp"
 #include <cassert>
 #include <cstring>
@@ -6,15 +6,30 @@
 
 // Helper to compare string_view with C string
 inline static bool
-str_eq(const std::string_view &a, const char *b)
+str_eq(const string_view &a, const char *b)
 {
-
 	if (a.empty() && !b)
 		return true;
 	if (a.empty() || !b)
 		return false;
 	return a.size() == strlen(b) && memcmp(a.data(), b, a.size()) == 0;
 }
+
+#define ASSERT_PRINT(condition, stmt)                                                                                  \
+	do                                                                                                                 \
+	{                                                                                                                  \
+		if (!(condition))                                                                                              \
+		{                                                                                                              \
+			printf("\n❌ Assertion failed: %s\n", #condition);                                                         \
+			printf("   at %s:%d\n", __FILE__, __LINE__);                                                               \
+			if (stmt)                                                                                                  \
+			{                                                                                                          \
+				printf("\nAST:\n");                                                                                    \
+				print_ast(stmt);                                                                                       \
+			}                                                                                                          \
+			assert(condition);                                                                                         \
+		}                                                                                                              \
+	} while (0)
 
 //=============================================================================
 // SELECT TESTS
@@ -23,166 +38,113 @@ str_eq(const std::string_view &a, const char *b)
 inline void
 test_select_star()
 {
-	printf("Testing SELECT * FROM table...\n");
-
-	ParseResult result = parse_sql("SELECT * FROM users");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
+	parser_result result = parse_sql("SELECT * FROM users");
+	ASSERT_PRINT(result.success == true, nullptr);
+	ASSERT_PRINT(result.statements.size() == 1, nullptr);
 
 	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-	assert(stmt->type == STMT_SELECT);
+	ASSERT_PRINT(stmt->type == STMT_SELECT, stmt);
 
 	SelectStmt *select = &stmt->select_stmt;
-	assert(select->is_star == true);
-	assert(str_eq(select->table_name, "users"));
-	assert(select->where_clause == nullptr);
-	assert(select->order_by_column.empty());
-
-	printf("  ✓ SELECT * passed\n");
+	ASSERT_PRINT(select->is_star == true, stmt);
+	ASSERT_PRINT(str_eq(select->table_name, "users"), stmt);
+	ASSERT_PRINT(select->where_clause == nullptr, stmt);
+	ASSERT_PRINT(select->order_by_column.empty(), stmt);
 }
 
 inline void
 test_select_columns()
 {
-	printf("Testing SELECT columns FROM table...\n");
+	parser_result result = parse_sql("SELECT id, name, email FROM users");
+	ASSERT_PRINT(result.success == true, nullptr);
 
-	ParseResult result = parse_sql("SELECT id, name, email FROM users");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-
+	Statement  *stmt = result.statements[0];
 	SelectStmt *select = &stmt->select_stmt;
-	assert(select->is_star == false);
-	assert(select->columns.size() == 3);
-	assert(str_eq(select->columns[0], "id"));
-	assert(str_eq(select->columns[1], "name"));
-	assert(str_eq(select->columns[2], "email"));
-	assert(str_eq(select->table_name, "users"));
 
-	printf("  ✓ SELECT columns passed\n");
+	ASSERT_PRINT(select->is_star == false, stmt);
+	ASSERT_PRINT(select->columns.size() == 3, stmt);
+	ASSERT_PRINT(str_eq(select->columns[0], "id"), stmt);
+	ASSERT_PRINT(str_eq(select->columns[1], "name"), stmt);
+	ASSERT_PRINT(str_eq(select->columns[2], "email"), stmt);
+	ASSERT_PRINT(str_eq(select->table_name, "users"), stmt);
 }
 
 inline void
 test_select_where()
 {
-	printf("Testing SELECT with WHERE...\n");
+	parser_result result = parse_sql("SELECT * FROM users WHERE id = 42");
+	ASSERT_PRINT(result.success == true, nullptr);
 
-	ParseResult result = parse_sql("SELECT * FROM users WHERE id = 42");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-
+	Statement  *stmt = result.statements[0];
 	SelectStmt *select = &stmt->select_stmt;
-	assert(select->where_clause != nullptr);
-	assert(select->where_clause->type == EXPR_BINARY_OP);
-	assert(select->where_clause->op == OP_EQ);
-	assert(str_eq(select->where_clause->left->column_name, "id"));
-	assert(select->where_clause->right->int_val == 42);
 
-	printf("  ✓ SELECT with WHERE passed\n");
+	ASSERT_PRINT(select->where_clause->type == EXPR_BINARY_OP, stmt);
+	ASSERT_PRINT(select->where_clause->op == OP_EQ, stmt);
+	ASSERT_PRINT(str_eq(select->where_clause->left->column_name, "id"), stmt);
+	ASSERT_PRINT(select->where_clause->right->int_val == 42, stmt);
 }
 
 inline void
 test_select_where_complex()
 {
-	printf("Testing SELECT with complex WHERE...\n");
+	parser_result result = parse_sql("SELECT * FROM products WHERE price > 100 AND category = 'electronics'");
+	ASSERT_PRINT(result.success == true, nullptr);
 
-	ParseResult result = parse_sql("SELECT * FROM products WHERE price > 100 AND category = 'electronics'");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-
+	Statement  *stmt = result.statements[0];
 	SelectStmt *select = &stmt->select_stmt;
-	assert(select->where_clause != nullptr);
-	assert(select->where_clause->op == OP_AND);
 
-	// Left: price > 100
-	assert(select->where_clause->left->op == OP_GT);
-	assert(str_eq(select->where_clause->left->left->column_name, "price"));
-	assert(select->where_clause->left->right->int_val == 100);
-
-	// Right: category = 'electronics'
-	assert(select->where_clause->right->op == OP_EQ);
-	assert(str_eq(select->where_clause->right->left->column_name, "category"));
-	assert(str_eq(select->where_clause->right->right->str_val, "electronics"));
-
-	printf("  ✓ Complex WHERE passed\n");
+	ASSERT_PRINT(select->where_clause->op == OP_AND, stmt);
+	ASSERT_PRINT(select->where_clause->left->op == OP_GT, stmt);
+	ASSERT_PRINT(str_eq(select->where_clause->left->left->column_name, "price"), stmt);
+	ASSERT_PRINT(select->where_clause->left->right->int_val == 100, stmt);
+	ASSERT_PRINT(select->where_clause->right->op == OP_EQ, stmt);
+	ASSERT_PRINT(str_eq(select->where_clause->right->left->column_name, "category"), stmt);
+	ASSERT_PRINT(str_eq(select->where_clause->right->right->str_val, "electronics"), stmt);
 }
 
 inline void
 test_select_order_by()
 {
-	printf("Testing SELECT with ORDER BY...\n");
+	parser_result result = parse_sql("SELECT * FROM users ORDER BY name ASC");
+	ASSERT_PRINT(result.success == true, nullptr);
 
-	// Test ASC
-	ParseResult result = parse_sql("SELECT * FROM users ORDER BY name ASC");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-
+	Statement  *stmt = result.statements[0];
 	SelectStmt *select = &stmt->select_stmt;
-	assert(str_eq(select->order_by_column, "name"));
-	assert(select->order_desc == false);
 
-	// Test DESC
+	ASSERT_PRINT(str_eq(select->order_by_column, "name"), stmt);
+	ASSERT_PRINT(select->order_desc == false, stmt);
+
 	result = parse_sql("SELECT * FROM users ORDER BY created_at DESC");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
 	stmt = result.statements[0];
-	assert(stmt != nullptr);
-
 	select = &stmt->select_stmt;
-	assert(str_eq(select->order_by_column, "created_at"));
-	assert(select->order_desc == true);
 
-	// Test default (ASC)
+	ASSERT_PRINT(str_eq(select->order_by_column, "created_at"), stmt);
+	ASSERT_PRINT(select->order_desc == true, stmt);
+
 	result = parse_sql("SELECT * FROM users ORDER BY id");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
 	stmt = result.statements[0];
-	assert(stmt != nullptr);
-
 	select = &stmt->select_stmt;
-	assert(str_eq(select->order_by_column, "id"));
-	assert(select->order_desc == false);
 
-	printf("  ✓ ORDER BY passed\n");
+	ASSERT_PRINT(str_eq(select->order_by_column, "id"), stmt);
+	ASSERT_PRINT(select->order_desc == false, stmt);
 }
 
 inline void
 test_select_full()
 {
-	printf("Testing full SELECT statement...\n");
+	parser_result result = parse_sql("SELECT name, email FROM users WHERE age > 18 ORDER BY name DESC");
+	ASSERT_PRINT(result.success == true, nullptr);
 
-	ParseResult result = parse_sql("SELECT name, email FROM users WHERE age > 18 ORDER BY name DESC");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-
+	Statement  *stmt = result.statements[0];
 	SelectStmt *select = &stmt->select_stmt;
-	assert(select->is_star == false);
-	assert(select->columns.size() == 2);
-	assert(str_eq(select->columns[0], "name"));
-	assert(str_eq(select->columns[1], "email"));
-	assert(select->where_clause != nullptr);
-	assert(select->where_clause->op == OP_GT);
-	assert(str_eq(select->order_by_column, "name"));
-	assert(select->order_desc == true);
 
-	printf("  ✓ Full SELECT passed\n");
+	ASSERT_PRINT(select->is_star == false, stmt);
+	ASSERT_PRINT(select->columns.size() == 2, stmt);
+	ASSERT_PRINT(str_eq(select->columns[0], "name"), stmt);
+	ASSERT_PRINT(str_eq(select->columns[1], "email"), stmt);
+	ASSERT_PRINT(select->where_clause->op == OP_GT, stmt);
+	ASSERT_PRINT(str_eq(select->order_by_column, "name"), stmt);
+	ASSERT_PRINT(select->order_desc == true, stmt);
 }
 
 //=============================================================================
@@ -192,53 +154,38 @@ test_select_full()
 inline void
 test_insert_values_only()
 {
-	printf("Testing INSERT VALUES...\n");
+	parser_result result = parse_sql("INSERT INTO users VALUES (1, 'John', 'john@example.com')");
+	ASSERT_PRINT(result.success == true, nullptr);
 
-	ParseResult result = parse_sql("INSERT INTO users VALUES (1, 'John', 'john@example.com')");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-	assert(stmt->type == STMT_INSERT);
-
+	Statement  *stmt = result.statements[0];
 	InsertStmt *insert = &stmt->insert_stmt;
-	assert(str_eq(insert->table_name, "users"));
-	assert(insert->columns.size() == 0); // No column list
-	assert(insert->values.size() == 3);
-	assert(insert->values[0]->type == EXPR_LITERAL);
-	assert(insert->values[0]->int_val == 1);
-	assert(insert->values[1]->type == EXPR_LITERAL);
-	assert(str_eq(insert->values[1]->str_val, "John"));
-	assert(insert->values[2]->type == EXPR_LITERAL);
-	assert(str_eq(insert->values[2]->str_val, "john@example.com"));
 
-	printf("  ✓ INSERT VALUES passed\n");
+	ASSERT_PRINT(str_eq(insert->table_name, "users"), stmt);
+	ASSERT_PRINT(insert->columns.size() == 0, stmt);
+	ASSERT_PRINT(insert->values.size() == 3, stmt);
+	ASSERT_PRINT(insert->values[0]->type == EXPR_LITERAL, stmt);
+	ASSERT_PRINT(insert->values[0]->int_val == 1, stmt);
+	ASSERT_PRINT(insert->values[1]->type == EXPR_LITERAL, stmt);
+	ASSERT_PRINT(str_eq(insert->values[1]->str_val, "John"), stmt);
+	ASSERT_PRINT(insert->values[2]->type == EXPR_LITERAL, stmt);
+	ASSERT_PRINT(str_eq(insert->values[2]->str_val, "john@example.com"), stmt);
 }
 
 inline void
 test_insert_with_columns()
 {
-	printf("Testing INSERT with column list...\n");
+	parser_result result = parse_sql("INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')");
+	ASSERT_PRINT(result.success == true, nullptr);
 
-	ParseResult result = parse_sql("INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-
+	Statement  *stmt = result.statements[0];
 	InsertStmt *insert = &stmt->insert_stmt;
-	assert(insert->columns.size() == 3);
-	assert(str_eq(insert->columns[0], "id"));
-	assert(str_eq(insert->columns[1], "name"));
-	assert(str_eq(insert->columns[2], "email"));
-	assert(insert->values.size() == 3);
 
-	printf("  ✓ INSERT with columns passed\n");
+	ASSERT_PRINT(insert->columns.size() == 3, stmt);
+	ASSERT_PRINT(str_eq(insert->columns[0], "id"), stmt);
+	ASSERT_PRINT(str_eq(insert->columns[1], "name"), stmt);
+	ASSERT_PRINT(str_eq(insert->columns[2], "email"), stmt);
+	ASSERT_PRINT(insert->values.size() == 3, stmt);
 }
-
-
 
 //=============================================================================
 // UPDATE TESTS
@@ -247,72 +194,53 @@ test_insert_with_columns()
 inline void
 test_update_no_where()
 {
-	printf("Testing UPDATE without WHERE...\n");
+	parser_result result = parse_sql("UPDATE users SET status = 'active'");
+	ASSERT_PRINT(result.success == true, nullptr);
 
-	ParseResult result = parse_sql("UPDATE users SET status = 'active'");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-	assert(stmt->type == STMT_UPDATE);
-
+	Statement  *stmt = result.statements[0];
 	UpdateStmt *update = &stmt->update_stmt;
-	assert(str_eq(update->table_name, "users"));
-	assert(update->columns.size() == 1);
-	assert(str_eq(update->columns[0], "status"));
-	assert(update->values.size() == 1);
-	assert(str_eq(update->values[0]->str_val, "active"));
-	assert(update->where_clause == nullptr);
 
-	printf("  ✓ UPDATE without WHERE passed\n");
+	ASSERT_PRINT(str_eq(update->table_name, "users"), stmt);
+	ASSERT_PRINT(update->columns.size() == 1, stmt);
+	ASSERT_PRINT(str_eq(update->columns[0], "status"), stmt);
+	ASSERT_PRINT(update->values.size() == 1, stmt);
+	ASSERT_PRINT(str_eq(update->values[0]->str_val, "active"), stmt);
+	ASSERT_PRINT(update->where_clause == nullptr, stmt);
 }
 
 inline void
 test_update_with_where()
 {
-	printf("Testing UPDATE with WHERE...\n");
+	parser_result result = parse_sql("UPDATE users SET name = 'Jane' WHERE id = 1");
+	ASSERT_PRINT(result.success == true, nullptr);
 
-	ParseResult result = parse_sql("UPDATE users SET name = 'Jane' WHERE id = 1");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-
+	Statement  *stmt = result.statements[0];
 	UpdateStmt *update = &stmt->update_stmt;
-	assert(str_eq(update->table_name, "users"));
-	assert(update->columns.size() == 1);
-	assert(str_eq(update->columns[0], "name"));
-	assert(str_eq(update->values[0]->str_val, "Jane"));
-	assert(update->where_clause != nullptr);
-	assert(update->where_clause->op == OP_EQ);
 
-	printf("  ✓ UPDATE with WHERE passed\n");
+	ASSERT_PRINT(str_eq(update->table_name, "users"), stmt);
+	ASSERT_PRINT(update->columns.size() == 1, stmt);
+	ASSERT_PRINT(str_eq(update->columns[0], "name"), stmt);
+	ASSERT_PRINT(str_eq(update->values[0]->str_val, "Jane"), stmt);
+	ASSERT_PRINT(update->where_clause->op == OP_EQ, stmt);
 }
 
 inline void
 test_update_multiple_columns()
 {
-	printf("Testing UPDATE multiple columns...\n");
+	parser_result result =
+		parse_sql("UPDATE users SET name = 'Jane', age = 30, email = 'jane@example.com' WHERE id = 1");
+	ASSERT_PRINT(result.success == true, nullptr);
 
-	ParseResult result = parse_sql("UPDATE users SET name = 'Jane', age = 30, email = 'jane@example.com' WHERE id = 1");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-
+	Statement  *stmt = result.statements[0];
 	UpdateStmt *update = &stmt->update_stmt;
-	assert(update->columns.size() == 3);
-	assert(str_eq(update->columns[0], "name"));
-	assert(str_eq(update->columns[1], "age"));
-	assert(str_eq(update->columns[2], "email"));
-	assert(str_eq(update->values[0]->str_val, "Jane"));
-	assert(update->values[1]->int_val == 30);
-	assert(str_eq(update->values[2]->str_val, "jane@example.com"));
 
-	printf("  ✓ UPDATE multiple columns passed\n");
+	ASSERT_PRINT(update->columns.size() == 3, stmt);
+	ASSERT_PRINT(str_eq(update->columns[0], "name"), stmt);
+	ASSERT_PRINT(str_eq(update->columns[1], "age"), stmt);
+	ASSERT_PRINT(str_eq(update->columns[2], "email"), stmt);
+	ASSERT_PRINT(str_eq(update->values[0]->str_val, "Jane"), stmt);
+	ASSERT_PRINT(update->values[1]->int_val == 30, stmt);
+	ASSERT_PRINT(str_eq(update->values[2]->str_val, "jane@example.com"), stmt);
 }
 
 //=============================================================================
@@ -322,43 +250,29 @@ test_update_multiple_columns()
 inline void
 test_delete_all()
 {
-	printf("Testing DELETE without WHERE...\n");
+	parser_result result = parse_sql("DELETE FROM users");
+	ASSERT_PRINT(result.success == true, nullptr);
 
-	ParseResult result = parse_sql("DELETE FROM users");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-	assert(stmt->type == STMT_DELETE);
-
+	Statement  *stmt = result.statements[0];
 	DeleteStmt *del = &stmt->delete_stmt;
-	assert(str_eq(del->table_name, "users"));
-	assert(del->where_clause == nullptr);
 
-	printf("  ✓ DELETE all passed\n");
+	ASSERT_PRINT(str_eq(del->table_name, "users"), stmt);
+	ASSERT_PRINT(del->where_clause == nullptr, stmt);
 }
 
 inline void
 test_delete_where()
 {
-	printf("Testing DELETE with WHERE...\n");
+	parser_result result = parse_sql("DELETE FROM users WHERE id = 1");
+	ASSERT_PRINT(result.success == true, nullptr);
 
-	ParseResult result = parse_sql("DELETE FROM users WHERE id = 1");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-
+	Statement  *stmt = result.statements[0];
 	DeleteStmt *del = &stmt->delete_stmt;
-	assert(str_eq(del->table_name, "users"));
-	assert(del->where_clause != nullptr);
-	assert(del->where_clause->op == OP_EQ);
-	assert(str_eq(del->where_clause->left->column_name, "id"));
-	assert(del->where_clause->right->int_val == 1);
 
-	printf("  ✓ DELETE with WHERE passed\n");
+	ASSERT_PRINT(str_eq(del->table_name, "users"), stmt);
+	ASSERT_PRINT(del->where_clause->op == OP_EQ, stmt);
+	ASSERT_PRINT(str_eq(del->where_clause->left->column_name, "id"), stmt);
+	ASSERT_PRINT(del->where_clause->right->int_val == 1, stmt);
 }
 
 //=============================================================================
@@ -368,55 +282,40 @@ test_delete_where()
 inline void
 test_create_table()
 {
-	printf("Testing CREATE TABLE...\n");
+	parser_result result = parse_sql("CREATE TABLE users (id INT, name TEXT, age INT, email TEXT)");
+	ASSERT_PRINT(result.success == true, nullptr);
 
-	ParseResult result = parse_sql("CREATE TABLE users (id INT, name TEXT, age INT, email TEXT)");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-	assert(stmt->type == STMT_CREATE_TABLE);
-
+	Statement		*stmt = result.statements[0];
 	CreateTableStmt *create = &stmt->create_table_stmt;
-	assert(str_eq(create->table_name, "users"));
-	assert(create->columns.size() == 4);
 
-	// Check columns
-	assert(str_eq(create->columns[0].name, "id"));
-	assert(create->columns[0].type == TYPE_U32);
-	assert(create->columns[0].sem.is_primary_key == true); // First column is PK
+	ASSERT_PRINT(str_eq(create->table_name, "users"), stmt);
+	ASSERT_PRINT(create->columns.size() == 4, stmt);
 
-	assert(str_eq(create->columns[1].name, "name"));
-	assert(create->columns[1].type == TYPE_CHAR32);
-	assert(create->columns[1].sem.is_primary_key == false);
+	ASSERT_PRINT(str_eq(create->columns[0].name, "id"), stmt);
+	ASSERT_PRINT(create->columns[0].type == TYPE_U32, stmt);
+	ASSERT_PRINT(create->columns[0].sem.is_primary_key == true, stmt);
 
-	assert(str_eq(create->columns[2].name, "age"));
-	assert(create->columns[2].type == TYPE_U32);
+	ASSERT_PRINT(str_eq(create->columns[1].name, "name"), stmt);
+	ASSERT_PRINT(create->columns[1].type == TYPE_CHAR32, stmt);
+	ASSERT_PRINT(create->columns[1].sem.is_primary_key == false, stmt);
 
-	assert(str_eq(create->columns[3].name, "email"));
-	assert(create->columns[3].type == TYPE_CHAR32);
+	ASSERT_PRINT(str_eq(create->columns[2].name, "age"), stmt);
+	ASSERT_PRINT(create->columns[2].type == TYPE_U32, stmt);
 
-	printf("  ✓ CREATE TABLE passed\n");
+	ASSERT_PRINT(str_eq(create->columns[3].name, "email"), stmt);
+	ASSERT_PRINT(create->columns[3].type == TYPE_CHAR32, stmt);
 }
 
 inline void
 test_drop_table()
 {
-	printf("Testing DROP TABLE...\n");
+	parser_result result = parse_sql("DROP TABLE users");
+	ASSERT_PRINT(result.success == true, nullptr);
 
-	ParseResult result = parse_sql("DROP TABLE users");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-	assert(stmt->type == STMT_DROP_TABLE);
-
+	Statement	  *stmt = result.statements[0];
 	DropTableStmt *drop = &stmt->drop_table_stmt;
-	assert(str_eq(drop->table_name, "users"));
 
-	printf("  ✓ DROP TABLE passed\n");
+	ASSERT_PRINT(str_eq(drop->table_name, "users"), stmt);
 }
 
 //=============================================================================
@@ -426,33 +325,17 @@ test_drop_table()
 inline void
 test_transactions()
 {
-	printf("Testing transaction statements...\n");
+	parser_result result = parse_sql("BEGIN");
+	ASSERT_PRINT(result.success == true, nullptr);
+	ASSERT_PRINT(result.statements[0]->type == STMT_BEGIN, result.statements[0]);
 
-	// BEGIN
-	ParseResult result = parse_sql("BEGIN");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-	assert(stmt->type == STMT_BEGIN);
-
-	// COMMIT
 	result = parse_sql("COMMIT");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-	stmt = result.statements[0];
-	assert(stmt != nullptr);
-	assert(stmt->type == STMT_COMMIT);
+	ASSERT_PRINT(result.success == true, nullptr);
+	ASSERT_PRINT(result.statements[0]->type == STMT_COMMIT, result.statements[0]);
 
-	// ROLLBACK
 	result = parse_sql("ROLLBACK");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-	stmt = result.statements[0];
-	assert(stmt != nullptr);
-	assert(stmt->type == STMT_ROLLBACK);
-
-	printf("  ✓ Transaction statements passed\n");
+	ASSERT_PRINT(result.success == true, nullptr);
+	ASSERT_PRINT(result.statements[0]->type == STMT_ROLLBACK, result.statements[0]);
 }
 
 //=============================================================================
@@ -462,195 +345,119 @@ test_transactions()
 inline void
 test_expressions()
 {
-	printf("Testing expressions...\n");
+	parser_result result =
+		parse_sql("SELECT * FROM t WHERE a = 1 AND b != 2 AND c < 3 AND d <= 4 AND e > 5 AND f >= 6");
+	ASSERT_PRINT(result.success == true, nullptr);
 
-	// Test comparison operators
-	ParseResult result = parse_sql("SELECT * FROM t WHERE a = 1 AND b != 2 AND c < 3 AND d <= 4 AND e > 5 AND f >= 6");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-	Statement *stmt = result.statements[0];
-	assert(stmt != nullptr);
-	SelectStmt *select = &stmt->select_stmt;
-	assert(select->where_clause != nullptr);
-
-	// Test OR
 	result = parse_sql("SELECT * FROM t WHERE a = 1 OR b = 2");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
-	stmt = result.statements[0];
-	assert(stmt != nullptr);
-	select = &stmt->select_stmt;
-	assert(select->where_clause->op == OP_OR);
+	Statement *stmt = result.statements[0];
+	ASSERT_PRINT(stmt->select_stmt.where_clause->op == OP_OR, stmt);
 
-	// Test NOT
 	result = parse_sql("SELECT * FROM t WHERE NOT active = 1");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
 	stmt = result.statements[0];
-	assert(stmt != nullptr);
-	select = &stmt->select_stmt;
-	assert(select->where_clause->type == EXPR_UNARY_OP);
-	assert(select->where_clause->unary_op == OP_NOT);
+	ASSERT_PRINT(stmt->select_stmt.where_clause->type == EXPR_UNARY_OP, stmt);
+	ASSERT_PRINT(stmt->select_stmt.where_clause->unary_op == OP_NOT, stmt);
 
-	// Test parentheses
 	result = parse_sql("SELECT * FROM t WHERE (a = 1 OR b = 2) AND c = 3");
-	assert(result.success == true);
-	assert(result.statements.size() == 1);
 	stmt = result.statements[0];
-	assert(stmt != nullptr);
-	select = &stmt->select_stmt;
-	assert(select->where_clause->op == OP_AND);
-	assert(select->where_clause->left->op == OP_OR);
-
-	printf("  ✓ Expressions passed\n");
+	ASSERT_PRINT(stmt->select_stmt.where_clause->op == OP_AND, stmt);
+	ASSERT_PRINT(stmt->select_stmt.where_clause->left->op == OP_OR, stmt);
 }
-/*
- * string literal handling
- */
 
 inline void
 test_string_literal_size_limits()
 {
-	printf("Testing string literal size limits...\n");
-
-	// Valid: String within 32 byte limit
 	{
-		const char *sql = "INSERT INTO users VALUES (1, 'This is a valid string')";
-		ParseResult result = parse_sql(sql);
-		assert(result.success == true);
-		assert(result.statements.size() == 1);
-
+		const char	 *sql = "INSERT INTO users VALUES (1, 'This is a valid string')";
+		parser_result result = parse_sql(sql);
+		ASSERT_PRINT(result.success == true, nullptr);
 		InsertStmt *insert = &result.statements[0]->insert_stmt;
-		assert(insert->values[1]->type == EXPR_LITERAL);
-		assert(insert->values[1]->lit_type == TYPE_CHAR32);
-		assert(insert->values[1]->str_val.size() <= 32);
-		printf("  ✓ Valid string literal accepted\n");
+		ASSERT_PRINT(insert->values[1]->type == EXPR_LITERAL, result.statements[0]);
+		ASSERT_PRINT(insert->values[1]->lit_type == TYPE_CHAR32, result.statements[0]);
+		ASSERT_PRINT(insert->values[1]->str_val.size() <= 32, result.statements[0]);
 	}
 
-	// Valid: Exactly 32 bytes
 	{
-		const char *sql = "INSERT INTO users VALUES (1, '12345678901234567890123456789012')"; // 32 chars
-		ParseResult result = parse_sql(sql);
-		assert(result.success == true);
-		assert(result.statements.size() == 1);
-
+		const char	 *sql = "INSERT INTO users VALUES (1, '12345678901234567890123456789012')";
+		parser_result result = parse_sql(sql);
+		ASSERT_PRINT(result.success == true, nullptr);
 		InsertStmt *insert = &result.statements[0]->insert_stmt;
-		assert(insert->values[1]->str_val.size() == 32);
-		printf("  ✓ 32-byte string literal accepted\n");
+		ASSERT_PRINT(insert->values[1]->str_val.size() == 32, result.statements[0]);
 	}
 
-	// Invalid: String exceeds 32 byte limit
 	{
-		const char *sql = "INSERT INTO users VALUES (1, 'This string is way too long and exceeds the 32 byte limit for TEXT columns')";
-		ParseResult result = parse_sql(sql);
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Error should mention string too long or exceeds TEXT limit
-		printf("  ✓ Oversized string literal rejected\n");
+		const char *sql = "INSERT INTO users VALUES (1, 'This string is way too long and exceeds the 32 byte limit for "
+						  "TEXT columns')";
+		parser_result result = parse_sql(sql);
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 	}
 
-	// Invalid: 33 bytes (just over limit)
 	{
-		const char *sql = "INSERT INTO users VALUES (1, '123456789012345678901234567890123')"; // 33 chars
-		ParseResult result = parse_sql(sql);
-		assert(result.success == false);
-		assert(!result.error.empty());
-		printf("  ✓ 33-byte string literal rejected\n");
+		const char	 *sql = "INSERT INTO users VALUES (1, '123456789012345678901234567890123')";
+		parser_result result = parse_sql(sql);
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 	}
 
-	// Test in SELECT WHERE clause
 	{
-		const char *sql = "SELECT * FROM users WHERE name = 'This extremely long string should not be allowed in a TEXT column'";
-		ParseResult result = parse_sql(sql);
-		assert(result.success == false);
-		assert(!result.error.empty());
-		printf("  ✓ Oversized string in WHERE rejected\n");
+		const char *sql =
+			"SELECT * FROM users WHERE name = 'This extremely long string should not be allowed in a TEXT column'";
+		parser_result result = parse_sql(sql);
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 	}
 
-	// Test in UPDATE SET
 	{
-		const char *sql = "UPDATE users SET name = 'Another string that is definitely way too long for the TEXT type limit'";
-		ParseResult result = parse_sql(sql);
-		assert(result.success == false);
-		assert(!result.error.empty());
-		printf("  ✓ Oversized string in UPDATE rejected\n");
+		const char *sql =
+			"UPDATE users SET name = 'Another string that is definitely way too long for the TEXT type limit'";
+		parser_result result = parse_sql(sql);
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 	}
 
-	// Test empty string (should be valid)
 	{
-		const char *sql = "INSERT INTO users VALUES (1, '')";
-		ParseResult result = parse_sql(sql);
-		assert(result.success == true);
-		assert(result.statements.size() == 1);
-		printf("  ✓ Empty string accepted\n");
+		const char	 *sql = "INSERT INTO users VALUES (1, '')";
+		parser_result result = parse_sql(sql);
+		ASSERT_PRINT(result.success == true, nullptr);
 	}
 
-	// Test with escaped characters (length should count actual bytes)
 	{
-		// Note: If parser handles escape sequences, this needs adjustment
-		const char *sql = "INSERT INTO users VALUES (1, 'String with \\n newline')";
-		ParseResult result = parse_sql(sql);
-		// Depending on escape handling, this might be valid or not
-		// If \n counts as 1 byte: valid
-		// If \n counts as 2 bytes: still valid (< 32)
-		printf("  ✓ String with escapes handled\n");
+		const char	 *sql = "INSERT INTO users VALUES (1, 'String with \\n newline')";
+		parser_result result = parse_sql(sql);
 	}
-
-	printf("  ✓ All string size limit tests passed\n");
 }
 
 inline void
 test_integer_literal_limits()
 {
-	printf("Testing integer literal limits...\n");
-
-	// Valid: Within uint32_t range
 	{
-		const char *sql = "INSERT INTO users VALUES (4294967295, 'name')"; // Max uint32_t
-		ParseResult result = parse_sql(sql);
-		assert(result.success == true);
-		assert(result.statements.size() == 1);
-
+		const char	 *sql = "INSERT INTO users VALUES (4294967295, 'name')";
+		parser_result result = parse_sql(sql);
+		ASSERT_PRINT(result.success == true, nullptr);
 		InsertStmt *insert = &result.statements[0]->insert_stmt;
-		assert(insert->values[0]->type == EXPR_LITERAL);
-		assert(insert->values[0]->lit_type == TYPE_U32);
-		assert(insert->values[0]->int_val == 4294967295U);
-		printf("  ✓ Max uint32_t value accepted\n");
+		ASSERT_PRINT(insert->values[0]->type == EXPR_LITERAL, result.statements[0]);
+		ASSERT_PRINT(insert->values[0]->lit_type == TYPE_U32, result.statements[0]);
+		ASSERT_PRINT(insert->values[0]->int_val == 4294967295U, result.statements[0]);
 	}
 
-	// Valid: Zero
 	{
-		const char *sql = "INSERT INTO users VALUES (0, 'name')";
-		ParseResult result = parse_sql(sql);
-		assert(result.success == true);
-		assert(result.statements.size() == 1);
-
+		const char	 *sql = "INSERT INTO users VALUES (0, 'name')";
+		parser_result result = parse_sql(sql);
+		ASSERT_PRINT(result.success == true, nullptr);
 		InsertStmt *insert = &result.statements[0]->insert_stmt;
-		assert(insert->values[0]->int_val == 0);
-		printf("  ✓ Zero value accepted\n");
+		ASSERT_PRINT(insert->values[0]->int_val == 0, result.statements[0]);
 	}
 
-	// Invalid: Exceeds uint32_t max (optional - parser could reject or wrap)
 	{
-		const char *sql = "INSERT INTO users VALUES (4294967296, 'name')"; // uint32_t max + 1
-		ParseResult result = parse_sql(sql);
-		// Parser might accept and wrap, or reject - depends on implementation
-		// If rejecting:
-		// assert(result.success == false);
-		// assert(!result.error.empty());
-		printf("  ✓ Integer overflow handled\n");
+		const char	 *sql = "INSERT INTO users VALUES (4294967296, 'name')";
+		parser_result result = parse_sql(sql);
 	}
 
-	// Invalid: Negative numbers (if not supporting signed integers)
 	{
-		const char *sql = "INSERT INTO users VALUES (-1, 'name')";
-		ParseResult result = parse_sql(sql);
-		// Since TYPE_U32 is unsigned, negative values should probably be rejected
-		// Though parser might not check this currently
-		printf("  ✓ Negative integer handled\n");
+		const char	 *sql = "INSERT INTO users VALUES (-1, 'name')";
+		parser_result result = parse_sql(sql);
 	}
-
-	printf("  ✓ All integer limit tests passed\n");
 }
 
 //=============================================================================
@@ -660,315 +467,210 @@ test_integer_literal_limits()
 inline void
 test_multiple_statements()
 {
-	printf("Testing multiple statements...\n");
+	parser_result result = parse_sql("SELECT * FROM users; "
+									 "INSERT INTO users VALUES (1, 'John'); "
+									 "UPDATE users SET name = 'Jane' WHERE id = 1; "
+									 "DELETE FROM users WHERE id = 2; "
+									 "CREATE TABLE test (id INT, name TEXT); "
+									 "DROP TABLE old_table; "
+									 "BEGIN; "
+									 "COMMIT");
 
-	ParseResult result = parse_sql("SELECT * FROM users; "
-								   "INSERT INTO users VALUES (1, 'John'); "
-								   "UPDATE users SET name = 'Jane' WHERE id = 1; "
-								   "DELETE FROM users WHERE id = 2; "
-								   "CREATE TABLE test (id INT, name TEXT); "
-								   "DROP TABLE old_table; "
-								   "BEGIN; "
-								   "COMMIT");
+	ASSERT_PRINT(result.success == true, nullptr);
+	ASSERT_PRINT(result.statements.size() == 8, nullptr);
 
-	assert(result.success == true);
-	assert(result.statements.size() == 8);
-
-	assert(result.statements[0]->type == STMT_SELECT);
-	assert(result.statements[1]->type == STMT_INSERT);
-	assert(result.statements[2]->type == STMT_UPDATE);
-	assert(result.statements[3]->type == STMT_DELETE);
-	assert(result.statements[4]->type == STMT_CREATE_TABLE);
-	assert(result.statements[5]->type == STMT_DROP_TABLE);
-	assert(result.statements[6]->type == STMT_BEGIN);
-	assert(result.statements[7]->type == STMT_COMMIT);
-
-	printf("  ✓ Multiple statements passed\n");
+	ASSERT_PRINT(result.statements[0]->type == STMT_SELECT, result.statements[0]);
+	ASSERT_PRINT(result.statements[1]->type == STMT_INSERT, result.statements[1]);
+	ASSERT_PRINT(result.statements[2]->type == STMT_UPDATE, result.statements[2]);
+	ASSERT_PRINT(result.statements[3]->type == STMT_DELETE, result.statements[3]);
+	ASSERT_PRINT(result.statements[4]->type == STMT_CREATE_TABLE, result.statements[4]);
+	ASSERT_PRINT(result.statements[5]->type == STMT_DROP_TABLE, result.statements[5]);
+	ASSERT_PRINT(result.statements[6]->type == STMT_BEGIN, result.statements[6]);
+	ASSERT_PRINT(result.statements[7]->type == STMT_COMMIT, result.statements[7]);
 }
 
 inline void
 test_statements_without_semicolons()
 {
-	printf("Testing statements without semicolons...\n");
+	parser_result result = parse_sql("SELECT * FROM users "
+									 "INSERT INTO users VALUES (1, 'Bob') "
+									 "COMMIT");
 
-	ParseResult result = parse_sql("SELECT * FROM users "
-								   "INSERT INTO users VALUES (1, 'Bob') "
-								   "COMMIT");
-
-	assert(result.success == true);
-	assert(result.statements.size() == 3);
-	assert(result.statements[0]->type == STMT_SELECT);
-	assert(result.statements[1]->type == STMT_INSERT);
-	assert(result.statements[2]->type == STMT_COMMIT);
-
-	printf("  ✓ Statements without semicolons passed\n");
+	ASSERT_PRINT(result.success == true, nullptr);
+	ASSERT_PRINT(result.statements.size() == 3, nullptr);
+	ASSERT_PRINT(result.statements[0]->type == STMT_SELECT, result.statements[0]);
+	ASSERT_PRINT(result.statements[1]->type == STMT_INSERT, result.statements[1]);
+	ASSERT_PRINT(result.statements[2]->type == STMT_COMMIT, result.statements[2]);
 }
 
 //=============================================================================
 // ERROR HANDLING TESTS
 //=============================================================================
 
-
 inline void
 test_error_handling()
 {
-	printf("Testing error handling...\n");
-
-	// Empty input - should succeed with no statements
 	{
-		ParseResult result = parse_sql("");
-		assert(result.success == true);
-		assert(result.statements.size() == 0);
-		printf("  ✓ Empty input handled\n");
+		parser_result result = parse_sql("");
+		ASSERT_PRINT(result.success == true, nullptr);
+		ASSERT_PRINT(result.statements.size() == 0, nullptr);
 	}
 
-	// Test specific error messages and locations
 	{
-		ParseResult result = parse_sql("INVALID SQL HERE");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		assert(result.error_line == 1);
-		assert(result.error_column == 1);
-		// Could check for specific message like "Unexpected token" or "Expected SQL statement"
-		printf("  ✓ Invalid statement detected\n");
+		parser_result result = parse_sql("INVALID SQL HERE");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
+		ASSERT_PRINT(result.error_line == 1, nullptr);
+		ASSERT_PRINT(result.error_column == 1, nullptr);
 	}
 
-	// SELECT errors
 	{
-		// Missing FROM
-		ParseResult result = parse_sql("SELECT *");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected FROM"
+		parser_result result = parse_sql("SELECT *");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Missing table name
 		result = parse_sql("SELECT * FROM");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected table name"
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Invalid WHERE expression
 		result = parse_sql("SELECT * FROM users WHERE");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected expression after WHERE"
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Incomplete ORDER BY
 		result = parse_sql("SELECT * FROM users ORDER");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected BY after ORDER"
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
 		result = parse_sql("SELECT * FROM users ORDER BY");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected column name after ORDER BY"
-
-		printf("  ✓ SELECT error cases handled\n");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 	}
 
-	// INSERT errors
 	{
-		// Missing INTO
-		ParseResult result = parse_sql("INSERT users VALUES (1)");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected INTO"
+		parser_result result = parse_sql("INSERT users VALUES (1)");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Missing VALUES
 		result = parse_sql("INSERT INTO users");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected VALUES"
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Missing opening paren for VALUES
 		result = parse_sql("INSERT INTO users VALUES 1, 2, 3");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected '(' after VALUES"
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Missing closing paren for column list
 		result = parse_sql("INSERT INTO users (id, name VALUES (1, 'test')");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected ')' after column list"
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Empty VALUES list
 		result = parse_sql("INSERT INTO users VALUES ()");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected value expression"
-
-		printf("  ✓ INSERT error cases handled\n");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 	}
 
-	// UPDATE errors
 	{
-		// Missing SET
-		ParseResult result = parse_sql("UPDATE users WHERE id = 1");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected SET"
+		parser_result result = parse_sql("UPDATE users WHERE id = 1");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Missing column name in SET
 		result = parse_sql("UPDATE users SET = 'value'");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected column name"
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Missing = in SET
 		result = parse_sql("UPDATE users SET name 'value'");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected '=' after column name"
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Missing value in SET
 		result = parse_sql("UPDATE users SET name =");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected value expression"
-
-		printf("  ✓ UPDATE error cases handled\n");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 	}
 
-	// DELETE errors
 	{
-		// Missing FROM
-		ParseResult result = parse_sql("DELETE users WHERE id = 1");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected FROM"
+		parser_result result = parse_sql("DELETE users WHERE id = 1");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Missing table name
 		result = parse_sql("DELETE FROM");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected table name"
-
-		printf("  ✓ DELETE error cases handled\n");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 	}
 
-	// CREATE TABLE errors
 	{
-		// Missing TABLE keyword
-		ParseResult result = parse_sql("CREATE users (id INT)");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected TABLE"
+		parser_result result = parse_sql("CREATE users (id INT)");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Missing opening paren
 		result = parse_sql("CREATE TABLE users id INT");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected '(' after table name"
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Empty column list
 		result = parse_sql("CREATE TABLE users ()");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Table must have at least one column" (if checked in parser)
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Invalid data type
 		result = parse_sql("CREATE TABLE users (id INVALID_TYPE)");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected data type"
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Missing data type
 		result = parse_sql("CREATE TABLE users (id)");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected data type"
-
-		printf("  ✓ CREATE TABLE error cases handled\n");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 	}
 
-	// DROP TABLE errors
 	{
-		// Missing TABLE keyword
-		ParseResult result = parse_sql("DROP users");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected TABLE"
+		parser_result result = parse_sql("DROP users");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Missing table name
 		result = parse_sql("DROP TABLE");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected table name"
-
-		printf("  ✓ DROP TABLE error cases handled\n");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 	}
 
-	// Expression errors
 	{
-		// Incomplete comparison
-		ParseResult result = parse_sql("SELECT * FROM users WHERE id =");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected expression after comparison operator"
+		parser_result result = parse_sql("SELECT * FROM users WHERE id =");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Incomplete AND
 		result = parse_sql("SELECT * FROM users WHERE id = 1 AND");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected expression after AND"
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Incomplete OR
 		result = parse_sql("SELECT * FROM users WHERE id = 1 OR");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected expression after OR"
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Incomplete NOT
 		result = parse_sql("SELECT * FROM users WHERE NOT");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected expression after NOT"
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 
-		// Unclosed parenthesis
 		result = parse_sql("SELECT * FROM users WHERE (id = 1");
-		assert(result.success == false);
-		assert(!result.error.empty());
-		// Should contain "Expected ')'"
-
-		printf("  ✓ Expression error cases handled\n");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(!result.error.empty(), nullptr);
 	}
 
-	// Multiple statement error handling
 	{
-		// Error in second statement
-		ParseResult result = parse_sql("SELECT * FROM users; INVALID SQL");
-		assert(result.success == false);
-		assert(result.statements.size() == 1); // First statement should be parsed
-		assert(result.failed_statement_index == 1); // Error in second statement
+		parser_result result = parse_sql("SELECT * FROM users; INVALID SQL");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(result.statements.size() == 1, nullptr);
+		ASSERT_PRINT(result.failed_statement_index == 1, nullptr);
 
-		// Error in first statement
 		result = parse_sql("INVALID SQL; SELECT * FROM users");
-		assert(result.success == false);
-		assert(result.statements.size() == 0); // No statements parsed
-		assert(result.failed_statement_index == 0); // Error in first statement
-
-		printf("  ✓ Multiple statement error handling verified\n");
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(result.statements.size() == 0, nullptr);
+		ASSERT_PRINT(result.failed_statement_index == 0, nullptr);
 	}
 
-	// Test error location tracking
 	{
-		// Multi-line error
-		const char *sql = "SELECT *\n"
-						  "FROM users\n"
-						  "WHERE";
-		ParseResult result = parse_sql(sql);
-		assert(result.success == false);
-		assert(result.error_line == 3); // Error on line 3
-
-		printf("  ✓ Error location tracking verified\n");
+		const char	 *sql = "SELECT *\n"
+							"FROM users\n"
+							"WHERE";
+		parser_result result = parse_sql(sql);
+		ASSERT_PRINT(result.success == false, nullptr);
+		ASSERT_PRINT(result.error_line == 3, nullptr);
 	}
-
-	printf("  ✓ All error handling tests passed\n");
 }
-
-
 
 //=============================================================================
 // MAIN TEST RUNNER
@@ -979,7 +681,6 @@ test_parser()
 {
 	arena<query_arena>::init();
 
-	// SELECT tests
 	test_select_star();
 	test_select_columns();
 	test_select_where();
@@ -987,38 +688,36 @@ test_parser()
 	test_select_order_by();
 	test_select_full();
 
-	// INSERT tests
 	test_insert_values_only();
 	test_insert_with_columns();
 
-
-	// UPDATE tests
 	test_update_no_where();
 	test_update_with_where();
 	test_update_multiple_columns();
 
-	// DELETE tests
 	test_delete_all();
 	test_delete_where();
 
-	// DDL tests
 	test_create_table();
 	test_drop_table();
 
-	// Transaction tests
 	test_transactions();
 
-	// Expression tests
 	test_expressions();
 
-	// Multiple statements
 	test_multiple_statements();
 	test_statements_without_semicolons();
 
-	// Error handling
 	test_error_handling();
 	test_string_literal_size_limits();
 	test_integer_literal_limits();
 
-	printf("\n🎉 All parser tests passed!\n");
+	parser_result select =
+		parse_sql("SELECT col1, col2, col3 FROM t WHERE a = 1 AND b != 2 OR c < 3 AND d <= 4 AND e > 5 AND f >= 6");
+	parser_result insert = parse_sql("INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')");
+
+	printf("\nSELECT AST:\n");
+	print_ast(select.statements[0]);
+	printf("\nINSERT AST:\n");
+	print_ast(insert.statements[0]);
 }

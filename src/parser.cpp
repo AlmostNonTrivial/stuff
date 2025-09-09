@@ -10,6 +10,56 @@
 #include <cstdio>
 #include <cstdarg>
 
+
+
+enum TokenType : uint8_t
+{
+	TOKEN_EOF = 0,
+	TOKEN_IDENTIFIER,
+	TOKEN_NUMBER,
+	TOKEN_STRING,
+	TOKEN_KEYWORD,
+	TOKEN_OPERATOR,
+	TOKEN_LPAREN,
+	TOKEN_RPAREN,
+	TOKEN_COMMA,
+	TOKEN_SEMICOLON,
+	TOKEN_STAR
+};
+
+struct Token
+{
+	TokenType	type;
+	const char *text; // Points into original input
+	uint32_t	length;
+	uint32_t	line;
+	uint32_t	column;
+};
+
+
+
+struct Lexer
+{
+	const char *input;
+	const char *current;
+	uint32_t	line;
+	uint32_t	column;
+	Token		current_token;
+};
+
+//=============================================================================
+// PARSER STATE
+//=============================================================================
+
+struct Parser
+{
+	Lexer		lexer; // Embed directly, not a pointer
+	string_view error_msg;
+	int			error_line;
+	int			error_column;
+};
+
+
 //=============================================================================
 // ERROR MESSAGE FORMATTING
 //=============================================================================
@@ -1157,10 +1207,10 @@ parse_statements(Parser *parser)
 // PUBLIC API
 //=============================================================================
 
-ParseResult
+parser_result
 parse_sql(const char *sql)
 {
-	ParseResult result;
+	parser_result result;
 	Parser		parser;
 
 	arena<query_arena>::init();

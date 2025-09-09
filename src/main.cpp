@@ -196,7 +196,7 @@ bool
 execute_sql_statement(const char *sql, bool test_mode)
 {
 	bool		in_transaction = false;
-	ParseResult result = parse_sql(sql);
+	parser_result result = parse_sql(sql);
 	if (!result.success)
 	{
 		printf("%s\n", result.error);
