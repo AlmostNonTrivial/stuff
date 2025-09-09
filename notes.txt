@@ -18,10 +18,24 @@
 
 IMPORTANT
 if no null terminator in 32, compare all 32 bytes with memcmp, otherwise up to the null terminator
-
 Need to remove Relation from sem, as a reshash could move pointer in multi-statement
-
 Deleting non-intered string from master,
+
+
+TODO
+assert print and finish pager tests
+assert print and clean up btree tests
+
+convert types to use union
+
+Get good error messages
+
+More rows?
+
+print arena stats make sure their okay
+
+
+
 
 
 TESTS:

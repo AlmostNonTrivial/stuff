@@ -66,7 +66,6 @@ void
 print_select_headers(SelectStmt *select_stmt)
 {
 
-
 	Relation *table = select_stmt->sem.table;
 	if (!table)
 		return;
@@ -122,7 +121,6 @@ void
 setup_result_formatting(SelectStmt *select_stmt)
 {
 	result_column_widths.clear();
-
 
 	Relation *table = select_stmt->sem.table;
 	if (!table)
@@ -195,7 +193,7 @@ formatted_result_callback(TypedValue *result, size_t count)
 bool
 execute_sql_statement(const char *sql, bool test_mode)
 {
-	bool		in_transaction = false;
+	bool		  in_transaction = false;
 	parser_result result = parse_sql(sql);
 	if (!result.success)
 	{
@@ -203,7 +201,7 @@ execute_sql_statement(const char *sql, bool test_mode)
 		return false;
 	}
 
-	auto		   statements = result.statements;
+	auto			statements = result.statements;
 	semantic_result res = semantic_analyze(statements);
 	if (!res.success)
 	{
@@ -230,7 +228,7 @@ execute_sql_statement(const char *sql, bool test_mode)
 		}
 
 		array<VMInstruction, query_arena> program = compile_program(stmt, !in_transaction);
-		if (program.size( )== 0)
+		if (program.size() == 0)
 		{
 			printf("❌ Compilation failed: %s\n", sql);
 			return false;
@@ -290,17 +288,17 @@ run_meta_command(const char *cmd)
 		printf("\nTables:\n");
 		printf("-------\n");
 
-
-		for(auto [name, relation] : catalog ) {
-    printf("  %.*s (%d columns)\n", (int)name.size(), name.data(), relation.columns.size());
-}
+		for (auto [name, relation] : catalog)
+		{
+			printf("  %.*s (%d columns)\n", (int)name.size(), name.data(), relation.columns.size());
+		}
 
 		printf("\n");
 	}
 	else if (strncmp(cmd, ".schema ", 8) == 0)
 	{
 		const char *table_name = cmd + 8;
-		Relation  *s = catalog.get(table_name);
+		Relation   *s = catalog.get(table_name);
 		if (s)
 		{
 			printf("\nSchema for %s:\n", table_name);
@@ -406,6 +404,7 @@ run_repl()
 {
 	arena<query_arena>::init();
 
+
 	bool existed = pager_open("relational_test.db");
 
 	if (!existed)
@@ -422,20 +421,22 @@ run_repl()
 		catalog_reload();
 	}
 
-
-
 	execute_sql_statement("INSERT INTO users VALUES (111, 'markymarky', 'marko', 22, 'boomtown');");
+	execute_sql_statement("INSERT INTO users VALUES (111, 'markymarky', 'marko', 22, 'boomtown');");
+	execute_sql_statement("INSERT INTO users VALUES (112, 'aaaaaaaaaaaaaaaaaaaaaaasdasdsadasdasdsadasdasddasdsamarkymarky', 'marko', 22, 'boomtown');");
 	execute_sql_statement("DELETE FROM users WHERE username = 'lilah';");
-	_debug = true;
-	execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 99;");
-	_debug = false;
-	execute_sql_statement("SELECT * FROM users WHERE user_id > 50 AND NOT NOT user_id > 75;");
 
+
+	execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 99;");
+	execute_sql_statement("SELECT * FROM users WHERE user_id > 50 AND NOT NOT user_id > 75;");
+	execute_sql_statement("SELECT * FROM sqlite_master");
+	execute_sql_statement("DROP TABLE products;");
+	execute_sql_statement("SELECT * FROM sqlite_master");
 
 
 	return 0;
 
-	char				input[4096];
+	char input[4096];
 	auto sql_buffer = stream_writer<query_arena>::begin();
 
 	printf("SQL Engine v0.1\n");
@@ -475,7 +476,7 @@ run_repl()
 		// SQL - collect until semicolon
 		sql_buffer.write(input);
 
-		while (!strchr((char*)sql_buffer.start, ';'))
+		while (!strchr((char *)sql_buffer.start, ';'))
 		{
 			printf("   ...> ");
 			fflush(stdout);
@@ -499,7 +500,7 @@ run_repl()
 
 		// Execute the SQL
 		auto start = std::chrono::high_resolution_clock::now();
-		bool success = execute_sql_statement((char*)sql_buffer.start);
+		bool success = execute_sql_statement((char *)sql_buffer.start);
 		auto end = std::chrono::high_resolution_clock::now();
 
 		if (_debug && success)
@@ -526,7 +527,7 @@ int
 run_tests()
 {
 
-    arena<global_arena>::init();
+	arena<global_arena>::init();
 	// test_arena();
 	test_parser();
 	test_types();
@@ -541,12 +542,11 @@ run_tests()
 int
 main(int argc, char **argv)
 {
-    arena<global_arena>::init();
-    arena<catalog_arena>::init();
-    arena<query_arena>::init();
+	arena<global_arena>::init();
+	arena<catalog_arena>::init();
+	arena<query_arena>::init();
 
-
-    // test_parser();
+	// test_parser();
 	if (argc > 1 && strlen(argv[1]) >= 5)
 	{
 		if (strcmp("debug", argv[1]) == 0)

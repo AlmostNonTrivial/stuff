@@ -138,7 +138,6 @@ load_table_from_csv_sql(const char *csv_file, const char *table_name)
 
 
 	char* list = (char*)column_list.finish().data();
-	std::cout << list << std::endl;
 	while (reader.next_row(fields))
 	{
 		if (fields.size() != structure->columns.size())
