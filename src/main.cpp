@@ -420,23 +420,23 @@ run_repl()
 		catalog_reload();
 	}
 
-	execute_sql_statement("INSERT INTO users VALUES (111, 'markymarky', 'marko', 22, 'boomtown');");
-	execute_sql_statement("INSERT INTO users VALUES (112, 'markymarky', 'marko', 23, 'boomtown');");
-	execute_sql_statement(
-		"INSERT INTO users VALUES (112, 'aaaaaaaaaaaaaaaaaaaaaaasdasdsadasdasdsadasdasddasdsamarkymarky', 'marko', 22, "
-		"'boomtown');");
-	execute_sql_statement("DELETE FROM users WHERE username = 'lilah';");
+	// execute_sql_statement("INSERT INTO users VALUES (111, 'markymarky', 'marko', 22, 'boomtown');");
+	// execute_sql_statement("INSERT INTO users VALUES (112, 'markymarky', 'marko', 23, 'boomtown');");
+	// execute_sql_statement(
+	// 	"INSERT INTO users VALUES (112, 'aaaaaaaaaaaaaaaaaaaaaaasdasdsadasdasdsadasdasddasdsamarkymarky', 'marko', 22, "
+	// 	"'boomtown');");
+	// execute_sql_statement("DELETE FROM users WHERE username = 'lilah';");
 
-	execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 99;");
-	execute_sql_statement("SELECT * FROM users WHERE user_id > 50 AND NOT NOT user_id > 75;");
-	execute_sql_statement("SELECT * FROM sqlite_master");
-	execute_sql_statement("DROP TABLE products;");
-	execute_sql_statement("SELECT * FROM sqlite_master");
+	// execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 99;");
+	// execute_sql_statement("SELECT * FROM users WHERE user_id > 50 AND NOT NOT user_id > 75;");
+	// execute_sql_statement("SELECT * FROM sqlite_master");
+	// execute_sql_statement("DROP TABLE products;");
+	// execute_sql_statement("SELECT * FROM sqlite_master");
 
-	return 0;
+	// return 0;
 
 	char input[4096];
-	auto sql_buffer = stream_writer<query_arena>::begin();
+
 
 	printf("SQL Engine v0.1\n");
 	printf("Type .help for commands or start typing SQL\n\n");
@@ -451,6 +451,8 @@ run_repl()
 			printf("\n");
 			break;
 		}
+
+		auto sql_buffer = stream_writer<query_arena>::begin();
 
 		// Trim newline
 		size_t len = strlen(input);
@@ -499,7 +501,7 @@ run_repl()
 
 		// Execute the SQL
 		auto start = std::chrono::high_resolution_clock::now();
-		bool success = execute_sql_statement((char *)sql_buffer.start);
+		bool success = execute_sql_statement((char *)sql_buffer.finish().data());
 		auto end = std::chrono::high_resolution_clock::now();
 
 		if (_debug && success)
@@ -507,8 +509,6 @@ run_repl()
 			auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 			printf("Query executed in %ld ms\n", ms.count());
 		}
-
-		sql_buffer.abandon();
 	}
 
 	pager_close();
@@ -555,8 +555,8 @@ main(int argc, char **argv)
 	// }
 	// run_repl();
 	// test_pager();
-	test_btree();
-	// return run_repl();
+	// test_btree();
+	return run_repl();
 	// char s[32];
 	// memset(s, 0, 32);
 	// int i  =0;

@@ -3,7 +3,7 @@
 
 #define PAGE_INVALID	  0
 #define MAX_CACHE_ENTRIES 5000
-#define PAGE_SIZE		  512
+#define PAGE_SIZE		  1024
 
 /*
 ** BASE PAGE STRUCTURE

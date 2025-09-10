@@ -90,7 +90,7 @@ TupleFormat tuple_format_from_relation(Relation& schema) {
  * (persistent) to ensure they survive beyond the current query.
  */
 Relation create_relation(string_view name, array<Attribute, query_arena> columns) {
-    Relation rel;
+    Relation rel = {};
 
     // Cross-arena copy from query to catalog arena
     rel.columns.copy_from(columns);

@@ -34,8 +34,6 @@
 inline void
 test_btree_sequential_ops()
 {
-	std::cout << "\n=== Sequential Operations ===\n";
-
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
@@ -45,7 +43,6 @@ test_btree_sequential_ops()
 	const int COUNT = 5000;
 
 	// Sequential forward insertion
-	std::cout << "Forward sequential insert..." << std::flush;
 	for (int i = 0; i < COUNT; i++)
 	{
 		uint32_t key = i;
@@ -58,7 +55,6 @@ test_btree_sequential_ops()
 		bt_cursorinsert(&cursor, &key, (void *)&value);
 		bt_validate(&tree);
 	}
-	std::cout << " OK\n";
 
 	btree_print(&tree);
 
@@ -72,7 +68,6 @@ test_btree_sequential_ops()
 	}
 
 	// Sequential forward deletion
-	std::cout << "Forward sequential delete..." << std::flush;
 	for (int i = 0; i < COUNT / 2; i++)
 	{
 		uint32_t key = i;
@@ -80,7 +75,6 @@ test_btree_sequential_ops()
 		bt_cursordelete(&cursor);
 		bt_validate(&tree);
 	}
-	std::cout << " OK\n";
 
 	// Verify deleted keys don't exist
 	for (int i = 0; i < COUNT / 2; i++)
@@ -97,7 +91,6 @@ test_btree_sequential_ops()
 	}
 
 	// Backward sequential deletion
-	std::cout << "Backward sequential delete..." << std::flush;
 	for (int i = COUNT - 1; i >= COUNT / 2; i--)
 	{
 		uint32_t key = i;
@@ -105,7 +98,6 @@ test_btree_sequential_ops()
 		bt_cursordelete(&cursor);
 		bt_validate(&tree);
 	}
-	std::cout << " OK\n";
 
 	// Tree should be empty
 	assert(!bt_cursorfirst(&cursor));
@@ -118,8 +110,6 @@ test_btree_sequential_ops()
 inline void
 test_btree_random_ops()
 {
-	std::cout << "\n=== Random Operations ===\n";
-
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
@@ -140,13 +130,11 @@ test_btree_random_ops()
 	std::shuffle(data.begin(), data.end(), rng);
 
 	// Random insertions
-	std::cout << "Random insert..." << std::flush;
 	for (auto &[key, value] : data)
 	{
 		bt_cursorinsert(&cursor, &key, (void *)&value);
 		bt_validate(&tree);
 	}
-	std::cout << " OK (" << COUNT << " unique keys)\n";
 
 	// Verify all entries
 	for (auto &[key, value] : data)
@@ -167,7 +155,6 @@ test_btree_random_ops()
 	std::shuffle(keys_to_delete.begin(), keys_to_delete.end(), rng);
 	int delete_count = keys_to_delete.size() / 2;
 
-	std::cout << "Random delete..." << std::flush;
 	std::set<uint32_t> deleted_keys;
 	for (int i = 0; i < delete_count; i++)
 	{
@@ -177,7 +164,6 @@ test_btree_random_ops()
 		bt_validate(&tree);
 		deleted_keys.insert(key);
 	}
-	std::cout << " OK (deleted keys: " << delete_count << ")\n";
 
 	// Verify correct keys remain
 	for (auto &[key, value] : data)
@@ -197,7 +183,6 @@ test_btree_random_ops()
 	}
 
 	// Delete remaining keys
-	std::cout << "Delete remaining..." << std::flush;
 	for (int i = delete_count; i < keys_to_delete.size(); i++)
 	{
 		uint32_t key = keys_to_delete[i];
@@ -205,7 +190,6 @@ test_btree_random_ops()
 		bt_cursordelete(&cursor);
 		bt_validate(&tree);
 	}
-	std::cout << " OK\n";
 
 	// Tree should be empty
 	assert(!bt_cursorfirst(&cursor));
@@ -218,8 +202,6 @@ test_btree_random_ops()
 inline void
 test_btree_mixed_ops()
 {
-	std::cout << "\n=== Mixed Operations ===\n";
-
 	std::srand(123);
 
 	pager_open(TEST_DB);
@@ -231,8 +213,6 @@ test_btree_mixed_ops()
 	std::set<uint64_t> keys_in_tree;
 	const int		   ITERATIONS = 1000;
 	const uint64_t	   KEY_RANGE = 1000;
-
-	std::cout << "Mixed insert/delete pattern..." << std::flush;
 
 	for (int i = 0; i < ITERATIONS; i++)
 	{
@@ -273,17 +253,13 @@ test_btree_mixed_ops()
 		}
 	}
 
-	std::cout << " OK (final size: " << keys_in_tree.size() << ")\n";
-
 	// Clean up remaining keys
-	std::cout << "Cleanup..." << std::flush;
 	for (uint64_t key : keys_in_tree)
 	{
 		assert(bt_cursorseek(&cursor, &key));
 		bt_cursordelete(&cursor);
 		bt_validate(&tree);
 	}
-	std::cout << " OK\n";
 
 	assert(!bt_cursorfirst(&cursor));
 
@@ -295,8 +271,6 @@ test_btree_mixed_ops()
 inline void
 test_btree_edge_cases()
 {
-	std::cout << "\n=== Edge Cases ===\n";
-
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
@@ -304,15 +278,12 @@ test_btree_edge_cases()
 	bt_cursor cursor = {.tree = &tree};
 
 	// Delete from empty tree
-	std::cout << "Delete from empty..." << std::flush;
 	uint32_t key = 42;
 	assert(!bt_cursorseek(&cursor, &key));
 	assert(!bt_cursordelete(&cursor));
 	bt_validate(&tree);
-	std::cout << " OK\n";
 
 	// Single element operations
-	std::cout << "Single element..." << std::flush;
 	uint32_t value = 100;
 	bt_cursorinsert(&cursor, &key, (void *)&value);
 	bt_validate(&tree);
@@ -320,10 +291,8 @@ test_btree_edge_cases()
 	bt_cursordelete(&cursor);
 	bt_validate(&tree);
 	assert(!bt_cursorfirst(&cursor));
-	std::cout << " OK\n";
 
 	// Boundary key values
-	std::cout << "Boundary values..." << std::flush;
 	uint32_t min_key = 0;
 	uint32_t max_key = UINT32_MAX;
 
@@ -341,8 +310,6 @@ test_btree_edge_cases()
 	bt_cursordelete(&cursor);
 	bt_validate(&tree);
 
-	std::cout << " OK\n";
-
 	pager_rollback();
 	pager_close();
 	os_file_delete(TEST_DB);
@@ -351,8 +318,6 @@ test_btree_edge_cases()
 inline void
 test_btree_stress()
 {
-	std::cout << "\n========== B+Tree Stress Test ==========\n";
-
 	// Test sequential operations
 	test_btree_sequential_ops();
 
@@ -364,8 +329,6 @@ test_btree_stress()
 
 	// Test edge cases
 	test_btree_edge_cases();
-
-	std::cout << "\n========== All B+Tree stress tests passed! ==========\n";
 }
 
 // ============================================================================
@@ -376,7 +339,6 @@ test_btree_stress()
 inline void
 test_btree_u32_u64()
 {
-	printf("Test 1: U32+U64 composite keys\n");
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
@@ -418,130 +380,17 @@ test_btree_u32_u64()
 	} while (bt_cursornext(&cursor));
 
 	assert(count == 4);
-	printf("  Found %d entries for user 3\n", count);
 
 	pager_rollback();
 	pager_close();
 	os_file_delete(TEST_DB);
 }
 
-// // Test 2: U16+U16 composite
-// inline void test_btree_u16_u16() {
-//     printf("Test 2: U16+U16 composite keys\n");
-//     pager_open(TEST_DB);
-//     pager_begin_transaction();
-
-//     DataType key_type = TYPE_MULTI_U16_U16;
-//     BPlusTree tree = btree_create(key_type, 0, true);
-//     BPtCursor cursor = {.tree = &tree};
-
-//     uint8_t key_data[4];
-//     uint8_t empty_value = 0;
-
-//     for (uint16_t dept = 10; dept <= 12; dept++) {
-//         for (uint16_t emp = 1000; emp <= 1002; emp++) {
-//             pack_u16_u16(key_data, dept, emp);
-//             assert(bt_cursorinsert(&cursor, key_data, &empty_value));
-//         }
-//     }
-
-//     pack_u16_u16(key_data, 11, 0);
-//     assert(bt_cursorseek(&cursor, key_data, GE));
-
-//     int count = 0;
-//     do {
-//         uint8_t* found = bt_cursorkey(&cursor);
-//         uint16_t found_dept = extract_u16_at(found, 0);
-//         if (found_dept != 11) break;
-//         count++;
-//     } while (bt_cursornext(&cursor));
-
-//     assert(count == 3);
-//     printf("  Found %d entries for dept 11\n", count);
-
-//     pager_rollback();
-//     pager_close();
-//     os_file_delete(TEST_DB);
-// }
-
-// // Test 3: U8+U8 composite
-// inline void test_btree_u8_u8() {
-//     printf("Test 3: U8+U8 composite keys\n");
-//     pager_open(TEST_DB);
-//     pager_begin_transaction();
-
-//     DataType key_type = TYPE_MULTI_U8_U8;
-//     BPlusTree tree = btree_create(key_type, 0, true);
-//     BPtCursor cursor = {.tree = &tree};
-
-//     uint8_t key_data[2];
-//     uint8_t empty_value = 0;
-
-//     for (uint8_t cat = 1; cat <= 3; cat++) {
-//         for (uint8_t pri = 10; pri <= 12; pri++) {
-//             pack_u8_u8(key_data, cat, pri);
-//             assert(bt_cursorinsert(&cursor, key_data, &empty_value));
-//         }
-//     }
-
-//     // Verify lexicographic ordering
-//     assert(bt_cursorfirst(&cursor));
-
-//     uint8_t expected[][2] = {{1,10}, {1,11}, {1,12}, {2,10}, {2,11}, {2,12}, {3,10}, {3,11}, {3,12}};
-
-//     for (int i = 0; i < 9; i++) {
-//         uint8_t* found = bt_cursorkey(&cursor);
-//         assert(extract_u8_at(found, 0) == expected[i][0]);
-//         assert(extract_u8_at(found, 1) == expected[i][1]);
-//         if (i < 8) assert(bt_cursornext(&cursor));
-//     }
-
-//     printf("  Verified lexicographic ordering for 9 entries\n");
-
-//     pager_rollback();
-//     pager_close();
-//     os_file_delete(TEST_DB);
-// }
-
-// // Test 4: Mixed size U32+U64
-// inline void test_btree_u32_u64() {
-//     printf("Test 4: U32+U64 composite keys (mixed sizes)\n");
-//     pager_open(TEST_DB);
-//     pager_begin_transaction();
-
-//     DataType key_type = make_dual(TYPE_U32, TYPE_U64);
-//     BTree tree = btree_create(key_type, 0, true);
-//     BtCursor cursor = {.tree = &tree};
-
-//     uint8_t key_data[12];
-//     uint8_t empty_value = 0;
-
-//     for (uint32_t order = 100; order <= 102; order++) {
-//         for (uint64_t ts = 1000000000000ULL; ts <= 1000000000002ULL; ts++) {
-//             pack_dual(key_data, TYPE_U32, &order, TYPE_U64, &ts);
-//             assert(bt_cursorinsert(&cursor, key_data, &empty_value));
-//         }
-//     }
-
-//     // Test that first component dominates
-//     uint8_t key_small[12], key_large[12];
-//     // pack_u32_u64(key_small, 101, 0ULL);
-//     // pack_u32_u64(key_large, 100, 0xFFFFFFFFFFFFFFFFULL);
-
-//     assert(type_compare(key_type, key_large, key_small) < 0);  // (100,MAX) < (101,0)
-//     printf("  Verified first component dominates: (100,MAX) < (101,0)\n");
-
-//     pager_rollback();
-//     pager_close();
-//     os_file_delete(TEST_DB);
-// }
 
 // Test with maximum-size records
 inline void
 test_btree_large_records()
 {
-	std::cout << "\n=== Large Record Tests ===\n";
-
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
@@ -570,8 +419,6 @@ test_btree_large_records()
 		assert(data[0] == i && data[LARGE_RECORD - 1] == i);
 	}
 
-	std::cout << "Large records OK\n";
-
 	pager_rollback();
 	pager_close();
 	os_file_delete(TEST_DB);
@@ -581,8 +428,6 @@ test_btree_large_records()
 inline void
 test_btree_multiple_cursors()
 {
-	std::cout << "\n=== Multiple Cursor Tests ===\n";
-
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
@@ -625,8 +470,6 @@ test_btree_multiple_cursors()
 	assert(*key1 == 1);
 	assert(*key3 == 98);
 
-	std::cout << "Multiple cursors OK\n";
-
 	pager_rollback();
 	pager_close();
 	os_file_delete(TEST_DB);
@@ -636,11 +479,8 @@ test_btree_multiple_cursors()
 inline void
 test_btree_page_eviction()
 {
-	std::cout << "\n=== Page Eviction Tests ===\n";
-
 	if (MAX_CACHE_ENTRIES > 10)
 	{
-		std::cout << "Skipping (cache too large)\n";
 		return;
 	}
 
@@ -685,7 +525,6 @@ test_btree_page_eviction()
 	}
 
 	bt_validate(&tree);
-	std::cout << "Page eviction OK\n";
 
 	pager_rollback();
 	pager_close();
@@ -696,8 +535,6 @@ test_btree_page_eviction()
 inline void
 test_btree_varchar_collation()
 {
-	std::cout << "\n=== VARCHAR Collation Tests ===\n";
-
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
@@ -754,8 +591,6 @@ test_btree_varchar_collation()
 		assert(memcmp(tree_order[i - 1].c_str(), tree_order[i].c_str(), 32) < 0);
 	}
 
-	std::cout << "VARCHAR collation OK (" << tree_order.size() << " unique keys)\n";
-
 	pager_rollback();
 	pager_close();
 	os_file_delete(TEST_DB);
@@ -765,22 +600,16 @@ test_btree_varchar_collation()
 inline void
 test_btree_extended()
 {
-	std::cout << "\n========== Extended B+Tree Tests ==========\n";
-
 	test_btree_large_records();
 
 	test_btree_multiple_cursors();
 	test_btree_page_eviction();
 	test_btree_varchar_collation();
-
-	std::cout << "\n========== All extended tests passed! ==========\n";
 }
 
 inline void
 test_update_parent_keys_condition()
 {
-	std::cout << "\n=== Sequential Operations ===\n";
-
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
@@ -790,7 +619,6 @@ test_update_parent_keys_condition()
 	const int COUNT = tree.leaf_max_keys * 3;
 
 	std::vector<uint32_t> keys;
-	std::cout << "Forward sequential insert..." << std::flush;
 	for (int i = 0; i < COUNT; i++)
 	{
 		keys.push_back(i);
@@ -804,11 +632,6 @@ test_update_parent_keys_condition()
 		bt_cursordelete(&cursor);
 	}
 
-	// btree_print(&tree);
-	std::cout << " OK\n";
-
-	;
-
 	pager_rollback();
 	pager_close();
 	os_file_delete(TEST_DB);
@@ -816,8 +639,6 @@ test_update_parent_keys_condition()
 inline void
 test_merge_empty_root()
 {
-	std::cout << "\n=== Sequential Operations ===\n";
-
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
@@ -826,7 +647,6 @@ test_merge_empty_root()
 
 	const int COUNT = tree.leaf_max_keys + 1;
 
-	std::cout << "Forward sequential insert..." << std::flush;
 	for (int i = 0; i < COUNT; i++)
 	{
 		bt_cursorinsert(&cursor, &i, (void *)&i);
@@ -836,79 +656,16 @@ test_merge_empty_root()
 	bt_cursorseek(&cursor, &key);
 	bt_cursordelete(&cursor);
 
-	// uint32_t key = 150;
-	// bt_cursorseek(&cursor, &key);
-	// for (int i = 0; i < 182 - 150; i++)
-	// {
-	// 	bt_cursordelete(&cursor);
-	// }
-
-	// // btree_print(&tree);
-	// std::cout << " OK\n";
-
-	;
-
 	pager_rollback();
 	pager_close();
 	os_file_delete(TEST_DB);
 }
 
-inline void
-test_btree_single_key_leaf_delete()
-{
-	std::cout << "\n=== Single Key Leaf Delete Test ===\n";
 
-	pager_open(TEST_DB);
-	pager_begin_transaction();
-
-	btree	  tree = bt_create(TYPE_U32, sizeof(uint32_t), true);
-	bt_cursor cursor = {.tree = &tree};
-
-	// Insert enough keys to create internal nodes and multiple leaves
-	// We need a tree structure where we can isolate a leaf with 1 key
-
-	// First, fill up the root to force a split
-	for (uint32_t i = 0; i <= tree.leaf_max_keys; i++)
-	{
-		uint32_t value = i;
-		bt_cursorinsert(&cursor, &i, (void *)&value);
-	}
-
-	// Now we have an internal root with 2 leaf children
-	// Delete all but one key from the left leaf
-	for (uint32_t i = 1; i < tree.leaf_min_keys; i++)
-	{
-		assert(bt_cursorseek(&cursor, &i));
-		bt_cursordelete(&cursor);
-	}
-
-	// The left leaf should now have exactly min_keys
-	// Delete one more to trigger underflow, but not the first key yet
-	uint32_t key_to_delete = tree.leaf_min_keys - 1;
-	if (key_to_delete > 0)
-	{
-		assert(bt_cursorseek(&cursor, &key_to_delete));
-		bt_cursordelete(&cursor);
-	}
-
-	// Now delete the first key (index 0) from a leaf with 1 key
-	// This should trigger if_43 in update_parent_keys
-	uint32_t first_key = 0;
-	assert(bt_cursorseek(&cursor, &first_key));
-	bt_cursordelete(&cursor);
-
-	bt_validate(&tree);
-
-	pager_rollback();
-	pager_close();
-	os_file_delete(TEST_DB);
-}
 
 inline void
 test_btree_collapse_root()
 {
-	std::cout << "\n=== Collapse Root Test ===\n";
-
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
@@ -937,8 +694,6 @@ test_btree_collapse_root()
 inline void
 test_btree_deep_tree_coverage()
 {
-	std::cout << "\n=== Deep Tree Coverage Test ===\n";
-
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
@@ -947,23 +702,18 @@ test_btree_deep_tree_coverage()
 	btree		   tree = bt_create(TYPE_U32, RECORD_SIZE, true);
 	bt_cursor	   cursor = {.tree = &tree};
 
-	std::cout << "Tree config: leaf_max=" << tree.leaf_max_keys << ", internal_max=" << tree.internal_max_keys << "\n";
-
 	// Insert enough keys to create a deep tree (at least 3 levels)
 	const int KEY_COUNT = 500;
 	uint8_t	  record_data[RECORD_SIZE];
 
-	std::cout << "Building deep tree..." << std::flush;
 	for (int i = 0; i < KEY_COUNT; i++)
 	{
 		uint32_t key = i;
 		memset(record_data, i % 256, RECORD_SIZE);
 		assert(bt_cursorinsert(&cursor, &key, record_data));
 	}
-	std::cout << " OK\n";
 
 	// Test cursor has_next and has_previous (if_100, if_101)
-	std::cout << "Testing cursor helpers..." << std::flush;
 	assert(bt_cursorfirst(&cursor));
 	assert(bt_cursorhas_next(&cursor));		 // Should hit if_100
 	assert(!bt_cursorhas_previous(&cursor)); // Should test if_101
@@ -971,19 +721,15 @@ test_btree_deep_tree_coverage()
 	assert(bt_cursorlast(&cursor));
 	assert(!bt_cursorhas_next(&cursor));
 	assert(bt_cursorhas_previous(&cursor)); // Should hit if_101
-	std::cout << " OK\n";
 
 	// Navigate to trigger previous leaf movement (if_98, if_99)
-	std::cout << "Testing leaf navigation..." << std::flush;
 	// Find a key that's at the start of a non-first leaf
 	uint32_t target_key = tree.leaf_max_keys; // Should be first key of second leaf
 	assert(bt_cursorseek(&cursor, &target_key));
 	assert(bt_cursorprevious(&cursor)); // Should move to previous leaf (if_98, if_99)
-	std::cout << " OK\n";
 
 	// Trigger if_37: Delete first key of a non-leftmost leaf
 	// The key should be used as a separator in parent
-	std::cout << "Testing parent key update (if_37)..." << std::flush;
 
 	// Navigate to second leaf's first key
 	target_key = tree.leaf_max_keys;
@@ -993,10 +739,8 @@ test_btree_deep_tree_coverage()
 	// Delete it to trigger parent key update
 	assert(bt_cursordelete(&cursor));
 	bt_validate(&tree);
-	std::cout << " OK\n";
 
 	// Test cursor operations on invalid cursor (various if_7x, if_8x, if_9x)
-	std::cout << "Testing invalid cursor operations..." << std::flush;
 	bt_cursor invalid_cursor = {.tree = &tree};
 	invalid_cursor.state = BT_CURSOR_INVALID;
 
@@ -1006,28 +750,22 @@ test_btree_deep_tree_coverage()
 	assert(!bt_cursorupdate(&invalid_cursor, record_data)); // if_89
 	assert(!bt_cursornext(&invalid_cursor));				// if_90
 	assert(!bt_cursorprevious(&invalid_cursor));			// if_95
-	std::cout << " OK\n";
 
 	// Test cursor on empty tree (if_79)
-	std::cout << "Testing empty tree seek..." << std::flush;
 	btree	  empty_tree = bt_create(TYPE_U32, sizeof(uint32_t), false); // Don't init
 	bt_cursor empty_cursor = {.tree = &empty_tree};
 	uint32_t  test_key = 42;
 	assert(!bt_cursorseek(&empty_cursor, &test_key)); // if_79
-	std::cout << " OK\n";
 
 	// Test seek_cmp for coverage (if_72, if_73)
-	std::cout << "Testing seek_cmp..." << std::flush;
 	uint32_t cmp_key = 250;
 	assert(bt_cursorseek(&cursor, &cmp_key, GE)); // if_72 for exact match case
 
 	// Test with key that doesn't exist
 	uint32_t missing_key = KEY_COUNT + 100;
 	assert(bt_cursorseek(&cursor, &missing_key, LE)); // Should iterate and hit if_73
-	std::cout << " OK\n";
 
 	// Test node fault conditions (if_91, if_96)
-	std::cout << "Testing fault conditions..." << std::flush;
 	bt_cursor fault_cursor = {.tree = &tree};
 	fault_cursor.state = BT_CURSOR_VALID;
 	fault_cursor.leaf_page = 999999; // Invalid page
@@ -1036,18 +774,14 @@ test_btree_deep_tree_coverage()
 	assert(!bt_cursornext(&fault_cursor));	   // if_91
 	fault_cursor.state = BT_CURSOR_VALID;	   // Reset state
 	assert(!bt_cursorprevious(&fault_cursor)); // if_96
-	std::cout << " OK\n";
 
 	// Test cursor with out-of-bounds index (if_76, if_78)
-	std::cout << "Testing out-of-bounds cursor..." << std::flush;
 	assert(bt_cursorfirst(&cursor));
 	cursor.leaf_index = 999;					 // Way out of bounds
 	assert(bt_cursorkey(&cursor) == nullptr);	 // if_76
 	assert(bt_cursorrecord(&cursor) == nullptr); // if_78
-	std::cout << " OK\n";
 
 	// Test node changes after delete (if_84)
-	std::cout << "Testing node change after delete..." << std::flush;
 	// This is tricky - need to delete such that the node itself changes
 	// Usually happens during merges where the node gets deallocated
 	// Set up a scenario with minimal keys
@@ -1067,16 +801,11 @@ test_btree_deep_tree_coverage()
 		assert(bt_cursorseek(&small_cursor, &i));
 		bt_cursordelete(&small_cursor);
 	}
-	std::cout << " OK\n";
 
 	// Clear the trees (if_64, if_65)
-	std::cout << "Testing tree clear..." << std::flush;
 	assert(bt_clear(&tree));	   // if_64 (recursive clear)
 	assert(bt_clear(&empty_tree)); // if_65 (empty tree clear)
 	assert(bt_clear(&small_tree));
-	std::cout << " OK\n";
-
-	std::cout << "All coverage paths tested!\n";
 
 	pager_rollback();
 	pager_close();
@@ -1085,11 +814,8 @@ test_btree_deep_tree_coverage()
 inline void
 test_btree_remaining_coverage()
 {
-	std::cout << "\n=== Remaining Coverage Tests ===\n";
-
 	// Test 1: if_55, if_56 - Collapse internal root with single child
 	{
-		std::cout << "Test collapse internal root..." << std::flush;
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
@@ -1117,41 +843,15 @@ test_btree_remaining_coverage()
 		pager_rollback();
 		pager_close();
 		os_file_delete(TEST_DB);
-		std::cout << " OK\n";
 	}
 
 	// Test 2: if_37 - Update parent keys when deleted key matches separator
 	{
-		// std::cout << "Test parent key update..." << std::flush;
-		// pager_open(TEST_DB);
-		// pager_begin_transaction();
-
-		// BPlusTree tree = btree_create(TYPE_U32, sizeof(uint32_t), true);
-		// BPtCursor cursor = {.tree = &tree};
-
-		// // Insert enough to create internal nodes
-		// for (uint32_t i = 0; i < 100; i++)
-		// {
-		// 	uint32_t val = i * 10;
-		// 	bt_cursorinsert(&cursor, &i, (void *)&val);
-		// }
-
-		// // Find the first key of the second leaf - this should be a separator
-		// uint32_t separator_key = tree.leaf_max_keys;
-
-		// // Delete this key to trigger parent update
-		// assert(bt_cursorseek(&cursor, &separator_key));
-		// bt_cursordelete(&cursor);
-
-		// pager_rollback();
-		// pager_close();
-		// os_file_delete(TEST_DB);
-		// std::cout << " OK\n";
+		// Commented out in original
 	}
 
 	// Test 3: if_98, if_99 - Previous navigation across leaf boundary
 	{
-		std::cout << "Test previous leaf navigation..." << std::flush;
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
@@ -1182,12 +882,10 @@ test_btree_remaining_coverage()
 		pager_rollback();
 		pager_close();
 		os_file_delete(TEST_DB);
-		std::cout << " OK\n";
 	}
 
 	// Test 4: if_73 - Null key in seek_cmp loop
 	{
-		std::cout << "Test seek_cmp with gaps..." << std::flush;
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
@@ -1214,12 +912,10 @@ test_btree_remaining_coverage()
 		pager_rollback();
 		pager_close();
 		os_file_delete(TEST_DB);
-		std::cout << " OK\n";
 	}
 
 	// Test 5: if_68 - Fault in cursor_move_in_subtree
 	{
-		std::cout << "Test cursor subtree fault..." << std::flush;
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
@@ -1233,12 +929,10 @@ test_btree_remaining_coverage()
 		pager_rollback();
 		pager_close();
 		os_file_delete(TEST_DB);
-		std::cout << " OK\n";
 	}
 
 	// Test 6: if_84 - Node changes after delete
 	{
-		std::cout << "Test node change on delete..." << std::flush;
 		pager_open(TEST_DB);
 		pager_begin_transaction();
 
@@ -1268,25 +962,202 @@ test_btree_remaining_coverage()
 
 		// Now delete with our positioned cursor - node should change
 		bt_cursordelete(&cursor);
-		// assert(cursor.state == BPT_CURSOR_INVALID); // Should be invalid after node change
 
 		pager_rollback();
 		pager_close();
 		os_file_delete(TEST_DB);
-		std::cout << " OK\n";
+	}
+}
+struct BTreeTestConfig
+{
+	DataType	key_type;
+	uint32_t	record_size;
+	const char *name;
+};
+
+void
+test_btree_sequential_ops_parameterized(const BTreeTestConfig &config)
+{
+	pager_open(TEST_DB);
+	pager_begin_transaction();
+
+	btree	  tree = bt_create(config.key_type, config.record_size, true);
+	bt_cursor cursor = {.tree = &tree};
+
+	const int COUNT = 5000;
+	uint32_t  key_size = type_size(config.key_type);
+
+	// Allocate storage for keys and records
+	std::vector<uint8_t> key_storage(COUNT * key_size);
+	std::vector<uint8_t> record_storage(COUNT * config.record_size);
+
+	// Generate keys based on type
+	for (int i = 0; i < COUNT; i++)
+	{
+		uint8_t *key_ptr = key_storage.data() + (i * key_size);
+		uint8_t *record_ptr = record_storage.data() + (i * config.record_size);
+
+		// Generate key based on type
+		if (type_is_dual(config.key_type))
+		{
+			// Handle dual types like U32+U64
+			DataType first_type = dual_component_type(config.key_type, 0);
+			DataType second_type = dual_component_type(config.key_type, 1);
+
+			if (first_type == TYPE_U32 && second_type == TYPE_U64)
+			{
+				uint32_t first = i;
+				uint64_t second = i * 100;
+				pack_dual(key_ptr, TYPE_U32, &first, TYPE_U64, &second);
+			}
+			else if (first_type == TYPE_U16 && second_type == TYPE_U16)
+			{
+				uint16_t first = i % 65536;
+				uint16_t second = (i * 10) % 65536;
+				pack_dual(key_ptr, TYPE_U16, &first, TYPE_U16, &second);
+			}
+			else if (first_type == TYPE_U8 && second_type == TYPE_U8)
+			{
+				uint8_t first = i % 256;
+				uint8_t second = (i * 10) % 256;
+				pack_dual(key_ptr, TYPE_U8, &first, TYPE_U8, &second);
+			}
+		}
+		else if (config.key_type == TYPE_CHAR32)
+		{
+			// Handle VARCHAR
+			char str[32] = {0};
+			snprintf(str, 31, "key_%010d", i);
+			memcpy(key_ptr, str, 32);
+		}
+		else
+		{
+			// Handle simple numeric types
+			switch (config.key_type)
+			{
+			case TYPE_U8:
+				*(uint8_t *)key_ptr = i % 256;
+				break;
+			case TYPE_U16:
+				*(uint16_t *)key_ptr = i % 65536;
+				break;
+			case TYPE_U32:
+				*(uint32_t *)key_ptr = i;
+				break;
+			case TYPE_U64:
+				*(uint64_t *)key_ptr = i;
+				break;
+			case TYPE_F64:
+				*(float *)key_ptr = (float)i;
+				break;
+			default:
+				assert(false && "Unsupported key type");
+			}
+		}
+
+		// Generate record data - just use a pattern based on index
+		if (config.record_size > 0)
+		{
+			// Fill with pattern: [i % 256, (i+1) % 256, ...]
+			for (uint32_t j = 0; j < config.record_size; j++)
+			{
+				record_ptr[j] = (i + j) % 256;
+			}
+		}
 	}
 
-	std::cout << "All remaining coverage tests complete!\n";
+	// Sequential forward insertion
+	for (int i = 0; i < COUNT; i++)
+	{
+		uint8_t *key = key_storage.data() + (i * key_size);
+		uint8_t *record = record_storage.data() + (i * config.record_size);
+
+		bool inserted = bt_cursorinsert(&cursor, key, record);
+		assert(inserted);
+		bt_validate(&tree);
+	}
+
+	// Verify all keys exist
+	for (int i = 0; i < COUNT; i++)
+	{
+		uint8_t *key = key_storage.data() + (i * key_size);
+		assert(bt_cursorseek(&cursor, key));
+
+		// Verify record data matches
+		if (config.record_size > 0)
+		{
+			uint8_t *expected_record = record_storage.data() + (i * config.record_size);
+			uint8_t *actual_record = (uint8_t *)bt_cursorrecord(&cursor);
+			assert(memcmp(actual_record, expected_record, config.record_size) == 0);
+		}
+	}
+
+	// Sequential forward deletion (first half)
+	for (int i = 0; i < COUNT / 2; i++)
+	{
+		uint8_t *key = key_storage.data() + (i * key_size);
+		assert(bt_cursorseek(&cursor, key));
+		assert(bt_cursordelete(&cursor));
+		bt_validate(&tree);
+	}
+
+	// Verify deleted keys don't exist
+	for (int i = 0; i < COUNT / 2; i++)
+	{
+		uint8_t *key = key_storage.data() + (i * key_size);
+		assert(!bt_cursorseek(&cursor, key));
+	}
+
+	// Verify remaining keys still exist
+	for (int i = COUNT / 2; i < COUNT; i++)
+	{
+		uint8_t *key = key_storage.data() + (i * key_size);
+		assert(bt_cursorseek(&cursor, key));
+	}
+
+	// Backward sequential deletion (remaining half)
+	for (int i = COUNT - 1; i >= COUNT / 2; i--)
+	{
+		uint8_t *key = key_storage.data() + (i * key_size);
+		assert(bt_cursorseek(&cursor, key));
+		assert(bt_cursordelete(&cursor));
+		bt_validate(&tree);
+	}
+
+	// Tree should be empty
+	assert(!bt_cursorfirst(&cursor));
+
+	pager_rollback();
+	pager_close();
+	os_file_delete(TEST_DB);
+}
+
+// Usage example:
+void
+test_btree_sequential_all_types()
+{
+	const BTreeTestConfig configs[] = {
+		{TYPE_U32, sizeof(uint32_t), "U32 key, U32 record"},
+		{TYPE_U32, sizeof(uint64_t), "U32 key, U64 record"},
+		{TYPE_U64, sizeof(uint32_t), "U64 key, U32 record"},
+		{TYPE_CHAR32, sizeof(uint32_t), "VARCHAR key, U32 record"},
+		{make_dual(TYPE_U32, TYPE_U64), sizeof(uint16_t), "U32+U64 key, U16 record"},
+		{make_dual(TYPE_U16, TYPE_U16), 0, "U16+U16 key, no record"},
+	};
+
+	for (const auto &config : configs)
+	{
+		test_btree_sequential_ops_parameterized(config);
+	}
 }
 
 // Update the main test_btree function to call stress test
 inline void
 test_btree()
 {
-
+	test_btree_sequential_all_types();
 	test_btree_stress();
 	std::this_thread::sleep_for(std::chrono::seconds(2));
-	// // test_btree_single_key_leaf_delete();
 	test_merge_empty_root();
 	test_btree_extended();
 
@@ -1294,10 +1165,7 @@ test_btree()
 	test_btree_collapse_root();
 	test_btree_deep_tree_coverage();
 	test_btree_remaining_coverage();
+	test_btree_u32_u64();
 
-	// printf("\n=== Composite Type B+Tree Integration Tests ===\n");
-	// test_btree_u32_u64();
-	// test_btree_u16_u16();
-	// test_btree_u8_u8();
-	// test_btree_u32_u64();
+	printf("btree tests passed\n");
 }

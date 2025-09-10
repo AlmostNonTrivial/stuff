@@ -244,7 +244,6 @@ vmfunc_catalog_bootstrap(TypedValue *result, size_t count)
 	}
 
 	Statement *stmt = parse_sql(sql).statements[0];
-
 	array<Attribute, query_arena> columns;
 
 	if (strcmp(tbl_name, name) == 0)
@@ -257,6 +256,7 @@ vmfunc_catalog_bootstrap(TypedValue *result, size_t count)
 		{
 			ColumnDef &col_def = create_stmt.columns[i];
 			Attribute  col;
+			col.type = col_def.type;
 			sv_to_cstr(col_def.name, col.name, ATTRIBUTE_NAME_MAX_SIZE);
 			columns.push(col);
 		}

@@ -1,3 +1,5 @@
+
+
 /*
 ** 2024 SQL-FromScratch
 **
@@ -41,6 +43,7 @@
 */
 
 #include "btree.hpp"
+#include "containers.hpp"
 #include "common.hpp"
 #include "types.hpp"
 #include "pager.hpp"
@@ -163,12 +166,12 @@ static_assert(sizeof(btree_node) == PAGE_SIZE, "btree_node must be exactly PAGE_
 ** The macros are organized into logical groups for clarity.
 */
 
-#define PRINT_KEY(x) (type_print(tree->node_key_type, x))
+
 
 // ============================================================================
 // NODE TYPE AND RELATIONSHIP PREDICATES
 // ============================================================================
-
+/*NOCOVER_START*/
 /*
 ** Node type checks - branch prediction hints could be added here
 ** since leaves are accessed more frequently than internals in most workloads
@@ -345,6 +348,8 @@ static_assert(sizeof(btree_node) == PAGE_SIZE, "btree_node must be exactly PAGE_
 /* Single element operations */
 #define COPY_KEY(dst, src)	  memcpy(dst, src, tree->node_key_size)
 #define COPY_RECORD(dst, src) memcpy(dst, src, tree->record_size)
+
+/*NOCOVER_END*/
 // ============================================================================
 // NODE RELATIONSHIP FUNCTIONS
 // ============================================================================
@@ -1277,11 +1282,8 @@ bt_create(DataType key, uint32_t record_size, bool init = false)
 
 	constexpr uint32_t USABLE_SPACE = PAGE_SIZE - NODE_HEADER_SIZE;
 
-	if (record_size * MIN_ENTRY_COUNT > USABLE_SPACE)
-	{
-		// return invalid tree
-		return tree;
-	}
+	assert(record_size * MIN_ENTRY_COUNT <= USABLE_SPACE);
+
 
 	uint32_t leaf_entry_size = tree.node_key_size + record_size;
 	uint32_t leaf_max_entries = USABLE_SPACE / leaf_entry_size;
@@ -2016,7 +2018,7 @@ validate_node_recursive(btree *tree, btree_node *node, uint32_t expected_parent,
 
 // Add this to bplustree.cpp
 
-#include "containers.hpp"
+
 
 // Helper to print a single key based on type
 static void
