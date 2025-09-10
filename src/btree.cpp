@@ -627,18 +627,18 @@ swap_with_root(btree *tree, btree_node *root, btree_node *other)
 		}
 	}
 	if (IS_INTERNAL(other))
-    {
-        uint32_t *children = GET_CHILDREN(other);
-        for (uint32_t i = 0; i <= other->num_keys; i++)
-        {
-            if (children[i])
-            {
-                btree_node *child = GET_NODE(children[i]);
-                MARK_DIRTY(child);
-                child->parent = other->index;  // ← Update to other's index, not root
-            }
-        }
-    }
+	{
+		uint32_t *children = GET_CHILDREN(other);
+		for (uint32_t i = 0; i <= other->num_keys; i++)
+		{
+			if (children[i])
+			{
+				btree_node *child = GET_NODE(children[i]);
+				MARK_DIRTY(child);
+				child->parent = other->index; // ← Update to other's index, not root
+			}
+		}
+	}
 }
 
 /*
@@ -806,7 +806,6 @@ insert_element(btree *tree, void *key, void *data)
 			// and research
 			node = split(tree, node);
 		}
-
 
 		// Re-find because splits may have moved our key
 		leaf = find_leaf_for_key(tree, (void *)key);
@@ -1056,18 +1055,14 @@ perform_merge_with_sibling(btree *tree, btree_node *node)
 		right = GET_CHILD(parent, child_index + 1);
 		separator_index = child_index;
 	}
-	else if (child_index > 0)
+	else
 	{
+
+		assert(child_index > 0);
 		// We're the rightmost child, merge with left sibling
 		left = GET_CHILD(parent, child_index - 1);
 		right = node;
 		separator_index = child_index - 1;
-	}
-	else
-	{
-		// Should never happen - non-root node must have siblings
-		assert(false);
-		return nullptr;
 	}
 
 	// === MERGE LOGIC ===
