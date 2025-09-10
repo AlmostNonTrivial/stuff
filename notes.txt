@@ -1,61 +1,32 @@
 
+OVERVIEW:
+-
 
+PAGER:
 
-- get os_page size
+BTREE:
+[Diagrams before and after op via prints]
+- Show binary search tree, white board math logs
+- Given that we're working with 4kb+ pages, b+trees are more efficient, show whiteboard math
+- Show b+tree visual
+- node raw data layout
+- my btree has fixed size rows, you can do more do save spaced
+- child/data access pointer math. shift keys
+- swap with root
+- no point walking through it
+- clear recurse
+- validate and print, first get 1 root leaf node working
+- coverage
+- show btree print out and coverage
 
-- get rid of csv, come with prepopulated OR generic utils with special command
-- key generation: we don't want to have to handle it
-
-- alloc strategy for vm
-- there might be problems with the catalog map keys
-
-
--put static asserts places
-
-
-- move program builder methods internal
-
-
-IMPORTANT
-if no null terminator in 32, compare all 32 bytes with memcmp, otherwise up to the null terminator
-Need to remove Relation from sem, as a reshash could move pointer in multi-statement
-Deleting non-intered string from master,
-
-
-TODO
-assert print and finish pager tests
-assert print and clean up btree tests
-
-
-vm error
-
-hash map thing to char[32]
-
-and put static asserts everywhere
-
-Get good error messages
-
-More rows?
-
-print arena stats make sure their okay
-
-op codes should be sequential
+BLOB:
+- If we need store large amounts of data that wouldn't, sqlite has the concept of overflow pages
+- I've done something similar.
 
 
 
-TESTS:
-- create from scratch, veryify .tables output:
-Tables:
--------
-  users (5 columns)
-  sqlite_master (5 columns)
-  orders (5 columns)
-  products (6 columns)
+PARSER:
 
+CATALOG/SEMANTIC
 
-BUGS_FIXED:
-- not allocated a specific sized string on create table, meant in the vm_create table callback
-I was comparing the entry key "users" to "users VALUES ..."
-- my stream writer was wasn't incrementing the memory in the arena
-- type system couldn't handle null
-- off by one that the compiler gave
+VM:

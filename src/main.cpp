@@ -547,7 +547,7 @@ main(int argc, char **argv)
 	arena<catalog_arena>::init();
 	arena<query_arena>::init();
 
-	run_tests();
+	// run_tests();
 	// // test_parser();
 	// if (argc > 1 && strlen(argv[1]) >= 5)
 	// {
@@ -556,7 +556,7 @@ main(int argc, char **argv)
 	// 		return run_tests();
 	// 	}
 	// }
-	// run_repl();
+	run_repl();
 	// test_pager();
 	// test_btree();
 	// return run_repl();

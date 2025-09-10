@@ -234,7 +234,7 @@ class SimpleCoverageInstrumenter:
 // Global set of uncovered points - starts with all points
 std::unordered_set<std::string> __uncovered_points = {"""
 
-        # Sort coverage points alphabetically
+
         sorted_points = sorted(self.coverage_points)
 
         # Add all coverage points
@@ -263,7 +263,7 @@ void print_coverage_report() {
     if (__uncovered_points.empty()) {
         std::cout << "✓ All paths covered!\\n";
     } else {
-        std::cout << "Uncovered points (alphabetical):\\n";
+        std::cout << "Uncovered points:\\n";
         // Sort uncovered points for display
         std::vector<std::string> uncovered_sorted(__uncovered_points.begin(), __uncovered_points.end());
         std::sort(uncovered_sorted.begin(), uncovered_sorted.end());

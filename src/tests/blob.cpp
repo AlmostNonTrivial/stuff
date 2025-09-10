@@ -240,7 +240,6 @@ test_blob()
 
 	// Cleanup
 	pager_close();
-	arena<query_arena>::shutdown();
 
 	return 0;
 }
