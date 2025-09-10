@@ -892,6 +892,102 @@ type_print(DataType type, const void *data)
 	}
 }
 
+__attribute__((always_inline)) inline void
+type_increment(DataType type, void *dst, const void *src)
+{
+    uint8_t tid = type_id(type);
+    uint32_t size = type_size(type);
+
+    switch (tid)
+    {
+    case TYPE_ID_U8:
+        *(uint8_t *)dst = *(uint8_t *)src + 1;
+        break;
+    case TYPE_ID_U16:
+        *(uint16_t *)dst = *(uint16_t *)src + 1;
+        break;
+    case TYPE_ID_U32:
+        *(uint32_t *)dst = *(uint32_t *)src + 1;
+        break;
+    case TYPE_ID_U64:
+        *(uint64_t *)dst = *(uint64_t *)src + 1;
+        break;
+
+    case TYPE_ID_I8:
+        *(int8_t *)dst = *(int8_t *)src + 1;
+        break;
+    case TYPE_ID_I16:
+        *(int16_t *)dst = *(int16_t *)src + 1;
+        break;
+    case TYPE_ID_I32:
+        *(int32_t *)dst = *(int32_t *)src + 1;
+        break;
+    case TYPE_ID_I64:
+        *(int64_t *)dst = *(int64_t *)src + 1;
+        break;
+
+    case TYPE_ID_F32:
+        *(float *)dst = *(float *)src + 1.0f;
+        break;
+    case TYPE_ID_F64:
+        *(double *)dst = *(double *)src + 1.0;
+        break;
+
+    case TYPE_ID_CHAR: {
+        // Copy the source string to ensure we don't modify it
+        char *dst_str = (char *)dst;
+        strncpy(dst_str, (const char *)src, size);
+        dst_str[size - 1] = '\0'; // Ensure null-termination
+
+        // Find the last non-null character
+        int last = size - 2;
+        while (last >= 0 && dst_str[last] == '\0') {
+            last--;
+        }
+
+        // If string is empty or all null, set first char to 'a'
+        if (last < 0) {
+            dst_str[0] = 'a';
+            break;
+        }
+
+        // Increment the last non-null character
+        if (dst_str[last] < 'z') {
+            dst_str[last]++;
+        } else {
+            // Handle carry-over (e.g., "z" -> "aa")
+            dst_str[last] = 'a';
+            int i = last - 1;
+            while (i >= 0 && dst_str[i] == 'z') {
+                dst_str[i] = 'a';
+                i--;
+            }
+            if (i >= 0) {
+                dst_str[i]++;
+            } else if (last + 1 < (int)size - 1) {
+                // Add a new 'a' if there's space
+                dst_str[last + 1] = 'a';
+            }
+        }
+        break;
+    }
+
+    case TYPE_ID_DUAL: {
+        // Increment first component
+        DataType type1 = dual_component_type(type, 0);
+        type_increment(type1, dst, src);
+
+        // Increment second component
+        DataType type2 = dual_component_type(type, 1);
+        uint32_t offset = dual_size_1(type);
+        type_increment(type2, (char *)dst + offset, (char *)src + offset);
+        break;
+    }
+
+
+    assert(false);
+    }
+}
 __attribute__((always_inline)) inline const char *
 type_name(DataType type)
 {
@@ -976,9 +1072,7 @@ unpack_dual(DataType dual_type, const void *src, void *data1, void *data2)
 struct TypedValue
 {
 
-		void *data;
-
-
+	void *data;
 
 	DataType type;
 

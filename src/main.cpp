@@ -429,9 +429,9 @@ run_repl()
 
 	// execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 99;");
 	// execute_sql_statement("SELECT * FROM users WHERE user_id > 50 AND NOT NOT user_id > 75;");
-	// execute_sql_statement("SELECT * FROM sqlite_master");
+	// execute_sql_statement("SELECT * FROM master_catalog");
 	// execute_sql_statement("DROP TABLE products;");
-	// execute_sql_statement("SELECT * FROM sqlite_master");
+	// execute_sql_statement("SELECT * FROM master_catalog");
 
 	// return 0;
 

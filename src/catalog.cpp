@@ -11,6 +11,7 @@
 #include "parser.hpp"
 #include "types.hpp"
 #include <cassert>
+#include <cstdint>
 #include <cstring>
 #include <string_view>
 #include "compile.hpp"
@@ -126,6 +127,10 @@ void bootstrap_master(bool is_new_database) {
     };
 
     Relation master_table = create_relation(MASTER_CATALOG, master_columns);
+    master_table.next_key.type = TYPE_U32;
+    master_table.next_key.data = arena<catalog_arena>::alloc(type_size(TYPE_U32));
+    *(uint32_t*)master_table.next_key.data = 0;
+
     TupleFormat layout = tuple_format_from_relation(master_table);
 
     if (is_new_database) {

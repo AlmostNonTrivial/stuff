@@ -6,6 +6,7 @@
 #include "parser.hpp"
 #include "types.hpp"
 #include "vm.hpp"
+#include <cstdint>
 #include <cstring>
 #include <string_view>
 
@@ -238,9 +239,9 @@ vmfunc_catalog_bootstrap(TypedValue *result, size_t count)
 		return;
 
 	auto master = catalog.get(MASTER_CATALOG);
-	if (master->next_key <= key)
+	if (master->next_key.as_u32() <= key)
 	{
-		master->next_key = key + 1;
+		*(uint32_t*)(master->next_key.data) = key + 1;
 	}
 
 	Statement *stmt = parse_sql(sql).statements[0];
@@ -756,8 +757,8 @@ compile_create_table(Statement *stmt)
 	int row_start = prog.regs.allocate_range(5);
 
 	// id (auto-increment)
-	prog.load(prog.alloc_data_type(TYPE_U32, &master.next_key), row_start);
-	master.next_key++;
+	prog.load(prog.alloc_data_type(TYPE_U32, master.next_key.data), row_start);
+	type_increment(master.next_key.type, master.next_key.data, master.next_key.data);
 	// name
 	// prog.load(TYPE_CHAR32, prog.alloc_string(create_stmt->table_name.c_str(), 32), row_start + 1);
 	prog.load(prog.alloc_data_type(TYPE_CHAR32, create_stmt->table_name.data(), create_stmt->table_name.size()),

@@ -31,7 +31,7 @@
 
 // The master catalog table name and column names follow SQLite conventions
 // for compatibility and familiarity
-#define MASTER_CATALOG "sqlite_master"
+#define MASTER_CATALOG "master_catalog"
 #define MC_ID          "id"        // Auto-increment primary key
 #define MC_NAME        "name"      // Object name (table/index)
 #define MC_TBL_NAME    "tbl_name"  // Table this object belongs to
@@ -81,7 +81,7 @@ struct Attribute {
  */
 struct Relation {
     char name[RELATION_NAME_MAX_SIZE];      // Interned table name
-    uint32_t next_key;   // Next auto-increment value (supports various key types)
+    TypedValue next_key;   // Next auto-increment value (supports various key types)
 
     // Physical storage handle
     union {
