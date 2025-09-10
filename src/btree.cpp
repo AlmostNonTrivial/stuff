@@ -1,4 +1,4 @@
-
+#include <string>
 
 /*
 ** 2024 SQL-FromScratch
@@ -165,8 +165,6 @@ static_assert(sizeof(btree_node) == PAGE_SIZE, "btree_node must be exactly PAGE_
 **
 ** The macros are organized into logical groups for clarity.
 */
-
-
 
 // ============================================================================
 // NODE TYPE AND RELATIONSHIP PREDICATES
@@ -1282,8 +1280,11 @@ bt_create(DataType key, uint32_t record_size, bool init = false)
 
 	constexpr uint32_t USABLE_SPACE = PAGE_SIZE - NODE_HEADER_SIZE;
 
-	assert(record_size * MIN_ENTRY_COUNT <= USABLE_SPACE);
-
+	if (record_size * MIN_ENTRY_COUNT > USABLE_SPACE)
+	{
+		// return invalid tree
+		return tree;
+	}
 
 	uint32_t leaf_entry_size = tree.node_key_size + record_size;
 	uint32_t leaf_max_entries = USABLE_SPACE / leaf_entry_size;
@@ -2018,8 +2019,6 @@ validate_node_recursive(btree *tree, btree_node *node, uint32_t expected_parent,
 
 // Add this to bplustree.cpp
 
-
-
 // Helper to print a single key based on type
 static void
 print_key(btree *tree, void *key)
@@ -2031,6 +2030,7 @@ print_key(btree *tree, void *key)
 	}
 	type_print(tree->node_key_type, key);
 }
+
 
 // Main B+Tree print function
 void

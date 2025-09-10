@@ -620,9 +620,6 @@ step()
 		case ARITH_DIV:
 			type_div(result.type, result.data, a->data, b->data);
 			break;
-		case ARITH_MOD:
-			type_mod(result.type, result.data, a->data, b->data);
-			break;
 		}
 
 		if (_debug)

@@ -3,10 +3,9 @@
 // #include "tests/parser.hpp"
 // #include "tests/arena.hpp"
 // #include "tests/blob.hpp"
-#include "tests/btree.hpp"
 // #include "tests/pager.hpp"
 // #include "tests/containers.hpp"
-#include "tests/types.hpp"
+
 // #include "tests/ephemeral.hpp"
 #include "arena.hpp"
 #include "containers.hpp"
@@ -420,20 +419,20 @@ run_repl()
 		catalog_reload();
 	}
 
-	// execute_sql_statement("INSERT INTO users VALUES (111, 'markymarky', 'marko', 22, 'boomtown');");
-	// execute_sql_statement("INSERT INTO users VALUES (112, 'markymarky', 'marko', 23, 'boomtown');");
-	// execute_sql_statement(
-	// 	"INSERT INTO users VALUES (112, 'aaaaaaaaaaaaaaaaaaaaaaasdasdsadasdasdsadasdasddasdsamarkymarky', 'marko', 22, "
-	// 	"'boomtown');");
-	// execute_sql_statement("DELETE FROM users WHERE username = 'lilah';");
+	execute_sql_statement("INSERT INTO users VALUES (111, 'markymarky', 'marko', 22, 'boomtown');");
+	execute_sql_statement("INSERT INTO users VALUES (112, 'markymarky', 'marko', 23, 'boomtown');");
+	execute_sql_statement(
+		"INSERT INTO users VALUES (112, 'aaaaaaaaaaaaaaaaaaaaaaasdasdsadasdasdsadasdasddasdsamarkymarky', 'marko', 22, "
+		"'boomtown');");
+	execute_sql_statement("DELETE FROM users WHERE username = 'lilah';");
 
-	// execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 99;");
-	// execute_sql_statement("SELECT * FROM users WHERE user_id > 50 AND NOT NOT user_id > 75;");
-	// execute_sql_statement("SELECT * FROM master_catalog");
-	// execute_sql_statement("DROP TABLE products;");
-	// execute_sql_statement("SELECT * FROM master_catalog");
+	execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 99;");
+	execute_sql_statement("SELECT * FROM users WHERE user_id > 50 AND NOT NOT user_id > 75;");
+	execute_sql_statement("SELECT * FROM master_catalog");
+	execute_sql_statement("DROP TABLE products;");
+	execute_sql_statement("SELECT * FROM master_catalog");
 
-	// return 0;
+	return 0;
 
 	char input[4096];
 
@@ -519,9 +518,12 @@ run_repl()
 #include "./tests/blob.hpp"
 #include "./tests/pager.hpp"
 #include "./tests/ephemeral.hpp"
+
 #include "./tests/btree.hpp"
 // #include "containers.hpp"
 
+#include "tests/btree.hpp"
+#include "tests/types.hpp"
 int
 run_tests()
 {
@@ -545,6 +547,7 @@ main(int argc, char **argv)
 	arena<catalog_arena>::init();
 	arena<query_arena>::init();
 
+	run_tests();
 	// // test_parser();
 	// if (argc > 1 && strlen(argv[1]) >= 5)
 	// {
@@ -556,7 +559,7 @@ main(int argc, char **argv)
 	// run_repl();
 	// test_pager();
 	// test_btree();
-	return run_repl();
+	// return run_repl();
 	// char s[32];
 	// memset(s, 0, 32);
 	// int i  =0;
