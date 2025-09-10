@@ -404,7 +404,6 @@ run_repl()
 {
 	arena<query_arena>::init();
 
-
 	bool existed = pager_open("relational_test.db");
 
 	if (!existed)
@@ -423,16 +422,16 @@ run_repl()
 
 	execute_sql_statement("INSERT INTO users VALUES (111, 'markymarky', 'marko', 22, 'boomtown');");
 	execute_sql_statement("INSERT INTO users VALUES (112, 'markymarky', 'marko', 23, 'boomtown');");
-	execute_sql_statement("INSERT INTO users VALUES (112, 'aaaaaaaaaaaaaaaaaaaaaaasdasdsadasdasdsadasdasddasdsamarkymarky', 'marko', 22, 'boomtown');");
+	execute_sql_statement(
+		"INSERT INTO users VALUES (112, 'aaaaaaaaaaaaaaaaaaaaaaasdasdsadasdasdsadasdasddasdsamarkymarky', 'marko', 22, "
+		"'boomtown');");
 	execute_sql_statement("DELETE FROM users WHERE username = 'lilah';");
-
 
 	execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 99;");
 	execute_sql_statement("SELECT * FROM users WHERE user_id > 50 AND NOT NOT user_id > 75;");
 	execute_sql_statement("SELECT * FROM sqlite_master");
 	execute_sql_statement("DROP TABLE products;");
 	execute_sql_statement("SELECT * FROM sqlite_master");
-
 
 	return 0;
 
@@ -554,9 +553,9 @@ main(int argc, char **argv)
 	// 		return run_tests();
 	// 	}
 	// }
-	run_repl();
+	// run_repl();
 	// test_pager();
-	// test_btree();
+	test_btree();
 	// return run_repl();
 	// char s[32];
 	// memset(s, 0, 32);
@@ -564,8 +563,4 @@ main(int argc, char **argv)
 	// while(i++ < 100) {
 	// type_increment(TYPE_CHAR32, s, s);
 	// std::cout << s << "\n";
-
-
-
-
 }

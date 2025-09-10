@@ -1,9 +1,9 @@
 #pragma once
 #include <cstdint>
 
-#define PAGE_INVALID 0
-#define MAX_CACHE_ENTRIES 100
-#define PAGE_SIZE 2048
+#define PAGE_INVALID	  0
+#define MAX_CACHE_ENTRIES 5000
+#define PAGE_SIZE		  512
 
 /*
 ** BASE PAGE STRUCTURE

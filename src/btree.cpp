@@ -50,6 +50,22 @@
 #include <sys/types.h>
 #include <utility>
 
+// When you know it's uint32_t
+static void
+debug_print_u32s_from_bytes(uint8_t *bytes, uint32_t count, const char *label)
+{
+	printf("%s[%u]: [", label, count);
+	uint32_t *u32_ptr = reinterpret_cast<uint32_t *>(bytes);
+
+	for (uint32_t i = 0; i < count; i++)
+	{
+		if (i > 0)
+			printf(", ");
+		printf("%u", u32_ptr[i]);
+	}
+	printf("]\n");
+}
+
 /*
 ** CONSTANTS AND CONFIGURATION
 **
@@ -146,6 +162,8 @@ static_assert(sizeof(btree_node) == PAGE_SIZE, "btree_node must be exactly PAGE_
 **
 ** The macros are organized into logical groups for clarity.
 */
+
+#define PRINT_KEY(x) (type_print(tree->node_key_type, x))
 
 // ============================================================================
 // NODE TYPE AND RELATIONSHIP PREDICATES
@@ -608,6 +626,19 @@ swap_with_root(btree *tree, btree_node *root, btree_node *other)
 			}
 		}
 	}
+	if (IS_INTERNAL(other))
+    {
+        uint32_t *children = GET_CHILDREN(other);
+        for (uint32_t i = 0; i <= other->num_keys; i++)
+        {
+            if (children[i])
+            {
+                btree_node *child = GET_NODE(children[i]);
+                MARK_DIRTY(child);
+                child->parent = other->index;  // ← Update to other's index, not root
+            }
+        }
+    }
 }
 
 /*
@@ -639,12 +670,13 @@ static btree_node *
 split(btree *tree, btree_node *node)
 {
 	// === PREPARATION ===
-	uint32_t   split_point = GET_SPLIT_INDEX(node);
+	uint32_t	split_point = GET_SPLIT_INDEX(node);
 	btree_node *new_right = create_node(tree, IS_LEAF(node));
 
 	// Save the key that will be promoted to parent
 	// (for leaves, this is a copy; for internals, it moves up)
 	uint8_t promoted_key[256];
+
 	COPY_KEY(promoted_key, GET_KEY_AT(node, split_point));
 
 	MARK_DIRTY(node);
@@ -652,7 +684,7 @@ split(btree *tree, btree_node *node)
 
 	// === ENSURE PARENT EXISTS ===
 	btree_node *parent = GET_PARENT(node);
-	uint32_t   position_in_parent = 0;
+	uint32_t	position_in_parent = 0;
 
 	if (!parent)
 	{
@@ -672,6 +704,7 @@ split(btree *tree, btree_node *node)
 	}
 	else
 	{
+		MARK_DIRTY(parent);
 		// Normal case: find our position in existing parent
 		position_in_parent = find_child_index(tree, parent, node);
 
@@ -681,7 +714,7 @@ split(btree *tree, btree_node *node)
 	}
 
 	// === INSERT PROMOTED KEY INTO PARENT ===
-	MARK_DIRTY(parent);
+
 	COPY_KEY(GET_KEY_AT(parent, position_in_parent), promoted_key);
 	set_child(tree, parent, position_in_parent + 1, new_right->index);
 	parent->num_keys++;
@@ -764,15 +797,16 @@ insert_element(btree *tree, void *key, void *data)
 	// Make room if needed
 	if (NODE_IS_FULL(leaf))
 	{
+
 		btree_node *node = leaf;
 		while (node && NODE_IS_FULL(node))
 		{
 			// split might propagate to parent,
 			// stop when split doesn't return new parent of split node
 			// and research
-			btree_node *parent = split(tree, node);
-			node = IS_ROOT(parent) ? nullptr : parent;
+			node = split(tree, node);
 		}
+
 
 		// Re-find because splits may have moved our key
 		leaf = find_leaf_for_key(tree, (void *)key);
@@ -963,7 +997,7 @@ static bool
 try_borrow_from_siblings(btree *tree, btree_node *node)
 {
 	btree_node *parent = GET_PARENT(node);
-	uint32_t   child_index = find_child_index(tree, parent, node);
+	uint32_t	child_index = find_child_index(tree, parent, node);
 
 	// Try left sibling first (consistent strategy)
 	if (child_index > 0)
@@ -1008,10 +1042,10 @@ static btree_node *
 perform_merge_with_sibling(btree *tree, btree_node *node)
 {
 	btree_node *parent = GET_PARENT(node);
-	uint32_t   child_index = find_child_index(tree, parent, node);
+	uint32_t	child_index = find_child_index(tree, parent, node);
 
 	btree_node *left, *right;
-	uint32_t   separator_index;
+	uint32_t	separator_index;
 
 	// Decide which sibling to merge with
 	// Prefer merging with right sibling (consistent strategy)
@@ -1184,7 +1218,7 @@ clear_recurse(btree *tree, btree_node *node)
 		return;
 	}
 
-	uint32_t   i = 0;
+	uint32_t	i = 0;
 	btree_node *child = GET_CHILD(node, i);
 	while (child != nullptr)
 	{
@@ -1390,7 +1424,7 @@ bt_cursorseek(bt_cursor *cursor, void *key, comparison_op op)
 
 	// Find the leaf and position
 	btree_node *leaf = find_leaf_for_key(cursor->tree, key);
-	uint32_t   index = binary_search(cursor->tree, leaf, key);
+	uint32_t	index = binary_search(cursor->tree, leaf, key);
 
 	cursor->leaf_page = leaf->index;
 
@@ -1744,9 +1778,9 @@ bt_cursorhas_previous(bt_cursor *cursor)
 // Validation result structure to pass information up the recursion
 struct ValidationResult
 {
-	uint32_t   depth;
-	uint8_t	  *min_key;
-	uint8_t	  *max_key;
+	uint32_t	depth;
+	uint8_t	   *min_key;
+	uint8_t	   *max_key;
 	btree_node *leftmost_leaf;
 	btree_node *rightmost_leaf;
 };
@@ -1924,7 +1958,7 @@ validate_node_recursive(btree *tree, btree_node *node, uint32_t expected_parent,
 		uint32_t *children = GET_CHILDREN(node);
 		ASSERT_PRINT(children != nullptr, tree);
 
-		uint32_t   child_depth = UINT32_MAX;
+		uint32_t	child_depth = UINT32_MAX;
 		btree_node *leftmost_leaf = nullptr;
 		btree_node *rightmost_leaf = nullptr;
 
@@ -1988,7 +2022,6 @@ validate_node_recursive(btree *tree, btree_node *node, uint32_t expected_parent,
 // Add this to bplustree.cpp
 
 #include "containers.hpp"
-
 
 // Helper to print a single key based on type
 static void
@@ -2164,8 +2197,10 @@ btree_print_compact(btree *tree_ptr)
 
 	printf("B+Tree (page:type:keys:parent):\n");
 
-	struct temp_arena{};
-	queue<uint32_t,temp_arena > q;
+	struct temp_arena
+	{
+	};
+	queue<uint32_t, temp_arena> q;
 	queue<uint32_t, temp_arena> levels;
 
 	q.push(tree_ptr->root_page_index);
