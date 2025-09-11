@@ -554,7 +554,7 @@ int
 main(int argc, char **argv)
 {
 	arena<global_arena>::init();
-	arena<catalog_arena>::init();
+
 	arena<query_arena>::init();
 
 	// run_tests();

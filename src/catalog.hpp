@@ -1,20 +1,29 @@
-// ============================================================================
-// catalog.hpp - Schema Management and Metadata Storage
-// ============================================================================
-//
-// The catalog is the heart of the database's metadata system. It maintains
-// the schema information for all relations (tables) and provides the mapping
-// between logical structure and physical storage.
-//
-// Memory Model:
-// - Catalog data lives in catalog_arena which persists across queries
-// - On rollback, the entire catalog is reloaded from the master table
-// - String names are interned in the catalog arena for deduplication
-//
-// The master catalog (sqlite_master compatible) is always at btree root page 1
-// and bootstraps the loading of all other relations.
-//
-// ============================================================================
+/*
+** 2024 SQL-FromScratch
+**
+** The catalog is essentially an in-memory copy of the contents of the master catalog
+** table, which contains data about other, user created tables.
+** We want a version of this in memory because for each query we need to
+** a) validate that a query is semantically valid, aka, does the table 'users'
+** from 'select * from users;' actually exist, and b) how do we interpret
+** the 'users' b+tree record format e.g., [u32][char16][char32][...], as opposed
+** to literally any other configuration.
+**
+** If we didn't have an in-memory copy we'd need to do several I/Os on the master table
+** just to validate a query in the first place.
+**
+** To build the catalog, we do exactly that, we first bootstrap the master catalog
+** and then do SELECT * FROM master_catalog, and parse output to generate the catalog.
+**
+** We decide that the root of master_catalog always goes at page index 1. If it's a new database
+** we'll create the master_catalog root, such that it will implicitly be placed at one. If it's an
+** existing database we know to look for it at 1.
+**
+** Further alterations, like 'CREATE TABLE X' will directly update the catalog itself, but
+** will also need to insert into the master_catalog table within the same transaction.
+** On the event of a rollback for simplicity, we reload the catalog to avoid a more
+** complicated sync mechanism.
+*/
 
 #pragma once
 #include "btree.hpp"
@@ -23,81 +32,62 @@
 #include "containers.hpp"
 #include <cstdint>
 
-
-
-// ============================================================================
-// Master Catalog Schema Constants
-// ============================================================================
-
-// The master catalog table name and column names follow SQLite conventions
-// for compatibility and familiarity
+// master catalog schema
 #define MASTER_CATALOG "master_catalog"
-#define MC_ID          "id"        // Auto-increment primary key
-#define MC_NAME        "name"      // Object name (table/index)
-#define MC_TBL_NAME    "tbl_name"  // Table this object belongs to
-#define MC_ROOTPAGE    "rootpage"  // Root page in btree
-#define MC_SQL         "sql"       // Original CREATE statement
+#define MC_ID		   "id"
+#define MC_NAME		   "name"
+#define MC_TBL_NAME	   "tbl_name"
+#define MC_ROOTPAGE	   "rootpage"
+#define MC_SQL		   "sql"
 
-
-
-#define ATTRIBUTE_NAME_MAX_SIZE 32 - 1
-#define RELATION_NAME_MAX_SIZE 32 - 1
-// ============================================================================
-// Memory Arenas
-// ============================================================================
+// data_type char32's
+#define ATTRIBUTE_NAME_MAX_SIZE 32
+#define RELATION_NAME_MAX_SIZE	32
 
 /**
- * catalog_arena - Persistent storage for schema metadata
  *
- * This arena holds all catalog data that must survive across queries.
+ * This arena holds all catalog data that survives across queries.
  * It is only reset when the catalog is reloaded (e.g., after rollback).
  */
-struct catalog_arena {};
-
-// ============================================================================
-// Core Types
-// ============================================================================
-
-/**
- * Attribute - Column definition within a relation
- *
- * Represents a single column's metadata. The name is interned in the
- * catalog arena to ensure it persists and to enable pointer comparison.
- */
-struct attribute {
-    char name[ATTRIBUTE_NAME_MAX_SIZE ];  // Interned string in catalog arena
-    data_type type;     // Column data type
+struct catalog_arena
+{
 };
 
 /**
- * Relation - Schema definition for a table
+ * Attribute aka column definition within a relation
+ */
+struct attribute
+{
+	char	  name[ATTRIBUTE_NAME_MAX_SIZE];
+	data_type type;
+};
+
+/**
+ * Relation aka schema definition for a table
  *
  * Holds the complete metadata for a table including its schema and
  * a handle to its btree storage. The relation itself lives in the
  * catalog arena and persists across queries.
  *
- * Note: In relational algebra, "relation" is the formal term for what
- * SQL calls a "table".
  */
-struct relation {
-    char name[RELATION_NAME_MAX_SIZE];      // Interned table name
-    typed_value next_key;   // Next auto-increment value (supports various key types)
+struct relation
+{
+	char		name[RELATION_NAME_MAX_SIZE];
+	typed_value next_key; // Next auto-increment value (supports various key types)
 
-    // Physical storage handle
-    union {
-        btree btree;       // B+tree storage backend
-        // Future: could add other storage backends
-    } storage;
+	// Physical storage handle
+	union {
+		btree btree; // B+tree storage backend
+					 // could add other storage backends here, like a persistant hash table
+	} storage;
 
-    // Schema definition
-    array<attribute, catalog_arena> columns;
+	array<attribute, catalog_arena> columns;
 };
 
 /**
- * TupleFormat - Runtime layout descriptor for tuple processing
- *
- * Created per-query to describe the physical layout of tuples being
- * processed. Can be derived from a Relation's schema or created
+ * The tuple_format is a runtime layout descriptor
+ * created per-query to describe the physical layout of tuples being
+ * processed. It can be derived from a relation's schema or created
  * independently for intermediate results (e.g., ORDER BY temp storage).
  *
  * Layout example for (id:u32, email:char32, name:char16, age:u16):
@@ -109,60 +99,27 @@ struct relation {
  * Note: The key is stored separately in the btree, so offsets start
  * from the first non-key column.
  */
-struct tuple_format {
-    array<data_type, query_arena> columns;  // All column types including key
-    array<uint32_t, query_arena> offsets;  // Byte offsets (excluding key)
-    uint32_t record_size;                  // Size of record (excluding key)
-    data_type key_type;                     // Type of the key column
+struct tuple_format
+{
+	array<data_type, query_arena> columns;	   // All column types including key
+	array<uint32_t, query_arena>  offsets;	   // Byte offsets (excluding key)
+	uint32_t					  record_size; // Size of record (excluding key)
+	data_type					  key_type;	   // Type of the key column
 };
 
-// ============================================================================
-// Global Catalog
-// ============================================================================
-
-/**
- * Global catalog map - Central registry of all relations
- *
- * Maps table names to their Relation metadata. Uses string_view as keys
- * with the assumption that the strings are interned in catalog_arena.
- */
 extern hash_map<string_view, relation, catalog_arena> catalog;
 
-// ============================================================================
-// Public API
-// ============================================================================
+void
+catalog_reload();
 
-/**
- * Reload the entire catalog from disk
- *
- * Clears the in-memory catalog and rebuilds it from the master catalog
- * stored on disk. Called after database open or rollback.
- */
-void catalog_reload();
+tuple_format
+tuple_format_from_types(array<data_type, query_arena> &columns);
 
-/**
- * Create a tuple format from raw column types
- *
- * Builds a TupleFormat from an array of data types. The first type
- * is assumed to be the key. Offsets are calculated for the record
- * portion (excluding the key which is stored separately).
- */
-tuple_format tuple_format_from_types(array<data_type, query_arena>& columns);
+tuple_format
+tuple_format_from_relation(relation &schema);
 
-/**
- * Extract tuple format from a relation's schema
- *
- * Creates a TupleFormat that describes the physical layout of tuples
- * for the given relation.
- */
-tuple_format tuple_format_from_relation(relation& schema);
+relation
+create_relation(string_view name, array<attribute, query_arena> columns);
 
-/**
- * Create a new relation with the given schema
- *
- * Note: Performs cross-arena copying from query_arena to catalog_arena
- * to ensure the schema persists beyond the current query.
- */
-relation create_relation(string_view name, array<attribute, query_arena> columns);
-
-void bootstrap_master(bool is_new_database);
+void
+bootstrap_master(bool is_new_database);
