@@ -8,7 +8,6 @@
 #include "pager.hpp"
 #include <cstring>
 #include <cstdint>
-#include <iterator>
 #include <string_view>
 #include <typeinfo>
 #include <type_traits>
@@ -746,6 +745,8 @@ template <typename T, typename arena_tag = global_arena, uint32_t InitialSize = 
 		capacity = 0;
 	}
 };
+
+
 // Utility functions at global/namespace level
 template <typename T>
 inline T

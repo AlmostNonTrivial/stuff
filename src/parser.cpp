@@ -1,13 +1,8 @@
 /*
-** parser.cpp - Recursive Descent SQL Parser
 **
-** OVERVIEW
+** A simple recursive decent parser
 **
-** This parser uses recursive descent - a top-down parsing technique where each
-** grammar rule becomes a function. The parser "descends" through the grammar
-** by calling functions that match progressively smaller parts of the input.
-**
-** ARCHITECTURE
+** For an inituition of AST's I recommend checking out https://astexplorer.net/
 **
 ** Lexer: Converts character stream → tokens (SELECT → TOKEN_KEYWORD)
 ** Parser: Converts tokens → Abstract Syntax Tree (AST)
@@ -17,11 +12,6 @@
 **   2. Parser recognizes SELECT pattern, calls parse_select()
 **   3. parse_select() consumes tokens and builds SelectStmt AST node
 **
-** ERROR RECOVERY
-**
-** On error, we return what we've successfully parsed so far. This allows
-** partial parsing for better error messages and potential future recovery
-** strategies.
 */
 
 #include "parser.hpp"
@@ -163,7 +153,7 @@ skip_whitespace(lexer *lex)
 		}
 		else if (lex->current[0] == '-' && lex->current[1] == '-')
 		{
-			// SQL comment
+
 			while (*lex->current && *lex->current != '\n')
 			{
 				lex->current++;
@@ -351,11 +341,7 @@ lexer_next_token(lexer *lex)
 	return token;
 }
 
-/*
-** Preserves lexer state to support lookahead.
-** This enables the parser to make decisions without committing to consume tokens.
-** Critical for distinguishing statement types and handling optional clauses.
-*/
+
 tok
 lexer_peek_token(lexer *lex)
 {
@@ -375,10 +361,10 @@ lexer_peek_token(lexer *lex)
 }
 
 bool
-consume_token(parser *parser, TOKEN_TYPE type)
+consume_token(parser *parser, TOKEN_TYPE expected_type)
 {
 	tok token = lexer_peek_token(&parser->lex);
-	if (token.type == type)
+	if (token.type == expected_type)
 	{
 		lexer_next_token(&parser->lex);
 		return true;
@@ -417,6 +403,10 @@ consume_operator(parser *parser, const char *op)
 	return false;
 }
 
+/*
+ * For simplicity, we just handle two different types
+ * feel free to extend this!
+ */
 data_type
 parse_data_type(parser *parser)
 {
@@ -436,9 +426,6 @@ parse_data_type(parser *parser)
 /*
 ** EXPRESSION PARSING
 **
-** Expression parsing uses operator precedence climbing to handle precedence
-** without explicit grammar rules for each level.
-**
 ** Precedence (lowest to highest):
 **   OR → AND → NOT → Comparisons (=, <, >, etc)
 **
@@ -449,8 +436,6 @@ parse_data_type(parser *parser)
 **   │   └── (b = 2)
 **   └── (c = 3)
 **
-** Each precedence level calls the next higher level for its operands,
-** naturally building the correct tree structure.
 */
 
 expr_node *
@@ -484,7 +469,10 @@ parse_or_expr(parser *parser)
 {
 	expr_node *left = parse_and_expr(parser);
 	if (!left)
-		return nullptr;
+	{
+			return nullptr;
+	}
+
 
 	while (consume_keyword(parser, "OR"))
 	{
@@ -519,8 +507,11 @@ expr_node *
 parse_and_expr(parser *parser)
 {
 	expr_node *left = parse_not_expr(parser);
-	if (!left)
-		return nullptr;
+	if (!left) {
+
+			return nullptr;
+	}
+
 
 	while (consume_keyword(parser, "AND"))
 	{
@@ -573,7 +564,7 @@ parse_not_expr(parser *parser)
 }
 
 /*
-** Comparison operators - single level, no chaining
+** Comparison operators
 ** Pattern: expr [= | != | < | <= | > | >=] expr
 ** Tree:    OP
 **         /  \
@@ -585,7 +576,10 @@ parse_comparison_expr(parser *parser)
 {
 	expr_node *left = parse_primary_expr(parser);
 	if (!left)
-		return nullptr;
+	{
+			return nullptr;
+	}
+
 
 	tok token = lexer_peek_token(&parser->lex);
 	if (token.type == TOKEN_OPERATOR)
@@ -640,7 +634,7 @@ parse_comparison_expr(parser *parser)
 }
 
 /*
-** Primary expressions - the leaves of our expression tree
+** Primary expressions
 ** Matches:
 **   42           → LITERAL(42)
 **   'text'       → LITERAL('text')
@@ -744,7 +738,7 @@ parse_where_clause(parser *parser)
 }
 
 void
-parse_select(parser *parser, select_stmt_node *stmt)
+parse_select(parser *parser, select_stmt *stmt)
 {
 
 	if (!consume_keyword(parser, "SELECT"))
@@ -823,7 +817,7 @@ parse_select(parser *parser, select_stmt_node *stmt)
 }
 
 void
-parse_insert(parser *parser, insert_stmt_node *stmt)
+parse_insert(parser *parser, insert_stmt *stmt)
 {
 
 	if (!consume_keyword(parser, "INSERT"))
@@ -900,7 +894,7 @@ parse_insert(parser *parser, insert_stmt_node *stmt)
 }
 
 void
-parse_update(parser *parser, update_stmt_node *stmt)
+parse_update(parser *parser, update_stmt *stmt)
 {
 
 	if (!consume_keyword(parser, "UPDATE"))
@@ -955,7 +949,7 @@ parse_update(parser *parser, update_stmt_node *stmt)
 }
 
 void
-parse_delete(parser *parser, delete_stmt_node *stmt)
+parse_delete(parser *parser, delete_stmt *stmt)
 {
 
 	if (!consume_keyword(parser, "DELETE"))
@@ -983,7 +977,7 @@ parse_delete(parser *parser, delete_stmt_node *stmt)
 }
 
 void
-parse_create_table(parser *parser, create_table_stmt_node *stmt)
+parse_create_table(parser *parser, create_table_stmt *stmt)
 {
 	if (!consume_keyword(parser, "CREATE"))
 	{
@@ -1054,7 +1048,7 @@ parse_create_table(parser *parser, create_table_stmt_node *stmt)
 }
 
 void
-parse_drop_table(parser *parser, drop_table_stmt_node *stmt)
+parse_drop_table(parser *parser, drop_table_stmt *stmt)
 {
 
 	if (!consume_keyword(parser, "DROP"))
@@ -1080,7 +1074,7 @@ parse_drop_table(parser *parser, drop_table_stmt_node *stmt)
 }
 
 void
-parse_begin(parser *parser, begin_stmt_node *stmt)
+parse_begin(parser *parser, begin_stmt *stmt)
 {
 	if (!consume_keyword(parser, "BEGIN"))
 	{
@@ -1090,7 +1084,7 @@ parse_begin(parser *parser, begin_stmt_node *stmt)
 }
 
 void
-parse_commit(parser *parser, commit_stmt_node *stmt)
+parse_commit(parser *parser, commit_stmt *stmt)
 {
 	if (!consume_keyword(parser, "COMMIT"))
 	{
@@ -1100,7 +1094,7 @@ parse_commit(parser *parser, commit_stmt_node *stmt)
 }
 
 void
-parse_rollback(parser *parser, rollback_stmt_node *stmt)
+parse_rollback(parser *parser, rollback_stmt *stmt)
 {
 	if (!consume_keyword(parser, "ROLLBACK"))
 	{
@@ -1109,16 +1103,12 @@ parse_rollback(parser *parser, rollback_stmt_node *stmt)
 	}
 }
 
-/*
-** Statement type dispatch uses lookahead to avoid backtracking.
-** We identify the statement type once, then commit to parsing it.
-** This is more efficient than try-parse-and-backtrack approaches.
-*/
+
 stmt_node *
 parse_statement(parser *parser)
 {
 	stmt_node *stmt = (stmt_node *)arena<query_arena>::alloc(sizeof(stmt_node));
-	// memset(stmt, 0, sizeof(Statement));
+
 	tok token = lexer_peek_token(&parser->lex);
 
 	if (peek_keyword(parser, "SELECT"))
@@ -1395,7 +1385,7 @@ print_ast(stmt_node *stmt)
 	switch (stmt->type)
 	{
 	case STMT_SELECT: {
-		select_stmt_node *s = &stmt->select_stmt;
+		select_stmt *s = &stmt->select_stmt;
 		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		if (s->is_star)
 		{
@@ -1426,7 +1416,7 @@ print_ast(stmt_node *stmt)
 	}
 
 	case STMT_INSERT: {
-		insert_stmt_node *s = &stmt->insert_stmt;
+		insert_stmt *s = &stmt->insert_stmt;
 		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		if (s->columns.size() > 0)
 		{
@@ -1448,7 +1438,7 @@ print_ast(stmt_node *stmt)
 	}
 
 	case STMT_UPDATE: {
-		update_stmt_node *s = &stmt->update_stmt;
+		update_stmt *s = &stmt->update_stmt;
 		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		printf("  SET:\n");
 		for (uint32_t i = 0; i < s->columns.size(); i++)
@@ -1465,7 +1455,7 @@ print_ast(stmt_node *stmt)
 	}
 
 	case STMT_DELETE: {
-		delete_stmt_node *s = &stmt->delete_stmt;
+		delete_stmt *s = &stmt->delete_stmt;
 		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		if (s->where_clause)
 		{
@@ -1476,7 +1466,7 @@ print_ast(stmt_node *stmt)
 	}
 
 	case STMT_CREATE_TABLE: {
-		create_table_stmt_node *s = &stmt->create_table_stmt;
+		create_table_stmt *s = &stmt->create_table_stmt;
 		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		printf("  Columns:\n");
 		for (uint32_t i = 0; i < s->columns.size(); i++)
@@ -1489,7 +1479,7 @@ print_ast(stmt_node *stmt)
 	}
 
 	case STMT_DROP_TABLE: {
-		drop_table_stmt_node *s = &stmt->drop_table_stmt;
+		drop_table_stmt *s = &stmt->drop_table_stmt;
 		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		break;
 	}
@@ -1497,7 +1487,7 @@ print_ast(stmt_node *stmt)
 	case STMT_BEGIN:
 	case STMT_COMMIT:
 	case STMT_ROLLBACK:
-		// No additional info needed
+
 		break;
 	}
 }

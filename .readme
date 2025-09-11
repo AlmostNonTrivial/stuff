@@ -1,3 +1,13 @@
+
+
+
+
+
+
+High level overview.
+
+
+
 ┌─────────────────────────────────────────────────────────────┐
 │                        SQL Query                            │
 │                  "SELECT * FROM users"                      │
@@ -29,15 +39,16 @@
 │  Generate VM bytecode from AST                             │
 │  Simple optimizations (e.g., primary key seeks)            │
 │                                                             │
-│  Output: Array of VM Instructions                          │
+│  Output: Array of VM paramterized Instructions                          │
 └────────────────────┬────────────────────────────────────────┘
                      │
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              VIRTUAL MACHINE (vm.cpp)                       │
 │                                                             │
-│  Register-based VM with 40 registers                       │
+│  Register-based VM                                     │
 │  Executes bytecode instructions                            │
+│  Capable of general computation                           │
 │  Interfaces with storage through cursors                   │
 │                                                             │
 └────────────────────┬────────────────────────────────────────┘
@@ -109,7 +120,6 @@
 │                                                                      │
 │ ✓ Column 'user_id' is column index 0                               │
 │ ✓ Literal 50 compatible with U32                                    │
-│ ✓ Optimization: Can use GT seek on primary key                      │
 └──────────────────────┬──────────────────────────────────────────────┘
                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -118,22 +128,19 @@
 │ PC[ 0] OPEN cursor=0 ctx=users_btree                                │
 │ PC[ 1] LOAD R[0] <- 50 (U32)           # Seek key                   │
 │ PC[ 2] SEEK cursor=0 key=R[0] op=GT -> R[1]  # Find first > 50     │
-│ PC[ 3] JUMPIF R[1] FALSE -> PC[16]     # Exit if not found          │
+│ PC[ 3] JUMPIF R[1] FALSE -> PC[13]     # Exit if not found          │
 │        ┌─── LOOP START ───┐                                         │
-│ PC[ 4] │ COLUMN cursor=0 col=0 -> R[2] # Get user_id               │
-│ PC[ 5] │ LOAD R[3] <- 50 (U32)                                      │
-│ PC[ 6] │ TEST R[4] <- R[2] > R[3]      # Verify > 50               │
-│ PC[ 7] │ JUMPIF R[4] FALSE -> PC[14]   # Skip if not               │
-│ PC[ 8] │ COLUMN cursor=0 col=0 -> R[5] # Extract all columns       │
-│ PC[ 9] │ COLUMN cursor=0 col=1 -> R[6]                             │
-│ PC[10] │ COLUMN cursor=0 col=2 -> R[7]                             │
-│ PC[11] │ COLUMN cursor=0 col=3 -> R[8]                             │
-│ PC[12] │ COLUMN cursor=0 col=4 -> R[9]                             │
-│ PC[13] │ RESULT R[5..9]                # Output row                 │
-│ PC[14] │ STEP cursor=0 forward -> R[1] # Next record               │
-│ PC[15] └ GOTO PC[3]                     # Continue loop             │
-│ PC[16] CLOSE cursor=0                                               │
-│ PC[17] HALT exit_code=0                                             │
+│ PC[ 4] │ COLUMN cursor=0 col=0 -> R[2]  # Extract all columns       │
+│ PC[ 5] │ COLUMN cursor=0 col=0 -> R[5]                             │
+│ PC[ 6] │ COLUMN cursor=0 col=1 -> R[6]                             │
+│ PC[ 7] │ COLUMN cursor=0 col=2 -> R[7]                             │
+│ PC[ 8] │ COLUMN cursor=0 col=3 -> R[8]                             │
+│ PC[ 9] │ COLUMN cursor=0 col=4 -> R[9]                             │
+│ PC[10] │ RESULT R[5..9]                # Output row                 │
+│ PC[11] │ STEP cursor=0 forward -> R[1] # Next record               │
+│ PC[12] └ GOTO PC[3]                     # Continue loop             │
+│ PC[13] CLOSE cursor=0                                               │
+│ PC[14] HALT exit_code=0                                             │
 └──────────────────────┬──────────────────────────────────────────────┘
                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -186,6 +193,9 @@ EXECUTION TRACE:
 3. STEP moves cursor to [59,Helen,...]
 4. Continue until end of tree
 5. Output: All users with user_id > 50
+
+
+
 
  ================================================================================
                          BLOB STORAGE - LINKED LIST STRUCTURE
@@ -1652,3 +1662,243 @@ AST → BYTECODE COMPILATION PIPELINE
 
     6. TYPE PRESERVATION: Types flow from parser → semantic → compiler
        → VM, ensuring type safety throughout.
+
+
+
+
+CURSOR: STATEFUL TREE TRAVERSAL
+    ═══════════════════════════════════════════════════════════════════════
+
+    CURSOR ABSTRACTION LAYER
+    ────────────────────────────────────────────────────────────────────
+
+    VmCursor (Unified Interface)
+    ┌─────────────────────────────┐
+    │ type: BPLUS | RED_BLACK     │
+    │ layout: TupleFormat         │
+    │ cursor: union {             │
+    │   bt_cursor bptree;         │──→ Persistent B+Tree
+    │   et_cursor mem;            │──→ Ephemeral Red-Black
+    │ }                           │
+    └─────────────────────────────┘
+            ↓
+    Polymorphic Operations:
+    - vmcursor_seek(cursor, key, op)
+    - vmcursor_step(cursor, forward)
+    - vmcursor_get_key/record(cursor)
+
+    Same interface, different storage!
+
+
+    CURSOR STATE (B+Tree Example)
+    ════════════════════════════════════════════════════════════════════
+
+    bt_cursor Structure:
+    ┌──────────────────────┐
+    │ tree: btree*         │──→ Points to tree
+    │ leaf_page: 42        │──→ Current leaf page index
+    │ leaf_index: 3        │──→ Position within leaf
+    │ state: VALID         │──→ Cursor validity
+    └──────────────────────┘
+
+    Tree Structure:                    Cursor Position:
+                 [Root:1]                     ↓
+                /    |    \            (Not stored - we're at leaf!)
+            [7]    [15]    [42]  ←── leaf_page = 42
+           /  \     |      /  \       leaf_index = 3
+         Leaves: [···] [···] [K₀|K₁|K₂|K₃|K₄]
+                                        ↑
+                               Cursor points here
+
+
+    RANGE QUERY: SEEK + STEP vs REPEATED SEEKS
+    ════════════════════════════════════════════════════════════════════
+
+    Query: SELECT * FROM users WHERE age >= 25 AND age <= 35
+
+    Inefficient (Repeated Seeks):         Efficient (Seek + Step):
+    ──────────────────────────────         ────────────────────────
+
+    for age in 25..35:                    cursor.seek(25, GE)
+      cursor.seek(age, EQ)  ← O(log n)    while cursor.valid:
+      if found:                             age = cursor.get_key()
+        emit_result()                       if age > 35: break
+                                           emit_result()
+    Total: 11 × O(log n)                   cursor.next()  ← O(1)
+           Tree traversals!
+                                          Total: 1 × O(log n) + k × O(1)
+                                                 One traversal + linear scan!
+
+
+    Visual Comparison:
+    ─────────────────
+    Repeated Seeks (11 tree traversals):
+
+         Root                Root                Root
+          ↓                   ↓                   ↓
+       Internal            Internal            Internal
+          ↓                   ↓                   ↓
+        Leaf               Leaf                Leaf
+         25                 26                  27...
+
+    Seek + Step (1 traversal, then leaf chain):
+
+         Root
+          ↓
+       Internal
+          ↓
+        Leaf ──→ Leaf ──→ Leaf ──→ Leaf
+         25      26      27      28...
+
+    Uses leaf chain for O(1) navigation!
+
+
+    CURSOR NAVIGATION OPERATIONS
+    ════════════════════════════════════════════════════════════════════
+
+    Operation     B+Tree Implementation        Red-Black Implementation
+    ─────────     ─────────────────────        ────────────────────────
+
+    REWIND(start) Walk left edges to           In-order to minimum
+                  first leaf
+                  ┌─────┐                      ┌─────┐
+                  │Root │                      │Root │
+                  └──┬──┘                      └──┬──┘
+                     ↓                            ↓
+                  ┌─────┐                      ┌─────┐
+                  │Node │                      │Node │
+                  └──┬──┘                      └──┬──┘
+                     ↓                            ↓
+                  [First]                      [Min]
+
+    NEXT()        if (leaf_index < num_keys-1) if (has_right_child)
+                    leaf_index++                 go to leftmost of right
+                  else                         else
+                    follow leaf->next            go up to unvisited parent
+
+                  Current leaf                 Current node
+                  [A|B|C|D|E]                     (C)
+                      ↑   ↑                      /   \
+                    index index+1              (B)   (D)
+                                                ↑     ↑
+                                            current  next
+
+    SEEK(GT,30)   Binary search to leaf,      Binary search in tree,
+                  then linear scan             position at first > 30
+
+                  Find leaf with 30,               (40)
+                  scan for first > 30             /    \
+                  [25|30|31|35]                (20)    (50)
+                       ↑  ↑                     /  \    /  \
+                      30  31 ← Found         (15)(30)(45)(60)
+                                                    ↑
+                                                  Found
+
+
+    LEAF CHAIN NAVIGATION (B+Tree Optimization)
+    ════════════════════════════════════════════════════════════════════
+
+    Leaf Level with Bidirectional Chain:
+
+         Internal Nodes (ignored during scan)
+              /        |         \
+    ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐
+    │ Leaf A     │←→│ Leaf B     │←→│ Leaf C     │←→│ Leaf D     │
+    │ [1,5,9]    │  │ [12,15,18] │  │ [22,28,30] │  │ [35,40,45] │
+    │ prev: 0    │  │ prev: A    │  │ prev: B    │  │ prev: C    │
+    │ next: B    │  │ next: C    │  │ next: D    │  │ next: 0    │
+    └────────────┘  └────────────┘  └────────────┘  └────────────┘
+
+    Range Query [15,35]:
+    1. Seek(15) → Lands in Leaf B at index 1
+    2. Emit 15, 18
+    3. cursor->next → Leaf C (via page index, O(1))
+    4. Emit 22, 28, 30
+    5. cursor->next → Leaf D
+    6. Emit 35, stop (40 > 35)
+
+    Never revisit internal nodes during scan!
+
+
+    UNIFIED CURSOR INTERFACE IN VM
+    ════════════════════════════════════════════════════════════════════
+
+    VM Instruction          B+Tree Storage           Red-Black Storage
+    ──────────────          ──────────────           ─────────────────
+
+    OP_Open C0 context  →   bt_cursor.tree =     →   et_cursor.tree =
+                           context->storage.tree     et_create(...)
+
+    OP_Rewind C0 R0    →   bt_cursorfirst()     →   et_cursor_first()
+                           R0 = valid?               R0 = valid?
+
+    OP_Seek C0 K GT R1 →   bt_cursorseek(       →   et_cursor_seek(
+                             cursor, K, GT)           cursor, K, GT)
+                           R1 = found?               R1 = found?
+
+    OP_Step C0 R2      →   bt_cursornext()      →   et_cursor_next()
+                           R2 = still_valid?         R2 = still_valid?
+
+    OP_Column C0 2 R3  →   bt_cursorrecord()    →   et_cursor_record()
+                           extract column 2          extract column 2
+                           into R3                   into R3
+
+    The VM doesn't know or care about storage implementation!
+
+
+    CURSOR LIFECYCLE IN QUERY
+    ════════════════════════════════════════════════════════════════════
+
+    SELECT * FROM orders WHERE total >= 100 AND total <= 500
+
+    Bytecode:                     Cursor State:
+    ─────────                     ─────────────
+    [OP_Open C0 orders]           state: INVALID
+
+    [OP_Seek C0 100 GE R0]       Traverse to leaf
+                                 state: VALID
+                                 leaf_page: 23
+                                 leaf_index: 7
+
+    [OP_JumpIf R0 @found]        (cursor unchanged)
+
+    [@found:]
+    [OP_Column C0 1 R1]          Read at current position
+                                 (cursor unchanged)
+
+    [OP_Test R1 500 GT R2]       (cursor unchanged)
+    [OP_JumpIf R2 @done]
+
+    [OP_Result R1]               (cursor unchanged)
+
+    [OP_Step C0 R3]              Move to next entry
+                                 leaf_index: 8
+                                 OR
+                                 leaf_page: 24, leaf_index: 0
+
+    [OP_JumpIf R3 @found]        Loop back if valid
+
+    [@done:]
+    [OP_Close C0]                state: INVALID
+
+
+    KEY DESIGN INSIGHTS
+    ════════════════════════════════════════════════════════════════════
+
+    1. STATEFUL POSITION: Cursor maintains position between operations,
+       avoiding repeated tree traversals from root.
+
+    2. LEAF CHAIN OPTIMIZATION: B+tree cursors use leaf-level links
+       for O(1) sequential access during range scans.
+
+    3. STORAGE POLYMORPHISM: Same cursor interface works for both
+       persistent (B+tree) and ephemeral (red-black) storage.
+
+    4. ITERATOR PATTERN: Cursors provide iterator semantics (first,
+       next, valid) making loops natural in bytecode.
+
+    5. ZERO-COPY ACCESS: Cursors return pointers directly into
+       page cache (B+tree) or node memory (red-black).
+
+    6. SEEK MODES: Support for different comparison ops (EQ, GT, GE,
+       LT, LE) enables efficient range query starting points.

@@ -263,7 +263,7 @@ resolve_where_clause(semantic_context *ctx, expr_node *where_clause, relation *t
 }
 
 static bool
-resolve_insert_columns(semantic_context *ctx, insert_stmt_node *stmt, relation *table)
+resolve_insert_columns(semantic_context *ctx, insert_stmt *stmt, relation *table)
 {
 	if (stmt->columns.size() > 0)
 	{
@@ -279,7 +279,7 @@ resolve_insert_columns(semantic_context *ctx, insert_stmt_node *stmt, relation *
 }
 
 static bool
-semantic_resolve_select(semantic_context *ctx, select_stmt_node *stmt)
+semantic_resolve_select(semantic_context *ctx, select_stmt *stmt)
 {
 	relation *table = require_table(ctx, stmt->table_name);
 	if (!table)
@@ -331,7 +331,7 @@ semantic_resolve_select(semantic_context *ctx, select_stmt_node *stmt)
 }
 
 static bool
-semantic_resolve_insert(semantic_context *ctx, insert_stmt_node *stmt)
+semantic_resolve_insert(semantic_context *ctx, insert_stmt *stmt)
 {
 	relation *table = require_table(ctx, stmt->table_name);
 	if (!table)
@@ -369,7 +369,7 @@ semantic_resolve_insert(semantic_context *ctx, insert_stmt_node *stmt)
 }
 
 static bool
-semantic_resolve_update(semantic_context *ctx, update_stmt_node *stmt)
+semantic_resolve_update(semantic_context *ctx, update_stmt *stmt)
 {
 	relation *table = require_table(ctx, stmt->table_name);
 	if (!table)
@@ -403,7 +403,7 @@ semantic_resolve_update(semantic_context *ctx, update_stmt_node *stmt)
 }
 
 static bool
-semantic_resolve_delete(semantic_context *ctx, delete_stmt_node *stmt)
+semantic_resolve_delete(semantic_context *ctx, delete_stmt *stmt)
 {
 	relation *table = require_table(ctx, stmt->table_name);
 	if (!table)
@@ -420,7 +420,7 @@ semantic_resolve_delete(semantic_context *ctx, delete_stmt_node *stmt)
 }
 
 static bool
-semantic_resolve_create_table(semantic_context *ctx, create_table_stmt_node *stmt)
+semantic_resolve_create_table(semantic_context *ctx, create_table_stmt *stmt)
 {
 	if (stmt->table_name.size() > RELATION_NAME_MAX_SIZE)
 	{
@@ -489,7 +489,7 @@ semantic_resolve_create_table(semantic_context *ctx, create_table_stmt_node *stm
 }
 
 static bool
-semantic_resolve_drop_table(semantic_context *ctx, drop_table_stmt_node *stmt)
+semantic_resolve_drop_table(semantic_context *ctx, drop_table_stmt *stmt)
 {
 	relation *table = lookup_table(ctx, stmt->table_name);
 	if (!table)

@@ -62,7 +62,7 @@ get_column_width(data_type type)
 static array<int, query_arena> result_column_widths;
 
 void
-print_select_headers(select_stmt_node *select_stmt)
+print_select_headers(select_stmt *select_stmt)
 {
 
 	relation *table = catalog.get(select_stmt->table_name);
@@ -119,7 +119,7 @@ print_select_headers(select_stmt_node *select_stmt)
 }
 
 void
-setup_result_formatting(select_stmt_node *select_stmt)
+setup_result_formatting(select_stmt *select_stmt)
 {
 	result_column_widths.clear();
 
@@ -451,6 +451,7 @@ run_repl()
 
 	while (true)
 	{
+	    arena<query_arena>::reset_and_decommit();
 		printf("sql> ");
 		fflush(stdout);
 

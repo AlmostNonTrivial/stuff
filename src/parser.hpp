@@ -1,13 +1,8 @@
 /*
-** parser.hpp - SQL Parser Interface
 **
-** OVERVIEW
-**
-** This parser implements a subset of SQL suitable for educational purposes.
-** It produces an Abstract Syntax Tree (AST) that can be analyzed and compiled
 ** into VM bytecode.
 **
-** SUPPORTED SQL GRAMMAR
+** This parser implements the following subset of SQL
 **
 ** Data Definition Language (DDL):
 **   CREATE TABLE table_name (column_name INT|TEXT, ...)
@@ -26,47 +21,21 @@
 **   COMMIT
 **   ROLLBACK
 **
-** Expression Grammar:
-**   Literals: 42, 'string'
-**   Columns: column_name
-**   Comparisons: =, !=, <>, <, <=, >, >=
-**   Logical: AND, OR, NOT
-**   Grouping: (expression)
 **
-** LIMITATIONS
+** AST nodes have 'sem(antic)' properties that are populated in the semantic pass
 **
-** - Single table operations only (no JOINs)
-** - INSERT supports single row only
-** - Data types limited to INT (stored as u32) and TEXT (max 32 bytes)
-** - No aggregates (COUNT, SUM, etc.)
-** - No GROUP BY or HAVING
-** - No subqueries
-** - No NULL values in expressions (though NULL type exists internally)
-** - String literals must be under 32 bytes
+** The parser can catch lexical and syntatic errors e.g., 'SELECT @ FROM', and 'SELECT WHERE' respectively
+** But semantic errors, such as 'SELECT * table_that_doesnt_exist' are caught in the semantic pass
 **
-** AST STRUCTURE
+** Have a play around my parsing a complex statement and then call 'parse_ast' do see the output
 **
-** The parser produces a two-level AST:
-**   1. Statement level - represents complete SQL statements
-**   2. Expression level - represents WHERE clauses and values
-**
-** Each AST node contains:
-**   - Parsed data from the SQL text
-**   - A 'sem' struct for semantic analysis results (filled by semantic.cpp)
-**
-** The AST uses arena allocation, so individual nodes don't need cleanup.
 */
 
 #pragma once
-#include "catalog.hpp"
+
 #include "common.hpp"
 #include "containers.hpp"
 #include "types.hpp"
-
-
-//=============================================================================
-// EXPRESSION AST NODES
-//=============================================================================
 
 enum EXPR_TYPE : uint8_t
 {
@@ -86,8 +55,6 @@ enum BINARY_OP : uint8_t
 	OP_LE,
 	OP_GT,
 	OP_GE,
-
-
 	OP_AND,
 	OP_OR
 };
@@ -105,11 +72,11 @@ struct expr_node
 	struct
 	{
 		data_type resolved_type = TYPE_NULL;
-		int32_t	   column_index = -1;
+		int32_t	  column_index = -1;
 	} sem;
 
 	union {
-		// EXPR_LITERAL
+
 		struct
 		{
 			data_type lit_type;
@@ -119,31 +86,25 @@ struct expr_node
 			};
 		};
 
-
 		struct
 		{
 			string_view column_name;
 		};
 
+		struct
+		{
+			BINARY_OP  op;
+			expr_node *left;
+			expr_node *right;
+		};
 
 		struct
 		{
-			BINARY_OP op;
-			expr_node	*left;
-			expr_node	*right;
+			UNARY_OP   unary_op;
+			expr_node *operand;
 		};
-
-
-		struct
-		{
-			UNARY_OP unary_op;
-			expr_node   *operand;
-		};
-
-
 	};
 };
-
 
 enum STMT_TYPE : uint8_t
 {
@@ -158,7 +119,6 @@ enum STMT_TYPE : uint8_t
 	STMT_ROLLBACK
 };
 
-
 struct attribute_node
 {
 	string_view name;
@@ -170,32 +130,28 @@ struct attribute_node
 	} sem;
 };
 
-
-struct select_stmt_node
+struct select_stmt
 {
-	bool							 is_star;		  // SELECT *
-	array<string_view, query_arena> columns;		  // Column names (if not *)
-	string_view						 table_name;	  // FROM table
-	expr_node						*where_clause;	  // Optional WHERE
-	string_view						 order_by_column; // Optional ORDER BY column
-	bool							 order_desc;	  // DESC if true, ASC if false
-
+	bool							is_star;		 // SELECT *
+	array<string_view, query_arena> columns;		 // Column names (if not *)
+	string_view						table_name;		 // FROM table
+	expr_node					   *where_clause;	 // Optional WHERE
+	string_view						order_by_column; // Optional ORDER BY column
+	bool							order_desc;		 // DESC if true, ASC if false
 
 	struct
 	{
-		array<int32_t, query_arena>  column_indices;	   // Indices of selected columns
+		array<int32_t, query_arena>	  column_indices;	   // Indices of selected columns
 		array<data_type, query_arena> column_types;		   // Types of selected columns
 		int32_t						  order_by_index = -1; // Index of ORDER BY column
 	} sem;
 };
 
-
-struct insert_stmt_node
+struct insert_stmt
 {
-	string_view						 table_name;
+	string_view						table_name;
 	array<string_view, query_arena> columns;
-	array<expr_node *, query_arena>		 values;
-
+	array<expr_node *, query_arena> values;
 
 	struct
 	{
@@ -203,14 +159,12 @@ struct insert_stmt_node
 	} sem;
 };
 
-
-struct update_stmt_node
+struct update_stmt
 {
-	string_view						 table_name;
+	string_view						table_name;
 	array<string_view, query_arena> columns;
-	array<expr_node *, query_arena>		 values;
-	expr_node							*where_clause;
-
+	array<expr_node *, query_arena> values;
+	expr_node					   *where_clause;
 
 	struct
 	{
@@ -218,19 +172,16 @@ struct update_stmt_node
 	} sem;
 };
 
-
-struct delete_stmt_node
+struct delete_stmt
 {
 	string_view table_name;
-	expr_node	   *where_clause;
+	expr_node  *where_clause;
 };
 
-
-struct create_table_stmt_node
+struct create_table_stmt
 {
-	string_view					   table_name;
+	string_view						   table_name;
 	array<attribute_node, query_arena> columns;
-
 
 	struct
 	{
@@ -239,28 +190,24 @@ struct create_table_stmt_node
 	} sem;
 };
 
-
-struct drop_table_stmt_node
+struct drop_table_stmt
 {
 	string_view table_name;
 };
 
-
-struct begin_stmt_node
+struct begin_stmt
 {
 };
-struct commit_stmt_node
+struct commit_stmt
 {
 };
-struct rollback_stmt_node
+struct rollback_stmt
 {
 };
-
 
 struct stmt_node
 {
 	STMT_TYPE type;
-
 
 	struct
 	{
@@ -268,34 +215,30 @@ struct stmt_node
 	} sem;
 
 	union {
-		select_stmt_node		select_stmt;
-		insert_stmt_node		insert_stmt;
-		update_stmt_node		update_stmt;
-		delete_stmt_node		delete_stmt;
-		create_table_stmt_node create_table_stmt;
-		drop_table_stmt_node	drop_table_stmt;
-		begin_stmt_node		begin_stmt;
-		commit_stmt_node		commit_stmt;
-		rollback_stmt_node	rollback_stmt;
+		select_stmt		  select_stmt;
+		insert_stmt		  insert_stmt;
+		update_stmt		  update_stmt;
+		delete_stmt		  delete_stmt;
+		create_table_stmt create_table_stmt;
+		drop_table_stmt	  drop_table_stmt;
+		begin_stmt		  begin_stmt;
+		commit_stmt		  commit_stmt;
+		rollback_stmt	  rollback_stmt;
 	};
 };
 
-
-
 struct parser_result
 {
-	bool							 success;
-	string_view						 error;					 // Error message (nullptr if success)
-	array<stmt_node *, query_arena> statements;			 // Array by value, not pointer
-	int								 error_line;			 // -1 if no error
-	int								 error_column;			 // -1 if no error
-	int								 failed_statement_index; // Which statement failed (-1 if none)
+	bool							success;
+	string_view						error;					// Error message (nullptr if success)
+	array<stmt_node *, query_arena> statements;				// Array by value, not pointer
+	int								error_line;				// -1 if no error
+	int								error_column;			// -1 if no error
+	int								failed_statement_index; // Which statement failed (-1 if none)
 };
-
 
 parser_result
 parse_sql(const char *sql);
-
 
 void
 print_ast(stmt_node *stmt);

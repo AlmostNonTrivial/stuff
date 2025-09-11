@@ -127,7 +127,7 @@ is_pk_lookup(expr_node *where_clause, relation *table, comparison_op *out_op, ex
 
 
 static string_view
-reconstruct_create_sql(create_table_stmt_node *stmt)
+reconstruct_create_sql(create_table_stmt *stmt)
 {
 	auto stream = stream_writer<query_arena>::begin();
 
@@ -239,7 +239,7 @@ vmfunc_catalog_bootstrap(typed_value *result, size_t count)
 	if (strcmp(tbl_name, name) == 0)
 	{
 
-		create_table_stmt_node &create_stmt = stmt->create_table_stmt;
+		create_table_stmt &create_stmt = stmt->create_table_stmt;
 		columns.reserve(create_stmt.columns.size());
 
 		for (uint32_t i = 0; i < create_stmt.columns.size(); i++)
@@ -265,7 +265,7 @@ array<vm_instruction, query_arena>
 compile_select(stmt_node *stmt)
 {
 	program_builder prog;
-	select_stmt_node	  *select_stmt = &stmt->select_stmt;
+	select_stmt	  *select_stmt = &stmt->select_stmt;
 
 	relation *table = catalog.get(select_stmt->table_name);
 
@@ -504,7 +504,7 @@ array<vm_instruction, query_arena>
 compile_insert(stmt_node *stmt)
 {
 	program_builder prog;
-	insert_stmt_node	  *insert_stmt = &stmt->insert_stmt;
+	insert_stmt	  *insert_stmt = &stmt->insert_stmt;
 
 	prog.begin_transaction();
 
@@ -543,7 +543,7 @@ array<vm_instruction, query_arena>
 compile_update(stmt_node *stmt)
 {
 	program_builder prog;
-	update_stmt_node	  *update_stmt = &stmt->update_stmt;
+	update_stmt	  *update_stmt = &stmt->update_stmt;
 
 	prog.begin_transaction();
 
@@ -604,7 +604,7 @@ array<vm_instruction, query_arena>
 compile_delete(stmt_node *stmt)
 {
 	program_builder prog;
-	delete_stmt_node	  *delete_stmt = &stmt->delete_stmt;
+	delete_stmt	  *delete_stmt = &stmt->delete_stmt;
 
 	prog.begin_transaction();
 
@@ -670,7 +670,7 @@ array<vm_instruction, query_arena>
 compile_create_table(stmt_node *stmt)
 {
 	program_builder	 prog;
-	create_table_stmt_node *create_stmt = &stmt->create_table_stmt;
+	create_table_stmt *create_stmt = &stmt->create_table_stmt;
 
 	prog.begin_transaction();
 
@@ -713,7 +713,7 @@ array<vm_instruction, query_arena>
 compile_drop_table(stmt_node *stmt)
 {
 	program_builder prog;
-	drop_table_stmt_node *drop_stmt = &stmt->drop_table_stmt;
+	drop_table_stmt *drop_stmt = &stmt->drop_table_stmt;
 
 	prog.begin_transaction();
 

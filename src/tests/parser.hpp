@@ -45,7 +45,7 @@ test_select_star()
 	stmt_node *stmt = result.statements[0];
 	ASSERT_PRINT(stmt->type == STMT_SELECT, stmt);
 
-	select_stmt_node *select = &stmt->select_stmt;
+	select_stmt *select = &stmt->select_stmt;
 	ASSERT_PRINT(select->is_star == true, stmt);
 	ASSERT_PRINT(str_eq(select->table_name, "users"), stmt);
 	ASSERT_PRINT(select->where_clause == nullptr, stmt);
@@ -59,7 +59,7 @@ test_select_columns()
 	ASSERT_PRINT(result.success == true, nullptr);
 
 	stmt_node  *stmt = result.statements[0];
-	select_stmt_node *select = &stmt->select_stmt;
+	select_stmt *select = &stmt->select_stmt;
 
 	ASSERT_PRINT(select->is_star == false, stmt);
 	ASSERT_PRINT(select->columns.size() == 3, stmt);
@@ -76,7 +76,7 @@ test_select_where()
 	ASSERT_PRINT(result.success == true, nullptr);
 
 	stmt_node  *stmt = result.statements[0];
-	select_stmt_node *select = &stmt->select_stmt;
+	select_stmt *select = &stmt->select_stmt;
 
 	ASSERT_PRINT(select->where_clause->type == EXPR_BINARY_OP, stmt);
 	ASSERT_PRINT(select->where_clause->op == OP_EQ, stmt);
@@ -91,7 +91,7 @@ test_select_where_complex()
 	ASSERT_PRINT(result.success == true, nullptr);
 
 	stmt_node  *stmt = result.statements[0];
-	select_stmt_node *select = &stmt->select_stmt;
+	select_stmt *select = &stmt->select_stmt;
 
 	ASSERT_PRINT(select->where_clause->op == OP_AND, stmt);
 	ASSERT_PRINT(select->where_clause->left->op == OP_GT, stmt);
@@ -109,7 +109,7 @@ test_select_order_by()
 	ASSERT_PRINT(result.success == true, nullptr);
 
 	stmt_node  *stmt = result.statements[0];
-	select_stmt_node *select = &stmt->select_stmt;
+	select_stmt *select = &stmt->select_stmt;
 
 	ASSERT_PRINT(str_eq(select->order_by_column, "name"), stmt);
 	ASSERT_PRINT(select->order_desc == false, stmt);
@@ -136,7 +136,7 @@ test_select_full()
 	ASSERT_PRINT(result.success == true, nullptr);
 
 	stmt_node  *stmt = result.statements[0];
-	select_stmt_node *select = &stmt->select_stmt;
+	select_stmt *select = &stmt->select_stmt;
 
 	ASSERT_PRINT(select->is_star == false, stmt);
 	ASSERT_PRINT(select->columns.size() == 2, stmt);
@@ -158,7 +158,7 @@ test_insert_values_only()
 	ASSERT_PRINT(result.success == true, nullptr);
 
 	stmt_node  *stmt = result.statements[0];
-	insert_stmt_node *insert = &stmt->insert_stmt;
+	insert_stmt *insert = &stmt->insert_stmt;
 
 	ASSERT_PRINT(str_eq(insert->table_name, "users"), stmt);
 	ASSERT_PRINT(insert->columns.size() == 0, stmt);
@@ -178,7 +178,7 @@ test_insert_with_columns()
 	ASSERT_PRINT(result.success == true, nullptr);
 
 	stmt_node  *stmt = result.statements[0];
-	insert_stmt_node *insert = &stmt->insert_stmt;
+	insert_stmt *insert = &stmt->insert_stmt;
 
 	ASSERT_PRINT(insert->columns.size() == 3, stmt);
 	ASSERT_PRINT(str_eq(insert->columns[0], "id"), stmt);
@@ -198,7 +198,7 @@ test_update_no_where()
 	ASSERT_PRINT(result.success == true, nullptr);
 
 	stmt_node  *stmt = result.statements[0];
-	update_stmt_node *update = &stmt->update_stmt;
+	update_stmt *update = &stmt->update_stmt;
 
 	ASSERT_PRINT(str_eq(update->table_name, "users"), stmt);
 	ASSERT_PRINT(update->columns.size() == 1, stmt);
@@ -215,7 +215,7 @@ test_update_with_where()
 	ASSERT_PRINT(result.success == true, nullptr);
 
 	stmt_node  *stmt = result.statements[0];
-	update_stmt_node *update = &stmt->update_stmt;
+	update_stmt *update = &stmt->update_stmt;
 
 	ASSERT_PRINT(str_eq(update->table_name, "users"), stmt);
 	ASSERT_PRINT(update->columns.size() == 1, stmt);
@@ -232,7 +232,7 @@ test_update_multiple_columns()
 	ASSERT_PRINT(result.success == true, nullptr);
 
 	stmt_node  *stmt = result.statements[0];
-	update_stmt_node *update = &stmt->update_stmt;
+	update_stmt *update = &stmt->update_stmt;
 
 	ASSERT_PRINT(update->columns.size() == 3, stmt);
 	ASSERT_PRINT(str_eq(update->columns[0], "name"), stmt);
@@ -254,7 +254,7 @@ test_delete_all()
 	ASSERT_PRINT(result.success == true, nullptr);
 
 	stmt_node  *stmt = result.statements[0];
-	delete_stmt_node *del = &stmt->delete_stmt;
+	delete_stmt *del = &stmt->delete_stmt;
 
 	ASSERT_PRINT(str_eq(del->table_name, "users"), stmt);
 	ASSERT_PRINT(del->where_clause == nullptr, stmt);
@@ -267,7 +267,7 @@ test_delete_where()
 	ASSERT_PRINT(result.success == true, nullptr);
 
 	stmt_node  *stmt = result.statements[0];
-	delete_stmt_node *del = &stmt->delete_stmt;
+	delete_stmt *del = &stmt->delete_stmt;
 
 	ASSERT_PRINT(str_eq(del->table_name, "users"), stmt);
 	ASSERT_PRINT(del->where_clause->op == OP_EQ, stmt);
@@ -286,7 +286,7 @@ test_create_table()
 	ASSERT_PRINT(result.success == true, nullptr);
 
 	stmt_node		*stmt = result.statements[0];
-	create_table_stmt_node *create = &stmt->create_table_stmt;
+	create_table_stmt *create = &stmt->create_table_stmt;
 
 	ASSERT_PRINT(str_eq(create->table_name, "users"), stmt);
 	ASSERT_PRINT(create->columns.size() == 4, stmt);
@@ -313,7 +313,7 @@ test_drop_table()
 	ASSERT_PRINT(result.success == true, nullptr);
 
 	stmt_node	  *stmt = result.statements[0];
-	drop_table_stmt_node *drop = &stmt->drop_table_stmt;
+	drop_table_stmt *drop = &stmt->drop_table_stmt;
 
 	ASSERT_PRINT(str_eq(drop->table_name, "users"), stmt);
 }
@@ -371,7 +371,7 @@ test_string_literal_size_limits()
 		const char	 *sql = "INSERT INTO users VALUES (1, 'This is a valid string')";
 		parser_result result = parse_sql(sql);
 		ASSERT_PRINT(result.success == true, nullptr);
-		insert_stmt_node *insert = &result.statements[0]->insert_stmt;
+		insert_stmt *insert = &result.statements[0]->insert_stmt;
 		ASSERT_PRINT(insert->values[1]->type == EXPR_LITERAL, result.statements[0]);
 		ASSERT_PRINT(insert->values[1]->lit_type == TYPE_CHAR32, result.statements[0]);
 		ASSERT_PRINT(insert->values[1]->str_val.size() <= 32, result.statements[0]);
@@ -381,7 +381,7 @@ test_string_literal_size_limits()
 		const char	 *sql = "INSERT INTO users VALUES (1, '12345678901234567890123456789012')";
 		parser_result result = parse_sql(sql);
 		ASSERT_PRINT(result.success == true, nullptr);
-		insert_stmt_node *insert = &result.statements[0]->insert_stmt;
+		insert_stmt *insert = &result.statements[0]->insert_stmt;
 		ASSERT_PRINT(insert->values[1]->str_val.size() == 32, result.statements[0]);
 	}
 
@@ -435,7 +435,7 @@ test_integer_literal_limits()
 		const char	 *sql = "INSERT INTO users VALUES (4294967295, 'name')";
 		parser_result result = parse_sql(sql);
 		ASSERT_PRINT(result.success == true, nullptr);
-		insert_stmt_node *insert = &result.statements[0]->insert_stmt;
+		insert_stmt *insert = &result.statements[0]->insert_stmt;
 		ASSERT_PRINT(insert->values[0]->type == EXPR_LITERAL, result.statements[0]);
 		ASSERT_PRINT(insert->values[0]->lit_type == TYPE_U32, result.statements[0]);
 		ASSERT_PRINT(insert->values[0]->int_val == 4294967295U, result.statements[0]);
@@ -445,7 +445,7 @@ test_integer_literal_limits()
 		const char	 *sql = "INSERT INTO users VALUES (0, 'name')";
 		parser_result result = parse_sql(sql);
 		ASSERT_PRINT(result.success == true, nullptr);
-		insert_stmt_node *insert = &result.statements[0]->insert_stmt;
+		insert_stmt *insert = &result.statements[0]->insert_stmt;
 		ASSERT_PRINT(insert->values[0]->int_val == 0, result.statements[0]);
 	}
 
