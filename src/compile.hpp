@@ -28,24 +28,21 @@ struct cursor_allocator
 	void
 	free(int cursor_id)
 	{
-		// free_list.push(cursor_id);
 	}
 };
 
-// Enhanced RegisterAllocator with strong scope-based management
 struct register_allocator
 {
 	int						next_free = 0;
 	array<int, query_arena> scope_stack;
 
-	// Allocate a single register (optionally specific one)
 	int
 	allocate(int specific = -1)
 	{
 		if (specific >= 0)
 		{
 			assert(specific < REGISTERS && "Register out of range");
-			// If requesting a specific register, it better be at or past our allocation point
+
 			assert(specific >= next_free && "Cannot allocate already-used register");
 			next_free = specific + 1;
 			return specific;
@@ -55,7 +52,6 @@ struct register_allocator
 		return next_free++;
 	}
 
-	// Allocate a contiguous range of registers
 	int
 	allocate_range(int count, int start_at = -1)
 	{
@@ -74,7 +70,6 @@ struct register_allocator
 		return first;
 	}
 
-	// Reserve space without returning a register (for manual management)
 	void
 	reserve(int count)
 	{
@@ -151,20 +146,15 @@ struct program_builder
 	hash_map<string_view, uint32_t, query_arena> labels;
 	array<uint32_t, query_arena>				 unresolved_jumps;
 	register_allocator							 regs;
-	cursor_allocator								 cursors;
+	cursor_allocator							 cursors;
 	int											 label_counter = 0;
 
 	loop_context current_loop;
-
-	// ========================================================================
-	// Basic Operations
-	// ========================================================================
 
 	template <typename T>
 	T *
 	alloc(const T &value)
 	{
-		static_assert(std::is_trivially_copyable_v<T>, "Type must be trivially copyable");
 		T *ptr = (T *)arena<query_arena>::alloc(sizeof(T));
 		memcpy(ptr, &value, sizeof(T));
 		return ptr;
@@ -174,7 +164,7 @@ struct program_builder
 	alloc_data_type(data_type type, const void *src, size_t src_len = 0)
 	{
 
-	    assert(src);
+		assert(src);
 		typed_value tv;
 		tv.type = type;
 		uint32_t size = type_size(type);
@@ -202,7 +192,6 @@ struct program_builder
 	{
 		instructions.push(inst);
 
-		// Track instructions that need label resolution
 		if (inst.p2 == -1 || inst.p3 == -1)
 		{
 			unresolved_jumps.push(instructions.size() - 1);
@@ -215,7 +204,7 @@ struct program_builder
 		labels.insert(arena_intern<query_arena>(name), instructions.size());
 	}
 
-const char*
+	const char *
 	generate_label(const char *prefix = "L")
 	{
 		char name[32];
@@ -234,11 +223,11 @@ const char*
 	{
 		for (uint32_t i = 0; i < unresolved_jumps.size(); i++)
 		{
-			uint32_t	   inst_idx = unresolved_jumps[i];
+			uint32_t		inst_idx = unresolved_jumps[i];
 			vm_instruction &inst = instructions[inst_idx];
 
 			if (inst.p4)
-			{ // Label stored temporarily in p4
+			{
 				const char *label_name = (const char *)inst.p4;
 
 				uint32_t *target = labels.get(label_name);
@@ -246,18 +235,19 @@ const char*
 				if (target)
 				{
 					if (inst.p2 == -1)
+					{
 						inst.p2 = *target;
+					}
+
 					if (inst.p3 == -1)
+					{
 						inst.p3 = *target;
+					}
 				}
 				inst.p4 = nullptr;
 			}
 		}
 	}
-
-	// ========================================================================
-	// Control Flow
-	// ========================================================================
 
 	void
 	goto_label(const char *label_name)
@@ -295,10 +285,6 @@ const char*
 		return jumpif_true(test_reg, label);
 	}
 
-	// ========================================================================
-	// Loop Management
-	// ========================================================================
-
 	loop_context
 	begin_loop(const char *name = nullptr)
 	{
@@ -332,10 +318,6 @@ const char*
 		goto_label(current_loop.start_label);
 	}
 
-	// ========================================================================
-	// While Loop Management
-	// ========================================================================
-
 	while_context
 	begin_while(int condition_reg)
 	{
@@ -357,9 +339,7 @@ const char*
 	while_context
 	begin_do()
 	{
-		while_context ctx = {generate_label("do_start"), generate_label("do_end"),
-							-1, // No condition reg yet
-							regs.mark()};
+		while_context ctx = {generate_label("do_start"), generate_label("do_end"), -1, regs.mark()};
 
 		label(ctx.condition_label.data());
 		return ctx;
@@ -372,10 +352,6 @@ const char*
 		label(ctx.end_label.data());
 		regs.restore(ctx.saved_reg_mark);
 	}
-
-	// ========================================================================
-	// Conditional Management
-	// ========================================================================
 
 	conditional_context
 	begin_if(int test_reg)
@@ -405,10 +381,6 @@ const char*
 		regs.restore(ctx.saved_reg_mark);
 	}
 
-	// ========================================================================
-	// Data Loading and Register Operations
-	// ========================================================================
-
 	int
 	load(const typed_value &value, int dest_reg = -1)
 	{
@@ -431,8 +403,6 @@ const char*
 		return dest_reg;
 	}
 
-
-
 	int
 	move(int src_reg, int dest_reg = -1)
 	{
@@ -443,10 +413,6 @@ const char*
 		emit(MOVE_MOVE_MAKE(dest_reg, src_reg));
 		return dest_reg;
 	}
-
-	// ========================================================================
-	// Arithmetic and Logic
-	// ========================================================================
 
 	int
 	arithmetic(int left_reg, int right_reg, arith_op op, int dest_reg = -1)
@@ -481,12 +447,6 @@ const char*
 	div(int left_reg, int right_reg, int dest_reg = -1)
 	{
 		return arithmetic(left_reg, right_reg, ARITH_DIV, dest_reg);
-	}
-
-	int
-	mod(int left_reg, int right_reg, int dest_reg = -1)
-	{
-		return arithmetic(left_reg, right_reg, ARITH_MOD, dest_reg);
 	}
 
 	int
@@ -558,10 +518,6 @@ const char*
 	{
 		return logic(left_reg, right_reg, LOGIC_OR, dest_reg);
 	}
-
-	// ========================================================================
-	// Cursor Operations
-	// ========================================================================
 
 	int
 	open_cursor(cursor_context *context)
@@ -644,7 +600,6 @@ const char*
 		return dest_reg;
 	}
 
-	// Get multiple columns into contiguous registers
 	int
 	get_columns(int cursor_id, int start_col, int count, int first_dest_reg = -1)
 	{
@@ -688,19 +643,11 @@ const char*
 		emit(UPDATE_MAKE(cursor_id, record_reg));
 	}
 
-	// ========================================================================
-	// Result Output
-	// ========================================================================
-
 	void
 	result(int first_reg, int reg_count = 1)
 	{
 		emit(RESULT_MAKE(first_reg, reg_count));
 	}
-
-	// ========================================================================
-	// Transaction Control
-	// ========================================================================
 
 	void
 	begin_transaction()
@@ -726,10 +673,6 @@ const char*
 		emit({OP_Debug});
 	}
 
-	// ========================================================================
-	// Function Calls
-	// ========================================================================
-
 	int
 	call_function(vm_function fn, int first_arg_reg, int arg_count, int result_reg = -1)
 	{
@@ -741,7 +684,6 @@ const char*
 		return result_reg;
 	}
 
-	// In ProgramBuilder (compile.hpp)
 	int
 	pack2(int left_reg, int right_reg, int dest_reg = -1)
 	{
@@ -764,27 +706,14 @@ const char*
 	}
 };
 
-inline cursor_context *
-from_structure(relation &structure)
-{
-	cursor_context *cctx = (cursor_context *)arena<query_arena>::alloc(sizeof(cursor_context));
-	cctx->storage.tree = &structure.storage.btree;
-	cctx->type = BPLUS;
-	cctx->layout = tuple_format_from_relation(structure);
-	return cctx;
-}
+cursor_context *
+from_structure(relation &structure);
 
-inline cursor_context *
-red_black(tuple_format &layout, bool allow_duplicates = true)
-{
-	cursor_context *cctx = (cursor_context *)arena<query_arena>::alloc(sizeof(cursor_context));
-	cctx->type = RED_BLACK;
-	cctx->layout = layout;
-	cctx->flags = allow_duplicates;
-	return cctx;
-}
+cursor_context *
+red_black(tuple_format &layout, bool allow_duplicates = true);
 
 array<vm_instruction, query_arena>
 compile_program(stmt_node *stmt, bool inject_transaction);
+
 void
 load_catalog_from_master();

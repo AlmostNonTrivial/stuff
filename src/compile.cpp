@@ -1,3 +1,36 @@
+/*
+**
+** The compiler takes the annotated AST, which has resolved that the query is targeting valid
+** tables/columns etc, and turns it into program that the vm can execute.
+**
+** Our 'program' is an array of vm_instructions, each having an op_code and various paramters that we can
+** utilize. Look at vm.hpp/cpp to see what parameters need to go where.
+**
+** This part of the project is the least developed: The VM is capable of doing most query ops
+** but the actual compilation those programs from an AST is quite involved.
+**
+** The implementation can compile the subset of SQL specified in parser.hpp, but in demo.hpp you can see hand-rolled
+** programs that do more advanced queries.
+**
+** To loosely illstrate what a full compiler might do, take the following example:
+**
+** 'SELECT * FROM users WHERE age > 30 AND user_id > 500;
+**
+** This would compile to a vastly different program depending on a few factors.
+**
+** Firstly, is there an index of age? If there is, should we first collect the the rows where
+** age > 30? Or because the users table is sorted by user_id, would it be quicker to
+** do SEEK GT and then scan until the end of the table?
+**
+** We can't answer what's best without data, like how big is the users table? If it's
+** large, then the SEEK GT basically degrades to a full-table scan, because it will only skip a fraction
+** of the table. Similary what is the distribution of ages? It might be that the vast majority of
+** of users are 30 >, such that the initial index lookup is pure overhead, that is, it has a low selectivity.
+**
+** The only 'optimization' that has been implemented, is that if our expression involves a primary key, we do a seek,
+** and if the op is '=' then, because we know primary keys are unique, we do exit immediately after the op is finished.
+*/
+
 #include "compile.hpp"
 #include "arena.hpp"
 #include "catalog.hpp"
@@ -7,8 +40,27 @@
 #include "vm.hpp"
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <string_view>
+
+cursor_context *
+from_structure(relation &structure)
+{
+	cursor_context *cctx = (cursor_context *)arena<query_arena>::alloc(sizeof(cursor_context));
+	cctx->storage.tree = &structure.storage.btree;
+	cctx->type = BPLUS;
+	cctx->layout = tuple_format_from_relation(structure);
+	return cctx;
+}
+
+cursor_context *
+red_black(tuple_format &layout, bool allow_duplicates)
+{
+	cursor_context *cctx = (cursor_context *)arena<query_arena>::alloc(sizeof(cursor_context));
+	cctx->type = RED_BLACK;
+	cctx->layout = layout;
+	cctx->flags = allow_duplicates;
+	return cctx;
+}
 
 static int
 compile_literal(program_builder *prog, expr_node *expr)
@@ -123,9 +175,11 @@ is_pk_lookup(expr_node *where_clause, relation *table, comparison_op *out_op, ex
 	return true;
 }
 
-
-
-
+/*
+ * When we create a table, we need to insert a record
+ * into the master catalog, including the actual 'CREATE TABLE X ..'
+ * command that kicked it off.
+ */
 static string_view
 reconstruct_create_sql(create_table_stmt *stmt)
 {
@@ -157,25 +211,26 @@ reconstruct_create_sql(create_table_stmt *stmt)
 	return stream.finish();
 }
 
+/*
+ * When the VM calls this function, the new table schema is already in
+ * the catalog, so we can create our btree from it (key, record_size).
+ */
 static bool
 vmfunc_create_structure(typed_value *result, typed_value *args, uint32_t arg_count)
 {
 	const char *table_name = args[0].as_char();
 
 	relation *structure = catalog.get(table_name);
-	if (!structure)
-	{
-		result->type = TYPE_U32;
-		result->data = arena<query_arena>::alloc(sizeof(uint32_t));
-		*(uint32_t *)result->data = 0;
-		return false;
-	}
+
+	assert(structure);
 
 	tuple_format layout = tuple_format_from_relation(*structure);
 	structure->storage.btree = bt_create(layout.key_type, layout.record_size, true);
 
 	result->type = TYPE_U32;
 	result->data = arena<query_arena>::alloc(sizeof(uint32_t));
+	// return the root page of the newly created btree, so that we can insert it into
+	// the master catalog
 	*(uint32_t *)result->data = structure->storage.btree.root_page_index;
 	return true;
 }
@@ -191,14 +246,7 @@ vmfunc_drop_structure(typed_value *result, typed_value *args, uint32_t arg_count
 	const char *name = args[0].as_char();
 	relation   *structure = catalog.get(name);
 
-	if (!structure)
-	{
-
-		result->type = TYPE_U32;
-		result->data = arena<query_arena>::alloc(sizeof(uint32_t));
-		*(uint32_t *)result->data = 1;
-		return true;
-	}
+	assert(structure);
 
 	bt_clear(&structure->storage.btree);
 
@@ -210,8 +258,11 @@ vmfunc_drop_structure(typed_value *result, typed_value *args, uint32_t arg_count
 	return true;
 }
 
+/*
+ * The output of the from the SELECT * FROM master_catalog is inserted into the catalog
+ */
 void
-vmfunc_catalog_bootstrap(typed_value *result, size_t count)
+catalog_reload_callback(typed_value *result, size_t count)
 {
 	if (count != 5)
 	{
@@ -225,7 +276,9 @@ vmfunc_catalog_bootstrap(typed_value *result, size_t count)
 	const char	  *sql = result[4].as_char();
 
 	if (strcmp(name, MASTER_CATALOG) == 0)
+	{
 		return;
+	}
 
 	auto master = catalog.get(MASTER_CATALOG);
 	if (master->next_key.as_u32() <= key)
@@ -233,6 +286,7 @@ vmfunc_catalog_bootstrap(typed_value *result, size_t count)
 		*(uint32_t *)(master->next_key.data) = key + 1;
 	}
 
+	// parse 'CREATE TABLE users (INT user_id, TEXT username ...) -> attributes
 	stmt_node					 *stmt = parse_sql(sql).statements[0];
 	array<attribute, query_arena> columns;
 
@@ -245,14 +299,14 @@ vmfunc_catalog_bootstrap(typed_value *result, size_t count)
 		for (uint32_t i = 0; i < create_stmt.columns.size(); i++)
 		{
 			attribute_node &col_def = create_stmt.columns[i];
-			attribute  col;
+			attribute		col;
 			col.type = col_def.type;
 			sv_to_cstr(col_def.name, col.name, ATTRIBUTE_NAME_MAX_SIZE);
 			columns.push(col);
 		}
 	}
 
-	relation	structure = create_relation(name, columns);
+	relation	 structure = create_relation(name, columns);
 	tuple_format format = tuple_format_from_relation(structure);
 
 	structure.storage.btree = bt_create(format.key_type, format.record_size, false);
@@ -265,11 +319,11 @@ array<vm_instruction, query_arena>
 compile_select(stmt_node *stmt)
 {
 	program_builder prog;
-	select_stmt	  *select_stmt = &stmt->select_stmt;
+	select_stmt	   *select_stmt = &stmt->select_stmt;
 
 	relation *table = catalog.get(select_stmt->table_name);
 
-	bool	  has_order_by = (select_stmt->order_by_column.size() > 0);
+	bool has_order_by = (select_stmt->order_by_column.size() > 0);
 
 	if (has_order_by)
 	{
@@ -395,7 +449,7 @@ compile_select(stmt_node *stmt)
 		int	 cursor = prog.open_cursor(table_ctx);
 
 		comparison_op seek_op;
-		expr_node		 *seek_literal;
+		expr_node	 *seek_literal;
 		bool		  use_seek = is_pk_lookup(select_stmt->where_clause, table, &seek_op, &seek_literal);
 
 		if (use_seek && seek_op == EQ)
@@ -448,7 +502,7 @@ compile_select(stmt_node *stmt)
 			{
 				prog.regs.push_scope();
 
-				bool		should_output = true;
+				bool				should_output = true;
 				conditional_context where_ctx;
 				if (select_stmt->where_clause)
 				{
@@ -504,21 +558,21 @@ array<vm_instruction, query_arena>
 compile_insert(stmt_node *stmt)
 {
 	program_builder prog;
-	insert_stmt	  *insert_stmt = &stmt->insert_stmt;
+	insert_stmt	   *insert_stmt = &stmt->insert_stmt;
 
 	prog.begin_transaction();
 
 	relation *table = catalog.get(insert_stmt->table_name);
-	auto table_ctx = from_structure(*table);
-	int	 cursor = prog.open_cursor(table_ctx);
+	auto	  table_ctx = from_structure(*table);
+	int		  cursor = prog.open_cursor(table_ctx);
 
 	int row_size = table->columns.size();
 	int row_start = prog.regs.allocate_range(row_size);
 
 	for (uint32_t i = 0; i < insert_stmt->values.size(); i++)
 	{
-		expr_node	*expr = insert_stmt->values[i];
-		uint32_t col_idx = insert_stmt->sem.column_indices[i];
+		expr_node *expr = insert_stmt->values[i];
+		uint32_t   col_idx = insert_stmt->sem.column_indices[i];
 
 		int value_reg;
 		if (expr->type == EXPR_LITERAL)
@@ -543,7 +597,7 @@ array<vm_instruction, query_arena>
 compile_update(stmt_node *stmt)
 {
 	program_builder prog;
-	update_stmt	  *update_stmt = &stmt->update_stmt;
+	update_stmt	   *update_stmt = &stmt->update_stmt;
 
 	prog.begin_transaction();
 
@@ -568,8 +622,8 @@ compile_update(stmt_node *stmt)
 
 		for (uint32_t i = 0; i < update_stmt->columns.size(); i++)
 		{
-			uint32_t col_idx = update_stmt->sem.column_indices[i];
-			expr_node	*value_expr = update_stmt->values[i];
+			uint32_t   col_idx = update_stmt->sem.column_indices[i];
+			expr_node *value_expr = update_stmt->values[i];
 
 			int new_value;
 			if (value_expr->type == EXPR_LITERAL)
@@ -604,13 +658,13 @@ array<vm_instruction, query_arena>
 compile_delete(stmt_node *stmt)
 {
 	program_builder prog;
-	delete_stmt	  *delete_stmt = &stmt->delete_stmt;
+	delete_stmt	   *delete_stmt = &stmt->delete_stmt;
 
 	prog.begin_transaction();
 
 	relation *table = catalog.get(delete_stmt->table_name);
-	auto table_ctx = from_structure(*table);
-	int	 cursor = prog.open_cursor(table_ctx);
+	auto	  table_ctx = from_structure(*table);
+	int		  cursor = prog.open_cursor(table_ctx);
 
 	int at_end = prog.first(cursor);
 
@@ -669,7 +723,7 @@ compile_delete(stmt_node *stmt)
 array<vm_instruction, query_arena>
 compile_create_table(stmt_node *stmt)
 {
-	program_builder	 prog;
+	program_builder	   prog;
 	create_table_stmt *create_stmt = &stmt->create_table_stmt;
 
 	prog.begin_transaction();
@@ -712,7 +766,7 @@ compile_create_table(stmt_node *stmt)
 array<vm_instruction, query_arena>
 compile_drop_table(stmt_node *stmt)
 {
-	program_builder prog;
+	program_builder	 prog;
 	drop_table_stmt *drop_stmt = &stmt->drop_table_stmt;
 
 	prog.begin_transaction();
@@ -823,24 +877,16 @@ compile_program(stmt_node *stmt, bool inject_transaction)
 	}
 	}
 }
+
 void
 load_catalog_from_master()
 {
+	vm_set_result_callback(catalog_reload_callback);
 
-	vm_set_result_callback(vmfunc_catalog_bootstrap);
+	parser_result result = parse_sql("SELECT * FROM master_catalog");
+	assert(result.success && result.statements.size() == 1);
 
-	program_builder prog = {};
-	auto		   cctx = from_structure(*catalog.get(MASTER_CATALOG));
-	int			   cursor = prog.open_cursor(cctx);
-	int			   is_at_end = prog.rewind(cursor, false);
-	auto		   while_context = prog.begin_while(is_at_end);
-	int			   dest_reg = prog.get_columns(cursor, 0, cctx->layout.columns.size());
-	prog.result(dest_reg, cctx->layout.columns.size());
-	prog.next(cursor, is_at_end);
-	prog.end_while(while_context);
-	prog.close_cursor(cursor);
-	prog.halt();
-	prog.resolve_labels();
+	auto program = compile_select(result.statements[0]);
 
-	vm_execute(prog.instructions.front(), prog.instructions.size());
+	vm_execute(program.front(), program.size());
 }

@@ -259,21 +259,7 @@ Records: [A]  [B]  [C]  [××]  (last entry ignored)
 #include <sys/types.h>
 #include <utility>
 
-// When you know it's uint32_t
-static void
-debug_print_u32s_from_bytes(uint8_t *bytes, uint32_t count, const char *label)
-{
-	printf("%s[%u]: [", label, count);
-	uint32_t *u32_ptr = reinterpret_cast<uint32_t *>(bytes);
 
-	for (uint32_t i = 0; i < count; i++)
-	{
-		if (i > 0)
-			printf(", ");
-		printf("%u", u32_ptr[i]);
-	}
-	printf("]\n");
-}
 
 /*
 ** CONSTANTS AND CONFIGURATION
