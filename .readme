@@ -1,0 +1,268 @@
+┌─────────────────────────────────────────────────────────────────┐
+│                        LOGICAL VIEW (SQL)                        │
+│  Table: users                                                    │
+│  ┌─────┬───────────────┬──────────────┬─────┐                  │
+│  │ id  │     email     │     name     │ age │                  │
+│  ├─────┼───────────────┼──────────────┼─────┤                  │
+│  │  1  │ alice@ex.com  │    Alice     │  25 │                  │
+│  │  2  │  bob@ex.com   │     Bob      │  30 │                  │
+│  └─────┴───────────────┴──────────────┴─────┘                  │
+│                                                                  │
+│  "Show me all users" → Rows with named columns                  │
+└─────────────────────────────────────────────────────────────────┘
+                              ↕
+┌─────────────────────────────────────────────────────────────────┐
+│                   VM VIEW (Cursor + TupleFormat)                 │
+│  ┌──────────────────────────────────────────────┐              │
+│  │ VmCursor[0] → BtCursor {                      │              │
+│  │   leaf_page: 42                               │              │
+│  │   leaf_index: 0                               │              │
+│  │   state: VALID                                │              │
+│  │ }                                             │              │
+│  └──────────────────────────────────────────────┘              │
+│                                                                  │
+│  CursorContext {                                                 │
+│    layout: TupleFormat {                                        │
+│      key_type: TYPE_U32        // Column 0 (id)                │
+│      columns: [TYPE_U32, TYPE_CHAR32, TYPE_CHAR16, TYPE_U16]   │
+│      offsets: [0, 32, 48]      // Offsets within record        │
+│      record_size: 50           // Total record bytes           │
+│    }                                                            │
+│  }                                                              │
+│                                                                  │
+│  OP_Column(cursor, 0) → Read key as TYPE_U32                    │
+│  OP_Column(cursor, 1) → Read record[0:32] as TYPE_CHAR32        │
+│  OP_Column(cursor, 2) → Read record[32:48] as TYPE_CHAR16       │
+│  OP_Column(cursor, 3) → Read record[48:50] as TYPE_U16          │
+└─────────────────────────────────────────────────────────────────┘
+                              ↕
+┌─────────────────────────────────────────────────────────────────┐
+│                    B-TREE VIEW (Key-Value Store)                 │
+│  BTreeNode (page 42) {                                          │
+│    flags: IS_LEAF                                               │
+│    num_keys: 2                                                  │
+│    parent: 15                                                   │
+│    prev: 41                                                     │
+│    next: 43                                                     │
+│                                                                  │
+│    ┌─────────────────────────────────────────┐                 │
+│    │ Keys (stored separately):                │                 │
+│    │   keys[0]: 0x00000001  (4 bytes)        │                 │
+│    │   keys[1]: 0x00000002  (4 bytes)        │                 │
+│    └─────────────────────────────────────────┘                 │
+│                                                                  │
+│    ┌─────────────────────────────────────────┐                 │
+│    │ Records (opaque byte arrays):            │                 │
+│    │   records[0]: [50 bytes of raw data...] │                 │
+│    │   records[1]: [50 bytes of raw data...] │                 │
+│    └─────────────────────────────────────────┘                 │
+│  }                                                              │
+│                                                                  │
+│  B-tree only knows:                                             │
+│  • How to compare keys (via DataType)                          │
+│  • Size of keys (4 bytes) and records (50 bytes)               │
+│  • Nothing about record internals                               │
+└─────────────────────────────────────────────────────────────────┘
+                              ↕
+┌─────────────────────────────────────────────────────────────────┐
+│                      PAGER VIEW (Raw Pages)                      │
+│  Page 42:                                                        │
+│  ┌──────────────────────────────────────────────────────┐      │
+│  │[0x00] Page Index (4 bytes): 0x0000002A              │      │
+│  │[0x04] Raw bytes (4064 bytes):                       │      │
+│  │       0x01 0x02 0x00 0x0F 0x29 0x2B ...            │      │
+│  │       [node header][keys][records][unused]...       │      │
+│  └──────────────────────────────────────────────────────┐      │
+│                                                                  │
+│  Pager only knows:                                              │
+│  • Pages are PAGE_SIZE bytes                                         │
+│  • First 4 bytes = page index                                   │
+│  • Remaining PAGE_SIZE - 4 bytes = usable space                          │
+│  • Nothing about content structure                              │
+└─────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+================================================================================
+                     PAGER ROLLBACK JOURNAL MECHANISM
+================================================================================
+
+NORMAL STATE (No Transaction)
+------------------------------
+    DATA FILE                          MEMORY
+    ┌─────────────┐                    ┌──────────────────┐
+    │ Page 0:     │                    │ PAGER.root       │
+    │ ROOT PAGE   │◄───────────────────│ (in-memory copy) │
+    │ counter: 5  │                    │                  │
+    │ free: 3─────┼──┐                 └──────────────────┘
+    ├─────────────┤  │                 ┌──────────────────┐
+    │ Page 1:     │  │                 │ LRU CACHE        │
+    │ DATA        │  │                 │ ┌──────────────┐ │
+    ├─────────────┤  │                 │ │ Page 1 data  │ │
+    │ Page 2:     │  │                 │ ├──────────────┤ │
+    │ DATA        │  │                 │ │ Page 4 data  │ │
+    ├─────────────┤  │                 │ └──────────────┘ │
+    │ Page 3:     │◄─┘                 └──────────────────┘
+    │ FREE        │
+    │ prev: 0     │      (No Journal File Exists)
+    ├─────────────┤
+    │ Page 4:     │
+    │ DATA        │
+    └─────────────┘
+
+================================================================================
+
+BEGIN TRANSACTION
+-----------------
+    DATA FILE                 JOURNAL FILE                MEMORY
+    ┌─────────────┐          ┌─────────────┐            ┌─────────────────┐
+    │ Page 0:     │          │ Page 0:     │            │ journaled_or_   │
+    │ ROOT PAGE   │────────► │ ROOT PAGE   │            │ new_pages:      │
+    │ counter: 5  │  copy    │ (original)  │            │ {0}             │
+    │ free: 3     │          └─────────────┘            └─────────────────┘
+    ├─────────────┤
+    │ Page 1:     │          Journal created             in_transaction=true
+    │ DATA        │          with root at
+    ├─────────────┤          offset 0
+    │ Page 2:     │
+    │ DATA        │
+    ├─────────────┤
+    │ Page 3:     │
+    │ FREE        │
+    ├─────────────┤
+    │ Page 4:     │
+    │ DATA        │
+    └─────────────┘
+
+================================================================================
+
+MODIFYING PAGE 2 (First Modification)
+--------------------------------------
+Step 1: pager_mark_dirty(2) - Journal original content BEFORE modification
+
+    DATA FILE                 JOURNAL FILE                MEMORY
+    ┌─────────────┐          ┌─────────────┐            ┌─────────────────┐
+    │ Page 0:     │          │ Page 0:     │            │ journaled_or_   │
+    │ ROOT        │          │ ROOT PAGE   │            │ new_pages:      │
+    ├─────────────┤          ├─────────────┤            │ {0, 2}          │
+    │ Page 1:     │          │ Page 2:     │◄─── append └─────────────────┘
+    │ DATA        │  copy    │ DATA        │     original
+    ├─────────────┤  ───────►│ (original)  │     content
+    │ Page 2:     │          └─────────────┘
+    │ DATA        │
+    │ (original)  │          Page 2 added to journal
+    ├─────────────┤          BEFORE any changes made
+    │ Page 3:     │
+    │ FREE        │
+    ├─────────────┤
+    │ Page 4:     │
+    │ DATA        │
+    └─────────────┘
+
+Step 2: Actual modification happens in cache
+
+    CACHE (after modification)
+    ┌──────────────┐
+    │ Page 2:      │
+    │ MODIFIED     │ (dirty flag set)
+    │ DATA         │
+    └──────────────┘
+
+================================================================================
+
+ALLOCATING NEW PAGE
+-------------------
+    DATA FILE                 JOURNAL FILE                MEMORY
+    ┌─────────────┐          ┌─────────────┐            ┌─────────────────┐
+    │ Page 0:     │          │ Page 0:     │            │ journaled_or_   │
+    │ ROOT        │          │ ROOT PAGE   │            │ new_pages:      │
+    │ counter: 6  │          ├─────────────┤            │ {0, 2, 5}       │
+    ├─────────────┤          │ Page 2:     │            └─────────────────┘
+    │ ...         │          │ DATA        │
+    ├─────────────┤          └─────────────┘            Page 5 marked in set
+    │ Page 5:     │                                      but NOT journaled
+    │ NEW DATA    │          (No journal entry          (no original state
+    └─────────────┘           for new pages)             to preserve)
+
+================================================================================
+
+COMMIT TRANSACTION
+------------------
+1. Write all dirty pages to data file
+2. Write root page to data file
+3. fsync(data_fd)
+4. Delete journal file ← ATOMIC COMMIT POINT
+5. Clear transaction state
+
+    DATA FILE                                            MEMORY
+    ┌─────────────┐                                     ┌─────────────────┐
+    │ Page 0:     │                                     │ journaled_or_   │
+    │ ROOT PAGE   │                                     │ new_pages:      │
+    │ (updated)   │                                     │ {} (cleared)    │
+    ├─────────────┤                                     └─────────────────┘
+    │ Page 1:     │
+    │ DATA        │          ✗ Journal deleted          in_transaction=false
+    ├─────────────┤            (commit complete)
+    │ Page 2:     │
+    │ MODIFIED    │
+    ├─────────────┤
+    │ ...         │
+    └─────────────┘
+
+================================================================================
+
+ROLLBACK/CRASH RECOVERY
+-----------------------
+If journal exists at startup or on explicit rollback:
+
+    JOURNAL FILE                 DATA FILE (Being Restored)
+    ┌─────────────┐             ┌─────────────┐
+    │ Page 0:     │──restore───►│ Page 0:     │
+    │ ROOT PAGE   │             │ ROOT PAGE   │ ← Original metadata
+    │ counter: 5  │             │ counter: 5  │   (including page count)
+    ├─────────────┤             ├─────────────┤
+    │ Page 2:     │──restore───►│ Page 2:     │
+    │ DATA        │             │ DATA        │ ← Original content
+    │ (original)  │             │ (original)  │
+    └─────────────┘             ├─────────────┤
+                                │ Page 5:     │ ← Will be truncated
+                                │ NEW DATA    │   based on original
+                                └─────────────┘   page_counter
+
+Steps:
+1. Read root from journal offset 0 → restore to data file
+2. Read each page from journal → restore using page's self-identifying index
+3. Truncate data file to (original page_counter * PAGE_SIZE)
+4. Delete journal file
+5. Reset cache
+
+================================================================================
+
+KEY DESIGN POINTS
+-----------------
+• Write-ahead logging: Original content journaled BEFORE modification
+• Self-identifying pages: Each page stores its index, enabling simple
+  append-only journal without separate index
+• Atomic commit: Journal deletion is the commit point
+• journaled_or_new_pages set: Ensures each page journaled at most once
+  (capturing pre-transaction state) and new pages never journaled
+• Root at offset 0: Fixed location simplifies recovery
+• Crash safety: Journal presence at startup triggers automatic recovery
+
+================================================================================
