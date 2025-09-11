@@ -1,92 +1,16 @@
 /**
- * blob.cpp - Binary Large Object (BLOB) Storage Implementation
+ * Binary Large Object (BLOB) Storage Implementation
  *
- * This module implements overflow page storage for large data that cannot fit
- * within standard btree nodes. BLOBs are stored as linked chains of pages,
+ * This module implements a loose equivilent to sqlite's overflow page storage for large data that cannot fit
+ * within standard btree nodes. BLOBs are stored as single-linked-list of pages,
  * where each page contains a portion of the data and a pointer to the next page.
  *
- * DESIGN DECISIONS:
- *   - Immutable: BLOBs are write-once, no update operations
- *   - Simple chaining: Linear linked list of pages, no indexing
- *   - Fixed overhead: 12 bytes per page for metadata
- *   - Zero-copy reads: Returns direct pointers to page data when possible
+ * A way to properly intergrate this might be to have a BLOB column,
+ * that would store the the actual index to the start of a blob chain.
  *
- * PAGE LAYOUT:
- *   [0-3]   index:  Page number of this node
- *   [4-7]   next:   Next page in chain (0 terminates)
- *   [8-9]   size:   Bytes of data in this page
- *   [10-11] flags:  Reserved for future use
- *   [12+]   data:   Actual blob content (PAGE_SIZE - 12 bytes)
- *
- * USAGE PATTERN:
- *   1. btree stores large values using blob_create()
- *   2. btree column stores the returned first page index
- *   3. VM reads blob via blob_read_page() for streaming
- *   4. Query execution uses blob_read_full() for complete data
- *
- * THREAD SAFETY:
- *   Not thread-safe. Relies on pager's transaction serialization.
- *
- * MEMORY MANAGEMENT:
- *   - Page allocation/deallocation through pager
- *   - Full reads allocate from QueryArena (freed after query)
- *   - No caching - relies on pager's buffer pool
+ * Note that both B+tree and blob's can use the pager, because the page is completely agnostic to the
+ * actual format of the data.
  */
-
-/*
-
-
- ================================================================================
-                         BLOB STORAGE - LINKED LIST STRUCTURE
- ================================================================================
-
- 1. SINGLE PAGE BLOB (fits in one page)
- ----------------------------------------
-
-     btree column
-     ┌──────────┐
-     │ page: 42 │ ──────┐
-     └──────────┘       │
-                        ▼
-                   Page #42 (4096 bytes)
-                   ┌──────────────────────────────────────┐
-                   │ index: 42   (4 bytes)                │
-                   │ next:  0    (4 bytes) [terminates]   │
-                   │ size:  1500 (2 bytes)                │
-                   │ flags: 0    (2 bytes)                │
-                   ├──────────────────────────────────────┤
-                   │ data: [1500 bytes of actual content] │
-                   │       [............................] │
-                   │       [2584 bytes unused]            │
-                   └──────────────────────────────────────┘
-                          12 byte header + 4084 data area
-
-
- 2. MULTI-PAGE BLOB (chained across 3 pages)
- ---------------------------------------------
-
-     btree column
-     ┌──────────┐
-     │ page: 42 │ ──────┐
-     └──────────┘       │
-                        ▼
-                   Page #42                    Page #57                    Page #89
-     ┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
-     │ index: 42               │  │ index: 57               │  │ index: 89               │
-     │ next:  57 ──────────────┼─▶  next:  89   ────────────┼──▶ next:  0  [end]         │
-     │ size:  4084             │  │ size:  4084             │  │ size:  2000             │
-     │ flags: 0                │  │ flags: 0                │  │ flags: 0                │
-     ├─────────────────────────┤  ├─────────────────────────┤  ├─────────────────────────┤
-     │ data: [4084 bytes full] │  │ data: [4084 bytes full] │  │ data: [2000 bytes]      │
-     │       [████████████████]│  │       [████████████████]│  │       [████████]        │
-     │       [████████████████]│  │       [████████████████]│  │       [        ]        │
-     └─────────────────────────┘  └─────────────────────────┘  └─────────────────────────┘
-          Total: 10,168 bytes of user data across 3 pages
-
-
-
-          */
-
 
 #include "blob.hpp"
 #include "common.hpp"
@@ -97,63 +21,36 @@
 #include <cstring>
 #include <sys/_types/_ssize_t.h>
 
-#define BLOB_HEADER_SIZE 12
+#define BLOB_HEADER_SIZE 14
 #define BLOB_DATA_SIZE	 (PAGE_SIZE - BLOB_HEADER_SIZE)
 
-// ============================================================================
-// Internal Page Structure
-// ============================================================================
-
-/**
- * Internal representation of a blob page.
- * Not exposed in public API - accessed only through blob functions.
- */
 struct blob_node
 {
 	uint32_t index; // Page index of this node
 	uint32_t next;	// Next page in chain (0 if last)
-	uint16_t size;	// Size of data in this node
-	uint16_t flags; // Reserved for future use
+	uint32_t size;	// Size of data in this node
 	uint8_t	 data[BLOB_DATA_SIZE];
 };
+static_assert(sizeof(blob_node) == PAGE_SIZE);
 
-// ============================================================================
-// Internal Helper Functions
-// ============================================================================
-
-/**
- * Get blob node from page index.
- * Returns nullptr for index 0 (invalid page).
- */
 #define GET_BLOB_NODE(index) (reinterpret_cast<blob_node *>(pager_get(index)))
 
-/**
- * Allocate and initialize a new blob page.
- * Sets all header fields to initial values and marks page dirty.
- */
 inline static blob_node *
 allocate_blob_node()
 {
 	uint32_t   page_index = pager_new();
 	blob_node *node = GET_BLOB_NODE(page_index);
 
-	// Initialize the node
+
 	node->index = page_index;
 	node->next = 0;
 	node->size = 0;
-	node->flags = 0;
 
 	pager_mark_dirty(page_index);
 	return node;
 }
 
-// ============================================================================
-// Public Interface Implementation
-// ============================================================================
-
 /**
- * Create a new blob from data.
- *
  * Splits data across multiple pages as needed, creating a linked chain.
  * Each page holds up to BLOB_DATA_SIZE bytes.
  *
@@ -162,13 +59,14 @@ allocate_blob_node()
  * @return First page index of blob chain, or 0 on failure
  */
 uint32_t
-blob_create(void *data, uint32_t size)
+blob_create(const void *data, uint32_t size)
 {
 	if (!data || size == 0)
 	{
 		return 0;
 	}
 
+	// how many pages do we need?
 	int nodes_required = (size + BLOB_DATA_SIZE - 1) / BLOB_DATA_SIZE;
 
 	uint32_t first_page = 0;
@@ -205,7 +103,6 @@ blob_create(void *data, uint32_t size)
  * Delete an entire blob chain.
  *
  * Walks the linked list and deallocates each page.
- * Safe to call with invalid (0) page index.
  *
  * @param first_page First page index of blob chain
  */
@@ -228,15 +125,7 @@ blob_delete(uint32_t first_page)
 	}
 }
 
-/**
- * Read a single page from blob chain.
- *
- * Used by VM for streaming blob data without loading entire blob.
- * Returns direct pointer to page data - valid until page is evicted.
- *
- * @param page_index Index of page to read
- * @return Page descriptor with data pointer and metadata
- */
+
 blob_page
 blob_read_page(uint32_t page_index)
 {
@@ -254,13 +143,7 @@ blob_read_page(uint32_t page_index)
 }
 
 /**
- * Calculate total size of blob.
- *
  * Walks entire chain summing page sizes.
- * Used for allocation sizing before full reads.
- *
- * @param first_page First page index of blob chain
- * @return Total size in bytes, or 0 if invalid
  */
 uint32_t
 blob_get_size(uint32_t first_page)
@@ -286,13 +169,9 @@ blob_get_size(uint32_t first_page)
 /**
  * Read entire blob into contiguous memory.
  *
- * Allocates buffer from QueryArena and copies all pages.
- * Buffer lifetime is tied to arena reset (typically end of query).
- *
- * @param first_page First page index of blob chain
- * @return Buffer with complete blob data, or {nullptr, 0} on failure
+ * Allocates buffer from query_arena and copies all pages.
  */
- uint8_t*
+uint8_t *
 blob_read_full(uint32_t first_page, size_t *size)
 {
 	auto stream = stream_writer<query_arena>::begin();
@@ -304,14 +183,14 @@ blob_read_full(uint32_t first_page, size_t *size)
 		blob_node *node = GET_BLOB_NODE(current);
 		if (!node)
 		{
-            stream.abandon();
-            return nullptr;
+			stream.abandon();
+			return nullptr;
 		}
 
-        *size +=node->size;
+		*size += node->size;
 		stream.write(node->data, node->size);
 		current = node->next;
 	}
 
-	return (uint8_t*)stream.start;
+	return (uint8_t *)stream.start;
 }
