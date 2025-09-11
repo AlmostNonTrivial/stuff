@@ -1,6 +1,25 @@
 
+INTRO:
+
+Hi everyone, a couple of months ago I set myself a challange to to build an SQL engine from scratch,
+and because of the lack of examples out there, I've decided to make a video about it. The source code that we'll
+be going through is linked below, so please feel free to play around it with it.
+
+First things first let's see the final product.
+
+Show different selects, and updates, inserts,
+A few demo programs, like like
+
+
+
+
 OVERVIEW:
--
+- most of the the diagrams in the readme
+- get rid of test is 50
+
+
+
+
 
 PAGER:
 
@@ -19,6 +38,8 @@ BTREE:
 - coverage
 - show btree print out and coverage
 
+[Tuple oriented view]
+
 BLOB:
 - If we need store large amounts of data that wouldn't, sqlite has the concept of overflow pages
 - I've done something similar.
@@ -27,6 +48,11 @@ BLOB:
 
 PARSER:
 
+COMPILER:
+NEED remove bools that make no sense like should_update
+
+
 CATALOG/SEMANTIC
 
 VM:
+- Need diagrams to explain interpreting tuples, from tuples to records
