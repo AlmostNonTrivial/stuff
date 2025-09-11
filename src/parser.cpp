@@ -1282,7 +1282,7 @@ token_type_to_string(TOKEN_TYPE type)
 }
 
 const char *
-stmt_type_to_string(StmtType type)
+stmt_type_to_string(STMT_TYPE type)
 {
 	switch (type)
 	{

@@ -94,7 +94,7 @@ sql_type_name(data_type type)
 }
 
 static relation *
-require_table(semantic_context *ctx, string_view table_name, relation **out_field)
+require_table(semantic_context *ctx, string_view table_name)
 {
 	relation *table = lookup_table(ctx, table_name);
 	if (!table)
@@ -102,10 +102,7 @@ require_table(semantic_context *ctx, string_view table_name, relation **out_fiel
 		set_error(ctx, "Table does not exist", table_name);
 		return nullptr;
 	}
-	if (out_field)
-	{
-		*out_field = table;
-	}
+
 	return table;
 }
 
@@ -177,7 +174,6 @@ semantic_resolve_expr(semantic_context *ctx, expr_node *expr, relation *table)
 
 		expr->sem.column_index = idx;
 		expr->sem.resolved_type = table->columns[idx].type;
-		expr->sem.table = table;
 		return true;
 	}
 
@@ -285,7 +281,7 @@ resolve_insert_columns(semantic_context *ctx, insert_stmt_node *stmt, relation *
 static bool
 semantic_resolve_select(semantic_context *ctx, select_stmt_node *stmt)
 {
-	relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
+	relation *table = require_table(ctx, stmt->table_name);
 	if (!table)
 	{
 		return false;
@@ -337,7 +333,7 @@ semantic_resolve_select(semantic_context *ctx, select_stmt_node *stmt)
 static bool
 semantic_resolve_insert(semantic_context *ctx, insert_stmt_node *stmt)
 {
-	relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
+	relation *table = require_table(ctx, stmt->table_name);
 	if (!table)
 	{
 		return false;
@@ -359,9 +355,9 @@ semantic_resolve_insert(semantic_context *ctx, insert_stmt_node *stmt)
 
 	for (uint32_t i = 0; i < stmt->values.size(); i++)
 	{
-		expr_node	*expr = stmt->values[i];
-		uint32_t col_idx = stmt->sem.column_indices[i];
-		data_type expected_type = table->columns[col_idx].type;
+		expr_node *expr = stmt->values[i];
+		uint32_t   col_idx = stmt->sem.column_indices[i];
+		data_type  expected_type = table->columns[col_idx].type;
 
 		if (!validate_literal_value(ctx, expr, expected_type, table->columns[col_idx].name, "INSERT"))
 		{
@@ -375,7 +371,7 @@ semantic_resolve_insert(semantic_context *ctx, insert_stmt_node *stmt)
 static bool
 semantic_resolve_update(semantic_context *ctx, update_stmt_node *stmt)
 {
-	relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
+	relation *table = require_table(ctx, stmt->table_name);
 	if (!table)
 	{
 		return false;
@@ -388,9 +384,9 @@ semantic_resolve_update(semantic_context *ctx, update_stmt_node *stmt)
 
 	for (uint32_t i = 0; i < stmt->values.size(); i++)
 	{
-		expr_node	*expr = stmt->values[i];
-		uint32_t col_idx = stmt->sem.column_indices[i];
-		data_type expected_type = table->columns[col_idx].type;
+		expr_node *expr = stmt->values[i];
+		uint32_t   col_idx = stmt->sem.column_indices[i];
+		data_type  expected_type = table->columns[col_idx].type;
 
 		if (!validate_literal_value(ctx, expr, expected_type, table->columns[col_idx].name, "UPDATE SET"))
 		{
@@ -409,7 +405,7 @@ semantic_resolve_update(semantic_context *ctx, update_stmt_node *stmt)
 static bool
 semantic_resolve_delete(semantic_context *ctx, delete_stmt_node *stmt)
 {
-	relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
+	relation *table = require_table(ctx, stmt->table_name);
 	if (!table)
 	{
 		return false;
@@ -502,8 +498,6 @@ semantic_resolve_drop_table(semantic_context *ctx, drop_table_stmt_node *stmt)
 		return false;
 	}
 
-	stmt->sem.table = table;
-
 	ctx->tables_to_drop.insert(stmt->table_name, 1);
 
 	return true;
@@ -578,6 +572,5 @@ semantic_analyze(array<stmt_node *, query_arena> &statements)
 	}
 
 	apply_catalog_changes(&ctx);
-
 	return result;
 }

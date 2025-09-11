@@ -1,3 +1,430 @@
+┌─────────────────────────────────────────────────────────────┐
+│                        SQL Query                            │
+│                  "SELECT * FROM users"                      │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    PARSER (parser.cpp)                      │
+│                                                             │
+│  Lexical Analysis → Tokens → Recursive Descent → AST       │
+│                                                             │
+│  Output: Abstract Syntax Tree                              │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│              SEMANTIC ANALYZER (semantic.cpp)               │
+│                                                             │
+│  Validate tables exist, columns exist, types match         │
+│  Annotate AST with metadata                                │
+│                                                             │
+│  Output: Validated & Annotated AST                         │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  COMPILER (compile.cpp)                     │
+│                                                             │
+│  Generate VM bytecode from AST                             │
+│  Simple optimizations (e.g., primary key seeks)            │
+│                                                             │
+│  Output: Array of VM Instructions                          │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│              VIRTUAL MACHINE (vm.cpp)                       │
+│                                                             │
+│  Register-based VM with 40 registers                       │
+│  Executes bytecode instructions                            │
+│  Interfaces with storage through cursors                   │
+│                                                             │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│                STORAGE LAYER                                │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │           CURSOR ABSTRACTION                         │  │
+│  │                                                      │  │
+│  │  Unified iterator interface for:                    │  │
+│  │  • B+Tree (persistent, disk-based)                  │  │
+│  │  • Red-Black Tree (ephemeral, memory-only)          │  │
+│  └──────────────────┬───────────────────────────────────┘  │
+│                     │                                       │
+│  ┌──────────────────▼───────────────────────────────────┐  │
+│  │            B+TREE (btree.cpp)                        │  │
+│  │                                                      │  │
+│  │  Persistent storage for tables                      │  │
+│  │  Supports ordered access and range queries          │  │
+│  └──────────────────┬───────────────────────────────────┘  │
+│                     │                                       │
+│  ┌──────────────────▼───────────────────────────────────┐  │
+│  │            PAGER (pager.cpp)                         │  │
+│  │                                                      │  │
+│  │  Page cache with LRU eviction                       │  │
+│  │  Write-ahead journaling for transactions            │  │
+│  │  Free page management                               │  │
+│  └──────────────────┬───────────────────────────────────┘  │
+│                     │                                       │
+│  ┌──────────────────▼───────────────────────────────────┐  │
+│  │         OS LAYER (os_layer.cpp)                      │  │
+│  │                                                      │  │
+│  │  Platform abstraction (Windows/Unix/Memory)         │  │
+│  │  File I/O operations                                │  │
+│  └──────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+
+
+// pipeline example
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ SQL: SELECT * FROM users WHERE user_id > 50;                       │
+└──────────────────────┬──────────────────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ PARSER - Abstract Syntax Tree                                       │
+├─────────────────────────────────────────────────────────────────────┤
+│ Statement type: SELECT                                              │
+│ Table: users                                                        │
+│ Columns: * (all)                                                    │
+│ WHERE:                                                              │
+│   BinaryOp                                                          │
+│   ├── op: GT (>)                                                    │
+│   ├── left: Column("user_id")                                       │
+│   └── right: Literal(50, TYPE_U32)                                  │
+└──────────────────────┬──────────────────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ SEMANTIC ANALYZER - Annotated AST                                   │
+├─────────────────────────────────────────────────────────────────────┤
+│ ✓ Table 'users' exists with 5 columns:                             │
+│   [0] user_id (U32) - PRIMARY KEY                                   │
+│   [1] username (CHAR32)                                             │
+│   [2] email (CHAR32)                                               │
+│   [3] age (U32)                                                     │
+│   [4] city (CHAR16)                                                 │
+│                                                                      │
+│ ✓ Column 'user_id' is column index 0                               │
+│ ✓ Literal 50 compatible with U32                                    │
+│ ✓ Optimization: Can use GT seek on primary key                      │
+└──────────────────────┬──────────────────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ COMPILER - VM Bytecode Program                                      │
+├─────────────────────────────────────────────────────────────────────┤
+│ PC[ 0] OPEN cursor=0 ctx=users_btree                                │
+│ PC[ 1] LOAD R[0] <- 50 (U32)           # Seek key                   │
+│ PC[ 2] SEEK cursor=0 key=R[0] op=GT -> R[1]  # Find first > 50     │
+│ PC[ 3] JUMPIF R[1] FALSE -> PC[16]     # Exit if not found          │
+│        ┌─── LOOP START ───┐                                         │
+│ PC[ 4] │ COLUMN cursor=0 col=0 -> R[2] # Get user_id               │
+│ PC[ 5] │ LOAD R[3] <- 50 (U32)                                      │
+│ PC[ 6] │ TEST R[4] <- R[2] > R[3]      # Verify > 50               │
+│ PC[ 7] │ JUMPIF R[4] FALSE -> PC[14]   # Skip if not               │
+│ PC[ 8] │ COLUMN cursor=0 col=0 -> R[5] # Extract all columns       │
+│ PC[ 9] │ COLUMN cursor=0 col=1 -> R[6]                             │
+│ PC[10] │ COLUMN cursor=0 col=2 -> R[7]                             │
+│ PC[11] │ COLUMN cursor=0 col=3 -> R[8]                             │
+│ PC[12] │ COLUMN cursor=0 col=4 -> R[9]                             │
+│ PC[13] │ RESULT R[5..9]                # Output row                 │
+│ PC[14] │ STEP cursor=0 forward -> R[1] # Next record               │
+│ PC[15] └ GOTO PC[3]                     # Continue loop             │
+│ PC[16] CLOSE cursor=0                                               │
+│ PC[17] HALT exit_code=0                                             │
+└──────────────────────┬──────────────────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ VIRTUAL MACHINE EXECUTION                                           │
+├─────────────────────────────────────────────────────────────────────┤
+│ Registers:                    Cursor State:                         │
+│ R[0] = 50                     ┌─────────────────┐                   │
+│ R[1] = true (found)           │ Cursor #0       │                   │
+│ R[2] = 51 (current user_id)   │ ┌─────────────┐ │                   │
+│ R[3] = 50                     │ │ position    ├─┼──► [51,Bob,...]   │
+│ R[4] = true (51 > 50)         │ └─────────────┘ │                   │
+│ R[5..9] = row data            │ Tree: users     │                   │
+│                               │ Leaf: page_5    │                   │
+│                               │ Index: 2        │                   │
+│                               └─────────────────┘                   │
+└──────────────────────┬──────────────────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ B+TREE STRUCTURE                                                    │
+├─────────────────────────────────────────────────────────────────────┤
+│ Root Page (Internal Node)                                           │
+│ ┌────────────────────────────────────────┐                         │
+│ │ Keys: [30, 60, 90]                      │                         │
+│ │ Children: [p3, p5, p7, p9]              │                         │
+│ └────────┬──────┬──────┬──────┬──────────┘                         │
+│          ▼      ▼      ▼      ▼                                     │
+│      ┌────┐ ┌────┐ ┌────┐ ┌────┐                                  │
+│      │ p3 │ │ p5 │ │ p7 │ │ p9 │  Leaf Pages                      │
+│      └────┘ └────┘ └────┘ └────┘                                  │
+│                                                                      │
+│ Page 3 (Leaf): [1,Alice] [15,Charlie] [29,Eve]                     │
+│         next→                                                       │
+│                                                                      │
+│ Page 5 (Leaf): [31,Frank] [42,Grace] [51,Bob] [59,Helen]           │
+│ ←prev          next→                   ↑                            │
+│                                    cursor here                      │
+│                                                                      │
+│ Page 7 (Leaf): [61,Ivan] [75,Julia] [89,Kevin]                     │
+│ ←prev          next→                                                │
+│                                                                      │
+│ Page 9 (Leaf): [91,Laura] [95,Mike] [99,Nancy]                     │
+│ ←prev                                                               │
+│                                                                      │
+│ Leaf Chain: p3 ↔ p5 ↔ p7 ↔ p9                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+EXECUTION TRACE:
+1. SEEK positions cursor at first key > 50 (finds 51 in page 5)
+2. Loop reads [51,Bob,...] and outputs via RESULT
+3. STEP moves cursor to [59,Helen,...]
+4. Continue until end of tree
+5. Output: All users with user_id > 50
+
+ ================================================================================
+                         BLOB STORAGE - LINKED LIST STRUCTURE
+ ================================================================================
+
+ 1. SINGLE PAGE BLOB (fits in one page)
+ ----------------------------------------
+
+     btree column
+     ┌──────────┐
+     │ page: 42 │ ──────┐
+     └──────────┘       │
+                        ▼
+                   Page #42 (4096 bytes)
+                   ┌──────────────────────────────────────┐
+                   │ index: 42   (4 bytes)                │
+                   │ next:  0    (4 bytes) [terminates]   │
+                   │ size:  1500 (2 bytes)                │
+                   │ flags: 0    (2 bytes)                │
+                   ├──────────────────────────────────────┤
+                   │ data: [1500 bytes of actual content] │
+                   │       [............................] │
+                   │       [2584 bytes unused]            │
+                   └──────────────────────────────────────┘
+                          12 byte header + 4084 data area
+
+
+ 2. MULTI-PAGE BLOB (chained across 3 pages)
+ ---------------------------------------------
+
+     btree column
+     ┌──────────┐
+     │ page: 42 │ ──────┐
+     └──────────┘       │
+                        ▼
+                   Page #42                    Page #57                    Page #89
+     ┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
+     │ index: 42               │  │ index: 57               │  │ index: 89               │
+     │ next:  57 ──────────────┼─▶  next:  89   ────────────┼──▶ next:  0  [end]         │
+     │ size:  4084             │  │ size:  4084             │  │ size:  2000             │
+     │ flags: 0                │  │ flags: 0                │  │ flags: 0                │
+     ├─────────────────────────┤  ├─────────────────────────┤  ├─────────────────────────┤
+     │ data: [4084 bytes full] │  │ data: [4084 bytes full] │  │ data: [2000 bytes]      │
+     │       [████████████████]│  │       [████████████████]│  │       [████████]        │
+     │       [████████████████]│  │       [████████████████]│  │       [        ]        │
+     └─────────────────────────┘  └─────────────────────────┘  └─────────────────────────┘
+          Total: 10,168 bytes of user data across 3 pages
+
+
+
+
+
+
+================================================================================
+					B+TREE LEAF NODE SHIFT OPERATIONS
+================================================================================
+
+LEAF NODE MEMORY LAYOUT
+-----------------------
+┌────────────────────────────────────────────────────────────────────────┐
+│ Header (24 bytes) │        Keys Area         │      Records Area       │
+├───────────────────┼──────────────────────────┼─────────────────────────┤
+│ index  (4)        │ key[0] │ key[1] │ key[2] │ rec[0] │ rec[1] │ rec[2]│
+│ parent (4)        │        │        │        │        │        │       │
+│ next   (4)        │  Keys stored             │  Records stored         │
+│ prev   (4)        │  contiguously            │  contiguously           │
+│ num_keys (4)      │                          │                         │
+│ is_leaf (4)       │                          │                         │
+└────────────────────────────────────────────────────────────────────────┘
+					↑                          ↑
+					data[0]                    data + (max_keys * key_size)
+
+
+================================================================================
+1. SHIFT_KEYS_RIGHT - Making space for insertion at index 1
+================================================================================
+
+BEFORE: (num_keys = 3, inserting at index 1)
+────────────────────────────────────────────
+Keys:    [10] [20] [30] [  ] [  ]
+		 ↑    ↑    ↑
+		 0    1    2
+
+Records: [A]  [B]  [C]  [ ]  [ ]
+		 ↑    ↑    ↑
+		 0    1    2
+
+OPERATION: SHIFT_KEYS_RIGHT(node, from_idx=1, count=2)
+──────────────────────────────────────────────────────
+memcpy(GET_KEY_AT(node, 2),    // destination: key[2]
+	   GET_KEY_AT(node, 1),    // source: key[1]
+	   2 * key_size)           // copy key[1] and key[2]
+
+Visual:
+	   from_idx
+		  ↓
+Keys:    [10] [20] [30] [  ] [  ]
+			  └─────┴────→ copy 2 keys
+Keys:    [10] [20] [20] [30] [  ]
+			  gap  └─────┴─── shifted
+
+AFTER: (ready to insert at index 1)
+─────────────────────────────────
+Keys:    [10] [??] [20] [30] [  ]
+			  ↑
+			  ready for new key
+
+Records: [A]  [??] [B]  [C]  [ ]
+			  ↑
+			  ready for new record
+			  (after SHIFT_RECORDS_RIGHT)
+
+
+================================================================================
+2. SHIFT_RECORDS_RIGHT - Corresponding record shift
+================================================================================
+
+OPERATION: SHIFT_RECORDS_RIGHT(node, from_idx=1, count=2)
+──────────────────────────────────────────────────────────
+uint8_t *base = GET_RECORD_DATA(node);
+memcpy(base + (2 * record_size),    // destination: rec[2]
+	   base + (1 * record_size),    // source: rec[1]
+	   2 * record_size)             // copy rec[1] and rec[2]
+
+Visual:
+		 from_idx
+			↓
+Records: [A]  [B]  [C]  [ ]  [ ]
+			  └────┴─────→ copy 2 records
+Records: [A]  [B]  [B]  [C]  [ ]
+			  gap  └────┴─── shifted
+
+
+================================================================================
+3. SHIFT_KEYS_LEFT - Removing entry at index 1
+================================================================================
+
+BEFORE: (num_keys = 4, deleting at index 1)
+───────────────────────────────────────────
+Keys:    [10] [15] [20] [30] [  ]
+		 ↑    ↑    ↑    ↑
+		 0    1    2    3
+			  DEL
+
+Records: [A]  [X]  [B]  [C]  [ ]
+		 ↑    ↑    ↑    ↑
+		 0    1    2    3
+			  DEL
+
+OPERATION: SHIFT_KEYS_LEFT(node, from_idx=1, count=2)
+─────────────────────────────────────────────────────
+memcpy(GET_KEY_AT(node, 1),    // destination: key[1]
+	   GET_KEY_AT(node, 2),    // source: key[2]
+	   2 * key_size)           // copy key[2] and key[3]
+
+Visual:
+			  from_idx
+				 ↓
+Keys:    [10] [15] [20] [30] [  ]
+			  ←────└────┴─── copy 2 keys
+Keys:    [10] [20] [30] [30] [  ]
+			  └────┴─── shifted
+						stale (will be ignored)
+
+AFTER: (num_keys decremented to 3)
+───────────────────────────────────
+Keys:    [10] [20] [30] [××] [  ]
+		 ↑    ↑    ↑
+		 0    1    2    (ignored)
+
+Records: [A]  [B]  [C]  [××] [ ]
+		 ↑    ↑    ↑
+		 0    1    2    (ignored)
+
+
+================================================================================
+4. COMPLETE INSERT EXAMPLE
+================================================================================
+
+Initial state: num_keys = 3
+─────────────────────────────
+Keys:    [10] [20] [30]
+Records: [A]  [B]  [C]
+
+Want to insert: key=15, record=X at position 1
+
+Step 1: Find insertion point (binary_search returns 1)
+Step 2: SHIFT_KEYS_RIGHT(node, 1, 2)
+		Keys:    [10] [20] [20] [30]
+Step 3: SHIFT_RECORDS_RIGHT(node, 1, 2)
+		Records: [A]  [B]  [B]  [C]
+Step 4: COPY_KEY(GET_KEY_AT(node, 1), 15)
+		Keys:    [10] [15] [20] [30]
+Step 5: COPY_RECORD(GET_RECORD_AT(node, 1), X)
+		Records: [A]  [X]  [B]  [C]
+Step 6: node->num_keys++
+		num_keys = 4
+
+Final state:
+────────────
+Keys:    [10] [15] [20] [30]
+Records: [A]  [X]  [B]  [C]
+
+
+================================================================================
+5. COMPLETE DELETE EXAMPLE
+================================================================================
+
+Initial state: num_keys = 4
+─────────────────────────────
+Keys:    [10] [15] [20] [30]
+Records: [A]  [X]  [B]  [C]
+
+Want to delete: key=15 at position 1
+
+Step 1: Find deletion point (binary_search returns 1)
+Step 2: Calculate entries_to_shift = 4 - 1 - 1 = 2
+Step 3: SHIFT_KEYS_LEFT(node, 1, 2)
+		Keys:    [10] [20] [30] [30]
+Step 4: SHIFT_RECORDS_LEFT(node, 1, 2)
+		Records: [A]  [B]  [C]  [C]
+Step 5: node->num_keys--
+		num_keys = 3
+
+Final state:
+────────────
+Keys:    [10] [20] [30] [××]  (last entry ignored)
+Records: [A]  [B]  [C]  [××]  (last entry ignored)
+
+
+
+
+
+
+
+
+
+
+
 ┌─────────────────────────────────────────────────────────────────┐
 │                        LOGICAL VIEW (SQL)                        │
 │  Table: users                                                    │
@@ -266,3 +693,962 @@ KEY DESIGN POINTS
 • Crash safety: Journal presence at startup triggers automatic recovery
 
 ================================================================================
+
+
+
+
+TYPE SYSTEM ARCHITECTURE
+    ═══════════════════════════════════════════════════════════════════
+
+    DataType (64-bit encoding)
+    ┌──────────────────────────────────────────────────────────────────┐
+    │                         Single Types                              │
+    │  63..56    55..24           23..0                                │
+    │ ┌────────┬─────────────┬──────────┐                             │
+    │ │Type ID │  Reserved    │   Size   │                             │
+    │ │  (8)   │    (32)      │   (24)   │                             │
+    │ └────────┴─────────────┴──────────┘                             │
+    │     ↑                         ↑                                  │
+    │  0x01=U8                 Size in bytes                           │
+    │  0x11=I8                 (up to 16MB)                            │
+    │  0x31=CHAR                                                       │
+    └──────────────────────────────────────────────────────────────────┘
+
+    ┌──────────────────────────────────────────────────────────────────┐
+    │                         Dual Types                                │
+    │  63..56   55..48   47..40   39..32   31..24      23..0          │
+    │ ┌────────┬────────┬────────┬────────┬────────┬──────────┐      │
+    │ │  0x40  │Type1 ID│Type2 ID│ Size1  │ Size2  │Total Size│      │
+    │ │ (DUAL) │  (8)   │  (8)   │  (8)   │  (8)   │   (24)   │      │
+    │ └────────┴────────┴────────┴────────┴────────┴──────────┘      │
+    │     ↑        ↑        ↑        ↑        ↑          ↑            │
+    │  Marker   First    Second   Sizes of          Combined         │
+    │           type     type     components        size              │
+    └──────────────────────────────────────────────────────────────────┘
+
+
+    DUAL KEY CONCEPT (Composite Keys for Indexing)
+    ═══════════════════════════════════════════════════════════════════
+
+    Use Case: Index on (customer_id, order_date)
+
+    Step 1: Individual Values
+    ┌─────────────┐    ┌─────────────┐
+    │ customer_id │    │ order_date  │
+    │   (U32)     │    │   (U64)     │
+    │  [42]       │    │ [timestamp] │
+    └─────────────┘    └─────────────┘
+           │                  │
+           └────────┬─────────┘
+                    ↓
+    Step 2: Pack into Dual Type
+    ┌───────────────────────────────┐
+    │       Dual(U32, U64)          │
+    │  ┌──────────┬───────────────┐ │
+    │  │   42     │   timestamp   │ │
+    │  │  4 bytes │    8 bytes    │ │
+    │  └──────────┴───────────────┘ │
+    │       Total: 12 bytes         │
+    └───────────────────────────────┘
+           │
+           ↓
+    Step 3: Use as Single Key in B-Tree
+
+    B-Tree Node:
+    ┌────────────────────────────────────┐
+    │  Key1(Dual)  │  Key2(Dual)  │ ... │
+    ├──────────────┼──────────────┼─────┤
+    │ (12,ts1)     │ (15,ts2)     │     │  <- Composite keys
+    │     ↓        │     ↓        │     │     sorted lexicographically
+    │   child1     │   child2     │     │
+    └────────────────────────────────────┘
+
+
+    OPERATIONS ON DUAL TYPES
+    ═══════════════════════════════════════════════════════════════════
+
+    Comparison (Lexicographic):
+    ────────────────────────────
+    Dual(a₁,a₂) vs Dual(b₁,b₂)
+
+    if (a₁ != b₁)
+        return compare(a₁, b₁)
+    else
+        return compare(a₂, b₂)
+
+    Example:
+    (10, "alice") < (10, "bob")   → true  (first components equal)
+    (10, "alice") < (11, "alice") → true  (first component decides)
+
+
+    Hashing:
+    ────────
+    hash(Dual) = hash(component1) ^ (hash(component2) * prime)
+
+
+    Memory Layout:
+    ─────────────
+    Dual value in memory:
+    ┌──────────────┬──────────────┐
+    │ Component 1  │ Component 2  │  <- Contiguous storage
+    └──────────────┴──────────────┘
+    offset=0       offset=size₁
+
+
+    TypedValue Structure:
+    ════════════════════
+    ┌─────────────────┐
+    │   TypedValue    │
+    ├─────────────────┤
+    │ void* data  ────┼──→ [Actual data bytes]
+    ├─────────────────┤
+    │ DataType type   │ (64-bit type descriptor)
+    └─────────────────┘
+
+
+
+
+FREE PAGE MANAGEMENT SYSTEM
+    ═══════════════════════════════════════════════════════════════════
+
+    PAGE STRUCTURE POLYMORPHISM
+    ────────────────────────────
+    All pages share base layout:
+    ┌──────────────────────────┐
+    │  base_page (1024 bytes)  │
+    ├──────────────────────────┤
+    │ index (4B) │   data...    │
+    └──────────────────────────┘
+          ↓ reinterpret_cast based on usage
+
+    ┌────────────────┬────────────────┬────────────────┐
+    │   root_page    │   free_page    │   data_page    │
+    ├────────────────┼────────────────┼────────────────┤
+    │ page_counter   │ index          │ index          │
+    │ free_page_head │ previous_free  │ [actual data]  │
+    │ [padding...]   │ [padding...]   │                │
+    └────────────────┴────────────────┴────────────────┘
+
+
+    CREATING A FREE PAGE (pager_delete)
+    ════════════════════════════════════════════════════════════════════
+
+    Initial State: Page 42 is active data page
+    ──────────────────────────────────────────
+    Root Page (0)          Free List
+    ┌──────────────┐       ┌─────┐    ┌─────┐
+    │ page_counter │       │  7  │───→│  3  │───→ 0 (end)
+    │ free_head: 7 │       └─────┘    └─────┘
+    └──────────────┘
+
+    Page 42
+    ┌──────────────┐
+    │ index: 42    │
+    │ [user data]  │
+    └──────────────┘
+
+    Step 1: Load page 42 into cache & mark dirty
+    ─────────────────────────────────────────────
+    cache_get_or_load(42) → Ensures page is in cache
+    pager_mark_dirty(42)  → Will be journaled
+
+    Step 2: Reinterpret as free_page
+    ─────────────────────────────────
+    Page 42 (reinterpreted)
+    ┌───────────────────┐
+    │ index: 42         │  ← Unchanged
+    │ previous_free: ?? │  ← To be set
+    │ [padding...]      │
+    └───────────────────┘
+
+    Step 3: Insert at head of free list
+    ────────────────────────────────────
+    free_page->previous_free = root.free_page_head (7)
+    root.free_page_head = 42
+
+    Final State: Page 42 is now free
+    ──────────────────────────────────
+    Root Page (0)          Free List
+    ┌──────────────┐       ┌─────┐    ┌─────┐    ┌─────┐
+    │ page_counter │       │ 42  │───→│  7  │───→│  3  │───→ 0
+    │ free_head: 42│       └─────┘    └─────┘    └─────┘
+    └──────────────┘       (newest)              (oldest)
+
+
+    RECLAIMING A FREE PAGE (pager_new)
+    ════════════════════════════════════════════════════════════════════
+
+    Initial State: Need new page, free list available
+    ──────────────────────────────────────────────────
+    Root Page (0)          Free List
+    ┌──────────────┐       ┌─────┐    ┌─────┐    ┌─────┐
+    │ counter: 100 │       │ 42  │───→│  7  │───→│  3  │───→ 0
+    │ free_head: 42│       └─────┘    └─────┘    └─────┘
+    └──────────────┘
+
+    Step 1: Check free list (take_page_from_free_list)
+    ────────────────────────────────────────────────────
+    if (root.free_page_head != 0)  // We have free pages!
+        current_index = 42
+
+    Step 2: Load free page & extract next pointer
+    ───────────────────────────────────────────────
+    Free Page 42
+    ┌───────────────────┐
+    │ index: 42         │
+    │ previous_free: 7  │ ← Save this
+    │ [padding...]      │
+    └───────────────────┘
+
+    Step 3: Update free list head
+    ──────────────────────────────
+    root.free_page_head = free_page->previous_free (7)
+
+    Step 4: Mark as new & initialize
+    ─────────────────────────────────
+    PAGER.journaled_or_new_pages.insert(42)  // Won't journal old data
+    memset(page, 0, PAGE_SIZE)                // Clear old free_page data
+    page->index = 42                          // Restore index
+
+    Final State: Page 42 reclaimed for use
+    ────────────────────────────────────────
+    Root Page (0)          Free List (shorter)
+    ┌──────────────┐       ┌─────┐    ┌─────┐
+    │ counter: 100 │       │  7  │───→│  3  │───→ 0
+    │ free_head: 7 │       └─────┘    └─────┘
+    └──────────────┘
+
+    Page 42 (ready for data)
+    ┌──────────────┐
+    │ index: 42    │
+    │ [zeros...]   │ ← Clean slate
+    └──────────────┘
+
+
+    ALLOCATION DECISION TREE
+    ════════════════════════════════════════════════════════════════════
+
+                          pager_new()
+                              │
+                              ▼
+                    ┌────────────────────┐
+                    │ free_head != 0?    │
+                    └────────────────────┘
+                        ╱            ╲
+                      YES             NO
+                      ╱                ╲
+                     ▼                  ▼
+            ┌──────────────┐    ┌──────────────────┐
+            │ Reclaim from │    │ Allocate new:    │
+            │ free list    │    │ page_counter++   │
+            └──────────────┘    └──────────────────┘
+                     │                  │
+                     └──────┬───────────┘
+                            ▼
+                    ┌──────────────┐
+                    │ Mark as new  │ ← Won't journal
+                    │ Initialize   │   old contents
+                    │ Return index │
+                    └──────────────┘
+
+
+    TRANSACTION SAFETY
+    ════════════════════════════════════════════════════════════════════
+
+    Key insight: Free list changes are transactional!
+
+    1. DELETE within transaction:
+       - Old page data → journaled
+       - Root's free_head change → journaled
+       - On rollback: Both restored, page is active again
+
+    2. NEW within transaction:
+       - Marked in journaled_or_new_pages
+       - If from free list: free_head change journaled
+       - If new allocation: page_counter change journaled
+       - On rollback: Free list restored, new pages truncated
+
+    3. File growth management:
+       ┌─────────────────────────────────────┐
+       │         Data File Layout            │
+       ├─────────────────────────────────────┤
+       │ Page 0: Root                        │
+       │ Page 1-99: Existing pages           │
+       │ Page 100+: Would be new allocations │
+       └─────────────────────────────────────┘
+                          ↓
+                    On rollback:
+                          ↓
+       os_file_truncate(fd, root.page_counter * PAGE_SIZE)
+       (Removes any pages allocated during failed transaction)
+
+
+
+
+
+LRU CACHE SYSTEM
+    ═══════════════════════════════════════════════════════════════════
+
+    CALLER'S VIEW (Completely Opaque)
+    ────────────────────────────────────
+
+    base_page* page = pager_get(42);
+    // Caller gets pointer - doesn't know or care if:
+    //   - Page was already cached (fast path)
+    //   - Page was loaded from disk (slow path)
+    //   - Another page was evicted to make room
+    // The pointer is always valid and points to cache memory
+
+    page->data[0] = 'X';  // Direct modification of cached page
+    pager_mark_dirty(42); // Tell pager it changed
+
+
+    INTERNAL ARCHITECTURE
+    ════════════════════════════════════════════════════════════════════
+
+    Global Pager State:
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ cache_meta[MAX_CACHE_ENTRIES]  │ cache_data[MAX_CACHE_ENTRIES] │
+    ├─────────────────────────────────┼─────────────────────────────────┤
+    │ [0] page_idx=7,  dirty, occ... │ [0] Page 7 data (1KB)          │
+    │ [1] page_idx=42, clean, occ... │ [1] Page 42 data (1KB)         │
+    │ [2] page_idx=15, dirty, occ... │ [2] Page 15 data (1KB)         │
+    │ [3] empty                       │ [3] uninitialized              │
+    │ ...                             │ ...                            │
+    └─────────────────────────────────┴─────────────────────────────────┘
+    Separated for cache locality when scanning metadata
+
+
+    Acceleration Structures:
+    ┌──────────────────────────────┐     ┌─────────────────────────┐
+    │   page_to_cache (hash_map)  │     │    LRU Doubly-Linked    │
+    ├──────────────────────────────┤     │         List            │
+    │ Page 7  → Slot 0             │     ├─────────────────────────┤
+    │ Page 42 → Slot 1             │     │ head → 1 ↔ 2 ↔ 0 ← tail│
+    │ Page 15 → Slot 2             │     │  (MRU)           (LRU)  │
+    └──────────────────────────────┘     └─────────────────────────┘
+      O(1) lookup: "Is page           O(1) operations for LRU policy
+      cached? Where?"
+
+
+    CACHE HIT PATH (Page Already Cached)
+    ════════════════════════════════════════════════════════════════════
+
+    pager_get(42)
+        │
+        ▼
+    cache_get_or_load(42)
+        │
+        ▼
+    ┌───────────────────────┐
+    │ page_to_cache.get(42) │ ← O(1) hash lookup
+    └───────────────────────┘
+        │
+        ▼ Found! slot = 1
+    ┌───────────────────────┐
+    │ cache_move_to_head(1) │ ← Update LRU order
+    └───────────────────────┘
+        │
+        ▼
+    return &cache_data[1]
+
+    LRU List Before: head → 2 ↔ 1 ↔ 0 ← tail
+    LRU List After:  head → 1 ↔ 2 ↔ 0 ← tail
+                            ↑
+                      Moved to front (MRU)
+
+
+    CACHE MISS PATH (Load from Disk)
+    ════════════════════════════════════════════════════════════════════
+
+    pager_get(99)
+        │
+        ▼
+    cache_get_or_load(99)
+        │
+        ▼
+    ┌───────────────────────┐
+    │ page_to_cache.get(99) │ → Not found (nullptr)
+    └───────────────────────┘
+        │
+        ▼
+    cache_find_free_slot()
+        │
+        ├─── Free slot exists ──→ Use slot 3
+        │
+        └─── All slots full ────→ cache_evict_lru_entry()
+                                         │
+                                         ▼
+                                   ┌─────────────────┐
+                                   │ slot = lru_tail │ (Slot 0)
+                                   └─────────────────┘
+                                         │
+                                         ▼
+                                   ┌─────────────────┐
+                                   │ if (dirty)      │
+                                   │   write_to_disk │
+                                   └─────────────────┘
+                                         │
+                                         ▼
+                                   Return slot 0
+
+    Then with slot:
+    ┌──────────────────────────┐
+    │ read_page_from_disk(99) │ → Load into cache_data[slot]
+    └──────────────────────────┘
+            │
+            ▼
+    ┌──────────────────────────┐
+    │ Update metadata:         │
+    │ - page_index = 99        │
+    │ - is_occupied = true     │
+    │ - is_dirty = false       │
+    └──────────────────────────┘
+            │
+            ▼
+    ┌──────────────────────────┐
+    │ page_to_cache.insert     │
+    │     (99 → slot)          │
+    └──────────────────────────┘
+            │
+            ▼
+    ┌──────────────────────────┐
+    │ lru_add_to_head(slot)    │
+    └──────────────────────────┘
+            │
+            ▼
+    return &cache_data[slot]
+
+
+    LRU LIST OPERATIONS (All O(1))
+    ════════════════════════════════════════════════════════════════════
+
+    Add to Head:                        Remove from Middle:
+    ────────────                        ───────────────────
+    Before: head → A ↔ B ← tail        Before: head → A ↔ X ↔ B ← tail
+
+    new.next = head (A)                 A.next = X.next (B)
+    new.prev = null                     B.prev = X.prev (A)
+    A.prev = new                        X.next = null
+    head = new                          X.prev = null
+
+    After: head → new ↔ A ↔ B ← tail   After: head → A ↔ B ← tail
+
+
+    Move to Head (on cache hit):
+    ────────────────────────────
+    1. Remove from current position (O(1) with doubly-linked)
+    2. Add to head (O(1))
+
+    This ensures recently accessed pages stay in cache
+
+
+    WRITE-BACK ON EVICTION
+    ════════════════════════════════════════════════════════════════════
+
+    When evicting slot with dirty page:
+
+    Cache Slot 0 (being evicted)
+    ┌──────────────────────┐
+    │ metadata:            │
+    │   page_index = 7     │
+    │   is_dirty = true ←──┼── Must write back!
+    └──────────────────────┘
+              │
+              ▼
+    write_page_to_disk(7, &cache_data[0])
+              │
+              ▼
+    os_file_seek(fd, 7 * PAGE_SIZE)
+    os_file_write(fd, data, PAGE_SIZE)
+              │
+              ▼
+    Slot 0 now free for reuse
+
+
+    KEY DESIGN INSIGHTS
+    ════════════════════════════════════════════════════════════════════
+
+    1. POINTER STABILITY: Returned pointers point to cache_data array,
+       which doesn't move. Valid until that slot is evicted.
+
+    2. METADATA SEPARATION: cache_meta and cache_data are separate arrays.
+       When scanning for free slots or walking LRU, we only touch metadata
+       (better cache locality).
+
+    3. ZERO-COPY: Callers work directly on cached pages. No copying
+       between user buffers and cache.
+
+    4. AUTOMATIC EVICTION: Cache manages itself. When full, LRU page
+       is automatically evicted, writing to disk if dirty.
+
+    5. TRANSACTION INTEGRATION: Dirty flag ensures modified pages are
+       journaled before changes, and written back on eviction/commit.
+
+    6. OPAQUE CACHING: The entire caching layer is hidden. Callers just
+       see: pager_get() → pointer. Simple interface, complex implementation.
+
+
+
+DISK-BASED TREE WITH PARTIAL MEMORY RESIDENCE
+    ═══════════════════════════════════════════════════════════════════════
+
+    PAGER'S ARRAY-LIKE ABSTRACTION
+    ────────────────────────────────────────────────────────────────────
+
+    Database File (Logical View):
+    ┌────┬────┬────┬────┬────┬────┬────┬────┬────┬────┬────┬────┬────┐
+    │ 0  │ 1  │ 2  │ 3  │ 4  │ 5  │ 6  │ 7  │ 8  │ 9  │ 10 │ 11 │... │
+    ├────┼────┼────┼────┼────┼────┼────┼────┼────┼────┼────┼────┼────┤
+    │Root│Node│Node│Node│Node│Node│Node│Node│Node│Node│Node│Node│    │
+    │Page│    │    │    │    │    │    │    │    │    │    │    │    │
+    └────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┘
+    Each slot = 1 PAGE_SIZE (1024 bytes)
+
+    The file is just an array of fixed-size pages!
+    Page Index = File Offset / PAGE_SIZE
+
+
+    TREE NODE "POINTERS" ARE INDICES
+    ════════════════════════════════════════════════════════════════════
+
+    Traditional In-Memory Tree:          Disk-Based Tree:
+    ─────────────────────────            ────────────────
+    struct Node {                        struct btree_node {
+        Key keys[N];                         uint32_t index;      // self
+        Node* children[N+1]; ← pointers      uint32_t parent;     // index!
+    };                                       uint32_t children[]; // indices!
+                                         };
+
+    child = node->children[i]            child = GET_NODE(node->children[i])
+            ↓                                     ↓
+    Direct memory access                  pager_get(page_index)
+                                                ↓
+                                         Returns cached or loads from disk
+
+
+    MULTIPLE TREES IN SAME FILE
+    ════════════════════════════════════════════════════════════════════
+
+    Database File Layout:
+    ┌─────────────────────────────────────────────────────────────────┐
+    │Page│     Tree A Pages        │    Tree B Pages    │ Free Pages │
+    │ 0  │ 1   2   3   4   5   6  │ 7   8   9  10  11 │ 12  13  14 │
+    ├────┼─────────────────────────┼────────────────────┼────────────┤
+    │Root│ A₁  A₂  A₃  A₄  A₅  A₆ │ B₁  B₂  B₃  B₄  B₅│ F₁  F₂  F₃│
+    └────┴─────────────────────────┴────────────────────┴────────────┘
+          ↑                         ↑                     ↑
+    Tree A: root_page_index = 1    Tree B: root = 7    Free list
+
+    btree* tree_A = btree_open(TYPE_U32, TYPE_NULL, 1);  // Root at page 1
+    btree* tree_B = btree_open(TYPE_U64, varchar(50), 7); // Root at page 7
+
+    Each tree only knows about its own pages via parent/child indices!
+
+
+    PARTIAL MEMORY RESIDENCE (WORKING SET)
+    ════════════════════════════════════════════════════════════════════
+
+    Example: Searching Tree A for key 42
+
+    Step 1: Start at root (page 1)
+    ────────────────────────────────
+    Disk:  [0][1][2][3][4][5][6][7][8][9]...
+               ↑
+    Cache: [Page 1 data]
+
+    GET_ROOT() → pager_get(1) → Loaded into cache
+
+
+    Step 2: Binary search in root, follow child[2] = page 3
+    ────────────────────────────────────────────────────────
+    Disk:  [0][1][2][3][4][5][6][7][8][9]...
+               ↑     ↑
+    Cache: [Page 1][Page 3]
+
+    GET_CHILD(node, 2) → GET_NODE(3) → pager_get(3) → Loaded
+
+
+    Step 3: Binary search in page 3, follow child[0] = page 5
+    ──────────────────────────────────────────────────────────
+    Disk:  [0][1][2][3][4][5][6][7][8][9]...
+               ↑     ↑     ↑
+    Cache: [Page 1][Page 3][Page 5]  ← Only path to key is loaded!
+
+    Pages 2, 4, 6 remain on disk - never touched for this query
+
+
+    B+TREE NODE STRUCTURE IN PAGE
+    ════════════════════════════════════════════════════════════════════
+
+    Internal Node (Page 3):
+    ┌──────────────────────────────────────────────────────────────┐
+    │ Header (24 bytes)              │ Data Area (1000 bytes)      │
+    ├────────┬────────┬──────┬──────┼──────────────┬──────────────┤
+    │index: 3│parent:1│next:0│keys:2│ Keys         │ Children     │
+    │        │        │prev:0│leaf:0│ [30][60]     │ [5][2][6]    │
+    └────────┴────────┴──────┴──────┴──────────────┴──────────────┘
+                                          ↑             ↑
+                                     Sorted keys   Page indices
+
+    Leaf Node (Page 5):
+    ┌──────────────────────────────────────────────────────────────┐
+    │ Header (24 bytes)              │ Data Area (1000 bytes)      │
+    ├────────┬────────┬──────┬──────┼──────────────┬──────────────┤
+    │index: 5│parent:3│next:2│keys:3│ Keys         │ Records      │
+    │        │        │prev:0│leaf:1│ [10][20][25] │ [R₁][R₂][R₃] │
+    └────────┴────────┴──────┴──────┴──────────────┴──────────────┘
+                         ↑                              ↑
+                    Leaf chain              Actual data records
+
+
+    TRAVERSAL WITH PAGE INDICES
+    ════════════════════════════════════════════════════════════════════
+
+    Code:                           What Actually Happens:
+    ─────                           ─────────────────────
+    find_leaf_for_key(tree, 42)
+    {
+      node = GET_ROOT()             node = pager_get(tree->root_page_index)
+                                           = pager_get(1)
+                                           → Returns pointer to cached page 1
+
+      while (IS_INTERNAL(node))     while (node->is_leaf == 0)
+      {
+        idx = binary_search(...)    // Find child index = 2
+
+        node = GET_CHILD(node,idx)  node = GET_NODE(children[2])
+                                          = GET_NODE(3)
+                                          = pager_get(3)
+                                          → Returns pointer to cached page 3
+      }
+      return node                   // Returns pointer to leaf in cache
+    }
+
+    The tree code thinks it's following pointers,
+    but it's actually loading pages by index!
+
+
+    RANGE SCAN USING LEAF CHAIN
+    ════════════════════════════════════════════════════════════════════
+
+    Leaf Chain (linked by page indices):
+    ┌────────┐    ┌────────┐    ┌────────┐    ┌────────┐
+    │ Page 5 │───→│ Page 2 │───→│ Page 6 │───→│ Page 4 │
+    │ [10-25]│ 2  │ [31-45]│ 6  │ [61-75]│ 4  │ [80-99]│ 0
+    └────────┘    └────────┘    └────────┘    └────────┘
+         ↑             ↑             ↑             ↑
+    node->next    node->next    node->next    node->next
+
+    Range scan from 20 to 70:
+    1. Find leaf for 20 → Page 5
+    2. Scan Page 5: get [20,25]
+    3. Follow chain: GET_NEXT(node) → pager_get(2) → Page 2
+    4. Scan Page 2: get [31,45]
+    5. Follow chain: GET_NEXT(node) → pager_get(6) → Page 6
+    6. Scan Page 6: get [61] and stop at 75
+
+    Only pages in the range are loaded into memory!
+
+
+    TRANSACTION & CRASH CONSISTENCY
+    ════════════════════════════════════════════════════════════════════
+
+    Split operation creating new nodes:
+
+    Before:                     After:
+    Page 3 (full)              Page 3 + new Page 15
+
+    1. new_node = create_node() → pager_new() → Returns page 15
+    2. Modify both nodes with new data
+    3. pager_mark_dirty(3) and pager_mark_dirty(15)
+    4. On commit: Both written atomically
+    5. On crash: Journal ensures both changes applied or neither
+
+    The tree always sees a consistent view!
+
+
+    KEY INSIGHTS
+    ════════════════════════════════════════════════════════════════════
+
+    1. FILE AS ARRAY: The database file is just a flat array of pages.
+       Trees impose structure via index references.
+
+    2. INDICES AS POINTERS: Where in-memory trees use pointers,
+       disk trees use page indices. GET_NODE() bridges this gap.
+
+    3. LAZY LOADING: Only accessed nodes are loaded. A million-node
+       tree might only need 3-4 pages in memory for a point query.
+
+    4. CACHE TRANSPARENCY: Tree algorithms don't know about caching.
+       They just call pager_get() and always get valid pointers.
+
+    5. MULTIPLE STRUCTURES: Different trees/indexes can coexist in
+       the same file, each starting from different root pages.
+
+    6. CRASH SAFETY: Page-level atomicity + journaling ensures trees
+       are never corrupted, even mid-operation.
+
+
+
+
+AST → BYTECODE COMPILATION PIPELINE
+    ═══════════════════════════════════════════════════════════════════════
+
+    SQL TO AST (Parser)
+    ────────────────────────────────────────────────────────────────────
+
+    Input: "SELECT name, age FROM users WHERE age > 21 ORDER BY name"
+
+    Tokenization:
+    ┌──────┬──────┬──────┬──────┬───────┬──────┬──────┬─────┬────┬────┐
+    │SELECT│ name │  ,   │ age  │ FROM  │users │WHERE │ age │ >  │ 21 │...
+    └──────┴──────┴──────┴──────┴───────┴──────┴──────┴─────┴────┴────┘
+
+    AST Generation:
+    ┌─────────────────────────────────┐
+    │       SelectStmt                │
+    ├─────────────────────────────────┤
+    │ table_name: "users"             │
+    │ columns: ["name", "age"]        │
+    │ order_by_column: "name"         │
+    │ where_clause: ───────────┐      │
+    └───────────────────────────┼─────┘
+                                ▼
+                        ┌─────────────┐
+                        │  EXPR_BINARY│
+                        │   op: GT    │
+                        ├─────────────┤
+                        │ left    right│
+                        └──┬───────┬──┘
+                           ▼       ▼
+                    ┌──────────┐ ┌──────────┐
+                    │EXPR_COLUMN│ │EXPR_LITERAL│
+                    │"age"     │ │21         │
+                    └──────────┘ └──────────┘
+
+
+    SEMANTIC ANALYSIS (Adds Type Info)
+    ════════════════════════════════════════════════════════════════════
+
+    Before Semantic:                  After Semantic:
+    ─────────────────                 ───────────────
+    EXPR_COLUMN                       EXPR_COLUMN
+    ├─ column_name: "age"            ├─ column_name: "age"
+    └─ sem: {                        └─ sem: {
+         resolved_type: NULL              resolved_type: TYPE_U32
+         column_index: -1                 column_index: 1
+         table: nullptr                   table: &users_relation
+       }                                }
+
+
+    PROGRAMBUILDER ABSTRACTION LAYER
+    ════════════════════════════════════════════════════════════════════
+
+    High-Level API:                   Generated Bytecode:
+    ───────────────                    ──────────────────
+    prog.begin_transaction()      →    [OP_Begin]
+
+    cursor = prog.open_cursor(    →    [OP_Open, C0, users_btree]
+        from_structure(users))
+
+    at_end = prog.first(cursor)   →    [OP_Rewind, C0, R0, false]
+
+    loop = prog.begin_while(at_end)    [OP_JumpIf, R0, @end]
+    {                                   [@loop:]
+        age = prog.get_column(     →   [OP_Column, C0, 1, R1]
+            cursor, 1)
+
+        limit = prog.load(         →   [OP_Load, R2, TYPE_U32, 21]
+            TYPE_U32, 21)
+
+        test = prog.gt(age, limit) →   [OP_Test, R3, R1, R2, GT]
+
+        if_block = prog.begin_if(test) [OP_JumpIf, R3, @skip, false]
+        {
+            name = prog.get_column( →  [OP_Column, C0, 0, R4]
+                cursor, 0)
+            prog.result(name, 2)    →   [OP_Result, R4, 2]
+        }
+        prog.end_if(if_block)          [@skip:]
+
+        prog.next(cursor, at_end)  →   [OP_Step, C0, R0, true]
+        prog.goto_label("loop")    →   [OP_Goto, @loop]
+    }
+    prog.end_while(loop)               [@end:]
+
+    prog.close_cursor(cursor)     →    [OP_Close, C0]
+    prog.commit_transaction()      →    [OP_Commit]
+    prog.halt()                    →    [OP_Halt, 0]
+
+
+    REGISTER ALLOCATION
+    ════════════════════════════════════════════════════════════════════
+
+    RegisterAllocator State:
+    ┌──────────────────────────────────────────────────────────────┐
+    │ next_reg: 5                                                  │
+    │ high_water: 5                                                │
+    │ scope_stack: [0, 1] ← Nested scopes for loops/conditions     │
+    └──────────────────────────────────────────────────────────────┘
+
+    Allocation Pattern:
+    R0: at_end flag (loop control)
+    R1: age column value
+    R2: literal 21
+    R3: comparison result
+    R4: name column value
+
+    Scoped allocation allows register reuse in different branches!
+
+
+    LABEL RESOLUTION (Two-Pass)
+    ════════════════════════════════════════════════════════════════════
+
+    Pass 1: Emit with Symbolic Labels
+    ──────────────────────────────────
+    Instructions:                    Labels Map:
+    [0] OP_Begin                    (empty)
+    [1] OP_Open C0
+    [2] OP_Rewind C0 R0
+    [3] OP_JumpIf R0 "end"  ←─┐
+    [4] OP_Column C0 1 R1      │     "loop" → 4
+    [5] OP_Load R2 21          │     "skip" → 9
+    [6] OP_Test R3 R1 R2 GT    │     "end"  → 11
+    [7] OP_JumpIf R3 "skip" ←──┤
+    [8] OP_Column C0 0 R4      │
+    [9] OP_Result R4 2         │
+    [10] OP_Step C0 R0         │
+    [11] OP_Goto "loop"    ←───┤
+    [12] OP_Close C0           │
+    [13] OP_Commit             │
+    [14] OP_Halt               │
+                               │
+    Pass 2: Resolve Labels     │
+    ──────────────────────     │
+    [3] OP_JumpIf R0 11  ←─────┘
+    [7] OP_JumpIf R3 9   ←──────┘
+    [11] OP_Goto 4       ←──────┘
+
+
+    EXPRESSION COMPILATION (Recursive)
+    ════════════════════════════════════════════════════════════════════
+
+    compile_expr(age > 21 AND name = 'John'):
+
+                        AND
+                       /   \
+                   GT         EQ
+                  /  \       /  \
+               age   21   name  'John'
+
+    Traversal:
+    1. compile_expr(AND)
+       ├─ left = compile_expr(GT)
+       │  ├─ left = compile_expr(age)
+       │  │  └─ prog.get_column(cursor, 1) → R1
+       │  ├─ right = compile_expr(21)
+       │  │  └─ prog.load(TYPE_U32, 21) → R2
+       │  └─ prog.gt(R1, R2) → R3
+       │
+       ├─ right = compile_expr(EQ)
+       │  ├─ left = compile_expr(name)
+       │  │  └─ prog.get_column(cursor, 0) → R4
+       │  ├─ right = compile_expr('John')
+       │  │  └─ prog.load(TYPE_CHAR32, "John") → R5
+       │  └─ prog.eq(R4, R5) → R6
+       │
+       └─ prog.logic_and(R3, R6) → R7
+
+
+    OPTIMIZATION: PRIMARY KEY SEEK
+    ════════════════════════════════════════════════════════════════════
+
+    WHERE id = 42 Detection:
+
+    is_pk_lookup() checks:
+    ┌─────────────────────┐
+    │ 1. Binary op?       │ → Yes (=)
+    │ 2. Column is PK?    │ → Yes (id)
+    │ 3. Other is literal?│ → Yes (42)
+    └─────────────────────┘
+            ↓
+    Optimized Code Path:
+    ────────────────────
+    Normal:                      Optimized:
+    prog.first(cursor)          key = prog.load(42)
+    loop:                       found = prog.seek(cursor, key, EQ)
+      check each row...         if (found)
+      if matches...               emit result
+    goto loop
+
+    O(n) scan → O(log n) seek!
+
+
+    CONTROL FLOW PATTERNS
+    ════════════════════════════════════════════════════════════════════
+
+    While Loop:                     If Statement:
+    ──────────                      ─────────────
+    test = ...                      test = ...
+    [@loop_end] ← JumpIf test       [@else] ← JumpIf !test
+    [@loop_body:]                   [@then:]
+      ... body ...                    ... then body ...
+      update test                     Goto @end
+      Goto @loop_body               [@else:]
+    [@loop_end:]                      ... else body ...
+                                    [@end:]
+
+
+    Nested Scopes:
+    ─────────────
+    while (outer) {          Scope Stack:
+      R1 = ...               [0]      ← base
+      if (inner) {           [0, 2]   ← push for while
+        R2 = ...             [0, 2, 3] ← push for if
+      }                      [0, 2]   ← pop
+      R2 = ... // can reuse!
+    }                        [0]      ← pop
+
+
+    CURSOR CONTEXT CREATION
+    ════════════════════════════════════════════════════════════════════
+
+    from_structure(users_table):
+    ┌────────────────────────┐
+    │ CursorContext          │
+    ├────────────────────────┤
+    │ type: BPLUS            │
+    │ storage.tree: &btree   │
+    │ layout: TupleFormat {  │
+    │   columns: [           │
+    │     {TYPE_U32, 0},     │  // id
+    │     {TYPE_U32, 4},     │  // age
+    │     {TYPE_CHAR32, 8}   │  // name
+    │   ]                    │
+    │ }                      │
+    └────────────────────────┘
+
+    This tells the VM how to interpret raw tree records!
+
+
+    KEY DESIGN INSIGHTS
+    ════════════════════════════════════════════════════════════════════
+
+    1. BUILDER PATTERN: ProgramBuilder provides high-level abstractions
+       that hide bytecode complexity. Clean separation of concerns.
+
+    2. REGISTER MACHINE: Virtual registers instead of stack-based VM
+       allows better optimization and clearer generated code.
+
+    3. LABEL-BASED JUMPS: Human-readable labels during compilation,
+       resolved to PC offsets in final pass.
+
+    4. SCOPED ALLOCATION: Register reuse within scopes reduces
+       register pressure without complex liveness analysis.
+
+    5. CURSOR ABSTRACTION: SQL operations map to cursor primitives
+       (open, seek, step, get_column) hiding storage details.
+
+    6. TYPE PRESERVATION: Types flow from parser → semantic → compiler
+       → VM, ensuring type safety throughout.

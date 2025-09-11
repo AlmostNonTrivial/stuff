@@ -58,11 +58,12 @@
 */
 
 #pragma once
+#include "catalog.hpp"
 #include "common.hpp"
 #include "containers.hpp"
 #include "types.hpp"
 
-struct relation;
+
 //=============================================================================
 // EXPRESSION AST NODES
 //=============================================================================
@@ -91,7 +92,7 @@ enum BINARY_OP : uint8_t
 	OP_OR
 };
 
-enum UnaryOp : uint8_t
+enum UNARY_OP : uint8_t
 {
 	OP_NOT = 0,
 	OP_NEG
@@ -105,8 +106,6 @@ struct expr_node
 	{
 		data_type resolved_type = TYPE_NULL;
 		int32_t	   column_index = -1;
-		relation *table = nullptr;
-
 	} sem;
 
 	union {
@@ -137,7 +136,7 @@ struct expr_node
 
 		struct
 		{
-			UnaryOp unary_op;
+			UNARY_OP unary_op;
 			expr_node   *operand;
 		};
 
@@ -146,7 +145,7 @@ struct expr_node
 };
 
 
-enum StmtType : uint8_t
+enum STMT_TYPE : uint8_t
 {
 	STMT_SELECT = 0,
 	STMT_INSERT,
@@ -184,7 +183,6 @@ struct select_stmt_node
 
 	struct
 	{
-		relation					 *table = nullptr;
 		array<int32_t, query_arena>  column_indices;	   // Indices of selected columns
 		array<data_type, query_arena> column_types;		   // Types of selected columns
 		int32_t						  order_by_index = -1; // Index of ORDER BY column
@@ -201,9 +199,7 @@ struct insert_stmt_node
 
 	struct
 	{
-		relation					*table = nullptr;
 		array<int32_t, query_arena> column_indices;
-
 	} sem;
 };
 
@@ -218,9 +214,7 @@ struct update_stmt_node
 
 	struct
 	{
-		relation					*table = nullptr;
 		array<int32_t, query_arena> column_indices;
-
 	} sem;
 };
 
@@ -229,13 +223,6 @@ struct delete_stmt_node
 {
 	string_view table_name;
 	expr_node	   *where_clause;
-
-
-	struct
-	{
-		relation *table = nullptr;
-
-	} sem;
 };
 
 
@@ -256,13 +243,6 @@ struct create_table_stmt_node
 struct drop_table_stmt_node
 {
 	string_view table_name;
-
-
-	struct
-	{
-		relation *table = nullptr;
-
-	} sem;
 };
 
 
@@ -279,7 +259,7 @@ struct rollback_stmt_node
 
 struct stmt_node
 {
-	StmtType type;
+	STMT_TYPE type;
 
 
 	struct

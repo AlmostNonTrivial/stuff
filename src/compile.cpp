@@ -7,6 +7,7 @@
 #include "vm.hpp"
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <string_view>
 
 static int
@@ -266,7 +267,8 @@ compile_select(stmt_node *stmt)
 	program_builder prog;
 	select_stmt_node	  *select_stmt = &stmt->select_stmt;
 
-	relation *table = select_stmt->sem.table;
+	relation *table = catalog.get(select_stmt->table_name);
+
 	bool	  has_order_by = (select_stmt->order_by_column.size() > 0);
 
 	if (has_order_by)
@@ -506,10 +508,11 @@ compile_insert(stmt_node *stmt)
 
 	prog.begin_transaction();
 
-	auto table_ctx = from_structure(*insert_stmt->sem.table);
+	relation *table = catalog.get(insert_stmt->table_name);
+	auto table_ctx = from_structure(*table);
 	int	 cursor = prog.open_cursor(table_ctx);
 
-	int row_size = insert_stmt->sem.table->columns.size();
+	int row_size = table->columns.size();
 	int row_start = prog.regs.allocate_range(row_size);
 
 	for (uint32_t i = 0; i < insert_stmt->values.size(); i++)
@@ -544,7 +547,7 @@ compile_update(stmt_node *stmt)
 
 	prog.begin_transaction();
 
-	relation *table = update_stmt->sem.table;
+	relation *table = catalog.get(update_stmt->table_name);
 	auto	  table_ctx = from_structure(*table);
 	int		  cursor = prog.open_cursor(table_ctx);
 
@@ -605,7 +608,8 @@ compile_delete(stmt_node *stmt)
 
 	prog.begin_transaction();
 
-	auto table_ctx = from_structure(*delete_stmt->sem.table);
+	relation *table = catalog.get(delete_stmt->table_name);
+	auto table_ctx = from_structure(*table);
 	int	 cursor = prog.open_cursor(table_ctx);
 
 	int at_end = prog.first(cursor);

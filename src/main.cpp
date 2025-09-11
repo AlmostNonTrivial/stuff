@@ -65,9 +65,11 @@ void
 print_select_headers(select_stmt_node *select_stmt)
 {
 
-	relation *table = select_stmt->sem.table;
+	relation *table = catalog.get(select_stmt->table_name);
 	if (!table)
+	{
 		return;
+	}
 
 	printf("\n");
 
@@ -104,7 +106,7 @@ print_select_headers(select_stmt_node *select_stmt)
 
 		for (uint32_t i = 0; i < select_stmt->sem.column_indices.size(); i++)
 		{
-			uint32_t col_idx = select_stmt->sem.column_indices[i];
+			uint32_t  col_idx = select_stmt->sem.column_indices[i];
 			data_type type = table->columns[col_idx].type;
 
 			int width = get_column_width(type);
@@ -121,7 +123,7 @@ setup_result_formatting(select_stmt_node *select_stmt)
 {
 	result_column_widths.clear();
 
-	relation *table = select_stmt->sem.table;
+	relation *table = catalog.get(select_stmt->table_name);
 	if (!table)
 		return;
 
@@ -136,7 +138,7 @@ setup_result_formatting(select_stmt_node *select_stmt)
 	{
 		for (uint32_t i = 0; i < select_stmt->sem.column_indices.size(); i++)
 		{
-			uint32_t col_idx = select_stmt->sem.column_indices[i];
+			uint32_t  col_idx = select_stmt->sem.column_indices[i];
 			data_type type = table->columns[col_idx].type;
 			result_column_widths.push(get_column_width(type));
 		}
@@ -237,6 +239,12 @@ execute_sql_statement(const char *sql, bool test_mode)
 		if (result != OK)
 		{
 			printf("❌ Execution failed: %s\n", sql);
+
+			if (in_transaction)
+			{
+				pager_rollback();
+			}
+
 			return false;
 		}
 
@@ -427,7 +435,9 @@ run_repl()
 	// execute_sql_statement("DELETE FROM users WHERE username = 'lilah';");
 
 	// execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 99;");
-	execute_sql_statement("SELECT * FROM users WHERE user_id > 50 AND NOT NOT user_id > 75;");
+
+	execute_sql_statement("SELECT * FROM users;DROP TABLE users;");
+
 	// execute_sql_statement("SELECT * FROM master_catalog");
 	// execute_sql_statement("DROP TABLE products;");
 	// execute_sql_statement("SELECT * FROM master_catalog");
@@ -435,7 +445,6 @@ run_repl()
 	return 0;
 
 	char input[4096];
-
 
 	printf("SQL Engine v0.1\n");
 	printf("Type .help for commands or start typing SQL\n\n");
