@@ -1,20 +1,67 @@
+/*
+**
+** Runtime type system
+**
+** All of the computation we do with the VM needs runtime info about the
+** actual types it's processing.
+**
+** We handle types dynamically because:
+** - Schema is loaded at runtime from the catalog
+** - Query plans are generated dynamically
+** - Intermediate results may have computed types (e.g., SUM(price) * 1.1)
+**
+** For example
+** 'WHERE user_id > 5;'
+**      OP_Test:
+**		typed_value *a = &VM.registers[left];   // 5
+**		typed_value *b = &VM.registers[right];  // user_id of row x
+**		int cmp_result = type_compare(a->type, a->data, b->data); // compare dispatch
+**
+** The type_compare function uses the type tag to dispatch to the correct
+** comparison function (int vs float vs string comparison).
+**
+** Real SQL engines need composite keys for multi-column operations:
+** - PRIMARY KEY (company_id, employee_id)
+** - ORDER BY age, username
+** - GROUP BY category, subcategory
+**
+** Instead of handling tuples of values, we pack multiple values into a single
+** "dual type" that maintains comparison semantics:
+**
+** ORDER BY age, username:
+** [u32][4 bytes] + [char16][16 bytes] -> [dual][20 bytes total]
+**
+** Comparison works lexicographically:
+** (20, "John") < (20, "Jane") = false  // Same age, John > Jane alphabetically
+** (20, "John") < (21, "Alice") = true  // Lower age wins regardless of name
+**
+**
+** We use a 64-bit type descriptor that encodes both type identity and size:
+**
+** Single types: [type_id:8][unused:32][size:24]
+**               ^^^^^^^^   ^^^^^^^^^^  ^^^^^^^^
+**               type tag   wasted      up to 16MB values
+**
+** Dual types:   [TYPE_ID_DUAL:8][type1:8][type2:8][size1:8][size2:8][total:24]
+**               ^^^^^^^^^^^^^^^  ^^^^^^^^ ^^^^^^^^ ^^^^^^^^ ^^^^^^^^ ^^^^^^^^^^
+**               dual marker      first    second   sizes    sizes    total size
+**
+**
+** Using 64 bits for both single and dual types, as well as referencing values by pointer
+** Including values that could fit within 64 bits, wastes space, but keeps the API uniform.
+**
+*/
+
+
 #pragma once
-#include <string>
 #include <cstdint>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include "common.hpp"
 
-
-
-
-// 64-bit uniform encoding - size ALWAYS in bits 0-23:
-// Single types: [type_id:8][reserved:32][size:24]
-// Dual types:   [TYPE_ID_DUAL:8][type1_id:8][type2_id:8][size1:8][size2:8][total_size:24]
 typedef uint64_t data_type;
 
-// Type IDs - each type gets unique ID
 enum TYPE_ID : uint8_t
 {
 	TYPE_ID_U8 = 0x01,
@@ -38,15 +85,12 @@ enum TYPE_ID : uint8_t
 	TYPE_ID_NULL = 0xFF
 };
 
-// Helper for single types - size ALWAYS in bits 0-23
 #define MAKE_TYPE(id, size) (((uint64_t)(id) << 56) | ((uint64_t)(size) & 0xFFFFFF))
 
-// Helper for dual types - total size STILL in bits 0-23
 #define MAKE_DUAL_TYPE(type1_id, type2_id, size1, size2)                                                               \
 	(((uint64_t)(TYPE_ID_DUAL) << 56) | ((uint64_t)(type1_id) << 48) | ((uint64_t)(type2_id) << 40) |                  \
 	 ((uint64_t)(size1) << 32) | ((uint64_t)(size2) << 24) | ((uint64_t)((size1) + (size2)) & 0xFFFFFF))
 
-// Scalar type definitions
 #define TYPE_U8	 MAKE_TYPE(TYPE_ID_U8, 1)
 #define TYPE_U16 MAKE_TYPE(TYPE_ID_U16, 2)
 #define TYPE_U32 MAKE_TYPE(TYPE_ID_U32, 4)
@@ -68,167 +112,187 @@ enum TYPE_ID : uint8_t
 #define TYPE_CHAR128 MAKE_TYPE(TYPE_ID_CHAR, 128)
 #define TYPE_CHAR256 MAKE_TYPE(TYPE_ID_CHAR, 256)
 
-// Null type
 #define TYPE_NULL MAKE_TYPE(TYPE_ID_NULL, 0)
 
 // VARCHAR with runtime size
 #define TYPE_VARCHAR(len) MAKE_TYPE(TYPE_ID_VARCHAR, (len))
 
-// Factory method defines
-#define make_u8()  TYPE_U8
-#define make_u16() TYPE_U16
-#define make_u32() TYPE_U32
-#define make_u64() TYPE_U64
 
-#define make_i8()  TYPE_I8
-#define make_i16() TYPE_I16
-#define make_i32() TYPE_I32
-#define make_i64() TYPE_I64
-
-#define make_f32() TYPE_F32
-#define make_f64() TYPE_F64
-
-#define make_char8()   TYPE_CHAR8
-#define make_char16()  TYPE_CHAR16
-#define make_char32()  TYPE_CHAR32
-#define make_char64()  TYPE_CHAR64
-#define make_char128() TYPE_CHAR128
-#define make_char256() TYPE_CHAR256
-
-#define make_null() TYPE_NULL
-
-// Function declarations
-data_type make_char(uint32_t size);
-data_type make_varchar(uint32_t size);
-
-// Type property extraction
-uint32_t type_size(data_type type);
-uint8_t type_id(data_type type);
-
-// Dual type specific extractors (only the necessary ones)
-uint8_t dual_type_id_1(data_type type);
-uint8_t dual_type_id_2(data_type type);
-
-// Type reconstruction and factory functions
-data_type type_from_id_and_size(uint8_t id, uint32_t size);
-data_type make_dual(data_type type1, data_type type2);
-data_type dual_component_type(data_type type, uint32_t index);
-uint32_t dual_component_offset(data_type type, uint32_t index);
-
-// Type properties
+data_type
+make_char(uint32_t size);
+data_type
+make_varchar(uint32_t size);
 
 
+uint32_t
+type_size(data_type type);
+uint8_t
+type_id(data_type type);
 
-bool type_is_string(data_type type);
-bool type_is_numeric(data_type type);
-bool type_is_null(data_type type);
-bool type_is_dual(data_type type);
 
-// Type comparison functions
-int type_compare(data_type type, const void *a, const void *b);
-bool type_compare_op(comparison_op op, data_type type, const void *a, const void *b);
+uint8_t
+dual_type_id_1(data_type type);
+uint8_t
+dual_type_id_2(data_type type);
 
-// Inline comparison helpers
-inline bool type_greater_than(data_type type, const void *a, const void *b) {
+
+data_type
+type_from_id_and_size(uint8_t id, uint32_t size);
+data_type
+make_dual(data_type type1, data_type type2);
+data_type
+dual_component_type(data_type type, uint32_t index);
+uint32_t
+dual_component_offset(data_type type, uint32_t index);
+
+bool
+type_is_string(data_type type);
+bool
+type_is_numeric(data_type type);
+bool
+type_is_null(data_type type);
+bool
+type_is_dual(data_type type);
+
+int
+type_compare(data_type type, const void *a, const void *b);
+bool
+type_compare_op(comparison_op op, data_type type, const void *a, const void *b);
+
+inline bool
+type_greater_than(data_type type, const void *a, const void *b)
+{
 	return type_compare(type, a, b) > 0;
 }
 
-inline bool type_greater_equal(data_type type, const void *a, const void *b) {
+inline bool
+type_greater_equal(data_type type, const void *a, const void *b)
+{
 	return type_compare(type, a, b) >= 0;
 }
 
-inline bool type_less_than(data_type type, const void *a, const void *b) {
+inline bool
+type_less_than(data_type type, const void *a, const void *b)
+{
 	return type_compare(type, a, b) < 0;
 }
 
-inline bool type_less_equal(data_type type, const void *a, const void *b) {
+inline bool
+type_less_equal(data_type type, const void *a, const void *b)
+{
 	return type_compare(type, a, b) <= 0;
 }
 
-inline bool type_equals(data_type type, const void *a, const void *b) {
+inline bool
+type_equals(data_type type, const void *a, const void *b)
+{
 	return type_compare(type, a, b) == 0;
 }
 
-inline bool type_not_equals(data_type type, const void *a, const void *b) {
+inline bool
+type_not_equals(data_type type, const void *a, const void *b)
+{
 	return type_compare(type, a, b) != 0;
 }
 
-// Arithmetic operations - using macro for definition
-#define DECLARE_ARITHMETIC_OP(name) \
-	void type_##name(data_type type, void *dst, const void *a, const void *b);
+#define DECLARE_ARITHMETIC_OP(name) void type_##name(data_type type, void *dst, const void *a, const void *b);
 
 DECLARE_ARITHMETIC_OP(add)
 DECLARE_ARITHMETIC_OP(sub)
 DECLARE_ARITHMETIC_OP(mul)
 DECLARE_ARITHMETIC_OP(div)
 
+void
+type_copy(data_type type, void *dst, const void *src);
+void
+type_zero(data_type type, void *dst);
 
-// Utility operations
-void type_copy(data_type type, void *dst, const void *src);
-void type_zero(data_type type, void *dst);
-uint64_t type_hash(data_type type, const void *data);
-void type_print(data_type type, const void *data);
-void type_increment(data_type type, void *dst, const void *src);
-const char *type_name(data_type type);
+void
+type_print(data_type type, const void *data);
+void
+type_increment(data_type type, void *dst, const void *src);
+const char *
+type_name(data_type type);
 
-// Dual type packing/unpacking helpers
-void pack_dual(void *dest, data_type type1, const void *data1, data_type type2, const void *data2);
-void unpack_dual(data_type dual_type, const void *src, void *data1, void *data2);
+void
+pack_dual(void *dest, data_type type1, const void *data1, data_type type2, const void *data2);
+void
+unpack_dual(data_type dual_type, const void *src, void *data1, void *data2);
 
-// TypedValue struct
 struct typed_value
 {
-	void *data;
+	void	 *data;
 	data_type type;
 
-	// Property accessors
-	uint8_t get_type_id() const;
-	uint32_t get_size() const;
-	bool is_dual() const;
+	uint8_t
+	get_type_id() const;
+	uint32_t
+	get_size() const;
+	bool
+	is_dual() const;
 
-	// Type checking
-	bool is_numeric() const;
-	bool is_string() const;
-	bool is_null() const;
+	bool
+	is_numeric() const;
+	bool
+	is_string() const;
+	bool
+	is_null() const;
 
-	// Set a varchar value with size
-	void set_varchar(const char *str, uint32_t len = 0);
+	void
+	set_varchar(const char *str, uint32_t len = 0);
 
-	// Comparison operators
-	int compare(const typed_value &other) const;
-	bool operator>(const typed_value &other) const;
-	bool operator>=(const typed_value &other) const;
-	bool operator<(const typed_value &other) const;
-	bool operator<=(const typed_value &other) const;
-	bool operator==(const typed_value &other) const;
-	bool operator!=(const typed_value &other) const;
+	int
+	compare(const typed_value &other) const;
+	bool
+	operator>(const typed_value &other) const;
+	bool
+	operator>=(const typed_value &other) const;
+	bool
+	operator<(const typed_value &other) const;
+	bool
+	operator<=(const typed_value &other) const;
+	bool
+	operator==(const typed_value &other) const;
+	bool
+	operator!=(const typed_value &other) const;
 
-	// Operations
-	void copy_to(typed_value &dst) const;
-	void print() const;
-	uint16_t size() const;
-	const char *name() const;
+	void
+	copy_to(typed_value &dst) const;
+	void
+	print() const;
+	uint16_t
+	size() const;
+	const char *
+	name() const;
 
-	// Factory methods
-	static typed_value make(data_type type, void *data = nullptr);
+	static typed_value
+	make(data_type type, void *data = nullptr);
 
-	// Casting to unsigned integer types
-	uint8_t as_u8() const;
-	uint16_t as_u16() const;
-	uint32_t as_u32() const;
-	uint64_t as_u64() const;
+	uint8_t
+	as_u8() const;
+	uint16_t
+	as_u16() const;
+	uint32_t
+	as_u32() const;
+	uint64_t
+	as_u64() const;
 
-	// Casting to signed integer types
-	int8_t as_i8() const;
-	int16_t as_i16() const;
-	int32_t as_i32() const;
-	int64_t as_i64() const;
+	int8_t
+	as_i8() const;
+	int16_t
+	as_i16() const;
+	int32_t
+	as_i32() const;
+	int64_t
+	as_i64() const;
 
-	// Casting to floating-point types
-	float as_f32() const;
-	double as_f64() const;
+	float
+	as_f32() const;
+	double
+	as_f64() const;
 
-	// Casting to string types
-	const char *as_char() const;
-	const char *as_varchar() const;
+	const char *
+	as_char() const;
+	const char *
+	as_varchar() const;
 };

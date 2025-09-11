@@ -3,52 +3,57 @@
 #include <cstring>
 #include <string.h>
 #include <inttypes.h>
-// Functions for parameterized types
-data_type make_char(uint32_t size)
+
+data_type
+make_char(uint32_t size)
 {
 	return MAKE_TYPE(TYPE_ID_CHAR, size);
 }
 
-data_type make_varchar(uint32_t size)
+data_type
+make_varchar(uint32_t size)
 {
 	return MAKE_TYPE(TYPE_ID_VARCHAR, size);
 }
 
-// Type property extraction - BRANCHLESS
-uint32_t type_size(data_type type)
+uint32_t
+type_size(data_type type)
 {
 	return type & 0xFFFFFF;
 }
 
-uint8_t type_id(data_type type)
+uint8_t
+type_id(data_type type)
 {
 	return type >> 56;
 }
 
-// Dual type specific extractors (minimal set)
-uint8_t dual_type_id_1(data_type type)
+uint8_t
+dual_type_id_1(data_type type)
 {
 	return (type >> 48) & 0xFF;
 }
 
-uint8_t dual_type_id_2(data_type type)
+uint8_t
+dual_type_id_2(data_type type)
 {
 	return (type >> 40) & 0xFF;
 }
 
-// Helper for getting dual component sizes - internal use only
-static uint8_t dual_size_1(data_type type)
+static uint8_t
+dual_size_1(data_type type)
 {
 	return (type >> 32) & 0xFF;
 }
 
-static uint8_t dual_size_2(data_type type)
+static uint8_t
+dual_size_2(data_type type)
 {
 	return (type >> 24) & 0xFF;
 }
 
-// Reconstruct full data_type from component ID and size
-data_type type_from_id_and_size(uint8_t id, uint32_t size)
+data_type
+type_from_id_and_size(uint8_t id, uint32_t size)
 {
 	switch (id)
 	{
@@ -85,8 +90,8 @@ data_type type_from_id_and_size(uint8_t id, uint32_t size)
 	}
 }
 
-// Factory function for dual types
-data_type make_dual(data_type type1, data_type type2)
+data_type
+make_dual(data_type type1, data_type type2)
 {
 	uint8_t	 id1 = type_id(type1);
 	uint8_t	 id2 = type_id(type2);
@@ -95,12 +100,10 @@ data_type make_dual(data_type type1, data_type type2)
 	return MAKE_DUAL_TYPE(id1, id2, size1, size2);
 }
 
-// Get component types from dual
-data_type dual_component_type(data_type type, uint32_t index)
+data_type
+dual_component_type(data_type type, uint32_t index)
 {
-	if (type_id(type) != TYPE_ID_DUAL)
-		return TYPE_NULL;
-
+	assert(type_id(type) == TYPE_ID_DUAL);
 	if (index == 0)
 	{
 		return type_from_id_and_size(dual_type_id_1(type), dual_size_1(type));
@@ -112,44 +115,53 @@ data_type dual_component_type(data_type type, uint32_t index)
 	return TYPE_NULL;
 }
 
-// Component offset for dual types
-uint32_t dual_component_offset(data_type type, uint32_t index)
+
+uint32_t
+dual_component_offset(data_type type, uint32_t index)
 {
 	if (index == 0)
+	{
 		return 0;
+	}
+
 	if (index == 1)
+	{
 		return type_size(dual_component_type(type, 0));
+	}
+
 	return 0;
 }
 
-
-bool type_is_string(data_type type)
+bool
+type_is_string(data_type type)
 {
 	uint8_t id = type_id(type);
 	return id == TYPE_ID_CHAR || id == TYPE_ID_VARCHAR;
 }
-bool type_is_dual(data_type type)
+bool
+type_is_dual(data_type type)
 {
 	return type_id(type) == TYPE_ID_DUAL;
 }
-bool type_is_null(data_type type)
+bool
+type_is_null(data_type type)
 {
 	return type_id(type) == TYPE_ID_NULL;
 }
 
-
-bool type_is_numeric(data_type type)
+bool
+type_is_numeric(data_type type)
 {
 	uint8_t id = type_id(type);
 	return id <= TYPE_ID_F64;
 }
 
-// Type comparison - unified for scalar and dual
-int type_compare(data_type type, const void *a, const void *b)
+
+int
+type_compare(data_type type, const void *a, const void *b)
 {
 	uint8_t tid = type_id(type);
 
-	// Scalar type comparison
 	switch (tid)
 	{
 	case TYPE_ID_U8: {
@@ -202,13 +214,13 @@ int type_compare(data_type type, const void *a, const void *b)
 	case TYPE_ID_DUAL: {
 		// Compare first component
 		data_type type1 = dual_component_type(type, 0);
-		int		 cmp1 = type_compare(type1, a, b);
+		int		  cmp1 = type_compare(type1, a, b);
 		if (cmp1 != 0)
 			return cmp1;
 
 		// Compare second component if first is equal
 		data_type type2 = dual_component_type(type, 1);
-		uint32_t offset = type_size(type1);
+		uint32_t  offset = type_size(type1);
 		return type_compare(type2, (char *)a + offset, (char *)b + offset);
 	}
 
@@ -217,8 +229,8 @@ int type_compare(data_type type, const void *a, const void *b)
 	}
 }
 
-// Unified comparison function
-bool type_compare_op(comparison_op op, data_type type, const void *a, const void *b)
+bool
+type_compare_op(comparison_op op, data_type type, const void *a, const void *b)
 {
 	switch (op)
 	{
@@ -238,22 +250,44 @@ bool type_compare_op(comparison_op op, data_type type, const void *a, const void
 	return false;
 }
 
-// Arithmetic operations - using macro for implementation
-#define DEFINE_ARITHMETIC_OP(name, op) \
-void type_##name(data_type type, void *dst, const void *a, const void *b) { \
-	switch (type_id(type)) { \
-	case TYPE_ID_U8:  *(uint8_t *)dst = *(uint8_t *)a op *(uint8_t *)b; break; \
-	case TYPE_ID_U16: *(uint16_t *)dst = *(uint16_t *)a op *(uint16_t *)b; break; \
-	case TYPE_ID_U32: *(uint32_t *)dst = *(uint32_t *)a op *(uint32_t *)b; break; \
-	case TYPE_ID_U64: *(uint64_t *)dst = *(uint64_t *)a op *(uint64_t *)b; break; \
-	case TYPE_ID_I8:  *(int8_t *)dst = *(int8_t *)a op *(int8_t *)b; break; \
-	case TYPE_ID_I16: *(int16_t *)dst = *(int16_t *)a op *(int16_t *)b; break; \
-	case TYPE_ID_I32: *(int32_t *)dst = *(int32_t *)a op *(int32_t *)b; break; \
-	case TYPE_ID_I64: *(int64_t *)dst = *(int64_t *)a op *(int64_t *)b; break; \
-	case TYPE_ID_F32: *(float *)dst = *(float *)a op *(float *)b; break; \
-	case TYPE_ID_F64: *(double *)dst = *(double *)a op *(double *)b; break; \
-	} \
-}
+
+#define DEFINE_ARITHMETIC_OP(name, op)                                                                                 \
+	void type_##name(data_type type, void *dst, const void *a, const void *b)                                          \
+	{                                                                                                                  \
+		switch (type_id(type))                                                                                         \
+		{                                                                                                              \
+		case TYPE_ID_U8:                                                                                               \
+			*(uint8_t *)dst = *(uint8_t *)a op * (uint8_t *)b;                                                         \
+			break;                                                                                                     \
+		case TYPE_ID_U16:                                                                                              \
+			*(uint16_t *)dst = *(uint16_t *)a op * (uint16_t *)b;                                                      \
+			break;                                                                                                     \
+		case TYPE_ID_U32:                                                                                              \
+			*(uint32_t *)dst = *(uint32_t *)a op * (uint32_t *)b;                                                      \
+			break;                                                                                                     \
+		case TYPE_ID_U64:                                                                                              \
+			*(uint64_t *)dst = *(uint64_t *)a op * (uint64_t *)b;                                                      \
+			break;                                                                                                     \
+		case TYPE_ID_I8:                                                                                               \
+			*(int8_t *)dst = *(int8_t *)a op * (int8_t *)b;                                                            \
+			break;                                                                                                     \
+		case TYPE_ID_I16:                                                                                              \
+			*(int16_t *)dst = *(int16_t *)a op * (int16_t *)b;                                                         \
+			break;                                                                                                     \
+		case TYPE_ID_I32:                                                                                              \
+			*(int32_t *)dst = *(int32_t *)a op * (int32_t *)b;                                                         \
+			break;                                                                                                     \
+		case TYPE_ID_I64:                                                                                              \
+			*(int64_t *)dst = *(int64_t *)a op * (int64_t *)b;                                                         \
+			break;                                                                                                     \
+		case TYPE_ID_F32:                                                                                              \
+			*(float *)dst = *(float *)a op * (float *)b;                                                               \
+			break;                                                                                                     \
+		case TYPE_ID_F64:                                                                                              \
+			*(double *)dst = *(double *)a op * (double *)b;                                                            \
+			break;                                                                                                     \
+		}                                                                                                              \
+	}
 
 DEFINE_ARITHMETIC_OP(add, +)
 DEFINE_ARITHMETIC_OP(sub, -)
@@ -261,8 +295,8 @@ DEFINE_ARITHMETIC_OP(mul, *)
 DEFINE_ARITHMETIC_OP(div, /)
 
 
-// Utility operations - simplified
-void type_copy(data_type type, void *dst, const void *src)
+void
+type_copy(data_type type, void *dst, const void *src)
 {
 	if (type_is_string(type))
 	{
@@ -274,51 +308,16 @@ void type_copy(data_type type, void *dst, const void *src)
 	}
 }
 
-void type_zero(data_type type, void *dst)
+void
+type_zero(data_type type, void *dst)
 {
 	memset(dst, 0, type_size(type));
 }
 
-uint64_t type_hash(data_type type, const void *data)
-{
-	uint64_t hash = 0xcbf29ce484222325ull;
 
-	if (type_is_string(type))
-	{
-		const char *str = (const char *)data;
-		while (*str)
-		{
-			hash = (hash ^ *str++) * 0x100000001b3ull;
-		}
-	}
-	else if (type_is_dual(type))
-	{
-		// Hash first component
-		data_type type1 = dual_component_type(type, 0);
-		uint64_t hash1 = type_hash(type1, data);
 
-		// Hash second component
-		data_type type2 = dual_component_type(type, 1);
-		uint32_t offset = type_size(type1);
-		uint64_t hash2 = type_hash(type2, (char *)data + offset);
-
-		// Combine hashes
-		hash = hash1 ^ (hash2 * 0x100000001b3ull);
-	}
-	else
-	{
-		// Just hash the bytes directly for numeric types
-		const uint8_t *bytes = (const uint8_t *)data;
-		uint32_t size = type_size(type);
-		for (uint32_t i = 0; i < size; i++)
-		{
-			hash = (hash ^ bytes[i]) * 0x100000001b3ull;
-		}
-	}
-	return hash;
-}
-
-void type_print(data_type type, const void *data)
+void
+type_print(data_type type, const void *data)
 {
 	switch (type_id(type))
 	{
@@ -379,7 +378,7 @@ void type_print(data_type type, const void *data)
 
 		// Print second component
 		data_type type2 = dual_component_type(type, 1);
-		uint32_t offset = type_size(type1);
+		uint32_t  offset = type_size(type1);
 		type_print(type2, (char *)data + offset);
 
 		printf(")");
@@ -388,8 +387,9 @@ void type_print(data_type type, const void *data)
 	}
 }
 
-// Simplified increment - no string support
-void type_increment(data_type type, void *dst, const void *src)
+// for auto incrementing primary keys
+void
+type_increment(data_type type, void *dst, const void *src)
 {
 	uint8_t tid = type_id(type);
 
@@ -428,19 +428,17 @@ void type_increment(data_type type, void *dst, const void *src)
 		*(double *)dst = *(double *)src + 1.0;
 		break;
 
+
 	case TYPE_ID_CHAR:
 	case TYPE_ID_VARCHAR:
-		// Just copy for strings - increment doesn't make sense
-		type_copy(type, dst, src);
-		break;
-
+	    // unimplemented
+	    assert(false);
 	case TYPE_ID_DUAL: {
-		// Increment both components
 		data_type type1 = dual_component_type(type, 0);
 		type_increment(type1, dst, src);
 
 		data_type type2 = dual_component_type(type, 1);
-		uint32_t offset = type_size(type1);
+		uint32_t  offset = type_size(type1);
 		type_increment(type2, (char *)dst + offset, (char *)src + offset);
 		break;
 	}
@@ -450,7 +448,8 @@ void type_increment(data_type type, void *dst, const void *src)
 	}
 }
 
-const char *type_name(data_type type)
+const char *
+type_name(data_type type)
 {
 	static char buf[64];
 
@@ -505,14 +504,16 @@ const char *type_name(data_type type)
 	}
 }
 
-// Dual type packing/unpacking helpers
-void pack_dual(void *dest, data_type type1, const void *data1, data_type type2, const void *data2)
+
+void
+pack_dual(void *dest, data_type type1, const void *data1, data_type type2, const void *data2)
 {
 	type_copy(type1, dest, data1);
 	type_copy(type2, (char *)dest + type_size(type1), data2);
 }
 
-void unpack_dual(data_type dual_type, const void *src, void *data1, void *data2)
+void
+unpack_dual(data_type dual_type, const void *src, void *data1, void *data2)
 {
 	data_type type1 = dual_component_type(dual_type, 0);
 	data_type type2 = dual_component_type(dual_type, 1);
@@ -521,160 +522,191 @@ void unpack_dual(data_type dual_type, const void *src, void *data1, void *data2)
 	type_copy(type2, data2, (char *)src + type_size(type1));
 }
 
-// TypedValue member function implementations
-uint8_t typed_value::get_type_id() const
+
+uint8_t
+typed_value::get_type_id() const
 {
 	return type_id(type);
 }
 
-uint32_t typed_value::get_size() const
+uint32_t
+typed_value::get_size() const
 {
 	return type_size(type);
 }
 
-bool typed_value::is_dual() const
+bool
+typed_value::is_dual() const
 {
 	return type_is_dual(type);
 }
 
-bool typed_value::is_numeric() const
+bool
+typed_value::is_numeric() const
 {
 	return type_is_numeric(type);
 }
 
-bool typed_value::is_string() const
+bool
+typed_value::is_string() const
 {
 	return type_is_string(type);
 }
-bool typed_value::is_null() const
+bool
+typed_value::is_null() const
 {
 	return type_is_null(type);
 }
 
-void typed_value::set_varchar(const char *str, uint32_t len)
+void
+typed_value::set_varchar(const char *str, uint32_t len)
 {
 	len = len ? len : strlen(str);
 	type = TYPE_VARCHAR(len);
 	data = (void *)str;
 }
 
-int typed_value::compare(const typed_value &other) const
+int
+typed_value::compare(const typed_value &other) const
 {
 	return type_compare(type, data, other.data);
 }
 
-bool typed_value::operator>(const typed_value &other) const
+bool
+typed_value::operator>(const typed_value &other) const
 {
 	return compare(other) > 0;
 }
 
-bool typed_value::operator>=(const typed_value &other) const
+bool
+typed_value::operator>=(const typed_value &other) const
 {
 	return compare(other) >= 0;
 }
 
-bool typed_value::operator<(const typed_value &other) const
+bool
+typed_value::operator<(const typed_value &other) const
 {
 	return compare(other) < 0;
 }
 
-bool typed_value::operator<=(const typed_value &other) const
+bool
+typed_value::operator<=(const typed_value &other) const
 {
 	return compare(other) <= 0;
 }
 
-bool typed_value::operator==(const typed_value &other) const
+bool
+typed_value::operator==(const typed_value &other) const
 {
 	return type_equals(type, data, other.data);
 }
 
-bool typed_value::operator!=(const typed_value &other) const
+bool
+typed_value::operator!=(const typed_value &other) const
 {
 	return !type_equals(type, data, other.data);
 }
 
-void typed_value::copy_to(typed_value &dst) const
+void
+typed_value::copy_to(typed_value &dst) const
 {
 	dst.type = type;
 	type_copy(type, dst.data, data);
 }
 
-void typed_value::print() const
+void
+typed_value::print() const
 {
 	type_print(type, data);
 }
 
-uint16_t typed_value::size() const
+uint16_t
+typed_value::size() const
 {
 	return type_size(this->type);
 }
 
-const char *typed_value::name() const
+const char *
+typed_value::name() const
 {
 	return type_name(type);
 }
 
-typed_value typed_value::make(data_type type, void *data)
+typed_value
+typed_value::make(data_type type, void *data)
 {
 	return {data, type};
 }
 
-uint8_t typed_value::as_u8() const
+uint8_t
+typed_value::as_u8() const
 {
 	return *reinterpret_cast<uint8_t *>(data);
 }
 
-uint16_t typed_value::as_u16() const
+uint16_t
+typed_value::as_u16() const
 {
 	return *reinterpret_cast<uint16_t *>(data);
 }
 
-uint32_t typed_value::as_u32() const
+uint32_t
+typed_value::as_u32() const
 {
 	return *reinterpret_cast<uint32_t *>(data);
 }
 
-uint64_t typed_value::as_u64() const
+uint64_t
+typed_value::as_u64() const
 {
 	return *reinterpret_cast<uint64_t *>(data);
 }
 
-int8_t typed_value::as_i8() const
+int8_t
+typed_value::as_i8() const
 {
 	return *reinterpret_cast<int8_t *>(data);
 }
 
-int16_t typed_value::as_i16() const
+int16_t
+typed_value::as_i16() const
 {
 	return *reinterpret_cast<int16_t *>(data);
 }
 
-int32_t typed_value::as_i32() const
+int32_t
+typed_value::as_i32() const
 {
 	return *reinterpret_cast<int32_t *>(data);
 }
 
-int64_t typed_value::as_i64() const
+int64_t
+typed_value::as_i64() const
 {
 	return *reinterpret_cast<int64_t *>(data);
 }
 
-float typed_value::as_f32() const
+float
+typed_value::as_f32() const
 {
 	return *reinterpret_cast<float *>(data);
 }
 
-double typed_value::as_f64() const
+double
+typed_value::as_f64() const
 {
 	return *reinterpret_cast<double *>(data);
 }
 
-const char *typed_value::as_char() const
+const char *
+typed_value::as_char() const
 {
 	return reinterpret_cast<const char *>(data);
 }
 
-const char *typed_value::as_varchar() const
+const char *
+typed_value::as_varchar() const
 {
 	return reinterpret_cast<const char *>(data);
 }

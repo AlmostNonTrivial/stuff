@@ -1,7 +1,5 @@
 /*
 **
-** into VM bytecode.
-**
 ** This parser implements the following subset of SQL
 **
 ** Data Definition Language (DDL):
