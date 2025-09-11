@@ -3,6 +3,7 @@
 **
 ** Comment out the following to use an in-memory fs
 */
+
 // #define USE_PLATFORM_FS
 
 #include "os_layer.hpp"

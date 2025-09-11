@@ -1,131 +1,85 @@
 /*
 ** 2024 SQL-FromScratch
 **
-** OVERVIEW
+** A Red-Black (balanced binary) tree data that can
+** be used as ephemeral storage by the VM during the execution of a program.
+** All nodes are allocated in the query_arena. The tree is 'ephemeral' because it doesn't persist between queries,
+** as like other query_arena allocations they are deallocated in bulk after the execution
 **
-** This file implements a Red-Black tree data structure optimized for
-** temporary in-memory storage. Red-Black trees provide O(log n) operations
-** while maintaining balance through color-based constraints.
+** For visualizing the Red-Black tree algorithm see https://www.cs.usfca.edu/~galles/visualization/RedBlack.html
 **
-** KEY CONCEPTS
+** Node structure and data are allocated in a single block: [node_struct][key_bytes][record_bytes]
+** Like the b+tree, access to a part of a record involves pointer arithmetic, but unlike the b+tree
+** it's key-record pair per node.
 **
-** Node Structure: Each node contains a key-value pair stored contiguously
-** in memory for cache efficiency. Nodes are colored either RED or BLACK
-** to maintain balance properties.
+** Having in-memory sorted storage allows to do things like:
+** - Aggregations: Store group keys with running aggregates
+** - Sorting: Insert all rows, then iterate in order
+** - DISTINCT: Store seen values, checking for duplicates
+** - Subquery results: Temporary storage for IN/EXISTS operations
 **
-** Balance Invariants: The tree maintains:
-**   1. Root is always BLACK
-**   2. RED nodes cannot have RED children
-**   3. All paths from root to leaves contain the same number of BLACK nodes
-**   4. New nodes start as RED to minimize rotations
+** EXAMPLE 1: GROUP BY city, COUNT(*)
+** SQL: SELECT city, COUNT(*) FROM users GROUP BY city;
 **
-** Memory Layout: Node structure and data are allocated in a single block:
-**   [node_struct][key_bytes][record_bytes]
-** This improves cache locality and reduces allocation overhead.
+**     Red-Black Tree (no duplicates)           Memory Layout per Node:
+**           [London]-B                          [node_struct(24B)][key:char32][record:u32]
+**              / \
+**      [Boston]-R [Paris]-R                     e.g., [node_ptr,color,...]["London\0..."][42]
+**           /       \                                                            ↑           ↑
+**    [Austin]-B  [Tokyo]-B                                                    city       count
 **
-** Rebalance Flag: Unique feature allowing the tree to operate as either:
-**   - Balanced Red-Black tree (rebalance=true): Guarantees O(log n)
-**   - Unbalanced BST (rebalance=false): Faster inserts, degraded search
-** This is useful for workloads where data is inserted once then queried.
+**     Each insertion either:
+**     - Adds new city with count=1
+**     - Finds existing city and increments count in-place
 **
-** IMPLEMENTATION NOTES
+** EXAMPLE 2: ORDER BY age
+** SQL: SELECT * FROM users ORDER BY age;
 **
-** Memory Management: All nodes allocated through asdasdas, enabling
-** bulk deallocation and transaction support. The tree itself maintains
-** no memory ownership - the context handles lifecycle.
+**     Red-Black Tree (duplicates allowed)      Node Layout:
+**           [25]-B                              [node_struct][age:u32][username,email,...]
+**            /    \
+**     [23]-B       [28]-B                       Multiple records with age=25 would create
+**         /       /    \                        separate nodes, maintaining all data
+**   [22]-R   [25]-R   [30]-R
 **
-** Duplicate Handling: When duplicates are allowed, the tree uses full
-** key+record comparison to maintain strict ordering. This ensures
-** identical entries are truly identical.
+**     Key: age (u32)
+**     Record: [username(char16), email(char32), city(char32), ...]
+**
+**
 */
 
 #include "ephemeral.hpp"
 #include <cstdint>
 #include "containers.hpp"
-
 #include "common.hpp"
 #include <cassert>
 #include <cstdio>
 #include <cstring>
 #include "arena.hpp"
 
-
-// ============================================================================
-// NODE ACCESS MACROS
-// ============================================================================
-
-/*
-** Node data accessors
-**
-** These macros provide zero-cost abstractions for accessing node data.
-** The key is always at the start of the data area, with the record
-** immediately following.
-*/
-#define GET_KEY(node)         ((node)->data)
+#define GET_KEY(node)		   ((node)->data)
 #define GET_RECORD(node, tree) ((node)->data + (tree)->key_size)
 
-/*
-** Node color predicates
-**
-** Explicit macros for color checking improve readability of the
-** Red-Black tree algorithms.
-*/
 #define IS_RED(node)   ((node) && (node)->color == RED)
 #define IS_BLACK(node) (!(node) || (node)->color == BLACK)
 
-/*
-** Node relationship predicates
-*/
-#define IS_LEFT_CHILD(node)  ((node)->parent && (node) == (node)->parent->left)
+#define IS_LEFT_CHILD(node)	 ((node)->parent && (node) == (node)->parent->left)
 #define IS_RIGHT_CHILD(node) ((node)->parent && (node) == (node)->parent->right)
-#define IS_ROOT(node)        ((node)->parent == nullptr)
+#define IS_ROOT(node)		 ((node)->parent == nullptr)
 
-// ============================================================================
-// Internal Helpers
-// ============================================================================
-
-/*
-** Compare a search key against a node's key.
-**
-** Returns: <0 if key < node_key, 0 if equal, >0 if key > node_key
-*/
 static inline int
 node_compare_key(const ephemeral_tree *tree, void *key, ephemeral_tree_node *node)
 {
 	return type_compare(tree->key_type, key, GET_KEY(node));
 }
 
-/*
-** Full comparison between two nodes including record data.
-**
-** Used when duplicates are allowed to maintain strict ordering.
-** Falls back to key-only comparison when duplicates are disabled
-** or nodes have no records.
-*/
-static inline int
-node_compare_full(const ephemeral_tree *tree, ephemeral_tree_node *a, ephemeral_tree_node *b)
-{
-	int cmp = type_compare(tree->key_type, GET_KEY(a), GET_KEY(b));
-	if (cmp != 0 || !tree->allow_duplicates || tree->record_size == 0)
-	{
-		return cmp;
-	}
-	return memcmp(GET_RECORD(a, tree), GET_RECORD(b, tree), tree->record_size);
-}
 
-/*
-** Allocate and initialize a new node.
-**
-** Performs single allocation for both node structure and data,
-** improving cache locality. The data area immediately follows
-** the node structure in memory.
-*/
 static ephemeral_tree_node *
 alloc_node(ephemeral_tree *tree, void *key, void *record)
 {
 	size_t total_size = sizeof(ephemeral_tree_node) + tree->data_size;
 	auto  *node = (ephemeral_tree_node *)arena<query_arena>::alloc(total_size);
-	node->data = (uint8_t *)(node + 1); // Data follows immediately after node
+	node->data = (uint8_t *)(node + 1);
 
 	memcpy(GET_KEY(node), key, tree->key_size);
 	if (record && tree->record_size > 0)
@@ -138,20 +92,11 @@ alloc_node(ephemeral_tree *tree, void *key, void *record)
 	}
 
 	node->left = node->right = node->parent = nullptr;
-	node->color = RED;  // New nodes start RED to minimize rotations
+	node->color = RED;
 	tree->node_count++;
 	return node;
 }
 
-// ============================================================================
-// Tree Navigation
-// ============================================================================
-
-/*
-** Find the minimum (leftmost) node in a subtree.
-**
-** Used for finding successors and the first node in traversal.
-*/
 static ephemeral_tree_node *
 tree_minimum(ephemeral_tree_node *node)
 {
@@ -162,11 +107,6 @@ tree_minimum(ephemeral_tree_node *node)
 	return node;
 }
 
-/*
-** Find the maximum (rightmost) node in a subtree.
-**
-** Used for finding predecessors and the last node in traversal.
-*/
 static ephemeral_tree_node *
 tree_maximum(ephemeral_tree_node *node)
 {
@@ -177,12 +117,6 @@ tree_maximum(ephemeral_tree_node *node)
 	return node;
 }
 
-/*
-** Find the in-order successor of a node.
-**
-** If the node has a right subtree, successor is its minimum.
-** Otherwise, successor is the first ancestor where node is in left subtree.
-*/
 static ephemeral_tree_node *
 tree_successor(ephemeral_tree_node *node)
 {
@@ -200,11 +134,6 @@ tree_successor(ephemeral_tree_node *node)
 	return parent;
 }
 
-/*
-** Find the in-order predecessor of a node.
-**
-** Mirror operation of tree_successor.
-*/
 static ephemeral_tree_node *
 tree_predecessor(ephemeral_tree_node *node)
 {
@@ -222,21 +151,6 @@ tree_predecessor(ephemeral_tree_node *node)
 	return parent;
 }
 
-// ============================================================================
-// Red-Black Tree Rotations
-// ============================================================================
-
-/*
-** Left rotation around node x.
-**
-**     x                y
-**    / \              / \
-**   a   y    ==>     x   c
-**      / \          / \
-**     b   c        a   b
-**
-** Preserves BST property while rebalancing the tree.
-*/
 static void
 rotate_left(ephemeral_tree *tree, ephemeral_tree_node *x)
 {
@@ -265,11 +179,6 @@ rotate_left(ephemeral_tree *tree, ephemeral_tree_node *x)
 	x->parent = y;
 }
 
-/*
-** Right rotation around node x.
-**
-** Mirror operation of rotate_left.
-*/
 static void
 rotate_right(ephemeral_tree *tree, ephemeral_tree_node *x)
 {
@@ -298,36 +207,20 @@ rotate_right(ephemeral_tree *tree, ephemeral_tree_node *x)
 	x->parent = y;
 }
 
-/*
-** Fix Red-Black tree violations after insertion.
-**
-** New RED nodes may violate the no-red-red-child rule.
-** This function restores the invariants through recoloring
-** and rotations, working up from the inserted node.
-**
-** Cases handled:
-**   1. Uncle is RED: Recolor parent, uncle, grandparent
-**   2. Uncle is BLACK, node is "inside": Rotate to outside
-**   3. Uncle is BLACK, node is "outside": Rotate and recolor
-*/
 static void
 insert_fixup(ephemeral_tree *tree, ephemeral_tree_node *z)
 {
-	if (!tree->rebalance)
-	{
-		return;  // Skip balancing if disabled
-	}
 
 	while (z->parent && IS_RED(z->parent))
 	{
 		ephemeral_tree_node *grandparent = z->parent->parent;
-		bool parent_is_left = (z->parent == grandparent->left);
+		bool				 parent_is_left = (z->parent == grandparent->left);
 
 		ephemeral_tree_node *uncle = parent_is_left ? grandparent->right : grandparent->left;
 
 		if (IS_RED(uncle))
 		{
-			// Case 1: Uncle is red - recolor and continue up
+
 			z->parent->color = BLACK;
 			uncle->color = BLACK;
 			grandparent->color = RED;
@@ -335,16 +228,16 @@ insert_fixup(ephemeral_tree *tree, ephemeral_tree_node *z)
 		}
 		else
 		{
-			// Cases 2 & 3: Uncle is black - rotate and recolor
+
 			if (parent_is_left)
 			{
 				if (IS_RIGHT_CHILD(z))
 				{
-					// Case 2: Left-Right - rotate to Left-Left
+
 					z = z->parent;
 					rotate_left(tree, z);
 				}
-				// Case 3: Left-Left - rotate and recolor
+
 				z->parent->color = BLACK;
 				grandparent->color = RED;
 				rotate_right(tree, grandparent);
@@ -353,25 +246,20 @@ insert_fixup(ephemeral_tree *tree, ephemeral_tree_node *z)
 			{
 				if (IS_LEFT_CHILD(z))
 				{
-					// Case 2: Right-Left - rotate to Right-Right
+
 					z = z->parent;
 					rotate_right(tree, z);
 				}
-				// Case 3: Right-Right - rotate and recolor
+
 				z->parent->color = BLACK;
 				grandparent->color = RED;
 				rotate_left(tree, grandparent);
 			}
 		}
 	}
-	tree->root->color = BLACK;  // Root must always be black
+	tree->root->color = BLACK;
 }
 
-/*
-** Replace subtree rooted at u with subtree rooted at v.
-**
-** Helper for deletion - maintains parent pointers correctly.
-*/
 static void
 transplant(ephemeral_tree *tree, ephemeral_tree_node *u, ephemeral_tree_node *v)
 {
@@ -394,31 +282,18 @@ transplant(ephemeral_tree *tree, ephemeral_tree_node *u, ephemeral_tree_node *v)
 	}
 }
 
-/*
-** Fix Red-Black tree violations after deletion.
-**
-** Deletion of BLACK nodes may violate the black-height property.
-** This function restores balance through rotations and recoloring.
-**
-** The algorithm handles four symmetric cases based on the
-** relationship between the node and its sibling.
-*/
 static void
 delete_fixup(ephemeral_tree *tree, ephemeral_tree_node *x, ephemeral_tree_node *x_parent)
 {
-	if (!tree->rebalance)
-	{
-		return;  // Skip balancing if disabled
-	}
 
 	while (x != tree->root && IS_BLACK(x))
 	{
-		bool is_left = (x == x_parent->left);
+		bool				 is_left = (x == x_parent->left);
 		ephemeral_tree_node *sibling = is_left ? x_parent->right : x_parent->left;
 
 		if (IS_RED(sibling))
 		{
-			// Case 1: Sibling is red - rotate and recolor
+
 			sibling->color = BLACK;
 			x_parent->color = RED;
 			if (is_left)
@@ -437,7 +312,7 @@ delete_fixup(ephemeral_tree *tree, ephemeral_tree_node *x, ephemeral_tree_node *
 
 		if (left_black && right_black)
 		{
-			// Case 2: Both sibling's children are black
+
 			sibling->color = RED;
 			x = x_parent;
 			x_parent = x->parent;
@@ -448,7 +323,7 @@ delete_fixup(ephemeral_tree *tree, ephemeral_tree_node *x, ephemeral_tree_node *
 			{
 				if (right_black)
 				{
-					// Case 3: Sibling's far child is black
+
 					if (sibling->left)
 					{
 						sibling->left->color = BLACK;
@@ -457,7 +332,7 @@ delete_fixup(ephemeral_tree *tree, ephemeral_tree_node *x, ephemeral_tree_node *
 					rotate_right(tree, sibling);
 					sibling = x_parent->right;
 				}
-				// Case 4: Sibling's far child is red
+
 				sibling->color = x_parent->color;
 				x_parent->color = BLACK;
 				if (sibling->right)
@@ -470,7 +345,7 @@ delete_fixup(ephemeral_tree *tree, ephemeral_tree_node *x, ephemeral_tree_node *
 			{
 				if (left_black)
 				{
-					// Case 3: Sibling's far child is black
+
 					if (sibling->right)
 					{
 						sibling->right->color = BLACK;
@@ -479,7 +354,7 @@ delete_fixup(ephemeral_tree *tree, ephemeral_tree_node *x, ephemeral_tree_node *
 					rotate_left(tree, sibling);
 					sibling = x_parent->left;
 				}
-				// Case 4: Sibling's far child is red
+
 				sibling->color = x_parent->color;
 				x_parent->color = BLACK;
 				if (sibling->left)
@@ -488,7 +363,7 @@ delete_fixup(ephemeral_tree *tree, ephemeral_tree_node *x, ephemeral_tree_node *
 				}
 				rotate_right(tree, x_parent);
 			}
-			x = tree->root;  // Force loop termination
+			x = tree->root;
 		}
 	}
 	if (x)
@@ -497,16 +372,6 @@ delete_fixup(ephemeral_tree *tree, ephemeral_tree_node *x, ephemeral_tree_node *
 	}
 }
 
-/*
-** Delete a node from the tree.
-**
-** Handles three cases:
-**   1. Node has no children: Simply remove
-**   2. Node has one child: Replace with child
-**   3. Node has two children: Replace with successor, delete successor
-**
-** The fixup is needed when a BLACK node is deleted.
-*/
 static bool
 delete_node(ephemeral_tree *tree, ephemeral_tree_node *z)
 {
@@ -518,25 +383,25 @@ delete_node(ephemeral_tree *tree, ephemeral_tree_node *z)
 	ephemeral_tree_node *y = z;
 	ephemeral_tree_node *x = nullptr;
 	ephemeral_tree_node *x_parent = nullptr;
-	TreeColor y_original_color = y->color;
+	TREE_COLOR			 y_original_color = y->color;
 
 	if (!z->left)
 	{
-		// Case 1: No left child
+
 		x = z->right;
 		x_parent = z->parent;
 		transplant(tree, z, z->right);
 	}
 	else if (!z->right)
 	{
-		// Case 2: No right child
+
 		x = z->left;
 		x_parent = z->parent;
 		transplant(tree, z, z->left);
 	}
 	else
 	{
-		// Case 3: Two children - replace with successor
+
 		y = tree_minimum(z->right);
 		y_original_color = y->color;
 		x = y->right;
@@ -569,15 +434,6 @@ delete_node(ephemeral_tree *tree, ephemeral_tree_node *z)
 	return true;
 }
 
-// ============================================================================
-// Seek Operations
-// ============================================================================
-
-/*
-** Find node with exact key match.
-**
-** For duplicates, returns the leftmost matching node.
-*/
 static ephemeral_tree_node *
 seek_eq(ephemeral_tree *tree, void *key)
 {
@@ -591,7 +447,7 @@ seek_eq(ephemeral_tree *tree, void *key)
 		if (cmp == 0)
 		{
 			found = current;
-			// For duplicates, find the leftmost
+
 			if (tree->allow_duplicates)
 			{
 				current = current->left;
@@ -610,9 +466,6 @@ seek_eq(ephemeral_tree *tree, void *key)
 	return found;
 }
 
-/*
-** Find smallest node with key >= target.
-*/
 static ephemeral_tree_node *
 seek_ge(ephemeral_tree *tree, void *key)
 {
@@ -625,9 +478,9 @@ seek_ge(ephemeral_tree *tree, void *key)
 
 		if (cmp <= 0)
 		{
-			// current.key >= key
+
 			best = current;
-			current = current->left; // Look for smaller valid node
+			current = current->left;
 		}
 		else
 		{
@@ -638,9 +491,6 @@ seek_ge(ephemeral_tree *tree, void *key)
 	return best;
 }
 
-/*
-** Find smallest node with key > target.
-*/
 static ephemeral_tree_node *
 seek_gt(ephemeral_tree *tree, void *key)
 {
@@ -653,9 +503,9 @@ seek_gt(ephemeral_tree *tree, void *key)
 
 		if (cmp < 0)
 		{
-			// current.key > key
+
 			best = current;
-			current = current->left; // Look for smaller valid node
+			current = current->left;
 		}
 		else
 		{
@@ -666,9 +516,6 @@ seek_gt(ephemeral_tree *tree, void *key)
 	return best;
 }
 
-/*
-** Find largest node with key <= target.
-*/
 static ephemeral_tree_node *
 seek_le(ephemeral_tree *tree, void *key)
 {
@@ -681,9 +528,9 @@ seek_le(ephemeral_tree *tree, void *key)
 
 		if (cmp >= 0)
 		{
-			// current.key <= key
+
 			best = current;
-			current = current->right; // Look for larger valid node
+			current = current->right;
 		}
 		else
 		{
@@ -694,9 +541,6 @@ seek_le(ephemeral_tree *tree, void *key)
 	return best;
 }
 
-/*
-** Find largest node with key < target.
-*/
 static ephemeral_tree_node *
 seek_lt(ephemeral_tree *tree, void *key)
 {
@@ -709,9 +553,9 @@ seek_lt(ephemeral_tree *tree, void *key)
 
 		if (cmp > 0)
 		{
-			// current.key < key
+
 			best = current;
-			current = current->right; // Look for larger valid node
+			current = current->right;
 		}
 		else
 		{
@@ -722,20 +566,6 @@ seek_lt(ephemeral_tree *tree, void *key)
 	return best;
 }
 
-// ============================================================================
-// PUBLIC TREE INTERFACE
-// ============================================================================
-
-/*
-** Create a new ephemeral tree.
-**
-** Parameters:
-**   key_type    - Data type of keys
-**   record_size - Size of value records in bytes
-**   flags       - Bit flags: 0x01 = allow_duplicates, 0x02 = rebalance
-**
-** Returns: Initialized tree structure
-*/
 ephemeral_tree
 et_create(data_type key_type, uint32_t record_size, uint8_t flags)
 {
@@ -745,16 +575,9 @@ et_create(data_type key_type, uint32_t record_size, uint8_t flags)
 	tree.record_size = record_size;
 	tree.data_size = tree.key_size + record_size;
 	tree.allow_duplicates = flags & 0x01;
-	// tree.rebalance = (flags & 0x02) >> 1;
-	tree.rebalance = true;
 	return tree;
 }
 
-/*
-** Clear all nodes from the tree.
-**
-** Note: Does not free memory
-*/
 void
 et_clear(ephemeral_tree *tree)
 {
@@ -762,18 +585,10 @@ et_clear(ephemeral_tree *tree)
 	tree->node_count = 0;
 }
 
-/*
-** Insert a key-value pair into the tree.
-**
-** For existing keys without duplicates, updates the record.
-** For duplicates with matching records, updates in place.
-**
-** Returns: true (always succeeds with sufficient memory)
-*/
 bool
 et_insert(ephemeral_tree *tree, void *key, void *record)
 {
-	// Find insertion point
+
 	ephemeral_tree_node *parent = nullptr, *current = tree->root;
 
 	while (current)
@@ -783,7 +598,7 @@ et_insert(ephemeral_tree *tree, void *key, void *record)
 
 		if (cmp == 0 && !tree->allow_duplicates)
 		{
-			// Update existing entry
+
 			if (record && tree->record_size > 0)
 			{
 				memcpy(GET_RECORD(current, tree), record, tree->record_size);
@@ -791,13 +606,12 @@ et_insert(ephemeral_tree *tree, void *key, void *record)
 			return true;
 		}
 
-		// For duplicates with records, use full comparison
 		if (cmp == 0 && tree->allow_duplicates && tree->record_size > 0 && record)
 		{
 			int rec_cmp = memcmp(record, GET_RECORD(current, tree), tree->record_size);
 			if (rec_cmp == 0)
 			{
-				// Exact duplicate - update
+
 				memcpy(GET_RECORD(current, tree), record, tree->record_size);
 				return true;
 			}
@@ -809,7 +623,6 @@ et_insert(ephemeral_tree *tree, void *key, void *record)
 		}
 	}
 
-	// Insert new node
 	ephemeral_tree_node *node = alloc_node(tree, key, record);
 	node->parent = parent;
 
@@ -822,7 +635,7 @@ et_insert(ephemeral_tree *tree, void *key, void *record)
 		int cmp = node_compare_key(tree, key, parent);
 		if (cmp == 0 && tree->allow_duplicates && tree->record_size > 0 && record)
 		{
-			// Compare records for placement
+
 			int rec_cmp = memcmp(record, GET_RECORD(parent, tree), tree->record_size);
 			if (rec_cmp < 0)
 			{
@@ -850,11 +663,6 @@ et_insert(ephemeral_tree *tree, void *key, void *record)
 	return true;
 }
 
-/*
-** Delete first occurrence of key from the tree.
-**
-** Returns: true if key was found and deleted, false otherwise
-*/
 bool
 et_delete(ephemeral_tree *tree, void *key)
 {
@@ -873,53 +681,6 @@ et_delete(ephemeral_tree *tree, void *key)
 	return false;
 }
 
-/*
-** Delete exact key-record pair from the tree.
-**
-** Only deletes if both key and record match exactly.
-**
-** Returns: true if exact match was found and deleted
-*/
-bool
-et_delete_exact(ephemeral_tree *tree, void *key, void *record)
-{
-	ephemeral_tree_node *current = tree->root;
-
-	while (current)
-	{
-		int cmp = node_compare_key(tree, key, current);
-
-		if (cmp == 0)
-		{
-			// Check record match
-			if (!tree->allow_duplicates || tree->record_size == 0)
-			{
-				return delete_node(tree, current);
-			}
-
-			int rec_cmp = memcmp(record, GET_RECORD(current, tree), tree->record_size);
-			if (rec_cmp == 0)
-			{
-				return delete_node(tree, current);
-			}
-			current = (rec_cmp < 0) ? current->left : current->right;
-		}
-		else
-		{
-			current = (cmp < 0) ? current->left : current->right;
-		}
-	}
-
-	return false;
-}
-
-// ============================================================================
-// CURSOR OPERATIONS
-// ============================================================================
-
-/*
-** Position cursor at first (leftmost) node.
-*/
 bool
 et_cursor_first(et_cursor *cursor)
 {
@@ -934,9 +695,6 @@ et_cursor_first(et_cursor *cursor)
 	return cursor->current != nullptr;
 }
 
-/*
-** Position cursor at last (rightmost) node.
-*/
 bool
 et_cursor_last(et_cursor *cursor)
 {
@@ -951,9 +709,6 @@ et_cursor_last(et_cursor *cursor)
 	return cursor->current != nullptr;
 }
 
-/*
-** Move cursor to next node in order.
-*/
 bool
 et_cursor_next(et_cursor *cursor)
 {
@@ -972,9 +727,6 @@ et_cursor_next(et_cursor *cursor)
 	return false;
 }
 
-/*
-** Move cursor to previous node in order.
-*/
 bool
 et_cursor_previous(et_cursor *cursor)
 {
@@ -993,9 +745,6 @@ et_cursor_previous(et_cursor *cursor)
 	return false;
 }
 
-/*
-** Check if cursor can move forward.
-*/
 bool
 et_cursor_has_next(et_cursor *cursor)
 {
@@ -1006,9 +755,6 @@ et_cursor_has_next(et_cursor *cursor)
 	return tree_successor(cursor->current) != nullptr;
 }
 
-/*
-** Check if cursor can move backward.
-*/
 bool
 et_cursor_has_previous(et_cursor *cursor)
 {
@@ -1019,15 +765,10 @@ et_cursor_has_previous(et_cursor *cursor)
 	return tree_predecessor(cursor->current) != nullptr;
 }
 
-/*
-** Position cursor based on key and comparison operator.
-**
-** Supports: EQ (exact), GE, GT, LE, LT
-*/
 bool
 et_cursor_seek(et_cursor *cursor, const void *key, comparison_op op)
 {
-	void *key_bytes = (void *)key;
+	void				*key_bytes = (void *)key;
 	ephemeral_tree_node *result = nullptr;
 
 	switch (op)
@@ -1063,9 +804,6 @@ et_cursor_seek(et_cursor *cursor, const void *key, comparison_op op)
 	return false;
 }
 
-/*
-** Get key at current cursor position.
-*/
 void *
 et_cursor_key(et_cursor *cursor)
 {
@@ -1076,9 +814,6 @@ et_cursor_key(et_cursor *cursor)
 	return GET_KEY(cursor->current);
 }
 
-/*
-** Get record at current cursor position.
-*/
 void *
 et_cursor_record(et_cursor *cursor)
 {
@@ -1089,27 +824,18 @@ et_cursor_record(et_cursor *cursor)
 	return GET_RECORD(cursor->current, &cursor->tree);
 }
 
-/*
-** Check if cursor is at valid position.
-*/
 bool
 et_cursor_is_valid(et_cursor *cursor)
 {
 	return cursor->state == et_cursor::VALID;
 }
 
-/*
-** Insert through cursor.
-*/
 bool
 et_cursor_insert(et_cursor *cursor, void *key, void *record)
 {
 	return et_insert(&cursor->tree, key, record);
 }
 
-/*
-** Delete at cursor position and advance.
-*/
 bool
 et_cursor_delete(et_cursor *cursor)
 {
@@ -1118,13 +844,10 @@ et_cursor_delete(et_cursor *cursor)
 		return false;
 	}
 
-	// Save next position before deletion
 	ephemeral_tree_node *next = tree_successor(cursor->current);
 
-	// Delete current node
 	bool result = delete_node(&cursor->tree, cursor->current);
 
-	// Move to next position
 	if (next)
 	{
 		cursor->current = next;
@@ -1138,9 +861,6 @@ et_cursor_delete(et_cursor *cursor)
 	return result;
 }
 
-/*
-** Update record at cursor position.
-*/
 bool
 et_cursor_update(et_cursor *cursor, void *record)
 {
@@ -1153,62 +873,22 @@ et_cursor_update(et_cursor *cursor, void *record)
 	return true;
 }
 
-// ============================================================================
-// UTILITY FUNCTIONS
-// ============================================================================
-
-/*
-** Get count of nodes in tree.
-*/
-uint32_t
-et_count(const ephemeral_tree *tree)
-{
-	return tree->node_count;
-}
-
-/*
-** Check if tree is empty.
-*/
-bool
-et_is_empty(const ephemeral_tree *tree)
-{
-	return tree->root == nullptr;
-}
-
-// ============================================================================
-// TREE VALIDATION
-// ============================================================================
-
-/*
-** Recursively validate tree structure and Red-Black properties.
-**
-** Checks:
-**   - BST property (left < node < right)
-**   - Red-Black coloring rules
-**   - Black height consistency
-**   - Parent pointer correctness
-**   - No cycles
-*/
 static int
 validate_node_recursive(const ephemeral_tree *tree, ephemeral_tree_node *node, ephemeral_tree_node *expected_parent,
 						void *min_bound, void *max_bound, hash_set<ephemeral_tree_node *, query_arena> &visited)
 {
 	if (!node)
 	{
-		return 0; // NIL nodes are black by definition
+		return 0;
 	}
 
-	// Check for cycles
 	assert(!visited.contains(node) && "Cycle detected in tree");
 	visited.insert(node, 1);
 
-	// Verify parent pointer
 	assert(node->parent == expected_parent && "Parent pointer mismatch");
 
-	// Get node's key
 	void *key = GET_KEY(node);
 
-	// Check BST bounds
 	if (min_bound)
 	{
 		assert(node_compare_key(tree, min_bound, node) < 0 && "BST violation: node smaller than min bound");
@@ -1218,7 +898,6 @@ validate_node_recursive(const ephemeral_tree *tree, ephemeral_tree_node *node, e
 		assert(node_compare_key(tree, max_bound, node) > 0 && "BST violation: node larger than max bound");
 	}
 
-	// Red-Black property: Red nodes have black children
 	if (IS_RED(node))
 	{
 		assert(IS_BLACK(node->left) && "Red node has red left child");
@@ -1227,57 +906,37 @@ validate_node_recursive(const ephemeral_tree *tree, ephemeral_tree_node *node, e
 		assert(IS_BLACK(node->parent) && "Red node has red parent");
 	}
 
-	// Recursively validate children
 	int left_black_height = validate_node_recursive(tree, node->left, node, min_bound, key, visited);
 	int right_black_height = validate_node_recursive(tree, node->right, node, key, max_bound, visited);
 
-	// Red-Black property: All paths have same black height
 	assert(left_black_height == right_black_height && "Black height mismatch");
 
-	// Return black height including this node
 	return left_black_height + (IS_BLACK(node) ? 1 : 0);
 }
 
-/*
-** Validate entire tree structure.
-**
-** Ensures all Red-Black tree invariants are maintained.
-*/
 void
 et_validate(const ephemeral_tree *tree)
 {
 	assert(tree != nullptr);
 
-	// Empty tree is valid
 	if (!tree->root)
 	{
 		assert(tree->node_count == 0);
 		return;
 	}
 
-	// Root must be black
 	assert(IS_BLACK(tree->root) && "Root is not black");
 	assert(IS_ROOT(tree->root) && "Root has parent");
 
-	// Track visited nodes to detect cycles
 	hash_set<ephemeral_tree_node *, query_arena> visited;
 
-	// Validate recursively and get black height
 	int black_height = validate_node_recursive(tree, tree->root, nullptr, nullptr, nullptr, visited);
 
-	// Verify node count matches
 	assert(visited.size() == tree->node_count && "Node count mismatch");
 
-	(void)black_height; // Suppress unused warning
+	(void)black_height;
 }
 
-// ============================================================================
-// TREE PRINTING
-// ============================================================================
-
-/*
-** Helper for in-order traversal printing.
-*/
 static void
 print_inorder_recursive(const ephemeral_tree *tree, ephemeral_tree_node *node, bool &first)
 {
@@ -1298,8 +957,8 @@ print_inorder_recursive(const ephemeral_tree *tree, ephemeral_tree_node *node, b
 	if (tree->record_size > 0)
 	{
 		printf(":");
-		// Print first few bytes of record as hex
-		uint8_t *rec = (uint8_t*)GET_RECORD(node, tree);
+
+		uint8_t *rec = (uint8_t *)GET_RECORD(node, tree);
 		for (uint32_t i = 0; i < std::min(tree->record_size, 4u); i++)
 		{
 			printf("%02x", rec[i]);
@@ -1314,9 +973,6 @@ print_inorder_recursive(const ephemeral_tree *tree, ephemeral_tree_node *node, b
 	print_inorder_recursive(tree, node->right, first);
 }
 
-/*
-** Visual tree printer - shows structure graphically.
-*/
 static void
 print_tree_visual_helper(const ephemeral_tree *tree, ephemeral_tree_node *node, const std::string &prefix, bool is_tail)
 {
@@ -1328,14 +984,13 @@ print_tree_visual_helper(const ephemeral_tree *tree, ephemeral_tree_node *node, 
 	printf("%s", prefix.c_str());
 	printf("%s", is_tail ? "└── " : "├── ");
 
-	// Print node
 	type_print(tree->key_type, GET_KEY(node));
 	printf(" %s", IS_RED(node) ? "(R)" : "(B)");
 
 	if (tree->record_size > 0)
 	{
 		printf(" rec:");
-		auto *rec = (uint8_t*)GET_RECORD(node, tree);
+		auto *rec = (uint8_t *)GET_RECORD(node, tree);
 		for (uint32_t i = 0; i < std::min(tree->record_size, 4u); i++)
 		{
 			printf("%02x", rec[i]);
@@ -1347,7 +1002,6 @@ print_tree_visual_helper(const ephemeral_tree *tree, ephemeral_tree_node *node, 
 	}
 	printf("\n");
 
-	// Print children
 	std::string child_prefix = prefix + (is_tail ? "    " : "│   ");
 
 	if (node->left || node->right)
@@ -1363,9 +1017,6 @@ print_tree_visual_helper(const ephemeral_tree *tree, ephemeral_tree_node *node, 
 	}
 }
 
-/*
-** Main print function with BFS level-order traversal.
-*/
 void
 et_print(const ephemeral_tree *tree)
 {
@@ -1381,16 +1032,14 @@ et_print(const ephemeral_tree *tree)
 	printf("Key type: %s, Key size: %u bytes\n", type_name(tree->key_type), tree->key_size);
 	printf("Record size: %u bytes\n", tree->record_size);
 	printf("Allow duplicates: %s\n", tree->allow_duplicates ? "YES" : "NO");
-	printf("Rebalancing: %s\n", tree->rebalance ? "ENABLED" : "DISABLED");
 	printf("Node count: %u\n", tree->node_count);
 	printf("------------------------------------\n\n");
 
-	// BFS traversal with level tracking
 	struct node_level
 	{
 		ephemeral_tree_node *node;
-		int level;
-		bool is_left;
+		int					 level;
+		bool				 is_left;
 	};
 
 	queue<node_level, query_arena> queue;
@@ -1416,7 +1065,6 @@ et_print(const ephemeral_tree *tree)
 			nodes_in_level = 0;
 		}
 
-		// Print node info
 		if (nodes_in_level > 0)
 		{
 			printf("  ");
@@ -1425,12 +1073,10 @@ et_print(const ephemeral_tree *tree)
 		type_print(tree->key_type, GET_KEY(nl.node));
 		printf("]");
 
-		// Print color
 		printf("-%c", IS_RED(nl.node) ? 'R' : 'B');
 
 		nodes_in_level++;
 
-		// Add children to queue
 		if (nl.node->left)
 		{
 			queue.push({nl.node->left, nl.level + 1, true});
@@ -1451,7 +1097,6 @@ et_print(const ephemeral_tree *tree)
 	print_inorder_recursive(tree, tree->root, first);
 	printf("\n");
 
-	// Show visual structure
 	printf("\nVisual Structure:\n");
 	print_tree_visual_helper(tree, tree->root, "", true);
 	printf("====================================\n\n");

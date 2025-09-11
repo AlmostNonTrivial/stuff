@@ -91,7 +91,7 @@ void shuffle_array(T* arr, size_t n, simple_rng& rng) {
                     "Failed to delete key %u in backward pass\n", key);
     }
 
-    ASSERT_PRINT(&tree, et_is_empty(&tree),
+    ASSERT_PRINT(&tree, tree.node_count == 0,
                 "Tree should be empty after deleting all keys\n");
 
     arena<query_arena>::reset();
@@ -206,8 +206,6 @@ void shuffle_array(T* arr, size_t n, simple_rng& rng) {
                 "Expected 10 duplicates, found %d\n", found_count);
 
     uint32_t target_record = 500;
-    ASSERT_PRINT(&tree, et_delete_exact(&tree, (uint8_t*)&key, (uint8_t*)&target_record),
-                "Failed to delete exact duplicate with record %u\n", target_record);
 
     ASSERT_PRINT(&tree, et_delete(&tree, (uint8_t*)&key),
                 "Failed to delete first occurrence of key %u\n", key);
@@ -355,7 +353,7 @@ void shuffle_array(T* arr, size_t n, simple_rng& rng) {
     et_cursor cursor = {.tree = et_create(TYPE_U32, sizeof(uint32_t), false)};
     ephemeral_tree &tree = cursor.tree;
 
-    ASSERT_PRINT(&tree, et_is_empty(&tree),
+    ASSERT_PRINT(&tree, tree.node_count == 0,
                 "New tree should be empty\n");
     ASSERT_PRINT(&tree, !et_cursor_first(&cursor),
                 "Empty tree should have no first element\n");
@@ -368,7 +366,7 @@ void shuffle_array(T* arr, size_t n, simple_rng& rng) {
     uint32_t value = 100;
     ASSERT_PRINT(&tree, et_insert(&tree, (uint8_t*)&key, (uint8_t*)&value),
                 "Failed to insert single element\n");
-    ASSERT_PRINT(&tree, !et_is_empty(&tree),
+    ASSERT_PRINT(&tree, tree.node_count != 0,
                 "Tree should not be empty after insert\n");
     ASSERT_PRINT(&tree, et_cursor_first(&cursor),
                 "Should find first in single-element tree\n");
@@ -378,7 +376,7 @@ void shuffle_array(T* arr, size_t n, simple_rng& rng) {
                 "Single element key should be 42, got %u\n", *(uint32_t*)et_cursor_key(&cursor));
     ASSERT_PRINT(&tree, et_delete(&tree, (uint8_t*)&key),
                 "Failed to delete single element\n");
-    ASSERT_PRINT(&tree, et_is_empty(&tree),
+    ASSERT_PRINT(&tree, tree.node_count == 0,
                 "Tree should be empty after deleting single element\n");
 
     uint32_t min_key = 0;
@@ -400,7 +398,7 @@ void shuffle_array(T* arr, size_t n, simple_rng& rng) {
                 "Last should be UINT32_MAX, got %u\n", *(uint32_t*)et_cursor_key(&cursor));
 
     et_clear(&tree);
-    ASSERT_PRINT(&tree, et_is_empty(&tree),
+    ASSERT_PRINT(&tree, tree.node_count == 0,
                 "Tree should be empty after clear\n");
 
     et_validate(&tree);
