@@ -25,7 +25,7 @@
 #include <chrono>
 
 int
-get_column_width(DataType type)
+get_column_width(data_type type)
 {
 	switch (type)
 	{
@@ -62,10 +62,10 @@ get_column_width(DataType type)
 static array<int, query_arena> result_column_widths;
 
 void
-print_select_headers(SelectStmt *select_stmt)
+print_select_headers(select_stmt_node *select_stmt)
 {
 
-	Relation *table = select_stmt->sem.table;
+	relation *table = select_stmt->sem.table;
 	if (!table)
 		return;
 
@@ -95,7 +95,7 @@ print_select_headers(SelectStmt *select_stmt)
 		{
 			uint32_t	col_idx = select_stmt->sem.column_indices[i];
 			const char *name = table->columns[col_idx].name;
-			DataType	type = table->columns[col_idx].type;
+			data_type	type = table->columns[col_idx].type;
 
 			int width = get_column_width(type);
 			printf("%-*s  ", width, name);
@@ -105,7 +105,7 @@ print_select_headers(SelectStmt *select_stmt)
 		for (uint32_t i = 0; i < select_stmt->sem.column_indices.size(); i++)
 		{
 			uint32_t col_idx = select_stmt->sem.column_indices[i];
-			DataType type = table->columns[col_idx].type;
+			data_type type = table->columns[col_idx].type;
 
 			int width = get_column_width(type);
 			for (int j = 0; j < width; j++)
@@ -117,11 +117,11 @@ print_select_headers(SelectStmt *select_stmt)
 }
 
 void
-setup_result_formatting(SelectStmt *select_stmt)
+setup_result_formatting(select_stmt_node *select_stmt)
 {
 	result_column_widths.clear();
 
-	Relation *table = select_stmt->sem.table;
+	relation *table = select_stmt->sem.table;
 	if (!table)
 		return;
 
@@ -137,14 +137,14 @@ setup_result_formatting(SelectStmt *select_stmt)
 		for (uint32_t i = 0; i < select_stmt->sem.column_indices.size(); i++)
 		{
 			uint32_t col_idx = select_stmt->sem.column_indices[i];
-			DataType type = table->columns[col_idx].type;
+			data_type type = table->columns[col_idx].type;
 			result_column_widths.push(get_column_width(type));
 		}
 	}
 }
 
 void
-formatted_result_callback(TypedValue *result, size_t count)
+formatted_result_callback(typed_value *result, size_t count)
 {
 	for (size_t i = 0; i < count; i++)
 	{
@@ -226,7 +226,7 @@ execute_sql_statement(const char *sql, bool test_mode)
 			vm_set_result_callback(formatted_result_callback);
 		}
 
-		array<VMInstruction, query_arena> program = compile_program(stmt, !in_transaction);
+		array<vm_instruction, query_arena> program = compile_program(stmt, !in_transaction);
 		if (program.size() == 0)
 		{
 			printf("❌ Compilation failed: %s\n", sql);
@@ -297,7 +297,7 @@ run_meta_command(const char *cmd)
 	else if (strncmp(cmd, ".schema ", 8) == 0)
 	{
 		const char *table_name = cmd + 8;
-		Relation   *s = catalog.get(table_name);
+		relation   *s = catalog.get(table_name);
 		if (s)
 		{
 			printf("\nSchema for %s:\n", table_name);
@@ -419,18 +419,18 @@ run_repl()
 		catalog_reload();
 	}
 
-	execute_sql_statement("INSERT INTO users VALUES (111, 'markymarky', 'marko', 22, 'boomtown');");
-	execute_sql_statement("INSERT INTO users VALUES (112, 'markymarky', 'marko', 23, 'boomtown');");
-	execute_sql_statement(
-		"INSERT INTO users VALUES (112, 'aaaaaaaaaaaaaaaaaaaaaaasdasdsadasdasdsadasdasddasdsamarkymarky', 'marko', 22, "
-		"'boomtown');");
-	execute_sql_statement("DELETE FROM users WHERE username = 'lilah';");
+	// execute_sql_statement("INSERT INTO users VALUES (111, 'markymarky', 'marko', 22, 'boomtown');");
+	// execute_sql_statement("INSERT INTO users VALUES (112, 'markymarky', 'marko', 23, 'boomtown');");
+	// execute_sql_statement(
+	// 	"INSERT INTO users VALUES (112, 'aaaaaaaaaaaaaaaaaaaaaaasdasdsadasdasdsadasdasddasdsamarkymarky', 'marko', 22, "
+	// 	"'boomtown');");
+	// execute_sql_statement("DELETE FROM users WHERE username = 'lilah';");
 
-	execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 99;");
+	// execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 99;");
 	execute_sql_statement("SELECT * FROM users WHERE user_id > 50 AND NOT NOT user_id > 75;");
-	execute_sql_statement("SELECT * FROM master_catalog");
-	execute_sql_statement("DROP TABLE products;");
-	execute_sql_statement("SELECT * FROM master_catalog");
+	// execute_sql_statement("SELECT * FROM master_catalog");
+	// execute_sql_statement("DROP TABLE products;");
+	// execute_sql_statement("SELECT * FROM master_catalog");
 
 	return 0;
 

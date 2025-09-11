@@ -42,10 +42,10 @@ test_select_star()
 	ASSERT_PRINT(result.success == true, nullptr);
 	ASSERT_PRINT(result.statements.size() == 1, nullptr);
 
-	Statement *stmt = result.statements[0];
+	stmt_node *stmt = result.statements[0];
 	ASSERT_PRINT(stmt->type == STMT_SELECT, stmt);
 
-	SelectStmt *select = &stmt->select_stmt;
+	select_stmt_node *select = &stmt->select_stmt;
 	ASSERT_PRINT(select->is_star == true, stmt);
 	ASSERT_PRINT(str_eq(select->table_name, "users"), stmt);
 	ASSERT_PRINT(select->where_clause == nullptr, stmt);
@@ -58,8 +58,8 @@ test_select_columns()
 	parser_result result = parse_sql("SELECT id, name, email FROM users");
 	ASSERT_PRINT(result.success == true, nullptr);
 
-	Statement  *stmt = result.statements[0];
-	SelectStmt *select = &stmt->select_stmt;
+	stmt_node  *stmt = result.statements[0];
+	select_stmt_node *select = &stmt->select_stmt;
 
 	ASSERT_PRINT(select->is_star == false, stmt);
 	ASSERT_PRINT(select->columns.size() == 3, stmt);
@@ -75,8 +75,8 @@ test_select_where()
 	parser_result result = parse_sql("SELECT * FROM users WHERE id = 42");
 	ASSERT_PRINT(result.success == true, nullptr);
 
-	Statement  *stmt = result.statements[0];
-	SelectStmt *select = &stmt->select_stmt;
+	stmt_node  *stmt = result.statements[0];
+	select_stmt_node *select = &stmt->select_stmt;
 
 	ASSERT_PRINT(select->where_clause->type == EXPR_BINARY_OP, stmt);
 	ASSERT_PRINT(select->where_clause->op == OP_EQ, stmt);
@@ -90,8 +90,8 @@ test_select_where_complex()
 	parser_result result = parse_sql("SELECT * FROM products WHERE price > 100 AND category = 'electronics'");
 	ASSERT_PRINT(result.success == true, nullptr);
 
-	Statement  *stmt = result.statements[0];
-	SelectStmt *select = &stmt->select_stmt;
+	stmt_node  *stmt = result.statements[0];
+	select_stmt_node *select = &stmt->select_stmt;
 
 	ASSERT_PRINT(select->where_clause->op == OP_AND, stmt);
 	ASSERT_PRINT(select->where_clause->left->op == OP_GT, stmt);
@@ -108,8 +108,8 @@ test_select_order_by()
 	parser_result result = parse_sql("SELECT * FROM users ORDER BY name ASC");
 	ASSERT_PRINT(result.success == true, nullptr);
 
-	Statement  *stmt = result.statements[0];
-	SelectStmt *select = &stmt->select_stmt;
+	stmt_node  *stmt = result.statements[0];
+	select_stmt_node *select = &stmt->select_stmt;
 
 	ASSERT_PRINT(str_eq(select->order_by_column, "name"), stmt);
 	ASSERT_PRINT(select->order_desc == false, stmt);
@@ -135,8 +135,8 @@ test_select_full()
 	parser_result result = parse_sql("SELECT name, email FROM users WHERE age > 18 ORDER BY name DESC");
 	ASSERT_PRINT(result.success == true, nullptr);
 
-	Statement  *stmt = result.statements[0];
-	SelectStmt *select = &stmt->select_stmt;
+	stmt_node  *stmt = result.statements[0];
+	select_stmt_node *select = &stmt->select_stmt;
 
 	ASSERT_PRINT(select->is_star == false, stmt);
 	ASSERT_PRINT(select->columns.size() == 2, stmt);
@@ -157,8 +157,8 @@ test_insert_values_only()
 	parser_result result = parse_sql("INSERT INTO users VALUES (1, 'John', 'john@example.com')");
 	ASSERT_PRINT(result.success == true, nullptr);
 
-	Statement  *stmt = result.statements[0];
-	InsertStmt *insert = &stmt->insert_stmt;
+	stmt_node  *stmt = result.statements[0];
+	insert_stmt_node *insert = &stmt->insert_stmt;
 
 	ASSERT_PRINT(str_eq(insert->table_name, "users"), stmt);
 	ASSERT_PRINT(insert->columns.size() == 0, stmt);
@@ -177,8 +177,8 @@ test_insert_with_columns()
 	parser_result result = parse_sql("INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')");
 	ASSERT_PRINT(result.success == true, nullptr);
 
-	Statement  *stmt = result.statements[0];
-	InsertStmt *insert = &stmt->insert_stmt;
+	stmt_node  *stmt = result.statements[0];
+	insert_stmt_node *insert = &stmt->insert_stmt;
 
 	ASSERT_PRINT(insert->columns.size() == 3, stmt);
 	ASSERT_PRINT(str_eq(insert->columns[0], "id"), stmt);
@@ -197,8 +197,8 @@ test_update_no_where()
 	parser_result result = parse_sql("UPDATE users SET status = 'active'");
 	ASSERT_PRINT(result.success == true, nullptr);
 
-	Statement  *stmt = result.statements[0];
-	UpdateStmt *update = &stmt->update_stmt;
+	stmt_node  *stmt = result.statements[0];
+	update_stmt_node *update = &stmt->update_stmt;
 
 	ASSERT_PRINT(str_eq(update->table_name, "users"), stmt);
 	ASSERT_PRINT(update->columns.size() == 1, stmt);
@@ -214,8 +214,8 @@ test_update_with_where()
 	parser_result result = parse_sql("UPDATE users SET name = 'Jane' WHERE id = 1");
 	ASSERT_PRINT(result.success == true, nullptr);
 
-	Statement  *stmt = result.statements[0];
-	UpdateStmt *update = &stmt->update_stmt;
+	stmt_node  *stmt = result.statements[0];
+	update_stmt_node *update = &stmt->update_stmt;
 
 	ASSERT_PRINT(str_eq(update->table_name, "users"), stmt);
 	ASSERT_PRINT(update->columns.size() == 1, stmt);
@@ -231,8 +231,8 @@ test_update_multiple_columns()
 		parse_sql("UPDATE users SET name = 'Jane', age = 30, email = 'jane@example.com' WHERE id = 1");
 	ASSERT_PRINT(result.success == true, nullptr);
 
-	Statement  *stmt = result.statements[0];
-	UpdateStmt *update = &stmt->update_stmt;
+	stmt_node  *stmt = result.statements[0];
+	update_stmt_node *update = &stmt->update_stmt;
 
 	ASSERT_PRINT(update->columns.size() == 3, stmt);
 	ASSERT_PRINT(str_eq(update->columns[0], "name"), stmt);
@@ -253,8 +253,8 @@ test_delete_all()
 	parser_result result = parse_sql("DELETE FROM users");
 	ASSERT_PRINT(result.success == true, nullptr);
 
-	Statement  *stmt = result.statements[0];
-	DeleteStmt *del = &stmt->delete_stmt;
+	stmt_node  *stmt = result.statements[0];
+	delete_stmt_node *del = &stmt->delete_stmt;
 
 	ASSERT_PRINT(str_eq(del->table_name, "users"), stmt);
 	ASSERT_PRINT(del->where_clause == nullptr, stmt);
@@ -266,8 +266,8 @@ test_delete_where()
 	parser_result result = parse_sql("DELETE FROM users WHERE id = 1");
 	ASSERT_PRINT(result.success == true, nullptr);
 
-	Statement  *stmt = result.statements[0];
-	DeleteStmt *del = &stmt->delete_stmt;
+	stmt_node  *stmt = result.statements[0];
+	delete_stmt_node *del = &stmt->delete_stmt;
 
 	ASSERT_PRINT(str_eq(del->table_name, "users"), stmt);
 	ASSERT_PRINT(del->where_clause->op == OP_EQ, stmt);
@@ -285,8 +285,8 @@ test_create_table()
 	parser_result result = parse_sql("CREATE TABLE users (id INT, name TEXT, age INT, email TEXT)");
 	ASSERT_PRINT(result.success == true, nullptr);
 
-	Statement		*stmt = result.statements[0];
-	CreateTableStmt *create = &stmt->create_table_stmt;
+	stmt_node		*stmt = result.statements[0];
+	create_table_stmt_node *create = &stmt->create_table_stmt;
 
 	ASSERT_PRINT(str_eq(create->table_name, "users"), stmt);
 	ASSERT_PRINT(create->columns.size() == 4, stmt);
@@ -312,8 +312,8 @@ test_drop_table()
 	parser_result result = parse_sql("DROP TABLE users");
 	ASSERT_PRINT(result.success == true, nullptr);
 
-	Statement	  *stmt = result.statements[0];
-	DropTableStmt *drop = &stmt->drop_table_stmt;
+	stmt_node	  *stmt = result.statements[0];
+	drop_table_stmt_node *drop = &stmt->drop_table_stmt;
 
 	ASSERT_PRINT(str_eq(drop->table_name, "users"), stmt);
 }
@@ -350,7 +350,7 @@ test_expressions()
 	ASSERT_PRINT(result.success == true, nullptr);
 
 	result = parse_sql("SELECT * FROM t WHERE a = 1 OR b = 2");
-	Statement *stmt = result.statements[0];
+	stmt_node *stmt = result.statements[0];
 	ASSERT_PRINT(stmt->select_stmt.where_clause->op == OP_OR, stmt);
 
 	result = parse_sql("SELECT * FROM t WHERE NOT active = 1");
@@ -371,7 +371,7 @@ test_string_literal_size_limits()
 		const char	 *sql = "INSERT INTO users VALUES (1, 'This is a valid string')";
 		parser_result result = parse_sql(sql);
 		ASSERT_PRINT(result.success == true, nullptr);
-		InsertStmt *insert = &result.statements[0]->insert_stmt;
+		insert_stmt_node *insert = &result.statements[0]->insert_stmt;
 		ASSERT_PRINT(insert->values[1]->type == EXPR_LITERAL, result.statements[0]);
 		ASSERT_PRINT(insert->values[1]->lit_type == TYPE_CHAR32, result.statements[0]);
 		ASSERT_PRINT(insert->values[1]->str_val.size() <= 32, result.statements[0]);
@@ -381,7 +381,7 @@ test_string_literal_size_limits()
 		const char	 *sql = "INSERT INTO users VALUES (1, '12345678901234567890123456789012')";
 		parser_result result = parse_sql(sql);
 		ASSERT_PRINT(result.success == true, nullptr);
-		InsertStmt *insert = &result.statements[0]->insert_stmt;
+		insert_stmt_node *insert = &result.statements[0]->insert_stmt;
 		ASSERT_PRINT(insert->values[1]->str_val.size() == 32, result.statements[0]);
 	}
 
@@ -435,7 +435,7 @@ test_integer_literal_limits()
 		const char	 *sql = "INSERT INTO users VALUES (4294967295, 'name')";
 		parser_result result = parse_sql(sql);
 		ASSERT_PRINT(result.success == true, nullptr);
-		InsertStmt *insert = &result.statements[0]->insert_stmt;
+		insert_stmt_node *insert = &result.statements[0]->insert_stmt;
 		ASSERT_PRINT(insert->values[0]->type == EXPR_LITERAL, result.statements[0]);
 		ASSERT_PRINT(insert->values[0]->lit_type == TYPE_U32, result.statements[0]);
 		ASSERT_PRINT(insert->values[0]->int_val == 4294967295U, result.statements[0]);
@@ -445,7 +445,7 @@ test_integer_literal_limits()
 		const char	 *sql = "INSERT INTO users VALUES (0, 'name')";
 		parser_result result = parse_sql(sql);
 		ASSERT_PRINT(result.success == true, nullptr);
-		InsertStmt *insert = &result.statements[0]->insert_stmt;
+		insert_stmt_node *insert = &result.statements[0]->insert_stmt;
 		ASSERT_PRINT(insert->values[0]->int_val == 0, result.statements[0]);
 	}
 

@@ -737,7 +737,7 @@ seek_lt(ephemeral_tree *tree, void *key)
 ** Returns: Initialized tree structure
 */
 ephemeral_tree
-et_create(DataType key_type, uint32_t record_size, uint8_t flags)
+et_create(data_type key_type, uint32_t record_size, uint8_t flags)
 {
 	ephemeral_tree tree = {};
 	tree.key_type = key_type;
@@ -1386,14 +1386,14 @@ et_print(const ephemeral_tree *tree)
 	printf("------------------------------------\n\n");
 
 	// BFS traversal with level tracking
-	struct NodeLevel
+	struct node_level
 	{
 		ephemeral_tree_node *node;
 		int level;
 		bool is_left;
 	};
 
-	queue<NodeLevel, query_arena> queue;
+	queue<node_level, query_arena> queue;
 	queue.push({tree->root, 0, false});
 
 	int current_level = -1;
@@ -1402,7 +1402,7 @@ et_print(const ephemeral_tree *tree)
 	printf("Level-Order Traversal:\n");
 	while (!queue.empty())
 	{
-		NodeLevel &nl = *queue.front();
+		node_level &nl = *queue.front();
 		queue.pop();
 
 		if (nl.level != current_level)

@@ -22,10 +22,10 @@ bool _debug = false;
 
 
 
-struct VmCursor
+struct vm_cursor
 {
 	storage_type type;
-	TupleFormat	 layout;
+	tuple_format	 layout;
 
 	union {
 		bt_cursor bptree;
@@ -34,7 +34,7 @@ struct VmCursor
 };
 
 void
-vmcursor_open(VmCursor *cursor, CursorContext *context)
+vmcursor_open(vm_cursor *cursor, cursor_context *context)
 {
 	switch (context->type)
 	{
@@ -48,7 +48,7 @@ vmcursor_open(VmCursor *cursor, CursorContext *context)
 	case RED_BLACK: {
 		cursor->type = RED_BLACK;
 		cursor->layout = context->layout;
-		DataType key_type = cursor->layout.columns[0];
+		data_type key_type = cursor->layout.columns[0];
 		bool	 allow_duplicates = (bool)context->flags;
 		cursor->cursor.mem.tree = et_create(key_type, cursor->layout.record_size, allow_duplicates);
 		cursor->cursor.mem.state = et_cursor::INVALID;
@@ -59,7 +59,7 @@ vmcursor_open(VmCursor *cursor, CursorContext *context)
 
 // Navigation functions
 bool
-vmcursor_rewind(VmCursor *cur, bool to_end)
+vmcursor_rewind(vm_cursor *cur, bool to_end)
 {
 	switch (cur->type)
 	{
@@ -73,7 +73,7 @@ vmcursor_rewind(VmCursor *cur, bool to_end)
 }
 
 bool
-vmcursor_step(VmCursor *cur, bool forward)
+vmcursor_step(vm_cursor *cur, bool forward)
 {
 	switch (cur->type)
 	{
@@ -87,7 +87,7 @@ vmcursor_step(VmCursor *cur, bool forward)
 }
 
 void
-vmcursor_clear(VmCursor *cursor)
+vmcursor_clear(vm_cursor *cursor)
 {
 	switch (cursor->type)
 	{
@@ -103,7 +103,7 @@ vmcursor_clear(VmCursor *cursor)
 }
 
 bool
-vmcursor_seek(VmCursor *cur, comparison_op op, uint8_t *key)
+vmcursor_seek(vm_cursor *cur, comparison_op op, uint8_t *key)
 {
 	switch (cur->type)
 	{
@@ -117,7 +117,7 @@ vmcursor_seek(VmCursor *cur, comparison_op op, uint8_t *key)
 }
 
 bool
-vmcursor_is_valid(VmCursor *cur)
+vmcursor_is_valid(vm_cursor *cur)
 {
 	switch (cur->type)
 	{
@@ -131,7 +131,7 @@ vmcursor_is_valid(VmCursor *cur)
 
 // Data access functions
 uint8_t *
-vmcursor_get_key(VmCursor *cur)
+vmcursor_get_key(vm_cursor *cur)
 {
 	switch (cur->type)
 	{
@@ -144,7 +144,7 @@ vmcursor_get_key(VmCursor *cur)
 }
 
 uint8_t *
-vmcursor_get_record(VmCursor *cur)
+vmcursor_get_record(vm_cursor *cur)
 {
 	switch (cur->type)
 	{
@@ -157,7 +157,7 @@ vmcursor_get_record(VmCursor *cur)
 }
 
 uint8_t *
-vmcursor_column(VmCursor *cur, uint32_t col_index)
+vmcursor_column(vm_cursor *cur, uint32_t col_index)
 {
 	if (col_index == 0)
 	{
@@ -167,15 +167,15 @@ vmcursor_column(VmCursor *cur, uint32_t col_index)
 	return record + cur->layout.offsets[col_index - 1];
 }
 
-DataType
-vmcursor_column_type(VmCursor *cur, uint32_t col_index)
+data_type
+vmcursor_column_type(vm_cursor *cur, uint32_t col_index)
 {
 	return cur->layout.columns[col_index];
 }
 
 // Modification functions
 bool
-vmcursor_insert(VmCursor *cur, uint8_t *key, uint8_t *record, uint32_t size)
+vmcursor_insert(vm_cursor *cur, uint8_t *key, uint8_t *record, uint32_t size)
 {
 	switch (cur->type)
 	{
@@ -189,7 +189,7 @@ vmcursor_insert(VmCursor *cur, uint8_t *key, uint8_t *record, uint32_t size)
 }
 
 bool
-vmcursor_update(VmCursor *cur, uint8_t *record)
+vmcursor_update(vm_cursor *cur, uint8_t *record)
 {
 	switch (cur->type)
 	{
@@ -203,7 +203,7 @@ vmcursor_update(VmCursor *cur, uint8_t *record)
 }
 
 bool
-vmcursor_remove(VmCursor *cur)
+vmcursor_remove(vm_cursor *cur)
 {
 	switch (cur->type)
 	{
@@ -218,7 +218,7 @@ vmcursor_remove(VmCursor *cur)
 
 // Utility functions
 const char *
-vmcursor_type_name(VmCursor *cur)
+vmcursor_type_name(vm_cursor *cur)
 {
 	switch (cur->type)
 	{
@@ -233,7 +233,7 @@ vmcursor_type_name(VmCursor *cur)
 }
 
 void
-vmcursor_print_current(VmCursor *cur)
+vmcursor_print_current(vm_cursor *cur)
 {
 	printf("Cursor type=%s, valid=%d", vmcursor_type_name(cur), vmcursor_is_valid(cur));
 	if (vmcursor_is_valid(cur))
@@ -242,7 +242,7 @@ vmcursor_print_current(VmCursor *cur)
 		if (key)
 		{
 			printf(", key=");
-			DataType key_type = cur->layout.columns[0];
+			data_type key_type = cur->layout.columns[0];
 			type_print(key_type, key);
 		}
 	}
@@ -254,20 +254,20 @@ vmcursor_print_current(VmCursor *cur)
 // ============================================================================
 static struct
 {
-	VMInstruction *program;
+	vm_instruction *program;
 	int			   program_size;
 	uint32_t	   pc;
 	bool		   halted;
-	TypedValue	   registers[REGISTERS];
-	VmCursor	   cursors[CURSORS];
-	ResultCallback emit_row;
+	typed_value	   registers[REGISTERS];
+	vm_cursor	   cursors[CURSORS];
+	result_callback emit_row;
 } VM = {};
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
 static void
-set_register(TypedValue *dest, uint8_t *src, DataType type)
+set_register(typed_value *dest, uint8_t *src, data_type type)
 {
 	if (dest->get_size() < type_size(type))
 	{
@@ -284,7 +284,7 @@ set_register(TypedValue *dest, uint8_t *src, DataType type)
 }
 
 static void
-set_register(TypedValue *dest, TypedValue *src)
+set_register(typed_value *dest, typed_value *src)
 {
 	set_register(dest, (uint8_t *)src->data, src->type);
 }
@@ -295,7 +295,7 @@ build_record(uint8_t *data, int32_t first_reg, int32_t count)
 	int32_t offset = 0;
 	for (int i = 0; i < count; i++)
 	{
-		TypedValue *val = &VM.registers[first_reg + i];
+		typed_value *val = &VM.registers[first_reg + i];
 		uint32_t	size = type_size(val->type);
 		memcpy(data + offset, val->data, size);
 		offset += size;
@@ -317,7 +317,7 @@ reset()
 }
 
 void
-vm_debug_print_program(VMInstruction *instructions, int count)
+vm_debug_print_program(vm_instruction *instructions, int count)
 {
 	printf("\n===== PROGRAM LISTING =====\n");
 	for (int i = 0; i < count; i++)
@@ -349,7 +349,7 @@ vm_debug_print_all_registers()
 static VM_RESULT
 step()
 {
-	VMInstruction *inst = &VM.program[VM.pc];
+	vm_instruction *inst = &VM.program[VM.pc];
 
 	// Instruction decode removed - just show execution results
 
@@ -375,9 +375,9 @@ step()
 	case OP_Load: {
 		int32_t	 dest_reg = LOAD_DEST_REG();
 		uint8_t *data = LOAD_DATA();
-		DataType type = LOAD_TYPE();
+		data_type type = LOAD_TYPE();
 
-		auto to_load = TypedValue::make(type, data);
+		auto to_load = typed_value::make(type, data);
 		if (_debug)
 		{
 			printf("=> R[%d] = ", dest_reg);
@@ -415,8 +415,8 @@ step()
 		int32_t		  left = TEST_LEFT_REG();
 		int32_t		  right = TEST_RIGHT_REG();
 		comparison_op op = TEST_OP();
-		TypedValue	 *a = &VM.registers[left];
-		TypedValue	 *b = &VM.registers[right];
+		typed_value	 *a = &VM.registers[left];
+		typed_value	 *b = &VM.registers[right];
 		int			  cmp_result = type_compare(a->type, a->data, b->data);
 		uint32_t	  test_result = false;
 
@@ -459,7 +459,7 @@ step()
 		int32_t	   dest = FUNCTION_DEST_REG();
 		int32_t	   first_arg = FUNCTION_FIRST_ARG_REG();
 		int32_t	   count = FUNCTION_ARG_COUNT();
-		VMFunction fn = FUNCTION_FUNCTION();
+		vm_function fn = FUNCTION_FUNCTION();
 
 		if (_debug)
 		{
@@ -468,7 +468,7 @@ step()
 			{
 				if (i > 0)
 					printf(", ");
-				TypedValue *arg = &VM.registers[first_arg + i];
+				typed_value *arg = &VM.registers[first_arg + i];
 				printf("R[%d]=", first_arg + i);
 				if (arg->data)
 				{
@@ -497,7 +497,7 @@ step()
 		int32_t		test_reg = JUMPIF_TEST_REG();
 		int32_t		target = JUMPIF_JUMP_TARGET();
 		bool		jump_on_true = JUMPIF_JUMP_ON_TRUE();
-		TypedValue *val = &VM.registers[test_reg];
+		typed_value *val = &VM.registers[test_reg];
 		bool		is_true = (*(uint32_t *)val->data != 0);
 		bool		will_jump = (is_true && jump_on_true) || (!is_true && !jump_on_true);
 
@@ -524,7 +524,7 @@ step()
 		int32_t	   left = LOGIC_LEFT_REG();
 		int32_t	   right = LOGIC_RIGHT_REG();
 		logic_op   op = LOGIC_OP();
-		TypedValue result = TypedValue::make(TYPE_U32);
+		typed_value result = typed_value::make(TYPE_U32);
 		result.data = (uint8_t *)arena<query_arena>::alloc(type_size(TYPE_U32));
 		uint32_t a = *(uint32_t *)VM.registers[left].data;
 		uint32_t b = *(uint32_t *)VM.registers[right].data;
@@ -564,7 +564,7 @@ step()
 			{
 				if (i > 0)
 					printf(", ");
-				TypedValue *val = &VM.registers[first_reg + i];
+				typed_value *val = &VM.registers[first_reg + i];
 				printf("R[%d]=", first_reg + i);
 				if (val->data)
 				{
@@ -579,11 +579,11 @@ step()
 		}
 
 		// Allocate output array using the context's allocator
-		TypedValue *values = (TypedValue *)arena<query_arena>::alloc(sizeof(TypedValue) * reg_count);
+		typed_value *values = (typed_value *)arena<query_arena>::alloc(sizeof(typed_value) * reg_count);
 
 		for (int i = 0; i < reg_count; i++)
 		{
-			TypedValue *val = &VM.registers[first_reg + i];
+			typed_value *val = &VM.registers[first_reg + i];
 			values[i].type = val->type;
 			values[i].data = (uint8_t *)arena<query_arena>::alloc(type_size(val->type));
 			memcpy(values[i].data, val->data, type_size(val->type));
@@ -598,10 +598,10 @@ step()
 		int32_t		left = ARITHMETIC_LEFT_REG();
 		int32_t		right = ARITHMETIC_RIGHT_REG();
 		arith_op	op = ARITHMETIC_OP();
-		TypedValue *a = &VM.registers[left];
-		TypedValue *b = &VM.registers[right];
+		typed_value *a = &VM.registers[left];
+		typed_value *b = &VM.registers[right];
 
-		TypedValue result = {.type = (a->type > b->type) ? a->type : b->type};
+		typed_value result = {.type = (a->type > b->type) ? a->type : b->type};
 		result.data = (uint8_t *)arena<query_arena>::alloc(type_size(result.type));
 
 		bool success = true;
@@ -651,8 +651,8 @@ step()
 	}
 	case OP_Open: {
 		int32_t		   cursor_id = OPEN_CURSOR_ID();
-		VmCursor	  *cursor = &VM.cursors[cursor_id];
-		CursorContext *context = OPEN_LAYOUT();
+		vm_cursor	  *cursor = &VM.cursors[cursor_id];
+		cursor_context *context = OPEN_LAYOUT();
 
 		if (_debug)
 		{
@@ -690,7 +690,7 @@ step()
 		int32_t	  cursor_id = REWIND_CURSOR_ID();
 		int32_t	  result_reg = REWIND_RESULT_REG();
 		bool	  to_end = REWIND_TO_END();
-		VmCursor *cursor = &VM.cursors[cursor_id];
+		vm_cursor *cursor = &VM.cursors[cursor_id];
 		bool	  valid = vmcursor_rewind(cursor, to_end);
 		uint32_t  result_val = valid ? 1 : 0;
 
@@ -708,7 +708,7 @@ step()
 		int32_t	  cursor_id = STEP_CURSOR_ID();
 		int32_t	  result_reg = STEP_RESULT_REG();
 		bool	  forward = STEP_FORWARD();
-		VmCursor *cursor = &VM.cursors[cursor_id];
+		vm_cursor *cursor = &VM.cursors[cursor_id];
 		uint32_t  has_more = vmcursor_step(cursor, forward) ? 1 : 0;
 
 		if (_debug)
@@ -726,8 +726,8 @@ step()
 		int32_t		  key_reg = SEEK_KEY_REG();
 		int32_t		  result_reg = SEEK_RESULT_REG();
 		comparison_op op = SEEK_OP();
-		VmCursor	 *cursor = &VM.cursors[cursor_id];
-		TypedValue	 *key = &VM.registers[key_reg];
+		vm_cursor	 *cursor = &VM.cursors[cursor_id];
+		typed_value	 *key = &VM.registers[key_reg];
 		bool		  found = vmcursor_seek(cursor, op, (uint8_t *)key->data);
 		uint32_t	  result_val = found ? 1 : 0;
 
@@ -746,12 +746,12 @@ step()
 		int32_t	  cursor_id = COLUMN_CURSOR_ID();
 		int32_t	  col_index = COLUMN_INDEX();
 		int32_t	  dest_reg = COLUMN_DEST_REG();
-		VmCursor *cursor = &VM.cursors[cursor_id];
+		vm_cursor *cursor = &VM.cursors[cursor_id];
 
-		DataType column_type = vmcursor_column_type(cursor, col_index);
+		data_type column_type = vmcursor_column_type(cursor, col_index);
 		auto	 column_value = vmcursor_column(cursor, col_index);
 
-		TypedValue src = TypedValue::make(column_type, column_value);
+		typed_value src = typed_value::make(column_type, column_value);
 
 		if (_debug)
 		{
@@ -775,11 +775,11 @@ step()
 		int32_t	   cursor_id = DELETE_CURSOR_ID();
 		int32_t	   delete_occured = DELETE_DELETE_OCCURED_REG();
 		int32_t	   cursor_valid = DELETE_CURSOR_VALID_REG();
-		VmCursor  *cursor = &VM.cursors[cursor_id];
+		vm_cursor  *cursor = &VM.cursors[cursor_id];
 		int32_t	   success = vmcursor_remove(cursor) ? 1 : 0;
 		int32_t	   valid = vmcursor_is_valid(cursor) ? 1 : 0;
-		TypedValue src_success = TypedValue::make(TYPE_U32, &success);
-		TypedValue src_valid = TypedValue::make(TYPE_U32, &valid);
+		typed_value src_success = typed_value::make(TYPE_U32, &success);
+		typed_value src_valid = typed_value::make(TYPE_U32, &valid);
 
 		set_register(&VM.registers[delete_occured], &src_success);
 		set_register(&VM.registers[cursor_valid], &src_valid);
@@ -796,8 +796,8 @@ step()
 		int32_t cursor_id = INSERT_CURSOR_ID();
 		int32_t key_reg = INSERT_KEY_REG();
 
-		VmCursor   *cursor = &VM.cursors[cursor_id];
-		TypedValue *first = &VM.registers[key_reg];
+		vm_cursor   *cursor = &VM.cursors[cursor_id];
+		typed_value *first = &VM.registers[key_reg];
 		uint32_t	count = cursor->layout.columns.size() - 1;
 		bool		success;
 
@@ -823,7 +823,7 @@ step()
 			{
 				if (i > 0)
 					printf(", ");
-				TypedValue *val = &VM.registers[key_reg + 1 + i];
+				typed_value *val = &VM.registers[key_reg + 1 + i];
 				type_print(val->type, val->data);
 			}
 			printf("]");
@@ -845,7 +845,7 @@ step()
 	case OP_Update: {
 		int32_t	  cursor_id = UPDATE_CURSOR_ID();
 		int32_t	  record_reg = UPDATE_RECORD_REG();
-		VmCursor *cursor = &VM.cursors[cursor_id];
+		vm_cursor *cursor = &VM.cursors[cursor_id];
 		uint8_t	  data[cursor->layout.record_size];
 		uint32_t  record_count = cursor->layout.columns.size() - 1;
 
@@ -860,7 +860,7 @@ step()
 			{
 				if (i > 0)
 					printf(", ");
-				TypedValue *val = &VM.registers[record_reg + i];
+				typed_value *val = &VM.registers[record_reg + i];
 				type_print(val->type, val->data);
 			}
 			printf("], success=%d\n", success);
@@ -901,11 +901,11 @@ step()
 		int32_t left = PACK2_LEFT_REG();
 		int32_t right = PACK2_RIGHT_REG();
 
-		TypedValue *a = &VM.registers[left];
-		TypedValue *b = &VM.registers[right];
+		typed_value *a = &VM.registers[left];
+		typed_value *b = &VM.registers[right];
 
 		// Create dual type from the two component types
-		DataType dual_type = make_dual(a->type, b->type);
+		data_type dual_type = make_dual(a->type, b->type);
 		uint32_t total_size = type_size(dual_type);
 
 		// Allocate space for packed value
@@ -934,13 +934,13 @@ step()
 		int32_t first_dest = UNPACK2_FIRST_DEST_REG();
 		int32_t src = UNPACK2_SRC_REG();
 
-		TypedValue *dual_val = &VM.registers[src];
+		typed_value *dual_val = &VM.registers[src];
 
 		assert(type_is_dual(dual_val->type));
 
 		// Get component types
-		DataType type1 = dual_component_type(dual_val->type, 0);
-		DataType type2 = dual_component_type(dual_val->type, 1);
+		data_type type1 = dual_component_type(dual_val->type, 0);
+		data_type type2 = dual_component_type(dual_val->type, 1);
 
 		// Allocate space for unpacked values
 		uint8_t data1[type_size(type1)];
@@ -984,7 +984,7 @@ step()
 // ============================================================================
 
 VM_RESULT
-vm_execute(VMInstruction *instructions, int instruction_count)
+vm_execute(vm_instruction *instructions, int instruction_count)
 {
 	reset();
 	VM.program = instructions;
@@ -1020,7 +1020,7 @@ vm_execute(VMInstruction *instructions, int instruction_count)
 }
 
 void
-vm_set_result_callback(ResultCallback callback)
+vm_set_result_callback(result_callback callback)
 {
 	VM.emit_row = callback;
 }

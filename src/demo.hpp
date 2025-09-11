@@ -12,15 +12,15 @@
 #include <sstream>
 
 void
-formatted_result_callback(TypedValue *result, size_t count);
+formatted_result_callback(typed_value *result, size_t count);
 
 // Simple CSV parser
-struct CSVReader
+struct csv_reader
 {
 	std::ifstream file;
 	std::string	  line;
 
-	CSVReader(const char *filename) : file(filename)
+	csv_reader(const char *filename) : file(filename)
 	{
 		if (!file.is_open())
 		{
@@ -112,14 +112,14 @@ create_all_tables_sql(bool create)
 inline void
 load_table_from_csv_sql(const char *csv_file, const char *table_name)
 {
-	CSVReader				 reader(csv_file);
+	csv_reader				 reader(csv_file);
 	std::vector<std::string> fields;
 
 	int		  count = 0;
 	int		  batch_count = 0;
 	const int BATCH_SIZE = 50;
 
-	Relation *structure = catalog.get(table_name);
+	relation *structure = catalog.get(table_name);
 	if (!structure)
 	{
 		return;
@@ -160,7 +160,7 @@ load_table_from_csv_sql(const char *csv_file, const char *table_name)
 			}
 
 
-			DataType col_type = structure->columns[i].type;
+			data_type col_type = structure->columns[i].type;
 
 			if (type_is_numeric(col_type))
 			{
@@ -225,7 +225,7 @@ load_all_data_sql()
 
 // VM Function: LIKE pattern matching with % wildcard
 bool
-vmfunc_like(TypedValue *result, TypedValue *args, uint32_t arg_count)
+vmfunc_like(typed_value *result, typed_value *args, uint32_t arg_count)
 {
 	if (arg_count != 2)
 		return false;
@@ -283,7 +283,7 @@ vmfunc_like(TypedValue *result, TypedValue *args, uint32_t arg_count)
 
 // VM Function: Create structure (for composite index demo)
 bool
-vmfunc_create_index_structure(TypedValue *result, TypedValue *args, uint32_t arg_count)
+vmfunc_create_index_structure(typed_value *result, typed_value *args, uint32_t arg_count)
 {
 	if (arg_count != 1)
 		return false;
@@ -291,12 +291,12 @@ vmfunc_create_index_structure(TypedValue *result, TypedValue *args, uint32_t arg
 	const char *index_name = args[0].as_char();
 
 	// Create composite index structure: (user_id, order_id) -> order_id
-	array<Attribute, query_arena> columns;
-	columns.push(Attribute{"key", make_dual(TYPE_U32, TYPE_U32)}); // Composite key
+	array<attribute, query_arena> columns;
+	columns.push(attribute{"key", make_dual(TYPE_U32, TYPE_U32)}); // Composite key
 
 	// Relation index = Schema::from(index_name, columns);
-	Relation	index = create_relation(index_name, columns);
-	TupleFormat layout = tuple_format_from_relation(index);
+	relation	index = create_relation(index_name, columns);
+	tuple_format layout = tuple_format_from_relation(index);
 	index.storage.btree = bt_create(layout.key_type, layout.record_size, false);
 
 	// Add to catalog temporarily (will be rolled back)
@@ -329,9 +329,9 @@ demo_like_pattern(const char *args)
 	printf("\n=== LIKE Pattern Matching Demo ===\n");
 	printf("Query: SELECT * FROM products WHERE title LIKE '%s'\n\n", pattern);
 
-	ProgramBuilder prog;
+	program_builder prog;
 
-	Relation *products = catalog.get("products");
+	relation *products = catalog.get("products");
 	if (!products)
 	{
 		printf("Products table not found!\n");
@@ -399,10 +399,10 @@ demo_nested_loop_join(const char *args)
 		printf(" LIMIT %d", limit);
 	printf("\n\n");
 
-	ProgramBuilder prog;
+	program_builder prog;
 
-	Relation *users = catalog.get("users");
-	Relation *orders = catalog.get("orders");
+	relation *users = catalog.get("users");
+	relation *orders = catalog.get("orders");
 	if (!users || !orders)
 	{
 		printf("Required tables not found!\n");
@@ -517,9 +517,9 @@ demo_subquery_pattern(const char *args)
 	printf("\n=== Subquery Pattern Demo ===\n");
 	printf("Query: SELECT * FROM (SELECT * FROM users WHERE age > %d) WHERE city = '%s'\n\n", age, city);
 
-	ProgramBuilder prog;
+	program_builder prog;
 
-	Relation *users = catalog.get("users");
+	relation *users = catalog.get("users");
 	if (!users)
 	{
 		printf("Users table not found!\n");
@@ -527,7 +527,7 @@ demo_subquery_pattern(const char *args)
 	}
 
 	auto		users_ctx = from_structure(*users);
-	TupleFormat temp_layout = users_ctx->layout;
+	tuple_format temp_layout = users_ctx->layout;
 	auto		temp_ctx = red_black(temp_layout);
 
 	int users_cursor = prog.open_cursor(users_ctx);
@@ -617,8 +617,8 @@ demo_composite_index(const char *args)
 	auto start = std::chrono::high_resolution_clock::now();
 
 	{
-		ProgramBuilder prog;
-		Relation	  *orders = catalog.get("orders");
+		program_builder prog;
+		relation	  *orders = catalog.get("orders");
 		if (!orders)
 		{
 			printf("Orders table not found!\n");
@@ -674,21 +674,21 @@ demo_composite_index(const char *args)
 	pager_begin_transaction();
 
 	// Create temporary index structure directly (not in catalog)
-	DataType composite_key_type = make_dual(TYPE_U32, TYPE_U32);
+	data_type composite_key_type = make_dual(TYPE_U32, TYPE_U32);
 	btree	 index_btree = bt_create(composite_key_type, 0, true); // No record, just key
 
 	// Populate index from orders table
 	{
-		ProgramBuilder prog;
+		program_builder prog;
 
-		Relation *orders = catalog.get("orders");
+		relation *orders = catalog.get("orders");
 		auto	  orders_ctx = from_structure(*orders);
 
 		// Create a context for the temporary index
-		CursorContext index_context;
+		cursor_context index_context;
 		index_context.type = BPLUS;
 		index_context.storage.tree = &index_btree;
-		array<DataType, query_arena> index_types = {composite_key_type};
+		array<data_type, query_arena> index_types = {composite_key_type};
 
 		index_context.layout = tuple_format_from_types(index_types);
 
@@ -725,13 +725,13 @@ demo_composite_index(const char *args)
 	start = std::chrono::high_resolution_clock::now();
 
 	{
-		ProgramBuilder prog;
+		program_builder prog;
 
 		// Use the temporary index
-		CursorContext index_context;
+		cursor_context index_context;
 		index_context.type = BPLUS;
 		index_context.storage.tree = &index_btree;
-		array<DataType, query_arena> index_types = {composite_key_type};
+		array<data_type, query_arena> index_types = {composite_key_type};
 		index_context.layout = tuple_format_from_types(index_types);
 
 		int cursor = prog.open_cursor(&index_context);
@@ -822,9 +822,9 @@ demo_group_by_aggregate(const char *args)
 		printf("Query: SELECT city, COUNT(*), SUM(age) FROM users GROUP BY city\n\n");
 	}
 
-	ProgramBuilder prog;
+	program_builder prog;
 
-	Relation *users = catalog.get("users");
+	relation *users = catalog.get("users");
 	if (!users)
 	{
 		printf("Users table not found!\n");
@@ -832,12 +832,12 @@ demo_group_by_aggregate(const char *args)
 	}
 
 	// Create layout for aggregation tree
-	array<DataType, query_arena> agg_types = {
+	array<data_type, query_arena> agg_types = {
 		(TYPE_CHAR16), // city (key)
 		(TYPE_U32),	   // count
 		(TYPE_U32),	   // sum_age
 	};
-	TupleFormat agg_layout = tuple_format_from_types(agg_types);
+	tuple_format agg_layout = tuple_format_from_types(agg_types);
 
 	auto users_ctx = from_structure(*users);
 	auto agg_ctx = red_black(agg_layout);
@@ -943,7 +943,7 @@ demo_group_by_aggregate(const char *args)
 
 // VM Function for blob operations
 bool
-vmfunc_write_blob(TypedValue *result, TypedValue *args, uint32_t arg_count)
+vmfunc_write_blob(typed_value *result, typed_value *args, uint32_t arg_count)
 {
 	if (arg_count != 2)
 		return false;
@@ -960,7 +960,7 @@ vmfunc_write_blob(TypedValue *result, TypedValue *args, uint32_t arg_count)
 }
 
 bool
-vmfunc_read_blob(TypedValue *result, TypedValue *args, uint32_t arg_count)
+vmfunc_read_blob(typed_value *result, typed_value *args, uint32_t arg_count)
 {
 	if (arg_count != 1)
 		return false;
@@ -997,19 +997,19 @@ demo_blob_storage(const char *args)
 	// Create documents table if it doesn't exist
 	if (!catalog.get("documents"))
 	{
-		array<Attribute, query_arena> columns = {{"doc_id", TYPE_U32}, {"title", TYPE_CHAR32}, {"blob_ref", TYPE_U32}};
+		array<attribute, query_arena> columns = {{"doc_id", TYPE_U32}, {"title", TYPE_CHAR32}, {"blob_ref", TYPE_U32}};
 
 		pager_begin_transaction();
-		Relation	docs = create_relation("documents", columns);
-		TupleFormat layout = tuple_format_from_relation(docs);
+		relation	docs = create_relation("documents", columns);
+		tuple_format layout = tuple_format_from_relation(docs);
 		docs.storage.btree = bt_create(layout.key_type, layout.record_size, true);
 		catalog.insert("documents", docs);
 	}
 
-	ProgramBuilder prog;
+	program_builder prog;
 	// prog.begin_transaction();
 
-	Relation *docs = catalog.get("documents");
+	relation *docs = catalog.get("documents");
 	auto	  docs_ctx = from_structure(*docs);
 	int		  cursor = prog.open_cursor(docs_ctx);
 

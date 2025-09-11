@@ -20,7 +20,7 @@
 // Global Catalog Instance
 // ============================================================================
 
-hash_map<string_view, Relation, catalog_arena> catalog;
+hash_map<string_view, relation, catalog_arena> catalog;
 
 // ============================================================================
 // Catalog Management
@@ -41,8 +41,8 @@ hash_map<string_view, Relation, catalog_arena> catalog;
  * @param columns Array of column types, first element is the key type
  * @return TupleFormat describing the physical tuple layout
  */
-TupleFormat tuple_format_from_types(array<DataType, query_arena>& columns) {
-    TupleFormat format;
+tuple_format tuple_format_from_types(array<data_type, query_arena>& columns) {
+    tuple_format format;
 
     // First column is always the key
     format.key_type = columns[0];
@@ -69,8 +69,8 @@ TupleFormat tuple_format_from_types(array<DataType, query_arena>& columns) {
  * Converts the logical schema (Attributes) into a physical layout
  * descriptor (TupleFormat) for tuple processing.
  */
-TupleFormat tuple_format_from_relation(Relation& schema) {
-    array<DataType, query_arena> column_types;
+tuple_format tuple_format_from_relation(relation& schema) {
+    array<data_type, query_arena> column_types;
 
     for (auto col : schema.columns) {
         column_types.push(col.type);
@@ -90,8 +90,8 @@ TupleFormat tuple_format_from_relation(Relation& schema) {
  * query_arena (temporary), but the Relation stores them in catalog_arena
  * (persistent) to ensure they survive beyond the current query.
  */
-Relation create_relation(string_view name, array<Attribute, query_arena> columns) {
-    Relation rel = {};
+relation create_relation(string_view name, array<attribute, query_arena> columns) {
+    relation rel = {};
 
     // Cross-arena copy from query to catalog arena
     rel.columns.copy_from(columns);
@@ -118,7 +118,7 @@ Relation create_relation(string_view name, array<Attribute, query_arena> columns
  */
 void bootstrap_master(bool is_new_database) {
     // Define the master catalog schema
-    array<Attribute, query_arena> master_columns = {
+    array<attribute, query_arena> master_columns = {
         {MC_ID, TYPE_U32},          // Auto-increment ID
         {MC_NAME, TYPE_CHAR32},     // Object name
         {MC_TBL_NAME, TYPE_CHAR32}, // Parent table name
@@ -126,12 +126,12 @@ void bootstrap_master(bool is_new_database) {
         {MC_SQL, TYPE_CHAR256}      // CREATE statement
     };
 
-    Relation master_table = create_relation(MASTER_CATALOG, master_columns);
+    relation master_table = create_relation(MASTER_CATALOG, master_columns);
     master_table.next_key.type = TYPE_U32;
     master_table.next_key.data = arena<catalog_arena>::alloc(type_size(TYPE_U32));
     *(uint32_t*)master_table.next_key.data = 0;
 
-    TupleFormat layout = tuple_format_from_relation(master_table);
+    tuple_format layout = tuple_format_from_relation(master_table);
 
     if (is_new_database) {
         // Create new master catalog

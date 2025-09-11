@@ -8,18 +8,18 @@
 #include <cstring>
 #include <cstdio>
 
-struct SemanticContext
+struct semantic_context
 {
 	string_view									 error;
 	string_view									 context;
-	hash_map<string_view, Relation, query_arena> tables_to_create;
+	hash_map<string_view, relation, query_arena> tables_to_create;
 	hash_set<string_view, query_arena>			 tables_to_drop;
 	char										 error_buffer[256];
 	char										 context_buffer[256];
 };
 
 char *
-format_error(SemanticContext *ctx, const char *fmt, ...)
+format_error(semantic_context *ctx, const char *fmt, ...)
 {
 	va_list args;
 	va_start(args, fmt);
@@ -29,21 +29,21 @@ format_error(SemanticContext *ctx, const char *fmt, ...)
 }
 
 static void
-set_error(SemanticContext *ctx, string_view error, string_view context = {})
+set_error(semantic_context *ctx, string_view error, string_view context = {})
 {
 	ctx->error = error;
 	ctx->context = context;
 }
 
-static Relation *
-lookup_table(SemanticContext *ctx, string_view name)
+static relation *
+lookup_table(semantic_context *ctx, string_view name)
 {
 	if (ctx->tables_to_drop.contains(name))
 	{
 		return nullptr;
 	}
 
-	Relation *pending = ctx->tables_to_create.get(name);
+	relation *pending = ctx->tables_to_create.get(name);
 	if (pending)
 	{
 		return pending;
@@ -53,7 +53,7 @@ lookup_table(SemanticContext *ctx, string_view name)
 }
 
 static int32_t
-find_column_index(Relation *table, string_view column_name)
+find_column_index(relation *table, string_view column_name)
 {
 	for (uint32_t i = 0; i < table->columns.size(); i++)
 	{
@@ -66,7 +66,7 @@ find_column_index(Relation *table, string_view column_name)
 }
 
 static bool
-resolve_column_list(SemanticContext *ctx, Relation *table, array<string_view, query_arena> &column_names,
+resolve_column_list(semantic_context *ctx, relation *table, array<string_view, query_arena> &column_names,
 					array<int32_t, query_arena> &out_indices)
 {
 
@@ -88,15 +88,15 @@ resolve_column_list(SemanticContext *ctx, Relation *table, array<string_view, qu
 }
 
 static const char *
-sql_type_name(DataType type)
+sql_type_name(data_type type)
 {
 	return (type == TYPE_U32) ? "INT" : "TEXT";
 }
 
-static Relation *
-require_table(SemanticContext *ctx, string_view table_name, Relation **out_field)
+static relation *
+require_table(semantic_context *ctx, string_view table_name, relation **out_field)
 {
-	Relation *table = lookup_table(ctx, table_name);
+	relation *table = lookup_table(ctx, table_name);
 	if (!table)
 	{
 		set_error(ctx, "Table does not exist", table_name);
@@ -110,7 +110,7 @@ require_table(SemanticContext *ctx, string_view table_name, Relation **out_field
 }
 
 static bool
-validate_literal_value(SemanticContext *ctx, Expr *expr, DataType expected_type, const char *column_name,
+validate_literal_value(semantic_context *ctx, expr_node *expr, data_type expected_type, const char *column_name,
 					   const char *operation)
 {
 	if (expr->type != EXPR_LITERAL)
@@ -133,7 +133,7 @@ validate_literal_value(SemanticContext *ctx, Expr *expr, DataType expected_type,
 }
 
 static void
-apply_catalog_changes(SemanticContext *ctx)
+apply_catalog_changes(semantic_context *ctx)
 {
 	for (auto [name, _] : ctx->tables_to_drop)
 	{
@@ -147,14 +147,14 @@ apply_catalog_changes(SemanticContext *ctx)
 }
 
 static void
-clear_catalog_changes(SemanticContext *ctx)
+clear_catalog_changes(semantic_context *ctx)
 {
 	ctx->tables_to_create.clear();
 	ctx->tables_to_drop.clear();
 }
 
 static bool
-semantic_resolve_expr(SemanticContext *ctx, Expr *expr, Relation *table)
+semantic_resolve_expr(semantic_context *ctx, expr_node *expr, relation *table)
 {
 	if (!expr)
 	{
@@ -191,8 +191,8 @@ semantic_resolve_expr(SemanticContext *ctx, Expr *expr, Relation *table)
 			return false;
 		}
 
-		DataType left_type = expr->left->sem.resolved_type;
-		DataType right_type = expr->right->sem.resolved_type;
+		data_type left_type = expr->left->sem.resolved_type;
+		data_type right_type = expr->right->sem.resolved_type;
 
 		if (left_type != right_type)
 		{
@@ -241,7 +241,7 @@ semantic_resolve_expr(SemanticContext *ctx, Expr *expr, Relation *table)
 }
 
 static bool
-resolve_where_clause(SemanticContext *ctx, Expr *where_clause, Relation *table)
+resolve_where_clause(semantic_context *ctx, expr_node *where_clause, relation *table)
 {
 	if (!where_clause)
 	{
@@ -267,7 +267,7 @@ resolve_where_clause(SemanticContext *ctx, Expr *where_clause, Relation *table)
 }
 
 static bool
-resolve_insert_columns(SemanticContext *ctx, InsertStmt *stmt, Relation *table)
+resolve_insert_columns(semantic_context *ctx, insert_stmt_node *stmt, relation *table)
 {
 	if (stmt->columns.size() > 0)
 	{
@@ -283,9 +283,9 @@ resolve_insert_columns(SemanticContext *ctx, InsertStmt *stmt, Relation *table)
 }
 
 static bool
-semantic_resolve_select(SemanticContext *ctx, SelectStmt *stmt)
+semantic_resolve_select(semantic_context *ctx, select_stmt_node *stmt)
 {
-	Relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
+	relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
 	if (!table)
 	{
 		return false;
@@ -335,9 +335,9 @@ semantic_resolve_select(SemanticContext *ctx, SelectStmt *stmt)
 }
 
 static bool
-semantic_resolve_insert(SemanticContext *ctx, InsertStmt *stmt)
+semantic_resolve_insert(semantic_context *ctx, insert_stmt_node *stmt)
 {
-	Relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
+	relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
 	if (!table)
 	{
 		return false;
@@ -359,9 +359,9 @@ semantic_resolve_insert(SemanticContext *ctx, InsertStmt *stmt)
 
 	for (uint32_t i = 0; i < stmt->values.size(); i++)
 	{
-		Expr	*expr = stmt->values[i];
+		expr_node	*expr = stmt->values[i];
 		uint32_t col_idx = stmt->sem.column_indices[i];
-		DataType expected_type = table->columns[col_idx].type;
+		data_type expected_type = table->columns[col_idx].type;
 
 		if (!validate_literal_value(ctx, expr, expected_type, table->columns[col_idx].name, "INSERT"))
 		{
@@ -373,9 +373,9 @@ semantic_resolve_insert(SemanticContext *ctx, InsertStmt *stmt)
 }
 
 static bool
-semantic_resolve_update(SemanticContext *ctx, UpdateStmt *stmt)
+semantic_resolve_update(semantic_context *ctx, update_stmt_node *stmt)
 {
-	Relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
+	relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
 	if (!table)
 	{
 		return false;
@@ -388,9 +388,9 @@ semantic_resolve_update(SemanticContext *ctx, UpdateStmt *stmt)
 
 	for (uint32_t i = 0; i < stmt->values.size(); i++)
 	{
-		Expr	*expr = stmt->values[i];
+		expr_node	*expr = stmt->values[i];
 		uint32_t col_idx = stmt->sem.column_indices[i];
-		DataType expected_type = table->columns[col_idx].type;
+		data_type expected_type = table->columns[col_idx].type;
 
 		if (!validate_literal_value(ctx, expr, expected_type, table->columns[col_idx].name, "UPDATE SET"))
 		{
@@ -407,9 +407,9 @@ semantic_resolve_update(SemanticContext *ctx, UpdateStmt *stmt)
 }
 
 static bool
-semantic_resolve_delete(SemanticContext *ctx, DeleteStmt *stmt)
+semantic_resolve_delete(semantic_context *ctx, delete_stmt_node *stmt)
 {
-	Relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
+	relation *table = require_table(ctx, stmt->table_name, &stmt->sem.table);
 	if (!table)
 	{
 		return false;
@@ -424,7 +424,7 @@ semantic_resolve_delete(SemanticContext *ctx, DeleteStmt *stmt)
 }
 
 static bool
-semantic_resolve_create_table(SemanticContext *ctx, CreateTableStmt *stmt)
+semantic_resolve_create_table(semantic_context *ctx, create_table_stmt_node *stmt)
 {
 	if (stmt->table_name.size() > RELATION_NAME_MAX_SIZE)
 	{
@@ -433,7 +433,7 @@ semantic_resolve_create_table(SemanticContext *ctx, CreateTableStmt *stmt)
 		return false;
 	}
 
-	Relation *existing = lookup_table(ctx, stmt->table_name);
+	relation *existing = lookup_table(ctx, stmt->table_name);
 	if (existing)
 	{
 		set_error(ctx, "Table already exists", stmt->table_name);
@@ -468,8 +468,8 @@ semantic_resolve_create_table(SemanticContext *ctx, CreateTableStmt *stmt)
 		}
 	}
 
-	array<Attribute, query_arena> cols;
-	for (ColumnDef &def : stmt->columns)
+	array<attribute, query_arena> cols;
+	for (attribute_node &def : stmt->columns)
 	{
 		if (def.type != TYPE_U32 && def.type != TYPE_CHAR32)
 		{
@@ -477,14 +477,14 @@ semantic_resolve_create_table(SemanticContext *ctx, CreateTableStmt *stmt)
 			return false;
 		}
 
-		Attribute attr;
+		attribute attr;
 		sv_to_cstr(def.name, attr.name, ATTRIBUTE_NAME_MAX_SIZE);
 		attr.type = def.type;
 
 		cols.push(attr);
 	}
 
-	Relation new_relation = create_relation(stmt->table_name, cols);
+	relation new_relation = create_relation(stmt->table_name, cols);
 
 	ctx->tables_to_create.insert(new_relation.name, new_relation);
 
@@ -493,9 +493,9 @@ semantic_resolve_create_table(SemanticContext *ctx, CreateTableStmt *stmt)
 }
 
 static bool
-semantic_resolve_drop_table(SemanticContext *ctx, DropTableStmt *stmt)
+semantic_resolve_drop_table(semantic_context *ctx, drop_table_stmt_node *stmt)
 {
-	Relation *table = lookup_table(ctx, stmt->table_name);
+	relation *table = lookup_table(ctx, stmt->table_name);
 	if (!table)
 	{
 		set_error(ctx, "Table does not exist", stmt->table_name);
@@ -510,7 +510,7 @@ semantic_resolve_drop_table(SemanticContext *ctx, DropTableStmt *stmt)
 }
 
 static bool
-semantic_resolve_statement(SemanticContext *ctx, Statement *stmt)
+semantic_resolve_statement(semantic_context *ctx, stmt_node *stmt)
 {
 	switch (stmt->type)
 	{
@@ -544,7 +544,7 @@ semantic_resolve_statement(SemanticContext *ctx, Statement *stmt)
 }
 
 semantic_result
-semantic_analyze(array<Statement *, query_arena> &statements)
+semantic_analyze(array<stmt_node *, query_arena> &statements)
 {
 	semantic_result result;
 	result.success = true;
@@ -552,14 +552,14 @@ semantic_analyze(array<Statement *, query_arena> &statements)
 	result.error_context = {};
 	result.failed_statement_index = -1;
 
-	SemanticContext ctx;
+	semantic_context ctx;
 	ctx.error = {};
 	ctx.context = {};
 	clear_catalog_changes(&ctx);
 
 	for (uint32_t i = 0; i < statements.size(); i++)
 	{
-		Statement *stmt = statements[i];
+		stmt_node *stmt = statements[i];
 
 		ctx.error = {};
 		ctx.context = {};

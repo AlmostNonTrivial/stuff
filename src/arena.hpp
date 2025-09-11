@@ -511,65 +511,65 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
  *
  */
 
-// Add this type alias at global scope:
 
-template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8> struct contiguous
+
+template <typename T, typename arena_tag = global_arena, uint32_t InitialSize = 8> struct contiguous
 {
 	T		*data = nullptr;
 	uint32_t size = 0;
 	uint32_t capacity = 0;
 
-	// Core allocation primitive
+
 	T *
 	alloc_raw(uint32_t count)
 	{
-		return (T *)arena<ArenaTag>::alloc(count * sizeof(T));
+		return (T *)arena<arena_tag>::alloc(count * sizeof(T));
 	}
 
-	// Core reallocation - FIXED VERSION
+
 	void
 	realloc_internal(uint32_t new_capacity, bool copy_existing)
 	{
 		T		*old_data = data;
 		uint32_t old_capacity = capacity;
-		uint32_t old_size = size; // Save size BEFORE any modifications
+		uint32_t old_size = size;
 
-		// Allocate new buffer
+
 		data = alloc_raw(new_capacity);
 		capacity = new_capacity;
 
-		// Copy if requested and there was old data
+
 		if (old_data && copy_existing && old_size > 0)
 		{
 			memcpy(data, old_data, old_size * sizeof(T));
-			size = old_size; // Preserve size when copying
+			size = old_size;
 		}
 		else
 		{
-			size = 0; // Reset size when not copying
+			size = 0;
 		}
 
-		// Reclaim old buffer
+
 		if (old_data)
 		{
-			arena<ArenaTag>::reclaim(old_data, old_capacity * sizeof(T));
+			arena<arena_tag>::reclaim(old_data, old_capacity * sizeof(T));
 		}
 	}
 
-	// Core reclaim primitive - unchanged
+
 	void
 	reclaim_if_exists()
 	{
 		if (data)
 		{
-			arena<ArenaTag>::reclaim(data, capacity * sizeof(T));
+			arena<arena_tag>::reclaim(data, capacity * sizeof(T));
 			data = nullptr;
 			capacity = 0;
 			size = 0;
 		}
 	}
 
-	// The rest remains the same...
+
 	T *
 	grow_by(uint32_t count)
 	{
@@ -638,7 +638,7 @@ template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8
 			return;
 		}
 
-		arena<ArenaTag>::reclaim(data + size, (capacity - size) * sizeof(T));
+		arena<arena_tag>::reclaim(data + size, (capacity - size) * sizeof(T));
 		capacity = size;
 	}
 
@@ -679,7 +679,6 @@ template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8
 		}
 	}
 
-	// Alternative: expose raw copy for when you have raw pointers
 	void
 	copy_from(const T *src_data, uint32_t src_size)
 	{
@@ -783,7 +782,7 @@ template <typename Tag = global_arena> struct stream_writer
 	void
 	write(const void *data, size_t size)
 	{
-		// Ensure we have committed memory for this write
+
 		if (write_ptr + size > arena<Tag>::base + arena<Tag>::committed_capacity)
 		{
 			size_t needed = (write_ptr - arena<Tag>::base) + size;
@@ -801,7 +800,7 @@ template <typename Tag = global_arena> struct stream_writer
 			}
 			arena<Tag>::committed_capacity = new_committed;
 		}
-		// Write contiguously at write_ptr
+
 		memcpy(write_ptr, data, size);
 		write_ptr += size;
 	}
@@ -821,7 +820,7 @@ template <typename Tag = global_arena> struct stream_writer
 	size_t
 	size() const
 	{
-		return write_ptr - start; // Fixed: use write_ptr not arena<Tag>::current
+		return write_ptr - start;
 	}
 
 	std::string_view
@@ -831,16 +830,9 @@ template <typename Tag = global_arena> struct stream_writer
 		*write_ptr = '\0';
 		size_t len = write_ptr - start;
 
-		// Critical: advance arena past what we wrote (including null terminator)
 		arena<Tag>::current = write_ptr + 1;
 
 		return std::string_view((char *)start, len);
-	}
-
-	void *
-	fin()
-	{
-		return start;
 	}
 
 	void

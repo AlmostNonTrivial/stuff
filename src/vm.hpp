@@ -7,8 +7,8 @@
 #include <cstdint>
 #include <cstring>
 
-typedef bool (*VMFunction)(TypedValue	 *result,	 // Output register
-						   TypedValue	 *args,		 // Input registers array
+typedef bool (*vm_function)(typed_value	 *result,	 // Output register
+						   typed_value	 *args,		 // Input registers array
 						   uint32_t		  arg_count // Number of arguments
 );
 
@@ -20,21 +20,24 @@ enum storage_type : uint8_t
 	BLOB
 };
 
-struct CursorContext
+struct cursor_context
 {
 	storage_type type;
-	TupleFormat	   layout;
+	tuple_format	   layout;
 	union {
 		btree *tree;
 	} storage;
 	uint8_t flags;
 };
 
-// typedef void (*ResultCallback)(array<TypedValue, QueryArena> result);
-typedef void (*ResultCallback)(TypedValue *values, size_t count);
+
+typedef void (*result_callback)(typed_value *values, size_t count);
+
+
+
 extern bool _debug;
 
-enum OpCode : uint8_t
+enum OPCODE : uint8_t
 {
 	// Control flow
 	OP_Goto = 1,
@@ -51,7 +54,7 @@ enum OpCode : uint8_t
 	OP_Open = 10,
 #define OPEN_MAKE(cursor_id, context) {OP_Open, cursor_id, 0, 0, context, 0}
 #define OPEN_CURSOR_ID()		      (inst->p1)
-#define OPEN_LAYOUT()			      ((CursorContext *)(inst->p4))
+#define OPEN_LAYOUT()			      ((cursor_context*)(inst->p4))
 #define OPEN_DEBUG_PRINT()		      printf("OPEN cursor=%d", OPEN_CURSOR_ID())
 
 	OP_Close = 12,
@@ -132,7 +135,7 @@ enum OpCode : uint8_t
 	OP_Load = 41,
 #define LOAD_MAKE(dest_reg, type, data) {OP_Load, dest_reg, type, 0, data, 0}
 #define LOAD_DEST_REG()				     (inst->p1)
-#define LOAD_TYPE()					     ((DataType)(inst->p2))
+#define LOAD_TYPE()					     ((data_type)(inst->p2))
 #define LOAD_DATA()					     ((uint8_t *)(inst->p4))
 #define LOAD_IS_LOAD()				     (inst->opcode == OP_Load)
 #define LOAD_DEBUG_PRINT()                                                                                         \
@@ -198,7 +201,7 @@ enum OpCode : uint8_t
 #define FUNCTION_DEST_REG()		 (inst->p1)
 #define FUNCTION_FIRST_ARG_REG() (inst->p2)
 #define FUNCTION_ARG_COUNT()	 (inst->p3)
-#define FUNCTION_FUNCTION()		 ((VMFunction)(inst->p4))
+#define FUNCTION_FUNCTION()		 ((vm_function)(inst->p4))
 #define FUNCTION_DEBUG_PRINT()                                                                                     \
 	printf("FUNCTION R[%d] <- fn(R[%d..%d]) %d args", FUNCTION_DEST_REG(), FUNCTION_FIRST_ARG_REG(),           \
 		   FUNCTION_FIRST_ARG_REG() + FUNCTION_ARG_COUNT() - 1, FUNCTION_ARG_COUNT())
@@ -239,9 +242,9 @@ OP_Unpack= 66,
 OP_Debug = 67
 };
 
-struct VMInstruction
+struct vm_instruction
 {
-	OpCode	opcode;
+	OPCODE	opcode;
 	int32_t p1;
 	int64_t p2;
 	int32_t p3;
@@ -258,16 +261,16 @@ enum VM_RESULT : uint8_t
 
 // VM Functions
 VM_RESULT
-vm_execute(VMInstruction *instructions, int instruction_count);
+vm_execute(vm_instruction *instructions, int instruction_count);
 
 void
 vm_debug_print_all_registers();
 void
-vm_debug_print_program(VMInstruction *instructions, int count);
+vm_debug_print_program(vm_instruction *instructions, int count);
 
 
 void
-vm_set_result_callback(ResultCallback callback);
+vm_set_result_callback(result_callback callback);
 
 // VM Runtime Definitions
 #define REGISTERS 40
@@ -295,7 +298,7 @@ debug_logic_op_name(logic_op op)
 }
 
 inline void
-vm_debug_print_instruction(const VMInstruction *inst, int pc)
+vm_debug_print_instruction(const vm_instruction *inst, int pc)
 {
 	printf("PC[%3d] ", pc);
 

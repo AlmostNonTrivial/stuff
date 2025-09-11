@@ -89,7 +89,7 @@
 #include "blob.hpp"
 #include "common.hpp"
 #include "pager.hpp"
-#include "arena.hpp" #include "containers.hpp"
+#include "arena.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <cstring>

@@ -15,7 +15,7 @@
 ** USAGE EXAMPLE:
 **   ```
 **   // Create a B+Tree with integer keys and 100-byte records
-**   BTree tree = btree_create(DataType::INT32, 100, true);
+**   BTree tree = btree_create(data_type::INT32, 100, true);
 **
 **   // Insert data using cursor
 **   BtCursor cursor = {&tree, 0, 0, BT_CURSOR_INVALID};
@@ -92,7 +92,7 @@ struct btree
 	/* Data configuration */
 	uint32_t record_size;	/* Size of value/record */
 	uint32_t node_key_size; /* Size of key */
-	DataType node_key_type; /* Key data type */
+	data_type node_key_type; /* Key data type */
 };
 
 /* ============================================================================
@@ -116,7 +116,7 @@ struct btree
 **   - Returns invalid tree (root_page_index=0) if record_size too large
 */
 btree
-bt_create(DataType key, uint32_t record_size, bool init);
+bt_create(data_type key, uint32_t record_size, bool init);
 
 /*
 ** Clear all nodes in a B+Tree.

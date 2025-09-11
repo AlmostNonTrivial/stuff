@@ -1541,7 +1541,7 @@ bt_clear(btree *tree)
 ** Returns: Initialized BTree structure (zero-initialized on failure)
 */
 btree
-bt_create(DataType key, uint32_t record_size, bool init = false)
+bt_create(data_type key, uint32_t record_size, bool init = false)
 {
 	btree tree = {0};
 
@@ -2046,7 +2046,7 @@ bt_cursorhas_previous(bt_cursor *cursor)
 	}
 
 // Validation result structure to pass information up the recursion
-struct ValidationResult
+struct validation_result
 {
 	uint32_t	depth;
 	uint8_t	   *min_key;
@@ -2056,7 +2056,7 @@ struct ValidationResult
 };
 
 // Forward declaration
-static ValidationResult
+static validation_result
 validate_node_recursive(btree *tree, btree_node *node, uint32_t expected_parent, void *parent_min_bound,
 						void *parent_max_bound, std::unordered_set<uint32_t> &visited);
 
@@ -2085,7 +2085,7 @@ bt_validate(btree *tree_ptr)
 	std::unordered_set<uint32_t> visited;
 
 	// Validate tree recursively
-	ValidationResult result = validate_node_recursive(tree, root, 0, nullptr, nullptr, visited);
+	validation_result result = validate_node_recursive(tree, root, 0, nullptr, nullptr, visited);
 
 	// If tree has data, verify leaf chain integrity
 	if (IS_LEAF(root) && root->num_keys > 0)
@@ -2124,7 +2124,7 @@ bt_validate(btree *tree_ptr)
 		}
 	}
 }
-static ValidationResult
+static validation_result
 validate_node_recursive(btree *tree, btree_node *node, uint32_t expected_parent, void *parent_min_bound,
 						void *parent_max_bound, std::unordered_set<uint32_t> &visited)
 {
@@ -2192,7 +2192,7 @@ validate_node_recursive(btree *tree, btree_node *node, uint32_t expected_parent,
 		prev_key = current_key;
 	}
 
-	ValidationResult result;
+	validation_result result;
 	result.min_key = (uint8_t *)first_key;
 	result.max_key = (uint8_t *)last_key;
 
@@ -2245,7 +2245,7 @@ validate_node_recursive(btree *tree, btree_node *node, uint32_t expected_parent,
 			void *child_min = (i == 0) ? parent_min_bound : GET_KEY_AT(node, i - 1);
 			void *child_max = (i == node->num_keys) ? parent_max_bound : GET_KEY_AT(node, i);
 
-			ValidationResult child_result =
+			validation_result child_result =
 				validate_node_recursive(tree, child, node->index, child_min, child_max, visited);
 
 			// All children must have same depth

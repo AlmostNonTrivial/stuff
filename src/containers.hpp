@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string_view>
 
-template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8> struct array
+template <typename T, typename arena_tag = global_arena, uint32_t InitialSize = 8> struct array
 {
 
 	array() = default;
@@ -21,7 +21,7 @@ template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8
 		}
 	}
 
-	contiguous<T, ArenaTag, InitialSize> storage;
+	contiguous<T, arena_tag, InitialSize> storage;
 
 	void
 	reserve(uint32_t min_capacity)
@@ -179,9 +179,9 @@ template <typename T, typename ArenaTag = global_arena, uint32_t InitialSize = 8
 	}
 };
 
-template <typename T, typename ArenaTag = global_arena> struct queue
+template <typename T, typename arena_tag = global_arena> struct queue
 {
-	contiguous<T, ArenaTag, 16> storage;
+	contiguous<T, arena_tag, 16> storage;
 	uint32_t					head = 0;
 	uint32_t					tail = 0;
 	uint32_t					count = 0;
@@ -219,7 +219,7 @@ template <typename T, typename ArenaTag = global_arena> struct queue
 
 		if (old_data)
 		{
-			arena<ArenaTag>::reclaim(old_data, old_cap * sizeof(T));
+			arena<arena_tag>::reclaim(old_data, old_cap * sizeof(T));
 		}
 
 		// Update metadata
@@ -339,9 +339,9 @@ template <typename T, typename ArenaTag = global_arena> struct queue
 
 using std::pair;
 
-template <typename K, typename V, typename ArenaTag = global_arena> struct hash_map
+template <typename K, typename V, typename arena_tag = global_arena> struct hash_map
 {
-	struct Entry
+	struct entry
 	{
 		K		 key;
 		V		 value;
@@ -354,7 +354,7 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		} state;
 	};
 
-	contiguous<Entry, ArenaTag, 16> storage;
+	contiguous<entry, arena_tag, 16> storage;
 	uint32_t						_size = 0;
 	uint32_t						tombstones = 0;
 
@@ -451,9 +451,9 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	grow()
 	{
 		uint32_t old_capacity = storage.capacity;
-		Entry	*old_entries = storage.data;
+		entry	*old_entries = storage.data;
 
-		contiguous<Entry, ArenaTag, 16> new_storage;
+		contiguous<entry, arena_tag, 16> new_storage;
 		new_storage.allocate_full(old_capacity * 2);
 		new_storage.zero();
 
@@ -463,7 +463,7 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 
 		for (uint32_t i = 0; i < old_capacity; i++)
 		{
-			if (old_entries[i].state == Entry::OCCUPIED)
+			if (old_entries[i].state == entry::OCCUPIED)
 			{
 
 				insert_into(new_storage.data, new_storage.capacity, old_entries[i].key, old_entries[i].hash,
@@ -488,14 +488,14 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 
 		while (true)
 		{
-			Entry &entry = storage.data[idx];
+			entry &entry = storage.data[idx];
 
-			if (entry.state == Entry::EMPTY)
+			if (entry.state == entry::EMPTY)
 			{
 				return nullptr;
 			}
 
-			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
+			if (entry.state == entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
 			{
 				return &entry.value;
 			}
@@ -541,16 +541,16 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 
 		while (true)
 		{
-			Entry &entry = storage.data[idx];
+			entry &entry = storage.data[idx];
 
-			if (entry.state == Entry::EMPTY)
+			if (entry.state == entry::EMPTY)
 			{
 				return false;
 			}
 
-			if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
+			if (entry.state == entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
 			{
-				entry.state = Entry::DELETED;
+				entry.state = entry::DELETED;
 				_size--;
 				tombstones++;
 				return true;
@@ -595,7 +595,7 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 	{
 		return storage.capacity;
 	}
-	Entry *
+	entry *
 	entries() const
 	{
 		return storage.data;
@@ -611,12 +611,12 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		return tombstones;
 	}
 
-	Entry *
+	entry *
 	data()
 	{
 		return storage.data;
 	}
-	const Entry *
+	const entry *
 	data() const
 	{
 		return storage.data;
@@ -625,7 +625,7 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
   private:
 	// Core insertion logic - no growth checks, works on any buffer
 	V *
-	insert_into(Entry *entries, uint32_t capacity, const K &key, uint32_t hash, const V &value,
+	insert_into(entry *entries, uint32_t capacity, const K &key, uint32_t hash, const V &value,
 				bool handle_tombstones = false)
 	{
 		uint32_t mask = capacity - 1;
@@ -634,16 +634,16 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 
 		while (true)
 		{
-			Entry &entry = entries[idx];
+			entry &e= entries[idx];
 
-			if (entry.state == Entry::EMPTY || (!handle_tombstones && entry.state != Entry::OCCUPIED))
+			if (e.state == entry::EMPTY || (!handle_tombstones && e.state != entry::OCCUPIED))
 			{
-				Entry *target = (handle_tombstones && first_deleted != -1) ? &entries[first_deleted] : &entry;
+				entry *target = (handle_tombstones && first_deleted != -1) ? &entries[first_deleted] : &e;
 
 				target->key = key;
 				target->value = value;
 				target->hash = hash;
-				target->state = Entry::OCCUPIED;
+				target->state = entry::OCCUPIED;
 
 				if (handle_tombstones && first_deleted != -1)
 				{
@@ -654,14 +654,14 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 				return &target->value;
 			}
 
-			if (handle_tombstones && entry.state == Entry::DELETED && first_deleted == -1)
+			if (handle_tombstones && e.state == entry::DELETED && first_deleted == -1)
 			{
 				first_deleted = idx;
 			}
-			else if (entry.state == Entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
+			else if (e.state == entry::OCCUPIED && e.hash == hash && keys_equal(e.key, key))
 			{
-				entry.value = value;
-				return &entry.value;
+				e.value = value;
+				return &e.value;
 			}
 
 			idx = (idx + 1) & mask;
@@ -670,15 +670,15 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 
 	struct iterator
 	{
-		Entry	*entries;
+		entry	*entries;
 		uint32_t capacity;
 		uint32_t index;
 
 		// Constructor
-		iterator(Entry *e, uint32_t cap, uint32_t idx) : entries(e), capacity(cap), index(idx)
+		iterator(entry *e, uint32_t cap, uint32_t idx) : entries(e), capacity(cap), index(idx)
 		{
 			// Skip to first valid entry
-			while (index < capacity && entries[index].state != Entry::OCCUPIED)
+			while (index < capacity && entries[index].state != entry::OCCUPIED)
 			{
 				++index;
 			}
@@ -712,7 +712,7 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		operator++()
 		{
 			++index;
-			while (index < capacity && entries[index].state != Entry::OCCUPIED)
+			while (index < capacity && entries[index].state != entry::OCCUPIED)
 			{
 				++index;
 			}
@@ -757,4 +757,4 @@ template <typename K, typename V, typename ArenaTag = global_arena> struct hash_
 		return iterator(storage.data, storage.capacity, storage.capacity);
 	}
 };
-template <typename K, typename ArenaTag = global_arena> using hash_set = hash_map<K, char, ArenaTag>;
+template <typename K, typename arena_tag = global_arena> using hash_set = hash_map<K, char, arena_tag>;

@@ -64,9 +64,9 @@ struct catalog_arena {};
  * Represents a single column's metadata. The name is interned in the
  * catalog arena to ensure it persists and to enable pointer comparison.
  */
-struct Attribute {
+struct attribute {
     char name[ATTRIBUTE_NAME_MAX_SIZE ];  // Interned string in catalog arena
-    DataType type;     // Column data type
+    data_type type;     // Column data type
 };
 
 /**
@@ -79,9 +79,9 @@ struct Attribute {
  * Note: In relational algebra, "relation" is the formal term for what
  * SQL calls a "table".
  */
-struct Relation {
+struct relation {
     char name[RELATION_NAME_MAX_SIZE];      // Interned table name
-    TypedValue next_key;   // Next auto-increment value (supports various key types)
+    typed_value next_key;   // Next auto-increment value (supports various key types)
 
     // Physical storage handle
     union {
@@ -90,7 +90,7 @@ struct Relation {
     } storage;
 
     // Schema definition
-    array<Attribute, catalog_arena> columns;
+    array<attribute, catalog_arena> columns;
 };
 
 /**
@@ -109,11 +109,11 @@ struct Relation {
  * Note: The key is stored separately in the btree, so offsets start
  * from the first non-key column.
  */
-struct TupleFormat {
-    array<DataType, query_arena> columns;  // All column types including key
+struct tuple_format {
+    array<data_type, query_arena> columns;  // All column types including key
     array<uint32_t, query_arena> offsets;  // Byte offsets (excluding key)
     uint32_t record_size;                  // Size of record (excluding key)
-    DataType key_type;                     // Type of the key column
+    data_type key_type;                     // Type of the key column
 };
 
 // ============================================================================
@@ -126,7 +126,7 @@ struct TupleFormat {
  * Maps table names to their Relation metadata. Uses string_view as keys
  * with the assumption that the strings are interned in catalog_arena.
  */
-extern hash_map<string_view, Relation, catalog_arena> catalog;
+extern hash_map<string_view, relation, catalog_arena> catalog;
 
 // ============================================================================
 // Public API
@@ -147,7 +147,7 @@ void catalog_reload();
  * is assumed to be the key. Offsets are calculated for the record
  * portion (excluding the key which is stored separately).
  */
-TupleFormat tuple_format_from_types(array<DataType, query_arena>& columns);
+tuple_format tuple_format_from_types(array<data_type, query_arena>& columns);
 
 /**
  * Extract tuple format from a relation's schema
@@ -155,7 +155,7 @@ TupleFormat tuple_format_from_types(array<DataType, query_arena>& columns);
  * Creates a TupleFormat that describes the physical layout of tuples
  * for the given relation.
  */
-TupleFormat tuple_format_from_relation(Relation& schema);
+tuple_format tuple_format_from_relation(relation& schema);
 
 /**
  * Create a new relation with the given schema
@@ -163,6 +163,6 @@ TupleFormat tuple_format_from_relation(Relation& schema);
  * Note: Performs cross-arena copying from query_arena to catalog_arena
  * to ensure the schema persists beyond the current query.
  */
-Relation create_relation(string_view name, array<Attribute, query_arena> columns);
+relation create_relation(string_view name, array<attribute, query_arena> columns);
 
 void bootstrap_master(bool is_new_database);

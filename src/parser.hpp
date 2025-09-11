@@ -62,12 +62,12 @@
 #include "containers.hpp"
 #include "types.hpp"
 
-struct Relation;
+struct relation;
 //=============================================================================
 // EXPRESSION AST NODES
 //=============================================================================
 
-enum ExprType : uint8_t
+enum EXPR_TYPE : uint8_t
 {
 	EXPR_LITERAL = 0, // Number or string literal
 	EXPR_COLUMN,	  // Column reference
@@ -76,7 +76,7 @@ enum ExprType : uint8_t
 	EXPR_NULL		  // NULL literal
 };
 
-enum BinaryOp : uint8_t
+enum BINARY_OP : uint8_t
 {
 
 	OP_EQ = 0,
@@ -97,15 +97,15 @@ enum UnaryOp : uint8_t
 	OP_NEG
 };
 
-struct Expr
+struct expr_node
 {
-	ExprType type;
+	EXPR_TYPE type;
 
 	struct
 	{
-		DataType   resolved_type = TYPE_NULL;
+		data_type resolved_type = TYPE_NULL;
 		int32_t	   column_index = -1;
-		Relation *table = nullptr;
+		relation *table = nullptr;
 
 	} sem;
 
@@ -113,7 +113,7 @@ struct Expr
 		// EXPR_LITERAL
 		struct
 		{
-			DataType lit_type;
+			data_type lit_type;
 			union {
 				uint32_t	int_val;
 				string_view str_val;
@@ -129,16 +129,16 @@ struct Expr
 
 		struct
 		{
-			BinaryOp op;
-			Expr	*left;
-			Expr	*right;
+			BINARY_OP op;
+			expr_node	*left;
+			expr_node	*right;
 		};
 
 
 		struct
 		{
 			UnaryOp unary_op;
-			Expr   *operand;
+			expr_node   *operand;
 		};
 
 
@@ -160,10 +160,10 @@ enum StmtType : uint8_t
 };
 
 
-struct ColumnDef
+struct attribute_node
 {
 	string_view name;
-	DataType	type;
+	data_type	type;
 
 	struct
 	{
@@ -172,77 +172,77 @@ struct ColumnDef
 };
 
 
-struct SelectStmt
+struct select_stmt_node
 {
 	bool							 is_star;		  // SELECT *
 	array<string_view, query_arena> columns;		  // Column names (if not *)
 	string_view						 table_name;	  // FROM table
-	Expr							*where_clause;	  // Optional WHERE
+	expr_node						*where_clause;	  // Optional WHERE
 	string_view						 order_by_column; // Optional ORDER BY column
 	bool							 order_desc;	  // DESC if true, ASC if false
 
 
 	struct
 	{
-		Relation					 *table = nullptr;
+		relation					 *table = nullptr;
 		array<int32_t, query_arena>  column_indices;	   // Indices of selected columns
-		array<DataType, query_arena> column_types;		   // Types of selected columns
+		array<data_type, query_arena> column_types;		   // Types of selected columns
 		int32_t						  order_by_index = -1; // Index of ORDER BY column
 	} sem;
 };
 
 
-struct InsertStmt
+struct insert_stmt_node
 {
 	string_view						 table_name;
 	array<string_view, query_arena> columns;
-	array<Expr *, query_arena>		 values;
+	array<expr_node *, query_arena>		 values;
 
 
 	struct
 	{
-		Relation					*table = nullptr;
+		relation					*table = nullptr;
 		array<int32_t, query_arena> column_indices;
 
 	} sem;
 };
 
 
-struct UpdateStmt
+struct update_stmt_node
 {
 	string_view						 table_name;
 	array<string_view, query_arena> columns;
-	array<Expr *, query_arena>		 values;
-	Expr							*where_clause;
+	array<expr_node *, query_arena>		 values;
+	expr_node							*where_clause;
 
 
 	struct
 	{
-		Relation					*table = nullptr;
+		relation					*table = nullptr;
 		array<int32_t, query_arena> column_indices;
 
 	} sem;
 };
 
 
-struct DeleteStmt
+struct delete_stmt_node
 {
 	string_view table_name;
-	Expr	   *where_clause;
+	expr_node	   *where_clause;
 
 
 	struct
 	{
-		Relation *table = nullptr;
+		relation *table = nullptr;
 
 	} sem;
 };
 
 
-struct CreateTableStmt
+struct create_table_stmt_node
 {
 	string_view					   table_name;
-	array<ColumnDef, query_arena> columns;
+	array<attribute_node, query_arena> columns;
 
 
 	struct
@@ -253,31 +253,31 @@ struct CreateTableStmt
 };
 
 
-struct DropTableStmt
+struct drop_table_stmt_node
 {
 	string_view table_name;
 
 
 	struct
 	{
-		Relation *table = nullptr;
+		relation *table = nullptr;
 
 	} sem;
 };
 
 
-struct BeginStmt
+struct begin_stmt_node
 {
 };
-struct CommitStmt
+struct commit_stmt_node
 {
 };
-struct RollbackStmt
+struct rollback_stmt_node
 {
 };
 
 
-struct Statement
+struct stmt_node
 {
 	StmtType type;
 
@@ -288,15 +288,15 @@ struct Statement
 	} sem;
 
 	union {
-		SelectStmt		select_stmt;
-		InsertStmt		insert_stmt;
-		UpdateStmt		update_stmt;
-		DeleteStmt		delete_stmt;
-		CreateTableStmt create_table_stmt;
-		DropTableStmt	drop_table_stmt;
-		BeginStmt		begin_stmt;
-		CommitStmt		commit_stmt;
-		RollbackStmt	rollback_stmt;
+		select_stmt_node		select_stmt;
+		insert_stmt_node		insert_stmt;
+		update_stmt_node		update_stmt;
+		delete_stmt_node		delete_stmt;
+		create_table_stmt_node create_table_stmt;
+		drop_table_stmt_node	drop_table_stmt;
+		begin_stmt_node		begin_stmt;
+		commit_stmt_node		commit_stmt;
+		rollback_stmt_node	rollback_stmt;
 	};
 };
 
@@ -306,7 +306,7 @@ struct parser_result
 {
 	bool							 success;
 	string_view						 error;					 // Error message (nullptr if success)
-	array<Statement *, query_arena> statements;			 // Array by value, not pointer
+	array<stmt_node *, query_arena> statements;			 // Array by value, not pointer
 	int								 error_line;			 // -1 if no error
 	int								 error_column;			 // -1 if no error
 	int								 failed_statement_index; // Which statement failed (-1 if none)
@@ -318,4 +318,4 @@ parse_sql(const char *sql);
 
 
 void
-print_ast(Statement *stmt);
+print_ast(stmt_node *stmt);

@@ -333,7 +333,7 @@ test_btree_u32_u64()
 	pager_open(TEST_DB);
 	pager_begin_transaction();
 
-	DataType  key_type = make_dual(TYPE_U32, TYPE_U64);
+	data_type  key_type = make_dual(TYPE_U32, TYPE_U64);
 	btree	  tree = bt_create(key_type, 0, true);
 	bt_cursor cursor = {.tree = &tree};
 
@@ -956,15 +956,15 @@ test_btree_remaining_coverage()
 		os_file_delete(TEST_DB);
 	}
 }
-struct BTreeTestConfig
+struct btree_test_config
 {
-	DataType	key_type;
+	data_type	key_type;
 	uint32_t	record_size;
 	const char *name;
 };
 
 void
-test_btree_sequential_ops_parameterized(const BTreeTestConfig &config)
+test_btree_sequential_ops_parameterized(const btree_test_config &config)
 {
 	pager_open(TEST_DB);
 	pager_begin_transaction();
@@ -989,8 +989,8 @@ test_btree_sequential_ops_parameterized(const BTreeTestConfig &config)
 		if (type_is_dual(config.key_type))
 		{
 			// Handle dual types like U32+U64
-			DataType first_type = dual_component_type(config.key_type, 0);
-			DataType second_type = dual_component_type(config.key_type, 1);
+			data_type first_type = dual_component_type(config.key_type, 0);
+			data_type second_type = dual_component_type(config.key_type, 1);
 
 			if (first_type == TYPE_U32 && second_type == TYPE_U64)
 			{
@@ -1124,7 +1124,7 @@ test_btree_sequential_ops_parameterized(const BTreeTestConfig &config)
 void
 test_btree_sequential_all_types()
 {
-	const BTreeTestConfig configs[] = {
+	const btree_test_config configs[] = {
 		{TYPE_U32, sizeof(uint32_t), "U32 key, U32 record"},
 		{TYPE_U32, sizeof(uint64_t), "U32 key, U64 record"},
 		{TYPE_U64, sizeof(uint32_t), "U64 key, U32 record"},

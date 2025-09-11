@@ -8,11 +8,11 @@
 #define TEST_DB "test_types.db"
 
 void test_type_construction() {
-    DataType u32_type = TYPE_U32;
+    data_type u32_type = TYPE_U32;
     assert(type_id(u32_type) == TYPE_ID_U32);
     assert(type_size(u32_type) == 4);
 
-    DataType varchar_type = TYPE_VARCHAR(128);
+    data_type varchar_type = TYPE_VARCHAR(128);
     assert(type_id(varchar_type) == TYPE_ID_VARCHAR);
     assert(type_size(varchar_type) == 128);
 
@@ -20,34 +20,34 @@ void test_type_construction() {
     assert(make_i64() == TYPE_I64);
     assert(make_f32() == TYPE_F32);
 
-    DataType char_type = make_char(64);
+    data_type char_type = make_char(64);
     assert(type_id(char_type) == TYPE_ID_CHAR);
     assert(type_size(char_type) == 64);
 
-    DataType varchar_runtime = make_varchar(256);
+    data_type varchar_runtime = make_varchar(256);
     assert(type_id(varchar_runtime) == TYPE_ID_VARCHAR);
     assert(type_size(varchar_runtime) == 256);
 
-    DataType dual_type = make_dual(TYPE_U32, TYPE_U32);
+    data_type dual_type = make_dual(TYPE_U32, TYPE_U32);
     assert(type_id(dual_type) == TYPE_ID_DUAL);
     assert(dual_type_id_1(dual_type) == TYPE_ID_U32);
     assert(dual_type_id_2(dual_type) == TYPE_ID_U32);
     assert(type_size(dual_type) == 8);
 
-    DataType mixed_dual = make_dual(TYPE_U32, TYPE_U64);
+    data_type mixed_dual = make_dual(TYPE_U32, TYPE_U64);
     assert(type_id(mixed_dual) == TYPE_ID_DUAL);
     assert(type_size(mixed_dual) == 12);
 }
 
 void test_type_checking() {
-    DataType dual_u32 = make_dual(TYPE_U32, TYPE_U32);
-    DataType dual_i32 = make_dual(TYPE_I32, TYPE_I32);
+    data_type dual_u32 = make_dual(TYPE_U32, TYPE_U32);
+    data_type dual_i32 = make_dual(TYPE_I32, TYPE_I32);
 
     assert(type_is_string(TYPE_CHAR64));
     assert(type_is_string(TYPE_VARCHAR(100)));
     assert(!type_is_string(TYPE_I32));
 
-    DataType dual_char = make_dual(TYPE_CHAR8, TYPE_CHAR8);
+    data_type dual_char = make_dual(TYPE_CHAR8, TYPE_CHAR8);
     assert(!type_is_string(dual_char));
 
     assert(type_is_numeric(TYPE_U32));
@@ -85,7 +85,7 @@ void test_type_comparison() {
     pack_dual(comp1, TYPE_U32, &val1_a, TYPE_U32, &val1_b);
     pack_dual(comp2, TYPE_U32, &val2_a, TYPE_U32, &val2_b);
 
-    DataType dual_type = make_dual(TYPE_U32, TYPE_U32);
+    data_type dual_type = make_dual(TYPE_U32, TYPE_U32);
     assert(type_less_than(dual_type, comp1, comp2));
 
     uint32_t val3_a = 6, val3_b = 50;
@@ -136,7 +136,7 @@ void test_utility_operations() {
     uint32_t val_a = 12345, val_b = 67890;
     pack_dual(src_comp, TYPE_U32, &val_a, TYPE_U32, &val_b);
 
-    DataType dual_type = make_dual(TYPE_U32, TYPE_U32);
+    data_type dual_type = make_dual(TYPE_U32, TYPE_U32);
     type_copy(dual_type, dst_comp, src_comp);
 
     uint32_t extracted_a, extracted_b;
@@ -180,7 +180,7 @@ void test_utility_operations() {
 
 void test_typed_value() {
     uint32_t val = 42;
-    TypedValue tv = TypedValue::make(TYPE_U32, &val);
+    typed_value tv = typed_value::make(TYPE_U32, &val);
 
     assert(tv.get_type_id() == TYPE_ID_U32);
     assert(tv.get_size() == 4);
@@ -189,7 +189,7 @@ void test_typed_value() {
     assert(!tv.is_dual());
 
     uint32_t val2 = 50;
-    TypedValue tv2 = TypedValue::make(TYPE_U32, &val2);
+    typed_value tv2 = typed_value::make(TYPE_U32, &val2);
 
     assert(tv < tv2);
     assert(tv <= tv2);
@@ -198,7 +198,7 @@ void test_typed_value() {
     assert(tv != tv2);
 
     uint32_t val3 = 42;
-    TypedValue tv3 = TypedValue::make(TYPE_U32, &val3);
+    typed_value tv3 = typed_value::make(TYPE_U32, &val3);
     assert(tv == tv3);
     assert(tv <= tv3);
     assert(tv >= tv3);
@@ -207,8 +207,8 @@ void test_typed_value() {
     uint32_t comp_a = 100, comp_b = 200;
     pack_dual(comp_data, TYPE_U32, &comp_a, TYPE_U32, &comp_b);
 
-    DataType dual_type = make_dual(TYPE_U32, TYPE_U32);
-    TypedValue comp_tv = TypedValue::make(dual_type, comp_data);
+    data_type dual_type = make_dual(TYPE_U32, TYPE_U32);
+    typed_value comp_tv = typed_value::make(dual_type, comp_data);
 
     assert(comp_tv.is_dual());
     assert(!comp_tv.is_numeric());
@@ -216,13 +216,13 @@ void test_typed_value() {
     assert(comp_tv.get_size() == 8);
 
     char str_data[] = "hello";
-    TypedValue str_tv = TypedValue::make(TYPE_VARCHAR(10), str_data);
+    typed_value str_tv = typed_value::make(TYPE_VARCHAR(10), str_data);
 
     assert(str_tv.is_string());
     assert(!str_tv.is_numeric());
     assert(!str_tv.is_dual());
 
-    TypedValue varchar_tv;
+    typed_value varchar_tv;
     char varchar_data[] = "test string";
     varchar_tv.set_varchar(varchar_data);
     assert(varchar_tv.get_type_id() == TYPE_ID_VARCHAR);
@@ -230,11 +230,11 @@ void test_typed_value() {
 }
 
 void test_type_edge_cases() {
-    TypedValue null_tv = TypedValue::make(TYPE_NULL, nullptr);
+    typed_value null_tv = typed_value::make(TYPE_NULL, nullptr);
     assert(null_tv.is_null());
     assert(null_tv.get_size() == 0);
 
-    DataType max_varchar = TYPE_VARCHAR(65535);
+    data_type max_varchar = TYPE_VARCHAR(65535);
     assert(type_size(max_varchar) == 65535);
 
     uint8_t zero_u8 = 0, nonzero_u8 = 1;
@@ -252,7 +252,7 @@ void test_type_edge_cases() {
     pack_dual(comp_min, TYPE_U32, &min_val, TYPE_U32, &min_val);
     pack_dual(comp_max, TYPE_U32, &max_val, TYPE_U32, &max_val);
 
-    DataType dual_type = make_dual(TYPE_U32, TYPE_U32);
+    data_type dual_type = make_dual(TYPE_U32, TYPE_U32);
     assert(type_less_than(dual_type, comp_min, comp_max));
 }
 
@@ -273,10 +273,10 @@ void test_comprehensive_arithmetic() {
 }
 
 void test_dual_operations() {
-    DataType dual_type = make_dual(TYPE_U32, TYPE_U64);
+    data_type dual_type = make_dual(TYPE_U32, TYPE_U64);
 
-    DataType comp1 = dual_component_type(dual_type, 0);
-    DataType comp2 = dual_component_type(dual_type, 1);
+    data_type comp1 = dual_component_type(dual_type, 0);
+    data_type comp2 = dual_component_type(dual_type, 1);
 
     assert(type_id(comp1) == TYPE_ID_U32);
     assert(type_size(comp1) == 4);
@@ -295,7 +295,7 @@ void test_dual_operations() {
     pack_dual(key2, TYPE_U32, &k2_a, TYPE_U32, &k2_b);
     pack_dual(key3, TYPE_U32, &k3_a, TYPE_U32, &k3_b);
 
-    DataType u32_u32_type = make_dual(TYPE_U32, TYPE_U32);
+    data_type u32_u32_type = make_dual(TYPE_U32, TYPE_U32);
     assert(type_compare(u32_u32_type, key1, key2) < 0);
     assert(type_compare(u32_u32_type, key2, key3) < 0);
     assert(type_compare(u32_u32_type, key1, key1) == 0);
@@ -306,7 +306,7 @@ void test_dual_operations() {
     uint32_t m2_a = 100;
     uint64_t m2_b = 0x2000000000000000ULL;
 
-    DataType mixed_dual = make_dual(TYPE_U32, TYPE_U64);
+    data_type mixed_dual = make_dual(TYPE_U32, TYPE_U64);
     pack_dual(mixed_key1, TYPE_U32, &m1_a, TYPE_U64, &m1_b);
     pack_dual(mixed_key2, TYPE_U32, &m2_a, TYPE_U64, &m2_b);
 
@@ -343,15 +343,15 @@ void test_type_names() {
     assert(strcmp(type_name(TYPE_F32), "F32") == 0);
     assert(strcmp(type_name(TYPE_NULL), "NULL") == 0);
 
-    DataType char_type = make_char(128);
+    data_type char_type = make_char(128);
     const char* char_name = type_name(char_type);
     assert(strstr(char_name, "CHAR128") != nullptr);
 
-    DataType varchar_type = make_varchar(256);
+    data_type varchar_type = make_varchar(256);
     const char* varchar_name = type_name(varchar_type);
     assert(strstr(varchar_name, "VARCHAR(256)") != nullptr);
 
-    DataType dual_type = make_dual(TYPE_U32, TYPE_U32);
+    data_type dual_type = make_dual(TYPE_U32, TYPE_U32);
     const char* dual_name = type_name(dual_type);
     assert(strstr(dual_name, "DUAL(U32,U32)") != nullptr);
 }
@@ -367,7 +367,7 @@ void test_hot_path_operations() {
     }
 
     uint8_t comp_keys[10][8];
-    DataType dual_type = make_dual(TYPE_U32, TYPE_U32);
+    data_type dual_type = make_dual(TYPE_U32, TYPE_U32);
 
     for (int i = 0; i < 10; i++) {
         uint32_t first = i / 3;

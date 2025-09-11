@@ -35,7 +35,7 @@
 #include <cstdio>
 #include <cstdarg>
 
-enum TokenType : uint8_t
+enum TOKEN_TYPE : uint8_t
 {
 	TOKEN_EOF = 0,
 	TOKEN_IDENTIFIER,
@@ -50,34 +50,34 @@ enum TokenType : uint8_t
 	TOKEN_STAR
 };
 
-struct Token
+struct tok
 {
-	TokenType	type;
+	TOKEN_TYPE	type;
 	const char *text;
 	uint32_t	length;
 	uint32_t	line;
 	uint32_t	column;
 };
 
-struct Lexer
+struct lexer
 {
 	const char *input;
 	const char *current;
 	uint32_t	line;
 	uint32_t	column;
-	Token		current_token;
+	tok		current_token;
 };
 
-struct Parser
+struct parser
 {
-	Lexer		lexer;
+	lexer		lex;
 	string_view error_msg;
 	int			error_line;
 	int			error_column;
 };
 
 static string_view
-format_error(Parser *parser, const char *fmt, ...)
+format_error(parser *p, const char *fmt, ...)
 {
 	char   *buffer = (char *)arena<query_arena>::alloc(256);
 	va_list args;
@@ -85,11 +85,11 @@ format_error(Parser *parser, const char *fmt, ...)
 	vsnprintf(buffer, 256, fmt, args);
 	va_end(args);
 
-	parser->error_msg = string_view(buffer, strlen(buffer));
-	parser->error_line = parser->lexer.line;
-	parser->error_column = parser->lexer.column;
+	p->error_msg = string_view(buffer, strlen(buffer));
+	p->error_line = p->lex.line;
+	p->error_column = p->lex.column;
 
-	return parser->error_msg;
+	return p->error_msg;
 }
 
 /*
@@ -133,7 +133,7 @@ is_keyword(const char *text, uint32_t length)
 }
 
 void
-lexer_init(Lexer *lex, const char *input)
+lexer_init(lexer *lex, const char *input)
 {
 	lex->input = input;
 	lex->current = input;
@@ -146,7 +146,7 @@ lexer_init(Lexer *lex, const char *input)
 ** Skips whitespace, newlines, and SQL comments (-- to end of line)
 */
 static void
-skip_whitespace(Lexer *lex)
+skip_whitespace(lexer *lex)
 {
 	while (*lex->current)
 	{
@@ -176,12 +176,12 @@ skip_whitespace(Lexer *lex)
 	}
 }
 
-Token
-lexer_next_token(Lexer *lex)
+tok
+lexer_next_token(lexer *lex)
 {
 	skip_whitespace(lex);
 
-	Token token;
+	tok token;
 	token.line = lex->line;
 	token.column = lex->column;
 	token.text = lex->current;
@@ -356,15 +356,15 @@ lexer_next_token(Lexer *lex)
 ** This enables the parser to make decisions without committing to consume tokens.
 ** Critical for distinguishing statement types and handling optional clauses.
 */
-Token
-lexer_peek_token(Lexer *lex)
+tok
+lexer_peek_token(lexer *lex)
 {
 	const char *saved_current = lex->current;
 	uint32_t	saved_line = lex->line;
 	uint32_t	saved_column = lex->column;
-	Token		saved_token = lex->current_token;
+	tok		saved_token = lex->current_token;
 
-	Token token = lexer_next_token(lex);
+	tok token = lexer_next_token(lex);
 
 	lex->current = saved_current;
 	lex->line = saved_line;
@@ -375,50 +375,50 @@ lexer_peek_token(Lexer *lex)
 }
 
 bool
-consume_token(Parser *parser, TokenType type)
+consume_token(parser *parser, TOKEN_TYPE type)
 {
-	Token token = lexer_peek_token(&parser->lexer);
+	tok token = lexer_peek_token(&parser->lex);
 	if (token.type == type)
 	{
-		lexer_next_token(&parser->lexer);
+		lexer_next_token(&parser->lex);
 		return true;
 	}
 	return false;
 }
 
 bool
-consume_keyword(Parser *parser, const char *keyword)
+consume_keyword(parser *parser, const char *keyword)
 {
-	Token token = lexer_peek_token(&parser->lexer);
+	tok token = lexer_peek_token(&parser->lex);
 	if (token.type == TOKEN_KEYWORD && str_eq_ci(token.text, token.length, keyword))
 	{
-		lexer_next_token(&parser->lexer);
+		lexer_next_token(&parser->lex);
 		return true;
 	}
 	return false;
 }
 
 bool
-peek_keyword(Parser *parser, const char *keyword)
+peek_keyword(parser *parser, const char *keyword)
 {
-	Token token = lexer_peek_token(&parser->lexer);
+	tok token = lexer_peek_token(&parser->lex);
 	return token.type == TOKEN_KEYWORD && str_eq_ci(token.text, token.length, keyword);
 }
 
 static bool
-consume_operator(Parser *parser, const char *op)
+consume_operator(parser *parser, const char *op)
 {
-	Token token = lexer_peek_token(&parser->lexer);
+	tok token = lexer_peek_token(&parser->lex);
 	if (token.type == TOKEN_OPERATOR && token.length == strlen(op) && memcmp(token.text, op, token.length) == 0)
 	{
-		lexer_next_token(&parser->lexer);
+		lexer_next_token(&parser->lex);
 		return true;
 	}
 	return false;
 }
 
-DataType
-parse_data_type(Parser *parser)
+data_type
+parse_data_type(parser *parser)
 {
 	if (consume_keyword(parser, "INT"))
 	{
@@ -453,19 +453,19 @@ parse_data_type(Parser *parser)
 ** naturally building the correct tree structure.
 */
 
-Expr *
-parse_or_expr(Parser *parser);
-Expr *
-parse_and_expr(Parser *parser);
-Expr *
-parse_not_expr(Parser *parser);
-Expr *
-parse_comparison_expr(Parser *parser);
-Expr *
-parse_primary_expr(Parser *parser);
+expr_node *
+parse_or_expr(parser *parser);
+expr_node *
+parse_and_expr(parser *parser);
+expr_node *
+parse_not_expr(parser *parser);
+expr_node *
+parse_comparison_expr(parser *parser);
+expr_node *
+parse_primary_expr(parser *parser);
 
-Expr *
-parse_expression(Parser *parser)
+expr_node *
+parse_expression(parser *parser)
 {
 	return parse_or_expr(parser);
 }
@@ -479,23 +479,23 @@ parse_expression(Parser *parser)
 **       /  \
 **    expr1  expr2
 */
-Expr *
-parse_or_expr(Parser *parser)
+expr_node *
+parse_or_expr(parser *parser)
 {
-	Expr *left = parse_and_expr(parser);
+	expr_node *left = parse_and_expr(parser);
 	if (!left)
 		return nullptr;
 
 	while (consume_keyword(parser, "OR"))
 	{
-		Expr *right = parse_and_expr(parser);
+		expr_node *right = parse_and_expr(parser);
 		if (!right)
 		{
 			format_error(parser, "Expected expression after OR");
 			return nullptr;
 		}
 
-		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
+		expr_node *expr = (expr_node *)arena<query_arena>::alloc(sizeof(expr_node));
 		expr->type = EXPR_BINARY_OP;
 		expr->op = OP_OR;
 		expr->left = left;
@@ -515,23 +515,23 @@ parse_or_expr(Parser *parser)
 **      /   \
 **   expr1  expr2
 */
-Expr *
-parse_and_expr(Parser *parser)
+expr_node *
+parse_and_expr(parser *parser)
 {
-	Expr *left = parse_not_expr(parser);
+	expr_node *left = parse_not_expr(parser);
 	if (!left)
 		return nullptr;
 
 	while (consume_keyword(parser, "AND"))
 	{
-		Expr *right = parse_not_expr(parser);
+		expr_node *right = parse_not_expr(parser);
 		if (!right)
 		{
 			format_error(parser, "Expected expression after AND");
 			return nullptr;
 		}
 
-		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
+		expr_node *expr = (expr_node *)arena<query_arena>::alloc(sizeof(expr_node));
 		expr->type = EXPR_BINARY_OP;
 		expr->op = OP_AND;
 		expr->left = left;
@@ -550,19 +550,19 @@ parse_and_expr(Parser *parser)
 **         expr
 ** Note: NOT NOT expr is valid and creates nested nodes
 */
-Expr *
-parse_not_expr(Parser *parser)
+expr_node *
+parse_not_expr(parser *parser)
 {
 	if (consume_keyword(parser, "NOT"))
 	{
-		Expr *operand = parse_not_expr(parser); // Recursive for NOT NOT case
+		expr_node *operand = parse_not_expr(parser); // Recursive for NOT NOT case
 		if (!operand)
 		{
 			format_error(parser, "Expected expression after NOT");
 			return nullptr;
 		}
 
-		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
+		expr_node *expr = (expr_node *)arena<query_arena>::alloc(sizeof(expr_node));
 		expr->type = EXPR_UNARY_OP;
 		expr->unary_op = OP_NOT;
 		expr->operand = operand;
@@ -580,17 +580,17 @@ parse_not_expr(Parser *parser)
 **      expr1  expr2
 ** Note: Does NOT handle a = b = c (would need to chain)
 */
-Expr *
-parse_comparison_expr(Parser *parser)
+expr_node *
+parse_comparison_expr(parser *parser)
 {
-	Expr *left = parse_primary_expr(parser);
+	expr_node *left = parse_primary_expr(parser);
 	if (!left)
 		return nullptr;
 
-	Token token = lexer_peek_token(&parser->lexer);
+	tok token = lexer_peek_token(&parser->lex);
 	if (token.type == TOKEN_OPERATOR)
 	{
-		BinaryOp op;
+		BINARY_OP op;
 
 		if (consume_operator(parser, "="))
 		{
@@ -621,14 +621,14 @@ parse_comparison_expr(Parser *parser)
 			return left;
 		}
 
-		Expr *right = parse_primary_expr(parser);
+		expr_node *right = parse_primary_expr(parser);
 		if (!right)
 		{
 			format_error(parser, "Expected expression after comparison operator");
 			return nullptr;
 		}
 
-		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
+		expr_node *expr = (expr_node *)arena<query_arena>::alloc(sizeof(expr_node));
 		expr->type = EXPR_BINARY_OP;
 		expr->op = op;
 		expr->left = left;
@@ -647,15 +647,15 @@ parse_comparison_expr(Parser *parser)
 **   column_name  → COLUMN(column_name)
 **   (expr)       → expr (parentheses just for grouping)
 */
-Expr *
-parse_primary_expr(Parser *parser)
+expr_node *
+parse_primary_expr(parser *parser)
 {
-	Token token = lexer_peek_token(&parser->lexer);
+	tok token = lexer_peek_token(&parser->lex);
 
 	if (token.type == TOKEN_NUMBER)
 	{
-		lexer_next_token(&parser->lexer);
-		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
+		lexer_next_token(&parser->lex);
+		expr_node *expr = (expr_node *)arena<query_arena>::alloc(sizeof(expr_node));
 
 		expr->type = EXPR_LITERAL;
 		expr->lit_type = TYPE_U32;
@@ -678,8 +678,8 @@ parse_primary_expr(Parser *parser)
 			return nullptr;
 		}
 
-		lexer_next_token(&parser->lexer);
-		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
+		lexer_next_token(&parser->lex);
+		expr_node *expr = (expr_node *)arena<query_arena>::alloc(sizeof(expr_node));
 		expr->type = EXPR_LITERAL;
 		expr->lit_type = TYPE_CHAR32;
 		expr->str_val = string_view(token.text, token.length);
@@ -688,7 +688,7 @@ parse_primary_expr(Parser *parser)
 
 	if (consume_token(parser, TOKEN_LPAREN))
 	{
-		Expr *expr = parse_expression(parser);
+		expr_node *expr = parse_expression(parser);
 		if (!expr)
 		{
 			format_error(parser, "Expected expression after '('");
@@ -706,8 +706,8 @@ parse_primary_expr(Parser *parser)
 
 	if (token.type == TOKEN_IDENTIFIER)
 	{
-		lexer_next_token(&parser->lexer);
-		Expr *expr = (Expr *)arena<query_arena>::alloc(sizeof(Expr));
+		lexer_next_token(&parser->lex);
+		expr_node *expr = (expr_node *)arena<query_arena>::alloc(sizeof(expr_node));
 		expr->type = EXPR_COLUMN;
 		expr->column_name = string_view(token.text, token.length);
 		return expr;
@@ -726,15 +726,15 @@ parse_primary_expr(Parser *parser)
 **            /   \
 **    (age > 18)  (city = 'NYC')
 */
-Expr *
-parse_where_clause(Parser *parser)
+expr_node *
+parse_where_clause(parser *parser)
 {
 	if (!consume_keyword(parser, "WHERE"))
 	{
 		return nullptr;
 	}
 
-	Expr *expr = parse_expression(parser);
+	expr_node *expr = parse_expression(parser);
 	if (!expr)
 	{
 		format_error(parser, "Expected expression after WHERE");
@@ -744,7 +744,7 @@ parse_where_clause(Parser *parser)
 }
 
 void
-parse_select(Parser *parser, SelectStmt *stmt)
+parse_select(parser *parser, select_stmt_node *stmt)
 {
 
 	if (!consume_keyword(parser, "SELECT"))
@@ -764,7 +764,7 @@ parse_select(Parser *parser, SelectStmt *stmt)
 
 		do
 		{
-			Token token = lexer_next_token(&parser->lexer);
+			tok token = lexer_next_token(&parser->lex);
 			if (token.type != TOKEN_IDENTIFIER)
 			{
 				format_error(parser, "Expected column name in SELECT list");
@@ -782,7 +782,7 @@ parse_select(Parser *parser, SelectStmt *stmt)
 		return;
 	}
 
-	Token token = lexer_next_token(&parser->lexer);
+	tok token = lexer_next_token(&parser->lex);
 	if (token.type != TOKEN_IDENTIFIER)
 	{
 		format_error(parser, "Expected table name after FROM");
@@ -801,7 +801,7 @@ parse_select(Parser *parser, SelectStmt *stmt)
 			return;
 		}
 
-		token = lexer_next_token(&parser->lexer);
+		token = lexer_next_token(&parser->lex);
 		if (token.type != TOKEN_IDENTIFIER)
 		{
 			format_error(parser, "Expected column name after ORDER BY");
@@ -823,7 +823,7 @@ parse_select(Parser *parser, SelectStmt *stmt)
 }
 
 void
-parse_insert(Parser *parser, InsertStmt *stmt)
+parse_insert(parser *parser, insert_stmt_node *stmt)
 {
 
 	if (!consume_keyword(parser, "INSERT"))
@@ -838,7 +838,7 @@ parse_insert(Parser *parser, InsertStmt *stmt)
 		return;
 	}
 
-	Token token = lexer_next_token(&parser->lexer);
+	tok token = lexer_next_token(&parser->lex);
 	if (token.type != TOKEN_IDENTIFIER)
 	{
 		format_error(parser, "Expected table name after INSERT INTO");
@@ -851,7 +851,7 @@ parse_insert(Parser *parser, InsertStmt *stmt)
 	{
 		do
 		{
-			token = lexer_next_token(&parser->lexer);
+			token = lexer_next_token(&parser->lex);
 			if (token.type != TOKEN_IDENTIFIER)
 			{
 				format_error(parser, "Expected column name in INSERT column list");
@@ -883,7 +883,7 @@ parse_insert(Parser *parser, InsertStmt *stmt)
 
 	do
 	{
-		Expr *expr = parse_expression(parser);
+		expr_node *expr = parse_expression(parser);
 		if (!expr)
 		{
 			format_error(parser, "Expected value expression in VALUES list");
@@ -900,7 +900,7 @@ parse_insert(Parser *parser, InsertStmt *stmt)
 }
 
 void
-parse_update(Parser *parser, UpdateStmt *stmt)
+parse_update(parser *parser, update_stmt_node *stmt)
 {
 
 	if (!consume_keyword(parser, "UPDATE"))
@@ -909,7 +909,7 @@ parse_update(Parser *parser, UpdateStmt *stmt)
 		return;
 	}
 
-	Token token = lexer_next_token(&parser->lexer);
+	tok token = lexer_next_token(&parser->lex);
 	if (token.type != TOKEN_IDENTIFIER)
 	{
 		format_error(parser, "Expected table name after UPDATE");
@@ -926,7 +926,7 @@ parse_update(Parser *parser, UpdateStmt *stmt)
 
 	do
 	{
-		token = lexer_next_token(&parser->lexer);
+		token = lexer_next_token(&parser->lex);
 		if (token.type != TOKEN_IDENTIFIER)
 		{
 			format_error(parser, "Expected column name in SET clause");
@@ -942,7 +942,7 @@ parse_update(Parser *parser, UpdateStmt *stmt)
 			return;
 		}
 
-		Expr *expr = parse_expression(parser);
+		expr_node *expr = parse_expression(parser);
 		if (!expr)
 		{
 			format_error(parser, "Expected value expression after '='");
@@ -955,7 +955,7 @@ parse_update(Parser *parser, UpdateStmt *stmt)
 }
 
 void
-parse_delete(Parser *parser, DeleteStmt *stmt)
+parse_delete(parser *parser, delete_stmt_node *stmt)
 {
 
 	if (!consume_keyword(parser, "DELETE"))
@@ -970,7 +970,7 @@ parse_delete(Parser *parser, DeleteStmt *stmt)
 		return;
 	}
 
-	Token token = lexer_next_token(&parser->lexer);
+	tok token = lexer_next_token(&parser->lex);
 	if (token.type != TOKEN_IDENTIFIER)
 	{
 		format_error(parser, "Expected table name after DELETE FROM");
@@ -983,7 +983,7 @@ parse_delete(Parser *parser, DeleteStmt *stmt)
 }
 
 void
-parse_create_table(Parser *parser, CreateTableStmt *stmt)
+parse_create_table(parser *parser, create_table_stmt_node *stmt)
 {
 	if (!consume_keyword(parser, "CREATE"))
 	{
@@ -997,7 +997,7 @@ parse_create_table(Parser *parser, CreateTableStmt *stmt)
 		return;
 	}
 
-	Token token = lexer_next_token(&parser->lexer);
+	tok token = lexer_next_token(&parser->lex);
 	if (token.type != TOKEN_IDENTIFIER)
 	{
 		format_error(parser, "Expected table name after CREATE TABLE");
@@ -1014,14 +1014,14 @@ parse_create_table(Parser *parser, CreateTableStmt *stmt)
 
 	do
 	{
-		token = lexer_next_token(&parser->lexer);
+		token = lexer_next_token(&parser->lex);
 		if (token.type != TOKEN_IDENTIFIER)
 		{
 			format_error(parser, "Expected column name in CREATE TABLE");
 			return;
 		}
 
-		ColumnDef col = {};
+		attribute_node col = {};
 
 		col.name = string_view(token.text, token.length);
 
@@ -1054,7 +1054,7 @@ parse_create_table(Parser *parser, CreateTableStmt *stmt)
 }
 
 void
-parse_drop_table(Parser *parser, DropTableStmt *stmt)
+parse_drop_table(parser *parser, drop_table_stmt_node *stmt)
 {
 
 	if (!consume_keyword(parser, "DROP"))
@@ -1069,7 +1069,7 @@ parse_drop_table(Parser *parser, DropTableStmt *stmt)
 		return;
 	}
 
-	Token token = lexer_next_token(&parser->lexer);
+	tok token = lexer_next_token(&parser->lex);
 	if (token.type != TOKEN_IDENTIFIER)
 	{
 		format_error(parser, "Expected table name after DROP TABLE");
@@ -1080,7 +1080,7 @@ parse_drop_table(Parser *parser, DropTableStmt *stmt)
 }
 
 void
-parse_begin(Parser *parser, BeginStmt *stmt)
+parse_begin(parser *parser, begin_stmt_node *stmt)
 {
 	if (!consume_keyword(parser, "BEGIN"))
 	{
@@ -1090,7 +1090,7 @@ parse_begin(Parser *parser, BeginStmt *stmt)
 }
 
 void
-parse_commit(Parser *parser, CommitStmt *stmt)
+parse_commit(parser *parser, commit_stmt_node *stmt)
 {
 	if (!consume_keyword(parser, "COMMIT"))
 	{
@@ -1100,7 +1100,7 @@ parse_commit(Parser *parser, CommitStmt *stmt)
 }
 
 void
-parse_rollback(Parser *parser, RollbackStmt *stmt)
+parse_rollback(parser *parser, rollback_stmt_node *stmt)
 {
 	if (!consume_keyword(parser, "ROLLBACK"))
 	{
@@ -1114,12 +1114,12 @@ parse_rollback(Parser *parser, RollbackStmt *stmt)
 ** We identify the statement type once, then commit to parsing it.
 ** This is more efficient than try-parse-and-backtrack approaches.
 */
-Statement *
-parse_statement(Parser *parser)
+stmt_node *
+parse_statement(parser *parser)
 {
-	Statement *stmt = (Statement *)arena<query_arena>::alloc(sizeof(Statement));
+	stmt_node *stmt = (stmt_node *)arena<query_arena>::alloc(sizeof(stmt_node));
 	// memset(stmt, 0, sizeof(Statement));
-	Token token = lexer_peek_token(&parser->lexer);
+	tok token = lexer_peek_token(&parser->lex);
 
 	if (peek_keyword(parser, "SELECT"))
 	{
@@ -1191,20 +1191,20 @@ parse_statement(Parser *parser)
 	return stmt;
 }
 
-array<Statement *, query_arena>
-parse_statements(Parser *parser)
+array<stmt_node *, query_arena>
+parse_statements(parser *parser)
 {
-	array<Statement *, query_arena> statements;
+	array<stmt_node *, query_arena> statements;
 	statements.reset();
 
 	while (true)
 	{
-		if (lexer_peek_token(&parser->lexer).type == TOKEN_EOF)
+		if (lexer_peek_token(&parser->lex).type == TOKEN_EOF)
 		{
 			break;
 		}
 
-		Statement *stmt = parse_statement(parser);
+		stmt_node *stmt = parse_statement(parser);
 		if (!stmt)
 		{
 			return statements;
@@ -1220,8 +1220,8 @@ parser_result
 parse_sql(const char *sql)
 {
 	parser_result result;
-	Parser		  parser;
-	lexer_init(&parser.lexer, sql);
+	parser		  parser;
+	lexer_init(&parser.lex, sql);
 
 	parser.error_msg = string_view{};
 	parser.error_line = -1;
@@ -1250,7 +1250,7 @@ parse_sql(const char *sql)
 }
 
 const char *
-token_type_to_string(TokenType type)
+token_type_to_string(TOKEN_TYPE type)
 {
 	switch (type)
 	{
@@ -1310,7 +1310,7 @@ stmt_type_to_string(StmtType type)
 }
 
 static void
-print_expr(Expr *expr, int indent)
+print_expr(expr_node *expr, int indent)
 {
 	if (!expr)
 	{
@@ -1382,7 +1382,7 @@ print_expr(Expr *expr, int indent)
 }
 
 void
-print_ast(Statement *stmt)
+print_ast(stmt_node *stmt)
 {
 	if (!stmt)
 	{
@@ -1395,7 +1395,7 @@ print_ast(Statement *stmt)
 	switch (stmt->type)
 	{
 	case STMT_SELECT: {
-		SelectStmt *s = &stmt->select_stmt;
+		select_stmt_node *s = &stmt->select_stmt;
 		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		if (s->is_star)
 		{
@@ -1426,7 +1426,7 @@ print_ast(Statement *stmt)
 	}
 
 	case STMT_INSERT: {
-		InsertStmt *s = &stmt->insert_stmt;
+		insert_stmt_node *s = &stmt->insert_stmt;
 		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		if (s->columns.size() > 0)
 		{
@@ -1448,7 +1448,7 @@ print_ast(Statement *stmt)
 	}
 
 	case STMT_UPDATE: {
-		UpdateStmt *s = &stmt->update_stmt;
+		update_stmt_node *s = &stmt->update_stmt;
 		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		printf("  SET:\n");
 		for (uint32_t i = 0; i < s->columns.size(); i++)
@@ -1465,7 +1465,7 @@ print_ast(Statement *stmt)
 	}
 
 	case STMT_DELETE: {
-		DeleteStmt *s = &stmt->delete_stmt;
+		delete_stmt_node *s = &stmt->delete_stmt;
 		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		if (s->where_clause)
 		{
@@ -1476,12 +1476,12 @@ print_ast(Statement *stmt)
 	}
 
 	case STMT_CREATE_TABLE: {
-		CreateTableStmt *s = &stmt->create_table_stmt;
+		create_table_stmt_node *s = &stmt->create_table_stmt;
 		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		printf("  Columns:\n");
 		for (uint32_t i = 0; i < s->columns.size(); i++)
 		{
-			ColumnDef *col = &s->columns[i];
+			attribute_node *col = &s->columns[i];
 			printf("    %.*s %s%s\n", (int)col->name.size(), col->name.data(), col->type == TYPE_U32 ? "INT" : "TEXT",
 				   col->sem.is_primary_key ? " (PRIMARY KEY)" : "");
 		}
@@ -1489,7 +1489,7 @@ print_ast(Statement *stmt)
 	}
 
 	case STMT_DROP_TABLE: {
-		DropTableStmt *s = &stmt->drop_table_stmt;
+		drop_table_stmt_node *s = &stmt->drop_table_stmt;
 		printf("  Table: %.*s\n", (int)s->table_name.size(), s->table_name.data());
 		break;
 	}

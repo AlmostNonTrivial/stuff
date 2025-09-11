@@ -4,51 +4,51 @@
 #include <string.h>
 #include <inttypes.h>
 // Functions for parameterized types
-DataType make_char(uint32_t size)
+data_type make_char(uint32_t size)
 {
 	return MAKE_TYPE(TYPE_ID_CHAR, size);
 }
 
-DataType make_varchar(uint32_t size)
+data_type make_varchar(uint32_t size)
 {
 	return MAKE_TYPE(TYPE_ID_VARCHAR, size);
 }
 
 // Type property extraction - BRANCHLESS
-uint32_t type_size(DataType type)
+uint32_t type_size(data_type type)
 {
 	return type & 0xFFFFFF;
 }
 
-uint8_t type_id(DataType type)
+uint8_t type_id(data_type type)
 {
 	return type >> 56;
 }
 
 // Dual type specific extractors (minimal set)
-uint8_t dual_type_id_1(DataType type)
+uint8_t dual_type_id_1(data_type type)
 {
 	return (type >> 48) & 0xFF;
 }
 
-uint8_t dual_type_id_2(DataType type)
+uint8_t dual_type_id_2(data_type type)
 {
 	return (type >> 40) & 0xFF;
 }
 
 // Helper for getting dual component sizes - internal use only
-static uint8_t dual_size_1(DataType type)
+static uint8_t dual_size_1(data_type type)
 {
 	return (type >> 32) & 0xFF;
 }
 
-static uint8_t dual_size_2(DataType type)
+static uint8_t dual_size_2(data_type type)
 {
 	return (type >> 24) & 0xFF;
 }
 
-// Reconstruct full DataType from component ID and size
-DataType type_from_id_and_size(uint8_t id, uint32_t size)
+// Reconstruct full data_type from component ID and size
+data_type type_from_id_and_size(uint8_t id, uint32_t size)
 {
 	switch (id)
 	{
@@ -86,7 +86,7 @@ DataType type_from_id_and_size(uint8_t id, uint32_t size)
 }
 
 // Factory function for dual types
-DataType make_dual(DataType type1, DataType type2)
+data_type make_dual(data_type type1, data_type type2)
 {
 	uint8_t	 id1 = type_id(type1);
 	uint8_t	 id2 = type_id(type2);
@@ -96,7 +96,7 @@ DataType make_dual(DataType type1, DataType type2)
 }
 
 // Get component types from dual
-DataType dual_component_type(DataType type, uint32_t index)
+data_type dual_component_type(data_type type, uint32_t index)
 {
 	if (type_id(type) != TYPE_ID_DUAL)
 		return TYPE_NULL;
@@ -113,7 +113,7 @@ DataType dual_component_type(DataType type, uint32_t index)
 }
 
 // Component offset for dual types
-uint32_t dual_component_offset(DataType type, uint32_t index)
+uint32_t dual_component_offset(data_type type, uint32_t index)
 {
 	if (index == 0)
 		return 0;
@@ -123,29 +123,29 @@ uint32_t dual_component_offset(DataType type, uint32_t index)
 }
 
 
-bool type_is_string(DataType type)
+bool type_is_string(data_type type)
 {
 	uint8_t id = type_id(type);
 	return id == TYPE_ID_CHAR || id == TYPE_ID_VARCHAR;
 }
-bool type_is_dual(DataType type)
+bool type_is_dual(data_type type)
 {
 	return type_id(type) == TYPE_ID_DUAL;
 }
-bool type_is_null(DataType type)
+bool type_is_null(data_type type)
 {
 	return type_id(type) == TYPE_ID_NULL;
 }
 
 
-bool type_is_numeric(DataType type)
+bool type_is_numeric(data_type type)
 {
 	uint8_t id = type_id(type);
 	return id <= TYPE_ID_F64;
 }
 
 // Type comparison - unified for scalar and dual
-int type_compare(DataType type, const void *a, const void *b)
+int type_compare(data_type type, const void *a, const void *b)
 {
 	uint8_t tid = type_id(type);
 
@@ -201,13 +201,13 @@ int type_compare(DataType type, const void *a, const void *b)
 
 	case TYPE_ID_DUAL: {
 		// Compare first component
-		DataType type1 = dual_component_type(type, 0);
+		data_type type1 = dual_component_type(type, 0);
 		int		 cmp1 = type_compare(type1, a, b);
 		if (cmp1 != 0)
 			return cmp1;
 
 		// Compare second component if first is equal
-		DataType type2 = dual_component_type(type, 1);
+		data_type type2 = dual_component_type(type, 1);
 		uint32_t offset = type_size(type1);
 		return type_compare(type2, (char *)a + offset, (char *)b + offset);
 	}
@@ -218,7 +218,7 @@ int type_compare(DataType type, const void *a, const void *b)
 }
 
 // Unified comparison function
-bool type_compare_op(comparison_op op, DataType type, const void *a, const void *b)
+bool type_compare_op(comparison_op op, data_type type, const void *a, const void *b)
 {
 	switch (op)
 	{
@@ -240,7 +240,7 @@ bool type_compare_op(comparison_op op, DataType type, const void *a, const void 
 
 // Arithmetic operations - using macro for implementation
 #define DEFINE_ARITHMETIC_OP(name, op) \
-void type_##name(DataType type, void *dst, const void *a, const void *b) { \
+void type_##name(data_type type, void *dst, const void *a, const void *b) { \
 	switch (type_id(type)) { \
 	case TYPE_ID_U8:  *(uint8_t *)dst = *(uint8_t *)a op *(uint8_t *)b; break; \
 	case TYPE_ID_U16: *(uint16_t *)dst = *(uint16_t *)a op *(uint16_t *)b; break; \
@@ -262,7 +262,7 @@ DEFINE_ARITHMETIC_OP(div, /)
 
 
 // Utility operations - simplified
-void type_copy(DataType type, void *dst, const void *src)
+void type_copy(data_type type, void *dst, const void *src)
 {
 	if (type_is_string(type))
 	{
@@ -274,12 +274,12 @@ void type_copy(DataType type, void *dst, const void *src)
 	}
 }
 
-void type_zero(DataType type, void *dst)
+void type_zero(data_type type, void *dst)
 {
 	memset(dst, 0, type_size(type));
 }
 
-uint64_t type_hash(DataType type, const void *data)
+uint64_t type_hash(data_type type, const void *data)
 {
 	uint64_t hash = 0xcbf29ce484222325ull;
 
@@ -294,11 +294,11 @@ uint64_t type_hash(DataType type, const void *data)
 	else if (type_is_dual(type))
 	{
 		// Hash first component
-		DataType type1 = dual_component_type(type, 0);
+		data_type type1 = dual_component_type(type, 0);
 		uint64_t hash1 = type_hash(type1, data);
 
 		// Hash second component
-		DataType type2 = dual_component_type(type, 1);
+		data_type type2 = dual_component_type(type, 1);
 		uint32_t offset = type_size(type1);
 		uint64_t hash2 = type_hash(type2, (char *)data + offset);
 
@@ -318,7 +318,7 @@ uint64_t type_hash(DataType type, const void *data)
 	return hash;
 }
 
-void type_print(DataType type, const void *data)
+void type_print(data_type type, const void *data)
 {
 	switch (type_id(type))
 	{
@@ -372,13 +372,13 @@ void type_print(DataType type, const void *data)
 		printf("(");
 
 		// Print first component
-		DataType type1 = dual_component_type(type, 0);
+		data_type type1 = dual_component_type(type, 0);
 		type_print(type1, data);
 
 		printf(", ");
 
 		// Print second component
-		DataType type2 = dual_component_type(type, 1);
+		data_type type2 = dual_component_type(type, 1);
 		uint32_t offset = type_size(type1);
 		type_print(type2, (char *)data + offset);
 
@@ -389,7 +389,7 @@ void type_print(DataType type, const void *data)
 }
 
 // Simplified increment - no string support
-void type_increment(DataType type, void *dst, const void *src)
+void type_increment(data_type type, void *dst, const void *src)
 {
 	uint8_t tid = type_id(type);
 
@@ -436,10 +436,10 @@ void type_increment(DataType type, void *dst, const void *src)
 
 	case TYPE_ID_DUAL: {
 		// Increment both components
-		DataType type1 = dual_component_type(type, 0);
+		data_type type1 = dual_component_type(type, 0);
 		type_increment(type1, dst, src);
 
-		DataType type2 = dual_component_type(type, 1);
+		data_type type2 = dual_component_type(type, 1);
 		uint32_t offset = type_size(type1);
 		type_increment(type2, (char *)dst + offset, (char *)src + offset);
 		break;
@@ -450,7 +450,7 @@ void type_increment(DataType type, void *dst, const void *src)
 	}
 }
 
-const char *type_name(DataType type)
+const char *type_name(data_type type)
 {
 	static char buf[64];
 
@@ -492,8 +492,8 @@ const char *type_name(DataType type)
 	}
 
 	case TYPE_ID_DUAL: {
-		DataType type1 = dual_component_type(type, 0);
-		DataType type2 = dual_component_type(type, 1);
+		data_type type1 = dual_component_type(type, 0);
+		data_type type2 = dual_component_type(type, 1);
 		snprintf(buf, sizeof(buf), "DUAL(%s,%s)", type_name(type1), type_name(type2));
 		return buf;
 	}
@@ -506,175 +506,175 @@ const char *type_name(DataType type)
 }
 
 // Dual type packing/unpacking helpers
-void pack_dual(void *dest, DataType type1, const void *data1, DataType type2, const void *data2)
+void pack_dual(void *dest, data_type type1, const void *data1, data_type type2, const void *data2)
 {
 	type_copy(type1, dest, data1);
 	type_copy(type2, (char *)dest + type_size(type1), data2);
 }
 
-void unpack_dual(DataType dual_type, const void *src, void *data1, void *data2)
+void unpack_dual(data_type dual_type, const void *src, void *data1, void *data2)
 {
-	DataType type1 = dual_component_type(dual_type, 0);
-	DataType type2 = dual_component_type(dual_type, 1);
+	data_type type1 = dual_component_type(dual_type, 0);
+	data_type type2 = dual_component_type(dual_type, 1);
 
 	type_copy(type1, data1, src);
 	type_copy(type2, data2, (char *)src + type_size(type1));
 }
 
 // TypedValue member function implementations
-uint8_t TypedValue::get_type_id() const
+uint8_t typed_value::get_type_id() const
 {
 	return type_id(type);
 }
 
-uint32_t TypedValue::get_size() const
+uint32_t typed_value::get_size() const
 {
 	return type_size(type);
 }
 
-bool TypedValue::is_dual() const
+bool typed_value::is_dual() const
 {
 	return type_is_dual(type);
 }
 
-bool TypedValue::is_numeric() const
+bool typed_value::is_numeric() const
 {
 	return type_is_numeric(type);
 }
 
-bool TypedValue::is_string() const
+bool typed_value::is_string() const
 {
 	return type_is_string(type);
 }
-bool TypedValue::is_null() const
+bool typed_value::is_null() const
 {
 	return type_is_null(type);
 }
 
-void TypedValue::set_varchar(const char *str, uint32_t len)
+void typed_value::set_varchar(const char *str, uint32_t len)
 {
 	len = len ? len : strlen(str);
 	type = TYPE_VARCHAR(len);
 	data = (void *)str;
 }
 
-int TypedValue::compare(const TypedValue &other) const
+int typed_value::compare(const typed_value &other) const
 {
 	return type_compare(type, data, other.data);
 }
 
-bool TypedValue::operator>(const TypedValue &other) const
+bool typed_value::operator>(const typed_value &other) const
 {
 	return compare(other) > 0;
 }
 
-bool TypedValue::operator>=(const TypedValue &other) const
+bool typed_value::operator>=(const typed_value &other) const
 {
 	return compare(other) >= 0;
 }
 
-bool TypedValue::operator<(const TypedValue &other) const
+bool typed_value::operator<(const typed_value &other) const
 {
 	return compare(other) < 0;
 }
 
-bool TypedValue::operator<=(const TypedValue &other) const
+bool typed_value::operator<=(const typed_value &other) const
 {
 	return compare(other) <= 0;
 }
 
-bool TypedValue::operator==(const TypedValue &other) const
+bool typed_value::operator==(const typed_value &other) const
 {
 	return type_equals(type, data, other.data);
 }
 
-bool TypedValue::operator!=(const TypedValue &other) const
+bool typed_value::operator!=(const typed_value &other) const
 {
 	return !type_equals(type, data, other.data);
 }
 
-void TypedValue::copy_to(TypedValue &dst) const
+void typed_value::copy_to(typed_value &dst) const
 {
 	dst.type = type;
 	type_copy(type, dst.data, data);
 }
 
-void TypedValue::print() const
+void typed_value::print() const
 {
 	type_print(type, data);
 }
 
-uint16_t TypedValue::size() const
+uint16_t typed_value::size() const
 {
 	return type_size(this->type);
 }
 
-const char *TypedValue::name() const
+const char *typed_value::name() const
 {
 	return type_name(type);
 }
 
-TypedValue TypedValue::make(DataType type, void *data)
+typed_value typed_value::make(data_type type, void *data)
 {
 	return {data, type};
 }
 
-uint8_t TypedValue::as_u8() const
+uint8_t typed_value::as_u8() const
 {
 	return *reinterpret_cast<uint8_t *>(data);
 }
 
-uint16_t TypedValue::as_u16() const
+uint16_t typed_value::as_u16() const
 {
 	return *reinterpret_cast<uint16_t *>(data);
 }
 
-uint32_t TypedValue::as_u32() const
+uint32_t typed_value::as_u32() const
 {
 	return *reinterpret_cast<uint32_t *>(data);
 }
 
-uint64_t TypedValue::as_u64() const
+uint64_t typed_value::as_u64() const
 {
 	return *reinterpret_cast<uint64_t *>(data);
 }
 
-int8_t TypedValue::as_i8() const
+int8_t typed_value::as_i8() const
 {
 	return *reinterpret_cast<int8_t *>(data);
 }
 
-int16_t TypedValue::as_i16() const
+int16_t typed_value::as_i16() const
 {
 	return *reinterpret_cast<int16_t *>(data);
 }
 
-int32_t TypedValue::as_i32() const
+int32_t typed_value::as_i32() const
 {
 	return *reinterpret_cast<int32_t *>(data);
 }
 
-int64_t TypedValue::as_i64() const
+int64_t typed_value::as_i64() const
 {
 	return *reinterpret_cast<int64_t *>(data);
 }
 
-float TypedValue::as_f32() const
+float typed_value::as_f32() const
 {
 	return *reinterpret_cast<float *>(data);
 }
 
-double TypedValue::as_f64() const
+double typed_value::as_f64() const
 {
 	return *reinterpret_cast<double *>(data);
 }
 
-const char *TypedValue::as_char() const
+const char *typed_value::as_char() const
 {
 	return reinterpret_cast<const char *>(data);
 }
 
-const char *TypedValue::as_varchar() const
+const char *typed_value::as_varchar() const
 {
 	return reinterpret_cast<const char *>(data);
 }

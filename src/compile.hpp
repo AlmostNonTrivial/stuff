@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <cstring>
 
-struct CursorAllocator
+struct cursor_allocator
 {
 	uint32_t				next_cursor = 0;
 	array<int, query_arena> free_list;
@@ -33,7 +33,7 @@ struct CursorAllocator
 };
 
 // Enhanced RegisterAllocator with strong scope-based management
-struct RegisterAllocator
+struct register_allocator
 {
 	int						next_free = 0;
 	array<int, query_arena> scope_stack;
@@ -122,14 +122,14 @@ struct RegisterAllocator
 	}
 };
 
-struct LoopContext
+struct loop_context
 {
 	const char *start_label;
 	const char *end_label;
 	int			saved_reg_mark;
 };
 
-struct WhileContext
+struct while_context
 {
 	string_view condition_label;
 	string_view end_label;
@@ -137,7 +137,7 @@ struct WhileContext
 	int			saved_reg_mark;
 };
 
-struct CondContext
+struct conditional_context
 {
 	const char *else_label;
 	const char *end_label;
@@ -145,16 +145,16 @@ struct CondContext
 	bool		has_else;
 };
 
-struct ProgramBuilder
+struct program_builder
 {
-	array<VMInstruction, query_arena>			 instructions;
+	array<vm_instruction, query_arena>			 instructions;
 	hash_map<string_view, uint32_t, query_arena> labels;
 	array<uint32_t, query_arena>				 unresolved_jumps;
-	RegisterAllocator							 regs;
-	CursorAllocator								 cursors;
+	register_allocator							 regs;
+	cursor_allocator								 cursors;
 	int											 label_counter = 0;
 
-	LoopContext current_loop;
+	loop_context current_loop;
 
 	// ========================================================================
 	// Basic Operations
@@ -170,12 +170,12 @@ struct ProgramBuilder
 		return ptr;
 	}
 
-	TypedValue
-	alloc_data_type(DataType type, const void *src, size_t src_len = 0)
+	typed_value
+	alloc_data_type(data_type type, const void *src, size_t src_len = 0)
 	{
 
 	    assert(src);
-		TypedValue tv;
+		typed_value tv;
 		tv.type = type;
 		uint32_t size = type_size(type);
 		void	*ptr = arena<query_arena>::alloc(size);
@@ -198,7 +198,7 @@ struct ProgramBuilder
 	}
 
 	void
-	emit(VMInstruction inst)
+	emit(vm_instruction inst)
 	{
 		instructions.push(inst);
 
@@ -235,7 +235,7 @@ const char*
 		for (uint32_t i = 0; i < unresolved_jumps.size(); i++)
 		{
 			uint32_t	   inst_idx = unresolved_jumps[i];
-			VMInstruction &inst = instructions[inst_idx];
+			vm_instruction &inst = instructions[inst_idx];
 
 			if (inst.p4)
 			{ // Label stored temporarily in p4
@@ -299,13 +299,13 @@ const char*
 	// Loop Management
 	// ========================================================================
 
-	LoopContext
+	loop_context
 	begin_loop(const char *name = nullptr)
 	{
 		if (!name)
 			name = generate_label("loop");
 
-		LoopContext ctx = {name, generate_label("end"), regs.mark()};
+		loop_context ctx = {name, generate_label("end"), regs.mark()};
 
 		label(ctx.start_label);
 		current_loop = ctx;
@@ -313,7 +313,7 @@ const char*
 	}
 
 	void
-	end_loop(const LoopContext &ctx)
+	end_loop(const loop_context &ctx)
 	{
 		goto_label(ctx.start_label);
 		label(ctx.end_label);
@@ -336,10 +336,10 @@ const char*
 	// While Loop Management
 	// ========================================================================
 
-	WhileContext
+	while_context
 	begin_while(int condition_reg)
 	{
-		WhileContext ctx = {generate_label("while_check"), generate_label("while_end"), condition_reg, regs.mark()};
+		while_context ctx = {generate_label("while_check"), generate_label("while_end"), condition_reg, regs.mark()};
 
 		label(ctx.condition_label.data());
 		jumpif_zero(condition_reg, ctx.end_label.data());
@@ -347,17 +347,17 @@ const char*
 	}
 
 	void
-	end_while(const WhileContext &ctx)
+	end_while(const while_context &ctx)
 	{
 		goto_label(ctx.condition_label.data());
 		label(ctx.end_label.data());
 		regs.restore(ctx.saved_reg_mark);
 	}
 
-	WhileContext
+	while_context
 	begin_do()
 	{
-		WhileContext ctx = {generate_label("do_start"), generate_label("do_end"),
+		while_context ctx = {generate_label("do_start"), generate_label("do_end"),
 							-1, // No condition reg yet
 							regs.mark()};
 
@@ -366,7 +366,7 @@ const char*
 	}
 
 	void
-	end_while_condition(const WhileContext &ctx, int condition_reg)
+	end_while_condition(const while_context &ctx, int condition_reg)
 	{
 		jumpif_not_zero(condition_reg, ctx.condition_label.data());
 		label(ctx.end_label.data());
@@ -377,17 +377,17 @@ const char*
 	// Conditional Management
 	// ========================================================================
 
-	CondContext
+	conditional_context
 	begin_if(int test_reg)
 	{
-		CondContext ctx = {generate_label("else"), generate_label("endif"), regs.mark(), false};
+		conditional_context ctx = {generate_label("else"), generate_label("endif"), regs.mark(), false};
 
 		jumpif_false(test_reg, ctx.else_label);
 		return ctx;
 	}
 
 	void
-	begin_else(CondContext &ctx)
+	begin_else(conditional_context &ctx)
 	{
 		goto_label(ctx.end_label);
 		label(ctx.else_label);
@@ -395,7 +395,7 @@ const char*
 	}
 
 	void
-	end_if(const CondContext &ctx)
+	end_if(const conditional_context &ctx)
 	{
 		if (!ctx.has_else)
 		{
@@ -410,7 +410,7 @@ const char*
 	// ========================================================================
 
 	int
-	load(const TypedValue &value, int dest_reg = -1)
+	load(const typed_value &value, int dest_reg = -1)
 	{
 		if (dest_reg == -1)
 		{
@@ -421,7 +421,7 @@ const char*
 	}
 
 	int
-	load(DataType type, void *value, int dest_reg = -1)
+	load(data_type type, void *value, int dest_reg = -1)
 	{
 		if (dest_reg == -1)
 		{
@@ -564,7 +564,7 @@ const char*
 	// ========================================================================
 
 	int
-	open_cursor(CursorContext *context)
+	open_cursor(cursor_context *context)
 	{
 		int cursor_id = cursors.allocate();
 		emit(OPEN_MAKE(cursor_id, context));
@@ -731,7 +731,7 @@ const char*
 	// ========================================================================
 
 	int
-	call_function(VMFunction fn, int first_arg_reg, int arg_count, int result_reg = -1)
+	call_function(vm_function fn, int first_arg_reg, int arg_count, int result_reg = -1)
 	{
 		if (result_reg == -1)
 		{
@@ -764,27 +764,27 @@ const char*
 	}
 };
 
-inline CursorContext *
-from_structure(Relation &structure)
+inline cursor_context *
+from_structure(relation &structure)
 {
-	CursorContext *cctx = (CursorContext *)arena<query_arena>::alloc(sizeof(CursorContext));
+	cursor_context *cctx = (cursor_context *)arena<query_arena>::alloc(sizeof(cursor_context));
 	cctx->storage.tree = &structure.storage.btree;
 	cctx->type = BPLUS;
 	cctx->layout = tuple_format_from_relation(structure);
 	return cctx;
 }
 
-inline CursorContext *
-red_black(TupleFormat &layout, bool allow_duplicates = true)
+inline cursor_context *
+red_black(tuple_format &layout, bool allow_duplicates = true)
 {
-	CursorContext *cctx = (CursorContext *)arena<query_arena>::alloc(sizeof(CursorContext));
+	cursor_context *cctx = (cursor_context *)arena<query_arena>::alloc(sizeof(cursor_context));
 	cctx->type = RED_BLACK;
 	cctx->layout = layout;
 	cctx->flags = allow_duplicates;
 	return cctx;
 }
 
-array<VMInstruction, query_arena>
-compile_program(Statement *stmt, bool inject_transaction);
+array<vm_instruction, query_arena>
+compile_program(stmt_node *stmt, bool inject_transaction);
 void
 load_catalog_from_master();

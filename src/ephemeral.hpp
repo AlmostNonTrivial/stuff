@@ -46,7 +46,7 @@ struct ephemeral_tree_node
 struct ephemeral_tree
 {
 	ephemeral_tree_node *root;           // Root node (null for empty tree)
-	DataType             key_type;       // Type of keys stored
+	data_type             key_type;       // Type of keys stored
 	uint32_t             key_size;       // Size of each key in bytes
 	uint32_t             record_size;    // Size of each record in bytes
 	uint32_t             node_count;     // Number of nodes in tree
@@ -84,7 +84,7 @@ struct et_cursor
 ** Flags: bit 0 = allow_duplicates, bit 1 = enable rebalancing
 */
 ephemeral_tree
-et_create(DataType key_type, uint32_t record_size, uint8_t flags = 0x03);
+et_create(data_type key_type, uint32_t record_size, uint8_t flags = 0x03);
 
 /*
 ** Clear all nodes from tree (does not free memory).

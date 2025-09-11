@@ -11,4 +11,4 @@ struct semantic_result {
 };
 
 // Main entry point - modifies statements in place
-semantic_result semantic_analyze(array<Statement*, query_arena>& statements);
+semantic_result semantic_analyze(array<stmt_node*, query_arena>& statements);

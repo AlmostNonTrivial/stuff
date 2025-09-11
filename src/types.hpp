@@ -12,10 +12,10 @@
 // 64-bit uniform encoding - size ALWAYS in bits 0-23:
 // Single types: [type_id:8][reserved:32][size:24]
 // Dual types:   [TYPE_ID_DUAL:8][type1_id:8][type2_id:8][size1:8][size2:8][total_size:24]
-typedef uint64_t DataType;
+typedef uint64_t data_type;
 
 // Type IDs - each type gets unique ID
-enum TypeId : uint8_t
+enum TYPE_ID : uint8_t
 {
 	TYPE_ID_U8 = 0x01,
 	TYPE_ID_U16 = 0x02,
@@ -98,64 +98,64 @@ enum TypeId : uint8_t
 #define make_null() TYPE_NULL
 
 // Function declarations
-DataType make_char(uint32_t size);
-DataType make_varchar(uint32_t size);
+data_type make_char(uint32_t size);
+data_type make_varchar(uint32_t size);
 
 // Type property extraction
-uint32_t type_size(DataType type);
-uint8_t type_id(DataType type);
+uint32_t type_size(data_type type);
+uint8_t type_id(data_type type);
 
 // Dual type specific extractors (only the necessary ones)
-uint8_t dual_type_id_1(DataType type);
-uint8_t dual_type_id_2(DataType type);
+uint8_t dual_type_id_1(data_type type);
+uint8_t dual_type_id_2(data_type type);
 
 // Type reconstruction and factory functions
-DataType type_from_id_and_size(uint8_t id, uint32_t size);
-DataType make_dual(DataType type1, DataType type2);
-DataType dual_component_type(DataType type, uint32_t index);
-uint32_t dual_component_offset(DataType type, uint32_t index);
+data_type type_from_id_and_size(uint8_t id, uint32_t size);
+data_type make_dual(data_type type1, data_type type2);
+data_type dual_component_type(data_type type, uint32_t index);
+uint32_t dual_component_offset(data_type type, uint32_t index);
 
 // Type properties
 
 
 
-bool type_is_string(DataType type);
-bool type_is_numeric(DataType type);
-bool type_is_null(DataType type);
-bool type_is_dual(DataType type);
+bool type_is_string(data_type type);
+bool type_is_numeric(data_type type);
+bool type_is_null(data_type type);
+bool type_is_dual(data_type type);
 
 // Type comparison functions
-int type_compare(DataType type, const void *a, const void *b);
-bool type_compare_op(comparison_op op, DataType type, const void *a, const void *b);
+int type_compare(data_type type, const void *a, const void *b);
+bool type_compare_op(comparison_op op, data_type type, const void *a, const void *b);
 
 // Inline comparison helpers
-inline bool type_greater_than(DataType type, const void *a, const void *b) {
+inline bool type_greater_than(data_type type, const void *a, const void *b) {
 	return type_compare(type, a, b) > 0;
 }
 
-inline bool type_greater_equal(DataType type, const void *a, const void *b) {
+inline bool type_greater_equal(data_type type, const void *a, const void *b) {
 	return type_compare(type, a, b) >= 0;
 }
 
-inline bool type_less_than(DataType type, const void *a, const void *b) {
+inline bool type_less_than(data_type type, const void *a, const void *b) {
 	return type_compare(type, a, b) < 0;
 }
 
-inline bool type_less_equal(DataType type, const void *a, const void *b) {
+inline bool type_less_equal(data_type type, const void *a, const void *b) {
 	return type_compare(type, a, b) <= 0;
 }
 
-inline bool type_equals(DataType type, const void *a, const void *b) {
+inline bool type_equals(data_type type, const void *a, const void *b) {
 	return type_compare(type, a, b) == 0;
 }
 
-inline bool type_not_equals(DataType type, const void *a, const void *b) {
+inline bool type_not_equals(data_type type, const void *a, const void *b) {
 	return type_compare(type, a, b) != 0;
 }
 
 // Arithmetic operations - using macro for definition
 #define DECLARE_ARITHMETIC_OP(name) \
-	void type_##name(DataType type, void *dst, const void *a, const void *b);
+	void type_##name(data_type type, void *dst, const void *a, const void *b);
 
 DECLARE_ARITHMETIC_OP(add)
 DECLARE_ARITHMETIC_OP(sub)
@@ -164,22 +164,22 @@ DECLARE_ARITHMETIC_OP(div)
 
 
 // Utility operations
-void type_copy(DataType type, void *dst, const void *src);
-void type_zero(DataType type, void *dst);
-uint64_t type_hash(DataType type, const void *data);
-void type_print(DataType type, const void *data);
-void type_increment(DataType type, void *dst, const void *src);
-const char *type_name(DataType type);
+void type_copy(data_type type, void *dst, const void *src);
+void type_zero(data_type type, void *dst);
+uint64_t type_hash(data_type type, const void *data);
+void type_print(data_type type, const void *data);
+void type_increment(data_type type, void *dst, const void *src);
+const char *type_name(data_type type);
 
 // Dual type packing/unpacking helpers
-void pack_dual(void *dest, DataType type1, const void *data1, DataType type2, const void *data2);
-void unpack_dual(DataType dual_type, const void *src, void *data1, void *data2);
+void pack_dual(void *dest, data_type type1, const void *data1, data_type type2, const void *data2);
+void unpack_dual(data_type dual_type, const void *src, void *data1, void *data2);
 
 // TypedValue struct
-struct TypedValue
+struct typed_value
 {
 	void *data;
-	DataType type;
+	data_type type;
 
 	// Property accessors
 	uint8_t get_type_id() const;
@@ -195,22 +195,22 @@ struct TypedValue
 	void set_varchar(const char *str, uint32_t len = 0);
 
 	// Comparison operators
-	int compare(const TypedValue &other) const;
-	bool operator>(const TypedValue &other) const;
-	bool operator>=(const TypedValue &other) const;
-	bool operator<(const TypedValue &other) const;
-	bool operator<=(const TypedValue &other) const;
-	bool operator==(const TypedValue &other) const;
-	bool operator!=(const TypedValue &other) const;
+	int compare(const typed_value &other) const;
+	bool operator>(const typed_value &other) const;
+	bool operator>=(const typed_value &other) const;
+	bool operator<(const typed_value &other) const;
+	bool operator<=(const typed_value &other) const;
+	bool operator==(const typed_value &other) const;
+	bool operator!=(const typed_value &other) const;
 
 	// Operations
-	void copy_to(TypedValue &dst) const;
+	void copy_to(typed_value &dst) const;
 	void print() const;
 	uint16_t size() const;
 	const char *name() const;
 
 	// Factory methods
-	static TypedValue make(DataType type, void *data = nullptr);
+	static typed_value make(data_type type, void *data = nullptr);
 
 	// Casting to unsigned integer types
 	uint8_t as_u8() const;
