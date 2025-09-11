@@ -1,56 +1,13 @@
 /*
 ** 2024 SQL-FromScratch
 **
-** OS LAYER IMPLEMENTATION
-**
-** This file provides three different backend implementations of the OS layer
-** API, selected at compile time via preprocessor directives.
-**
-** CONFIGURATION
-**
-** Define USE_PLATFORM_FS to use native filesystem APIs (default: memory filesystem)
-** The memory filesystem is ideal for testing and debugging.
-**
-** IMPLEMENTATION NOTES
-**
-** Windows Backend:
-**   - Uses Win32 API with explicit Unicode/ANSI selection (we use ANSI)
-**   - Requires careful HANDLE casting and error checking
-**   - File sharing is enabled to allow multiple readers
-**
-** Unix/Linux Backend:
-**   - Uses POSIX system calls directly
-**   - File descriptors are simple integers
-**   - Permissions fixed at 0644 for new files
-**
-** Memory Filesystem:
-**   - Files stored as dynamic byte arrays
-**   - Handles are incrementing integers starting from 1
-**   - Supports multiple handles to same file with independent positions
-**   - Properly implements sparse file semantics (zero-fill on extend)
-**
-** ERROR HANDLING
-**
-** All implementations follow consistent error conventions:
-**   - Invalid operations return 0, false, or OS_INVALID_HANDLE
-**   - No exceptions are thrown
-**   - Errors are silent (no stderr output)
+** Comment out the following to use an in-memory fs
 */
+// #define USE_PLATFORM_FS
 
 #include "os_layer.hpp"
 
-// Comment out the next line to use memory filesystem instead of platform-specific
-// #define USE_PLATFORM_FS
-
 #if defined(USE_PLATFORM_FS) && defined(_WIN32)
-/*
-** WINDOWS IMPLEMENTATION
-**
-** Uses Win32 API for file operations. Key considerations:
-** - HANDLEs are kernel objects that must be closed
-** - File positions are 64-bit (LARGE_INTEGER)
-** - Sharing mode allows concurrent access
-*/
 
 #include <windows.h>
 #include <io.h>
@@ -63,7 +20,6 @@ os_file_open(const char *filename, bool read_write, bool create)
 	DWORD access = read_write ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_READ;
 	DWORD creation = create ? OPEN_ALWAYS : OPEN_EXISTING;
 
-	/* Allow shared reading and writing for database concurrency */
 	HANDLE handle =
 		CreateFileA(filename, access, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, creation, FILE_ATTRIBUTE_NORMAL, NULL);
 
@@ -140,14 +96,6 @@ os_file_truncate(os_file_handle_t handle, os_file_offset_t size)
 }
 
 #elif defined(USE_PLATFORM_FS)
-/*
-** UNIX/LINUX IMPLEMENTATION
-**
-** Uses POSIX system calls. Key considerations:
-** - File descriptors are small integers
-** - O_CREAT requires mode parameter (0644)
-** - fsync() forces data to disk but is expensive
-*/
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -160,7 +108,6 @@ os_file_open(const char *filename, bool read_write, bool create)
 	if (create)
 		flags |= O_CREAT;
 
-	/* Mode 0644 = owner read/write, group/other read only */
 	return open(filename, flags, 0644);
 }
 
@@ -231,81 +178,32 @@ os_file_truncate(os_file_handle_t handle, os_file_offset_t size)
 
 #else
 
-/*
-** MEMORY FILESYSTEM IMPLEMENTATION
-**
-** In-memory filesystem for testing and development using arena-based containers.
-** Key features:
-** - Files are byte arrays that grow dynamically
-** - Multiple handles can reference the same file
-** - Each handle maintains its own position
-** - Implements proper sparse file semantics
-**
-** DESIGN NOTES
-**
-** File Storage:
-**   Files are stored in a hash_map<string, array<uint8_t>> keyed by filepath.
-**   Each file is represented as a dynamic byte array using the arena allocator.
-**
-** Handle Management:
-**   Handles are integers that index into a hash_map. Each handle tracks:
-**   - The filepath it references (as a string)
-**   - Current read/write position
-**   - Whether it was opened for writing
-**
-** Sparse File Support:
-**   When writing past EOF, the intervening bytes are zero-filled to match
-**   POSIX behavior. This ensures database pages are properly initialized.
-**
-** Memory Management:
-**   Uses arena allocator for all dynamic memory. The arena is configured
-**   for the global_arena tag.
-*/
-/*
-** MEMORY FILESYSTEM IMPLEMENTATION - FIXED
-**
-** In-memory filesystem for testing and development using arena-based containers.
-*/
-
 #include "arena.hpp"
 #include "containers.hpp"
 #include <cstring>
 
-/* Define invalid handle for memory filesystem */
 #ifndef OS_INVALID_HANDLE
 #define OS_INVALID_HANDLE ((os_file_handle_t)0)
 #endif
 
-/*
-** FILE HANDLE STRUCTURE
-**
-** Represents an open handle to a file. Multiple handles can point to
-** the same file with independent positions.
-*/
 struct file_handle
 {
-	const char *filepath;  /* Path to file (interned in arena) */
-	size_t position;       /* Current read/write position */
-	bool read_write;       /* true if opened for writing */
+	const char *filepath;
+	size_t		position;
+	bool		read_write;
 };
 
-/*
-** MEMORY FILESYSTEM STATE
-**
-** Global state for the in-memory filesystem. Not thread-safe.
-*/
 struct memory_file_system
 {
-	/* Map from filepath to file contents */
-	hash_map<std::string_view, array<uint8_t, global_arena>, global_arena> files;
 
-	/* Map from handle ID to handle data */
-	hash_map<os_file_handle_t, file_handle, global_arena> handles;
+	hash_map<std::string_view, array<uint8_t>> files;
 
-	/* Next handle ID to assign (starts at 1, 0 is invalid) */
+	hash_map<os_file_handle_t, file_handle> handles;
+
 	os_file_handle_t next_handle = 1;
 
-	void init()
+	void
+	init()
 	{
 		files.init();
 		handles.init();
@@ -323,10 +221,8 @@ os_file_open(const char *filename, bool read_write, bool create)
 		g_filesystem.init();
 	}
 
-	/* Intern the filename string for consistent key usage */
 	std::string_view filepath_key = arena_intern<global_arena>(filename);
 
-	/* Check if file exists */
 	auto *file_data = g_filesystem.files.get(filepath_key);
 
 	if (!file_data)
@@ -336,17 +232,15 @@ os_file_open(const char *filename, bool read_write, bool create)
 			return OS_INVALID_HANDLE;
 		}
 
-		/* Create new file with empty byte array */
 		array<uint8_t, global_arena> new_file;
 		g_filesystem.files.insert(filepath_key, new_file);
 		file_data = g_filesystem.files.get(filepath_key);
 	}
 
-	/* Create new handle with its own state */
 	os_file_handle_t handle = g_filesystem.next_handle++;
 
 	file_handle fh;
-	fh.filepath = filepath_key.data(); /* Store the interned pointer */
+	fh.filepath = filepath_key.data();
 	fh.position = 0;
 	fh.read_write = read_write;
 
@@ -386,14 +280,10 @@ os_file_delete(const char *filename)
 
 	std::string_view filepath_key = arena_intern<global_arena>(filename);
 
-	/* Delete from the files map */
 	g_filesystem.files.remove(filepath_key);
 
-	/* Close any open handles to this file */
-	/* Collect handles first to avoid modifying while iterating */
 	array<os_file_handle_t, global_arena> handles_to_close;
 
-	/* Iterate through hash_map entries properly */
 	for (auto it = g_filesystem.handles.begin(); it != g_filesystem.handles.end(); ++it)
 	{
 		auto [handle_id, handle_data] = *it;
@@ -403,7 +293,6 @@ os_file_delete(const char *filename)
 		}
 	}
 
-	/* Now close the collected handles */
 	for (uint32_t i = 0; i < handles_to_close.size(); i++)
 	{
 		os_file_close(handles_to_close[i]);
@@ -420,13 +309,13 @@ os_file_read(os_file_handle_t handle, void *buffer, os_file_size_t size)
 	}
 
 	std::string_view filepath_key(handle_data->filepath);
-	auto *file_data = g_filesystem.files.get(filepath_key);
+	auto			*file_data = g_filesystem.files.get(filepath_key);
 	if (!file_data)
 	{
 		return 0;
 	}
 
-	size_t &position = handle_data->position;
+	size_t		  &position = handle_data->position;
 	os_file_size_t bytes_to_read = 0;
 
 	if (position < file_data->size())
@@ -457,34 +346,26 @@ os_file_write(os_file_handle_t handle, const void *buffer, os_file_size_t size)
 	}
 
 	std::string_view filepath_key(handle_data->filepath);
-	auto *file_data = g_filesystem.files.get(filepath_key);
+	auto			*file_data = g_filesystem.files.get(filepath_key);
 	if (!file_data)
 	{
 		return 0;
 	}
 
 	size_t &position = handle_data->position;
-	size_t required_size = position + size;
+	size_t	required_size = position + size;
 
-	/*
-	** SPARSE FILE HANDLING
-	**
-	** If writing past EOF, we need to zero-fill the gap to match
-	** POSIX sparse file behavior.
-	*/
 	if (required_size > file_data->size())
 	{
 		size_t old_size = file_data->size();
 		file_data->resize(required_size);
 
-		/* Zero-fill gap if writing past EOF */
 		if (position > old_size)
 		{
 			memset(file_data->data() + old_size, 0, position - old_size);
 		}
 	}
 
-	/* Perform the write */
 	memcpy(file_data->data() + position, buffer, size);
 	position += size;
 
@@ -507,7 +388,6 @@ os_file_seek(os_file_handle_t handle, os_file_offset_t offset)
 		return;
 	}
 
-	/* Allow seeking beyond EOF to support sparse files */
 	handle_data->position = (size_t)offset;
 }
 
@@ -521,7 +401,7 @@ os_file_size(os_file_handle_t handle)
 	}
 
 	std::string_view filepath_key(handle_data->filepath);
-	auto *file_data = g_filesystem.files.get(filepath_key);
+	auto			*file_data = g_filesystem.files.get(filepath_key);
 	if (!file_data)
 	{
 		return 0;
@@ -540,7 +420,7 @@ os_file_truncate(os_file_handle_t handle, os_file_offset_t size)
 	}
 
 	std::string_view filepath_key(handle_data->filepath);
-	auto *file_data = g_filesystem.files.get(filepath_key);
+	auto			*file_data = g_filesystem.files.get(filepath_key);
 	if (!file_data)
 	{
 		return;
@@ -549,19 +429,16 @@ os_file_truncate(os_file_handle_t handle, os_file_offset_t size)
 	size_t new_size = (size_t)size;
 	size_t old_size = file_data->size();
 
-	/* Resize the file */
 	if (new_size != old_size)
 	{
 		file_data->resize(new_size);
 
-		/* Zero-fill if extending */
 		if (new_size > old_size)
 		{
 			memset(file_data->data() + old_size, 0, new_size - old_size);
 		}
 	}
 
-	/* Adjust position if it's beyond new size */
 	if (handle_data->position > new_size)
 	{
 		handle_data->position = new_size;
