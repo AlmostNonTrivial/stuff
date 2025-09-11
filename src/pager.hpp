@@ -2,31 +2,35 @@
 #include <cstdint>
 
 #define PAGE_INVALID	  0
-#define MAX_CACHE_ENTRIES 5000
+/*
+ * Although we only need at least 3 cache entries for the lru algorithm,
+ * having too small a cache puts us at risk of getting stale pointers
+ * when doing operations on the b+tree, which was the cause of some
+ * hilariously frustrating bugs, for example, when I got all my b+tree
+ * tests passing, and absent-mindedly reduced the cache size, then the next
+ * day ran the tests again after change a variable name, for them to fail.
+ */
+#define MAX_CACHE_ENTRIES 64
 #define PAGE_SIZE		  1024
 
 /*
-** BASE PAGE STRUCTURE
 **
 ** Generic page layout used for all data pages. A page knowing it's own
 ** index allows us to append them in arbitrary positions in the journal,
-** and rollback safely
+** and rollback
 **
 ** This is the "type" that free_page and other page types can be cast from,
 ** since they all share the index field at offset 0.
 */
 struct base_page
 {
-	uint32_t index; /* Page's position in the file (self-identifying) */
+	uint32_t index; /* Page's position in the database file (self-identifying) */
 	char	 data[PAGE_SIZE - sizeof(uint32_t)];
 };
 
 struct pager_meta
 {
-	uint32_t total_pages;
-	uint32_t cached_pages;
-	uint32_t dirty_pages;
-	uint32_t free_pages;
+	uint32_t total_pages, cached_pages, dirty_pages, free_pages;
 };
 
 bool

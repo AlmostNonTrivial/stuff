@@ -19,8 +19,8 @@
 **
 ** Free List: Deleted pages are linked into a singly-linked free list, with
 ** the head pointer stored in the root page. New allocations preferentially
-** reuse free pages before growing the file. Note that free pages remain
-** accessible - the caller is responsible for not using deleted pages.
+** reuse free pages before growing the file. The caller is responsible for
+** not using deleted pages.
 **
 ** Transactions: The pager implements transactions using a write-ahead journal.
 ** Before modifying a page, its original content is saved to a journal file.
@@ -28,7 +28,6 @@
 ** On rollback or crash recovery, the journal is replayed to restore the
 ** original state.
 **
-** ALGORITHMS
 **
 ** Journal Format:
 **   - Offset 0: Original root page (saved at transaction begin)
@@ -45,6 +44,17 @@
 **   Recovery replays the journal to restore all pages to their pre-transaction state,
 **   then deletes the journal.
 **
+**
+** The pager allows callers to view the database file as a practically infinite array of fixed
+** sized nodes. The Caching layer is hidden from the caller, such that when they call 'pager_get(x)'
+** they might as well be doing an index into 'char file[LARGE_NUMBER][PAGE_SIZE]'
+**
+** Keeping the pager agnositic about how it is implemented means that we can use it many storage structures,
+** for example we have internal and leaf b+tree nodes, and BLOB nodes, an internally free-pages. The draw
+** back of this, is that because the pager doesn't know the contents of the pages, it can't implement a compaction
+** mechanism for where there are a lot of free pages built up. Since the b+tree structure is formed by
+** pointing to specific indexes, shifting the pages without updating these keys would break everything.
+**
 */
 
 #include "pager.hpp"
@@ -57,17 +67,9 @@
 #include <cstdlib>
 #include <cstring>
 
-/*
-** TYPE DEFINITIONS AND MEMORY LAYOUTS
-**
-** The pager uses several carefully aligned structures to manage pages.
-** All page structures are exactly PAGE_SIZE bytes to ensure atomic disk I/O
-** and prevent partial reads/writes.
-*/
 
 /*
-** Empty tag type for arena allocator specialization.
-** Allows hash_map and hash_set to use a dedicated memory arena.
+** The pager arena is initialized on startup, and reset in the event of a rollback
 */
 struct pager_arena
 {
@@ -83,10 +85,9 @@ struct pager_arena
 static_assert(MAX_CACHE_ENTRIES >= 3, "Cache size must be at least 3 for proper operation");
 
 /*
-** FREE PAGE STRUCTURE
 **
-** When a page is deleted, it's not immediately reclaimed by the OS.
-** Instead, it joins a linked list for future reuse, storing the list node data in the page itself
+** When a page is deleted, it joins a linked list for future reuse,
+** storing the list node data in the page itself.
 **
 */
 struct free_page
@@ -97,7 +98,6 @@ struct free_page
 };
 
 /*
-** ROOT PAGE (Page 0)
 **
 ** The pager reserves the first page offset (0) in the data file and journal file
 ** for the root, which contains metadata. Keeping metadata in the data file
@@ -106,21 +106,20 @@ struct free_page
 */
 struct root_page
 {
-	uint32_t page_counter;	 /* Next page ID to allocate (high water mark) */
+	uint32_t page_counter;	 /* Next page index to allocate */
 	uint32_t free_page_head; /* Head of free list (0 = empty list) */
 	char	 padding[PAGE_SIZE - (sizeof(uint32_t) * 2)];
 };
 
 /*
-** Critical invariants to ensure our reinterpret_casts are safe
-** and that disk I/O aligns with OS page boundaries for efficiency.
+** Invariants to ensure our reinterpret_casts are safe
+** and that disk I/O aligns with OS page boundaries
 */
 static_assert(PAGE_SIZE == sizeof(base_page), "Page size mismatch");
 static_assert(PAGE_SIZE == sizeof(root_page), "root_page size mismatch");
 static_assert(PAGE_SIZE == sizeof(free_page), "free_page size mismatch");
 
 /*
-** CACHE ENTRY METADATA
 **
 ** Each cache slot has associated metadata for the LRU eviction policy.
 ** Separating metadata from data improves cache locality when scanning
@@ -139,7 +138,6 @@ struct cache_metadata
 };
 
 /*
-** GLOBAL PAGER STATE
 **
 ** Single global instance simplifies the API and matches the reality that
 ** a process typically manages one database file at a time.
@@ -155,7 +153,7 @@ static struct
 
 	/* Page cache with parallel arrays pattern for better memory layout */
 	cache_metadata cache_meta[MAX_CACHE_ENTRIES]; /* LRU and state tracking */
-	base_page	   cache_data[MAX_CACHE_ENTRIES]; /* Actual page data */
+	base_page cache_data[MAX_CACHE_ENTRIES]; /* Actual page data */
 
 	/* LRU list endpoints for O(1) access to head (MRU) and tail (LRU) */
 	int32_t lru_head; /* Most recently used slot */
@@ -167,14 +165,12 @@ static struct
 	char journal_file[JOURNAL_FILENAME_SIZE];
 
 	/*
-	** Acceleration structures:
-	**
-	** page_to_cache: O(1) lookup of "is page X cached, and where?"
+	** page_to_cache: Lookup of "is page X cached, and where?"
 	** journaled_or_new_pages: Track pages that don't need journaling
 	**                         (already saved or newly created)
 	*/
 	hash_map<uint32_t, uint32_t, pager_arena>		 page_to_cache;
-	hash_set<uint32_t /* use as set */, pager_arena> journaled_or_new_pages;
+	hash_set<uint32_t , pager_arena> journaled_or_new_pages;
 
 } PAGER = {};
 
@@ -194,7 +190,6 @@ read_page_from_disk(uint32_t page_index, void *data)
 
 /*
 ** Write a page to the journal file.
-**
 **
 **   1. Mark page as journaled in the journaled_or_new_pages set
 **   2. If root page, write at offset 0
@@ -287,7 +282,6 @@ cache_move_to_head(int32_t slot)
 /*
 ** Evict the least recently used page from the cache.
 **
-**
 **   1. Select the tail of the LRU list
 **   2. If page is dirty, write to disk
 **   3. Remove from page_to_cache map
@@ -357,7 +351,6 @@ cache_reset()
 /*
 ** Fetch a page into cache.
 **
-**
 **   1. Check if page is already cached via page_to_cache map
 **   2. If cached, move to head of LRU and return
 **   3. Otherwise find a free cache slot (may evict)
@@ -395,7 +388,6 @@ cache_get_or_load(uint32_t page_index)
 /*
 ** Add a page to the free list.
 **
-**
 **   1. Ensure page is loaded
 **   2. Mark it dirty; it will be written to the journal
 **   3. Reinterpret the page as a free_page, the index will be the same
@@ -418,7 +410,6 @@ add_page_to_free_list(uint32_t page_index)
 
 /*
 ** Take a page from the free list.
-**
 **
 **   1. Check if free list is empty (head == 0), return 0 if so
 **   2. Load the current head of free list
@@ -446,9 +437,6 @@ take_page_from_free_list()
 /*
 ** Count free pages by walking the linked list.
 **
-** NOTE: This is O(n) in the number of free pages, which could be
-** expensive for large databases with many free pages.
-**
 **   1. Start from root.free_page_head
 **   2. Load each free page
 **   3. Follow previous_free_page link
@@ -474,8 +462,7 @@ count_free_pages()
 /*
 ** Open a database file.
 **
-**
-**   1. Initialize arena allocator, it will reset and decommit if already initialised
+**   1. Initialize arena allocator
 **   2. Open data file (create if needed)
 **   3. Check for journal file (crash recovery)
 **   4. If journal exists, rollback incomplete transaction
@@ -538,9 +525,6 @@ pager_open(const char *filename)
 /*
 ** Get a page for reading/writing.
 **
-** NOTE: Free pages remain accessible - it's the caller's responsibility
-** to track which pages are allocated vs free.
-**
 **   1. Validate page index is in valid range
 **   2. Check page is not root (internal only)
 **   3. Load page into cache and return pointer to cache memory
@@ -549,10 +533,6 @@ base_page *
 pager_get(uint32_t page_index)
 {
 
-	if (page_index == 1830)
-	{
-		int s = 0;
-	}
 	if (page_index >= PAGER.root.page_counter || page_index == ROOT_PAGE_INDEX)
 	{
 		return nullptr;
@@ -563,7 +543,6 @@ pager_get(uint32_t page_index)
 
 /*
 ** Allocate a new page.
-**
 **
 **   1. Verify transaction is active
 **   2. Try to reclaim a page from free list
@@ -610,7 +589,6 @@ pager_new()
 ** NOTE:
 ** This must be called BEFORE modifying the page data, so the pre-modified data is journaled.
 **
-**
 **   1. Validate page index and transaction state
 **   2. If page not yet journaled, write to journal
 **   3. Mark in journaled_or_new_pages set
@@ -641,7 +619,6 @@ pager_mark_dirty(uint32_t page_index)
 /*
 ** Delete a page.
 **
-**
 **   1. Validate page can be deleted (not root, valid index)
 **   2. Verify transaction is active
 **   3. Add page to free list
@@ -661,7 +638,6 @@ pager_delete(uint32_t page_index)
 
 /*
 ** Begin a transaction.
-**
 **
 **   1. Check not already in transaction
 **   2. Create journal file
@@ -691,7 +667,6 @@ pager_begin_transaction()
 
 /*
 ** Commit a transaction.
-**
 **
 **   1. Write all dirty cached pages to disk
 **   2. Write root page with updated metadata
@@ -736,7 +711,6 @@ pager_commit()
 ** NOTE:
 ** The root page always goes at offset 0 in the journal, other pages can simply be read
 ** sequentially as they contain their own index in the data file
-**
 **
 **   1. Read root page from journal
 **   2. Restore root to disk
@@ -792,7 +766,7 @@ pager_rollback()
 	return true;
 }
 
-/* Returns the next page that will be allocted */
+/* Returns the next page that will be allocated */
 uint32_t
 pager_get_next()
 {
