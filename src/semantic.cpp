@@ -1,5 +1,4 @@
 #include "semantic.hpp"
-#include "arena.hpp"
 #include "containers.hpp"
 #include "catalog.hpp"
 #include "common.hpp"

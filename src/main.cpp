@@ -2,7 +2,6 @@
 #include "containers.hpp"
 #include "catalog.hpp"
 #include "common.hpp"
-#include "os_layer.hpp"
 #include "types.hpp"
 #include "demo.hpp"
 #include "compile.hpp"
@@ -192,11 +191,9 @@ execute_sql_statement(const char *sql, bool test_mode)
 		return false;
 	}
 
-	auto statements = result.statements;
 
-	for (auto &stmt : statements)
+	for (auto &stmt : result.statements)
 	{
-
 		semantic_result res = semantic_analyze(stmt);
 		if (!res.success)
 		{
@@ -485,12 +482,13 @@ run_repl()
 			auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 			printf("Query executed in %ld ms\n", ms.count());
 		}
-		// arena<query_arena>::reset_and_decommit();
+		arena<query_arena>::reset_and_decommit();
 	}
 
 	pager_close();
 	return 0;
 }
+#include "tests/btree.hpp"
 
 int
 main(int argc, char **argv)
@@ -499,5 +497,6 @@ main(int argc, char **argv)
 	arena<global_arena>::init();
 	arena<catalog_arena>::init();
 
-	run_repl();
+	// run_repl();
+	test_btree();
 }

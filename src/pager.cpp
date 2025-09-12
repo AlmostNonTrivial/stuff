@@ -1,7 +1,4 @@
 /*
-** 2024 SQL-FromScratch
-**
-** OVERVIEW
 **
 ** The pager provides an abstraction layer between the higher-level SQL engine
 ** and the filesystem. It manages fixed-size pages, implements an LRU
@@ -57,6 +54,7 @@
 **
 */
 
+
 #include "pager.hpp"
 #include "arena.hpp"
 #include "containers.hpp"
@@ -66,7 +64,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-
 
 /*
 ** The pager arena is initialized on startup, and reset in the event of a rollback
@@ -153,7 +150,7 @@ static struct
 
 	/* Page cache with parallel arrays pattern for better memory layout */
 	cache_metadata cache_meta[MAX_CACHE_ENTRIES]; /* LRU and state tracking */
-	base_page cache_data[MAX_CACHE_ENTRIES]; /* Actual page data */
+	base_page	   cache_data[MAX_CACHE_ENTRIES]; /* Actual page data */
 
 	/* LRU list endpoints for O(1) access to head (MRU) and tail (LRU) */
 	int32_t lru_head; /* Most recently used slot */
@@ -169,8 +166,8 @@ static struct
 	** journaled_or_new_pages: Track pages that don't need journaling
 	**                         (already saved or newly created)
 	*/
-	hash_map<uint32_t, uint32_t, pager_arena>		 page_to_cache;
-	hash_set<uint32_t , pager_arena> journaled_or_new_pages;
+	hash_map<uint32_t, uint32_t, pager_arena> page_to_cache;
+	hash_set<uint32_t, pager_arena>			  journaled_or_new_pages;
 
 } PAGER = {};
 
@@ -292,7 +289,7 @@ cache_move_to_head(int32_t slot)
 static int32_t
 cache_evict_lru_entry()
 {
-	assert(false);
+
 	int32_t			slot = PAGER.lru_tail;
 	cache_metadata *entry = &PAGER.cache_meta[slot];
 

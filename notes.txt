@@ -22,8 +22,20 @@ OVERVIEW:
 
 
 PAGER:
+- nodes on disk
+- other types of relations aka blobs
+- where page size comes from aka read one-byte
+
+
 
 BTREE:
+
+- node data is in a block that we have to interpret at runtime
+- use the pager to do gets
+
+
+
+
 [Diagrams before and after op via prints]
 - Show binary search tree, white board math logs
 - Given that we're working with 4kb+ pages, b+trees are more efficient, show whiteboard math
@@ -56,3 +68,17 @@ CATALOG/SEMANTIC
 
 VM:
 - Need diagrams to explain interpreting tuples, from tuples to records
+
+
+
+
+
+
+
+KEY CONCEPTS:
+
+PAGES
+
+B+TREES
+
+CURSORS

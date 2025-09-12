@@ -1,5 +1,5 @@
 #pragma once
-#include "catalog.hpp"
+
 #include "parser.hpp"
 struct semantic_result {
     bool success;
