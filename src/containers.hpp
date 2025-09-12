@@ -511,7 +511,7 @@ template <typename K, typename V, typename arena_tag = global_arena> struct hash
 	}
 
 	V *
-	insert(const K &key, const V &value)
+	insert(const K &key,const V &value)
 	{
 		if (!storage.data)
 		{

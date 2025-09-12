@@ -5,6 +5,7 @@
 #include "common.hpp"
 #include "parser.hpp"
 #include "types.hpp"
+#include <cstdlib>
 #include <cstring>
 #include <cstdio>
 
@@ -138,9 +139,11 @@ apply_catalog_changes(semantic_context *ctx)
 		catalog.remove(name);
 	}
 
-	for (auto [name, relation] : ctx->tables_to_create)
+	for (auto [name, _] : ctx->tables_to_create)
 	{
-		catalog.insert(relation.name, relation);
+        auto x= (relation*)arena<catalog_arena>::alloc(sizeof(relation));
+        memcpy(x, &_, sizeof(relation));
+		catalog.insert(name, *x);
 	}
 }
 

@@ -1,16 +1,8 @@
-
-// main.cpp - Full REPL implementation
-// #include "tests/parser.hpp"
-// #include "tests/arena.hpp"
-// #include "tests/blob.hpp"
-// #include "tests/pager.hpp"
-// #include "tests/containers.hpp"
-
-// #include "tests/ephemeral.hpp"
 #include "arena.hpp"
 #include "containers.hpp"
 #include "catalog.hpp"
 #include "common.hpp"
+#include "os_layer.hpp"
 #include "types.hpp"
 #include "demo.hpp"
 #include "compile.hpp"
@@ -20,8 +12,6 @@
 #include "vm.hpp"
 #include <cassert>
 #include <cstdio>
-#include <iostream>
-#include <numeric>
 #include <chrono>
 
 int
@@ -264,10 +254,6 @@ execute_sql_statement(const char *sql, bool test_mode)
 	return true;
 }
 
-// ============================================================================
-// REPL Meta Commands
-// ============================================================================
-
 void
 run_meta_command(const char *cmd)
 {
@@ -410,10 +396,6 @@ run_meta_command(const char *cmd)
 	}
 }
 
-// ============================================================================
-// Main REPL Loop
-// ============================================================================
-
 int
 run_repl()
 {
@@ -454,27 +436,23 @@ run_repl()
 
 		auto sql_buffer = stream_writer<query_arena>::begin();
 
-		// Trim newline
 		size_t len = strlen(input);
 		if (len > 0 && input[len - 1] == '\n')
 		{
 			input[len - 1] = '\0';
 		}
 
-		// Skip empty lines
 		if (strlen(input) == 0)
 		{
 			continue;
 		}
 
-		// Meta command
 		if (input[0] == '.')
 		{
 			run_meta_command(input);
 			continue;
 		}
 
-		// SQL - collect until semicolon
 		sql_buffer.write(input);
 
 		while (!strchr((char *)sql_buffer.start, ';'))
@@ -488,7 +466,6 @@ run_repl()
 				break;
 			}
 
-			// Trim newline from continuation
 			len = strlen(input);
 			if (len > 0 && input[len - 1] == '\n')
 			{
@@ -499,7 +476,6 @@ run_repl()
 			sql_buffer.write(input);
 		}
 
-		// Execute the SQL
 		auto start = std::chrono::high_resolution_clock::now();
 		bool success = execute_sql_statement((char *)sql_buffer.finish().data());
 		auto end = std::chrono::high_resolution_clock::now();
@@ -509,65 +485,19 @@ run_repl()
 			auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 			printf("Query executed in %ld ms\n", ms.count());
 		}
-		arena<query_arena>::reset_and_decommit();
+		// arena<query_arena>::reset_and_decommit();
 	}
 
 	pager_close();
 	return 0;
 }
 
-#include "./tests/parser.hpp"
-#include "./tests/blob.hpp"
-#include "./tests/pager.hpp"
-#include "./tests/ephemeral.hpp"
-
-#include "./tests/btree.hpp"
-// #include "containers.hpp"
-
-#include "tests/btree.hpp"
-#include "tests/types.hpp"
-int
-run_tests()
-{
-
-	arena<global_arena>::init();
-	// test_arena();
-	test_parser();
-	test_types();
-
-	// test_blob();
-
-	test_ephemeral();
-
-	return 0;
-}
-
 int
 main(int argc, char **argv)
 {
-
+	arena<query_arena>::init();
 	arena<global_arena>::init();
 	arena<catalog_arena>::init();
-	arena<query_arena>::init();
 
-	// test_ephemeral();
-	// run_tests();
-	// // test_parser();
-	// if (argc > 1 && strlen(argv[1]) >= 5)
-	// {
-	// 	if (strcmp("debug", argv[1]) == 0)
-	// 	{
-	// 		return run_tests();
-	// 	}
-	// }
 	run_repl();
-	// test_pager();
-	// test_btree();
-	// return run_repl();
-	// char s[32];
-	// memset(s, 0, 32);
-	// int i  =0;
-	// while(i++ < 100) {
-	// type_increment(TYPE_CHAR32, s, s);
-	// std::cout << s << "\n";
 }

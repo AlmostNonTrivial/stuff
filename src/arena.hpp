@@ -115,6 +115,8 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 		reclaimed_bytes = 0;
 		reused_bytes = 0;
 #endif
+
+		printf("Arena<%s> initialized at %p (size: %zu)\n", typeid(Tag).name(), base, reserved_capacity);
 	}
 
 	static void
@@ -510,21 +512,17 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
  *
  */
 
-
-
 template <typename T, typename arena_tag = global_arena, uint32_t InitialSize = 8> struct contiguous
 {
 	T		*data = nullptr;
 	uint32_t size = 0;
 	uint32_t capacity = 0;
 
-
 	T *
 	alloc_raw(uint32_t count)
 	{
 		return (T *)arena<arena_tag>::alloc(count * sizeof(T));
 	}
-
 
 	void
 	realloc_internal(uint32_t new_capacity, bool copy_existing)
@@ -533,10 +531,8 @@ template <typename T, typename arena_tag = global_arena, uint32_t InitialSize = 
 		uint32_t old_capacity = capacity;
 		uint32_t old_size = size;
 
-
 		data = alloc_raw(new_capacity);
 		capacity = new_capacity;
-
 
 		if (old_data && copy_existing && old_size > 0)
 		{
@@ -548,13 +544,11 @@ template <typename T, typename arena_tag = global_arena, uint32_t InitialSize = 
 			size = 0;
 		}
 
-
 		if (old_data)
 		{
 			arena<arena_tag>::reclaim(old_data, old_capacity * sizeof(T));
 		}
 	}
-
 
 	void
 	reclaim_if_exists()
@@ -567,7 +561,6 @@ template <typename T, typename arena_tag = global_arena, uint32_t InitialSize = 
 			size = 0;
 		}
 	}
-
 
 	T *
 	grow_by(uint32_t count)
@@ -745,7 +738,6 @@ template <typename T, typename arena_tag = global_arena, uint32_t InitialSize = 
 		capacity = 0;
 	}
 };
-
 
 // Utility functions at global/namespace level
 template <typename T>
