@@ -252,8 +252,6 @@ vmcursor_type_name(vm_cursor *cur)
 		return "RED_BLACK";
 	case BPLUS:
 		return "BPLUS";
-		// case BLOB:
-		//     return "BLOB";
 	}
 	return "UNKNOWN";
 }
@@ -802,8 +800,12 @@ step()
 		int32_t		delete_occured = DELETE_DELETE_OCCURED_REG();
 		int32_t		cursor_valid = DELETE_CURSOR_VALID_REG();
 		vm_cursor  *cursor = &VM.cursors[cursor_id];
+
+
 		int32_t		success = vmcursor_remove(cursor) ? 1 : 0;
+
 		int32_t		valid = vmcursor_is_valid(cursor) ? 1 : 0;
+
 		typed_value src_success = typed_value::make(TYPE_U32, &success);
 		typed_value src_valid = typed_value::make(TYPE_U32, &valid);
 
@@ -1015,6 +1017,8 @@ vm_execute(vm_instruction *instructions, int instruction_count)
 		vm_debug_print_program(instructions, instruction_count);
 		printf("\n===== EXECUTION TRACE =====\n");
 	}
+
+	_debug = false;
 
 	while (!VM.halted && VM.pc < VM.program_size)
 	{

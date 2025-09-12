@@ -105,9 +105,6 @@ bootstrap_master(bool is_new_database)
 void
 catalog_reload()
 {
-
-	arena<catalog_arena>::init();
-
 	catalog.reset();
 	arena<catalog_arena>::reset_and_decommit();
 

@@ -667,12 +667,6 @@ struct program_builder
 		emit(ROLLBACK_MAKE());
 	}
 
-	void
-	debug()
-	{
-		emit({OP_Debug});
-	}
-
 	int
 	call_function(vm_function fn, int first_arg_reg, int arg_count, int result_reg = -1)
 	{
@@ -690,7 +684,7 @@ struct program_builder
 		if (dest_reg == -1)
 		{
 			dest_reg = regs.allocate();
-		}
+	}
 		emit(PACK2_MAKE(dest_reg, left_reg, right_reg));
 		return dest_reg;
 	}

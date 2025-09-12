@@ -21,7 +21,7 @@
 #include <cstring>
 #include <sys/_types/_ssize_t.h>
 
-#define BLOB_HEADER_SIZE 14
+#define BLOB_HEADER_SIZE 12
 #define BLOB_DATA_SIZE	 (PAGE_SIZE - BLOB_HEADER_SIZE)
 
 struct blob_node
@@ -59,7 +59,7 @@ allocate_blob_node()
  * @return First page index of blob chain, or 0 on failure
  */
 uint32_t
-blob_create(const void *data, uint32_t size)
+blob_create(void *data, uint32_t size)
 {
 	if (!data || size == 0)
 	{

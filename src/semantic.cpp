@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cstdio>
 
+
 struct semantic_context
 {
 	string_view									 error;
@@ -538,39 +539,33 @@ semantic_resolve_statement(semantic_context *ctx, stmt_node *stmt)
 }
 
 semantic_result
-semantic_analyze(array<stmt_node *, query_arena> &statements)
+semantic_analyze(stmt_node *statement)
 {
 	semantic_result result;
 	result.success = true;
 	result.error = {};
 	result.error_context = {};
-	result.failed_statement_index = -1;
 
 	semantic_context ctx;
 	ctx.error = {};
 	ctx.context = {};
 	clear_catalog_changes(&ctx);
 
-	for (uint32_t i = 0; i < statements.size(); i++)
+	ctx.error = {};
+	ctx.context = {};
+
+	if (!semantic_resolve_statement(&ctx, statement))
 	{
-		stmt_node *stmt = statements[i];
+		result.success = false;
+		result.error = ctx.error;
+		result.error_context = ctx.context;
 
-		ctx.error = {};
-		ctx.context = {};
+		clear_catalog_changes(&ctx);
 
-		if (!semantic_resolve_statement(&ctx, stmt))
-		{
-			result.success = false;
-			result.error = ctx.error;
-			result.error_context = ctx.context;
-			result.failed_statement_index = i;
-
-			clear_catalog_changes(&ctx);
-
-			return result;
-		}
+		return result;
 	}
 
 	apply_catalog_changes(&ctx);
+
 	return result;
 }

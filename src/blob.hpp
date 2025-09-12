@@ -12,7 +12,7 @@ struct blob_page
 };
 
 uint32_t
-blob_create(const void *data, uint32_t size);
+blob_create(void *data, uint32_t size);
 
 void
 blob_delete(uint32_t first_page);

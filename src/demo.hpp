@@ -310,6 +310,9 @@ vmfunc_create_index_structure(typed_value *result, typed_value *args, uint32_t a
 
 // Demo 1: LIKE pattern matching
 // Usage: .demo_like %Phone%
+
+
+
 void
 demo_like_pattern(const char *args)
 {
@@ -332,6 +335,7 @@ demo_like_pattern(const char *args)
 	program_builder prog;
 
 	relation *products = catalog.get("products");
+
 	if (!products)
 	{
 		printf("Products table not found!\n");
@@ -806,12 +810,10 @@ demo_group_by_aggregate(const char *args)
 {
 	vm_set_result_callback(formatted_result_callback);
 	bool show_avg = false;
-
 	if (args && *args)
 	{
 		show_avg = (strcmp(args, "avg") == 0 || strcmp(args, "1") == 0);
 	}
-
 	printf("\n=== GROUP BY Aggregate Demo ===\n");
 	if (show_avg)
 	{
@@ -821,16 +823,13 @@ demo_group_by_aggregate(const char *args)
 	{
 		printf("Query: SELECT city, COUNT(*), SUM(age) FROM users GROUP BY city\n\n");
 	}
-
 	program_builder prog;
-
 	relation *users = catalog.get("users");
 	if (!users)
 	{
 		printf("Users table not found!\n");
 		return;
 	}
-
 	// Create layout for aggregation tree
 	array<data_type, query_arena> agg_types = {
 		(TYPE_CHAR16), // city (key)
@@ -838,40 +837,34 @@ demo_group_by_aggregate(const char *args)
 		(TYPE_U32),	   // sum_age
 	};
 	tuple_format agg_layout = tuple_format_from_types(agg_types);
-
 	auto users_ctx = from_structure(*users);
 	auto agg_ctx = red_black(agg_layout);
-
 	int users_cursor = prog.open_cursor(users_ctx);
 	int agg_cursor = prog.open_cursor(agg_ctx);
-
 	// Phase 1: Scan users and build aggregates
 	{
 		prog.regs.push_scope();
 		// int one_const = prog.load(TYPE_U32, prog.alloc_value(1U));
-		auto ss = 1U;
-		int	 one_const = prog.load(prog.alloc_data_type(TYPE_U32, &ss));
-
+		int	 one_const = prog.load(prog.alloc_data_type(TYPE_U32, prog.alloc(1U)));
 		int	 at_end = prog.first(users_cursor);
 		auto scan_loop = prog.begin_while(at_end);
 		{
 			prog.regs.push_scope();
-
 			int city_reg = prog.get_column(users_cursor, 4);
 			int age_reg = prog.get_column(users_cursor, 3);
-
 			// Try to find existing aggregate for this city
 			int found = prog.seek(agg_cursor, city_reg, EQ);
-
 			auto if_found = prog.begin_if(found);
 			{
-				// Update existing aggregate
+				// Update existing aggregate - FIXED: Include city in the update record
+				int city_key = prog.get_column(agg_cursor, 0);  // Get the city
 				int cur_count = prog.get_column(agg_cursor, 1);
 				int cur_sum = prog.get_column(agg_cursor, 2);
 
-				int update_start = prog.regs.allocate_range(2);
-				prog.add(cur_count, one_const, update_start);
-				prog.add(cur_sum, age_reg, update_start + 1);
+				int update_start = prog.regs.allocate_range(3);  // Need 3 registers for full record
+				prog.move(city_key, update_start);               // City stays the same
+				prog.add(cur_count, one_const, update_start + 1); // New count
+				prog.add(cur_sum, age_reg, update_start + 2);    // New sum
 
 				prog.update_record(agg_cursor, update_start);
 			}
@@ -882,27 +875,22 @@ demo_group_by_aggregate(const char *args)
 				prog.move(city_reg, insert_start);
 				prog.move(one_const, insert_start + 1);
 				prog.move(age_reg, insert_start + 2);
-
 				prog.insert_record(agg_cursor, insert_start, 3);
 			}
 			prog.end_if(if_found);
-
 			prog.next(users_cursor, at_end);
 			prog.regs.pop_scope();
 		}
 		prog.end_while(scan_loop);
 		prog.regs.pop_scope();
 	}
-
 	// Phase 2: Output aggregated results
 	{
 		prog.regs.push_scope();
-
 		int	 at_end = prog.first(agg_cursor);
 		auto output_loop = prog.begin_while(at_end);
 		{
 			prog.regs.push_scope();
-
 			if (show_avg)
 			{
 				// Calculate average and output city, count, sum, avg
@@ -910,13 +898,11 @@ demo_group_by_aggregate(const char *args)
 				int count = prog.get_column(agg_cursor, 1);
 				int sum = prog.get_column(agg_cursor, 2);
 				int avg = prog.div(sum, count);
-
 				int result_start = prog.regs.allocate_range(4);
 				prog.move(city, result_start);
 				prog.move(count, result_start + 1);
 				prog.move(sum, result_start + 2);
 				prog.move(avg, result_start + 3);
-
 				prog.result(result_start, 4);
 			}
 			else
@@ -925,19 +911,16 @@ demo_group_by_aggregate(const char *args)
 				int result_start = prog.get_columns(agg_cursor, 0, 3);
 				prog.result(result_start, 3);
 			}
-
 			prog.next(agg_cursor, at_end);
 			prog.regs.pop_scope();
 		}
 		prog.end_while(output_loop);
 		prog.regs.pop_scope();
 	}
-
 	prog.close_cursor(users_cursor);
 	prog.close_cursor(agg_cursor);
 	prog.halt();
 	prog.resolve_labels();
-
 	vm_execute(prog.instructions.front(), prog.instructions.size());
 }
 
@@ -945,8 +928,10 @@ demo_group_by_aggregate(const char *args)
 bool
 vmfunc_write_blob(typed_value *result, typed_value *args, uint32_t arg_count)
 {
-	if (arg_count != 2)
+	if (arg_count != 2) {
 		return false;
+	}
+
 
 	void	*data = (void *)args[0].as_u64();
 	uint32_t size = args[1].as_u32();

@@ -198,20 +198,27 @@ execute_sql_statement(const char *sql, bool test_mode)
 	parser_result result = parse_sql(sql);
 	if (!result.success)
 	{
-		printf("%s\n", result.error);
+		printf("%s\n", result.error.data());
 		return false;
 	}
 
-	auto			statements = result.statements;
-	semantic_result res = semantic_analyze(statements);
-	if (!res.success)
-	{
-		printf("%s\n", res.error);
-		return false;
-	}
+	auto statements = result.statements;
 
 	for (auto &stmt : statements)
 	{
+
+		semantic_result res = semantic_analyze(stmt);
+		if (!res.success)
+		{
+			printf("%s\n", res.error.data());
+			if (in_transaction)
+			{
+				pager_rollback();
+			}
+
+			return false;
+		}
+
 		if (stmt->type == STMT_BEGIN && !in_transaction)
 		{
 			in_transaction = true;
@@ -253,6 +260,7 @@ execute_sql_statement(const char *sql, bool test_mode)
 			printf("\n");
 		}
 	}
+
 	return true;
 }
 
@@ -427,23 +435,6 @@ run_repl()
 		catalog_reload();
 	}
 
-	// execute_sql_statement("INSERT INTO users VALUES (111, 'markymarky', 'marko', 22, 'boomtown');");
-	// execute_sql_statement("INSERT INTO users VALUES (112, 'markymarky', 'marko', 23, 'boomtown');");
-	// execute_sql_statement(
-	// 	"INSERT INTO users VALUES (112, 'aaaaaaaaaaaaaaaaaaaaaaasdasdsadasdasdsadasdasddasdsamarkymarky', 'marko', 22, "
-	// 	"'boomtown');");
-	// execute_sql_statement("DELETE FROM users WHERE username = 'lilah';");
-
-	// execute_sql_statement("UPDATE users SET username = 'elasdasdib', age = 30 WHERE user_id = 99;");
-
-	execute_sql_statement("SELECT * FROM users;DROP TABLE users;");
-
-	// execute_sql_statement("SELECT * FROM master_catalog");
-	// execute_sql_statement("DROP TABLE products;");
-	// execute_sql_statement("SELECT * FROM master_catalog");
-
-	return 0;
-
 	char input[4096];
 
 	printf("SQL Engine v0.1\n");
@@ -451,7 +442,7 @@ run_repl()
 
 	while (true)
 	{
-	    arena<query_arena>::reset_and_decommit();
+
 		printf("sql> ");
 		fflush(stdout);
 
@@ -518,6 +509,7 @@ run_repl()
 			auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 			printf("Query executed in %ld ms\n", ms.count());
 		}
+		arena<query_arena>::reset_and_decommit();
 	}
 
 	pager_close();
@@ -544,19 +536,21 @@ run_tests()
 	test_types();
 
 	// test_blob();
-	// test_pager();
+
 	test_ephemeral();
-	// test_btree();
+
 	return 0;
 }
 
 int
 main(int argc, char **argv)
 {
-	arena<global_arena>::init();
 
+	arena<global_arena>::init();
+	arena<catalog_arena>::init();
 	arena<query_arena>::init();
 
+	// test_ephemeral();
 	// run_tests();
 	// // test_parser();
 	// if (argc > 1 && strlen(argv[1]) >= 5)
