@@ -53,6 +53,7 @@
 #include "containers.hpp"
 #include "common.hpp"
 #include <cassert>
+#include <string>
 #include <cstdio>
 #include <cstring>
 #include "arena.hpp"

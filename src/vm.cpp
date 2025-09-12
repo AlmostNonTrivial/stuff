@@ -1,13 +1,41 @@
-// vm.cpp
+/*
+** 2024 SQL-FromScratch
+**
+** Virtual Machine Execution Engine
+**
+** The VM is the execution layer of the SQL engine - it takes compiled query
+** plans (sequences of instructions) and executes them against the storage layer.
+** This provides a clean abstraction boundary: the compiler transforms SQL into
+** instructions without knowing how data is physically stored, and the storage
+** layer doesn't need to understand SQL semantics.
+**
+** The instruction set is domain-specific for database operations. Rather than
+** general-purpose computation, the opcodes directly represent database concepts:
+** opening cursors, scanning tables, seeking to keys, extracting columns,
+** and emitting result rows. This makes the compiled programs readable and
+** the execution model clear.
+**
+** The VM acts as an interpreter that maintains execution context (program counter,
+** registers for intermediate values, open cursors) and steps through instructions
+** sequentially. Each instruction performs one logical operation - seek to a row,
+** test a condition, extract a value, etc.
+**
+** This design separates concerns cleanly:
+**   - The parser/compiler handles SQL syntax and semantics
+**   - The VM handles execution flow and data movement
+**   - The btree layer handles physical storage and retrieval
+**
+** The boundary between logical and physical is particularly important for
+** education - you can understand how a query executes without diving into
+** page layouts, and you can understand storage without parsing SQL.
+*/
 #include "vm.hpp"
 #include "cassert"
 #include "common.hpp"
 #include "pager.hpp"
 #include "types.hpp"
-#include "blob.hpp"
 #include "arena.hpp"
 #include "containers.hpp"
-#include "blob.hpp"
 #include "btree.hpp"
 #include "ephemeral.hpp"
 #include "catalog.hpp"
@@ -20,12 +48,10 @@
 
 bool _debug = false;
 
-
-
 struct vm_cursor
 {
 	storage_type type;
-	tuple_format	 layout;
+	tuple_format layout;
 
 	union {
 		bt_cursor bptree;
@@ -49,7 +75,7 @@ vmcursor_open(vm_cursor *cursor, cursor_context *context)
 		cursor->type = RED_BLACK;
 		cursor->layout = context->layout;
 		data_type key_type = cursor->layout.columns[0];
-		bool	 allow_duplicates = (bool)context->flags;
+		bool	  allow_duplicates = (bool)context->flags;
 		cursor->cursor.mem.tree = et_create(key_type, cursor->layout.record_size, allow_duplicates);
 		cursor->cursor.mem.state = et_cursor::INVALID;
 		break;
@@ -255,11 +281,11 @@ vmcursor_print_current(vm_cursor *cur)
 static struct
 {
 	vm_instruction *program;
-	int			   program_size;
-	uint32_t	   pc;
-	bool		   halted;
-	typed_value	   registers[REGISTERS];
-	vm_cursor	   cursors[CURSORS];
+	int				program_size;
+	uint32_t		pc;
+	bool			halted;
+	typed_value		registers[REGISTERS];
+	vm_cursor		cursors[CURSORS];
 	result_callback emit_row;
 } VM = {};
 
@@ -296,7 +322,7 @@ build_record(uint8_t *data, int32_t first_reg, int32_t count)
 	for (int i = 0; i < count; i++)
 	{
 		typed_value *val = &VM.registers[first_reg + i];
-		uint32_t	size = type_size(val->type);
+		uint32_t	 size = type_size(val->type);
 		memcpy(data + offset, val->data, size);
 		offset += size;
 	}
@@ -373,8 +399,8 @@ step()
 		return OK;
 	}
 	case OP_Load: {
-		int32_t	 dest_reg = LOAD_DEST_REG();
-		uint8_t *data = LOAD_DATA();
+		int32_t	  dest_reg = LOAD_DEST_REG();
+		uint8_t	 *data = LOAD_DATA();
 		data_type type = LOAD_TYPE();
 
 		auto to_load = typed_value::make(type, data);
@@ -456,9 +482,9 @@ step()
 		return OK;
 	}
 	case OP_Function: {
-		int32_t	   dest = FUNCTION_DEST_REG();
-		int32_t	   first_arg = FUNCTION_FIRST_ARG_REG();
-		int32_t	   count = FUNCTION_ARG_COUNT();
+		int32_t		dest = FUNCTION_DEST_REG();
+		int32_t		first_arg = FUNCTION_FIRST_ARG_REG();
+		int32_t		count = FUNCTION_ARG_COUNT();
 		vm_function fn = FUNCTION_FUNCTION();
 
 		if (_debug)
@@ -494,12 +520,12 @@ step()
 		return OK;
 	}
 	case OP_JumpIf: {
-		int32_t		test_reg = JUMPIF_TEST_REG();
-		int32_t		target = JUMPIF_JUMP_TARGET();
-		bool		jump_on_true = JUMPIF_JUMP_ON_TRUE();
+		int32_t		 test_reg = JUMPIF_TEST_REG();
+		int32_t		 target = JUMPIF_JUMP_TARGET();
+		bool		 jump_on_true = JUMPIF_JUMP_ON_TRUE();
 		typed_value *val = &VM.registers[test_reg];
-		bool		is_true = (*(uint32_t *)val->data != 0);
-		bool		will_jump = (is_true && jump_on_true) || (!is_true && !jump_on_true);
+		bool		 is_true = (*(uint32_t *)val->data != 0);
+		bool		 will_jump = (is_true && jump_on_true) || (!is_true && !jump_on_true);
 
 		if (_debug)
 		{
@@ -520,10 +546,10 @@ step()
 		return OK;
 	}
 	case OP_Logic: {
-		int32_t	   dest = LOGIC_DEST_REG();
-		int32_t	   left = LOGIC_LEFT_REG();
-		int32_t	   right = LOGIC_RIGHT_REG();
-		logic_op   op = LOGIC_OP();
+		int32_t		dest = LOGIC_DEST_REG();
+		int32_t		left = LOGIC_LEFT_REG();
+		int32_t		right = LOGIC_RIGHT_REG();
+		logic_op	op = LOGIC_OP();
 		typed_value result = typed_value::make(TYPE_U32);
 		result.data = (uint8_t *)arena<query_arena>::alloc(type_size(TYPE_U32));
 		uint32_t a = *(uint32_t *)VM.registers[left].data;
@@ -594,10 +620,10 @@ step()
 		return OK;
 	}
 	case OP_Arithmetic: {
-		int32_t		dest = ARITHMETIC_DEST_REG();
-		int32_t		left = ARITHMETIC_LEFT_REG();
-		int32_t		right = ARITHMETIC_RIGHT_REG();
-		arith_op	op = ARITHMETIC_OP();
+		int32_t		 dest = ARITHMETIC_DEST_REG();
+		int32_t		 left = ARITHMETIC_LEFT_REG();
+		int32_t		 right = ARITHMETIC_RIGHT_REG();
+		arith_op	 op = ARITHMETIC_OP();
 		typed_value *a = &VM.registers[left];
 		typed_value *b = &VM.registers[right];
 
@@ -650,8 +676,8 @@ step()
 		return OK;
 	}
 	case OP_Open: {
-		int32_t		   cursor_id = OPEN_CURSOR_ID();
-		vm_cursor	  *cursor = &VM.cursors[cursor_id];
+		int32_t			cursor_id = OPEN_CURSOR_ID();
+		vm_cursor	   *cursor = &VM.cursors[cursor_id];
 		cursor_context *context = OPEN_LAYOUT();
 
 		if (_debug)
@@ -687,12 +713,12 @@ step()
 		return OK;
 	}
 	case OP_Rewind: {
-		int32_t	  cursor_id = REWIND_CURSOR_ID();
-		int32_t	  result_reg = REWIND_RESULT_REG();
-		bool	  to_end = REWIND_TO_END();
+		int32_t	   cursor_id = REWIND_CURSOR_ID();
+		int32_t	   result_reg = REWIND_RESULT_REG();
+		bool	   to_end = REWIND_TO_END();
 		vm_cursor *cursor = &VM.cursors[cursor_id];
-		bool	  valid = vmcursor_rewind(cursor, to_end);
-		uint32_t  result_val = valid ? 1 : 0;
+		bool	   valid = vmcursor_rewind(cursor, to_end);
+		uint32_t   result_val = valid ? 1 : 0;
 
 		if (_debug)
 		{
@@ -705,11 +731,11 @@ step()
 		return OK;
 	}
 	case OP_Step: {
-		int32_t	  cursor_id = STEP_CURSOR_ID();
-		int32_t	  result_reg = STEP_RESULT_REG();
-		bool	  forward = STEP_FORWARD();
+		int32_t	   cursor_id = STEP_CURSOR_ID();
+		int32_t	   result_reg = STEP_RESULT_REG();
+		bool	   forward = STEP_FORWARD();
 		vm_cursor *cursor = &VM.cursors[cursor_id];
-		uint32_t  has_more = vmcursor_step(cursor, forward) ? 1 : 0;
+		uint32_t   has_more = vmcursor_step(cursor, forward) ? 1 : 0;
 
 		if (_debug)
 		{
@@ -743,13 +769,13 @@ step()
 		return OK;
 	}
 	case OP_Column: {
-		int32_t	  cursor_id = COLUMN_CURSOR_ID();
-		int32_t	  col_index = COLUMN_INDEX();
-		int32_t	  dest_reg = COLUMN_DEST_REG();
+		int32_t	   cursor_id = COLUMN_CURSOR_ID();
+		int32_t	   col_index = COLUMN_INDEX();
+		int32_t	   dest_reg = COLUMN_DEST_REG();
 		vm_cursor *cursor = &VM.cursors[cursor_id];
 
 		data_type column_type = vmcursor_column_type(cursor, col_index);
-		auto	 column_value = vmcursor_column(cursor, col_index);
+		auto	  column_value = vmcursor_column(cursor, col_index);
 
 		typed_value src = typed_value::make(column_type, column_value);
 
@@ -772,12 +798,12 @@ step()
 		return OK;
 	}
 	case OP_Delete: {
-		int32_t	   cursor_id = DELETE_CURSOR_ID();
-		int32_t	   delete_occured = DELETE_DELETE_OCCURED_REG();
-		int32_t	   cursor_valid = DELETE_CURSOR_VALID_REG();
+		int32_t		cursor_id = DELETE_CURSOR_ID();
+		int32_t		delete_occured = DELETE_DELETE_OCCURED_REG();
+		int32_t		cursor_valid = DELETE_CURSOR_VALID_REG();
 		vm_cursor  *cursor = &VM.cursors[cursor_id];
-		int32_t	   success = vmcursor_remove(cursor) ? 1 : 0;
-		int32_t	   valid = vmcursor_is_valid(cursor) ? 1 : 0;
+		int32_t		success = vmcursor_remove(cursor) ? 1 : 0;
+		int32_t		valid = vmcursor_is_valid(cursor) ? 1 : 0;
 		typed_value src_success = typed_value::make(TYPE_U32, &success);
 		typed_value src_valid = typed_value::make(TYPE_U32, &valid);
 
@@ -796,10 +822,10 @@ step()
 		int32_t cursor_id = INSERT_CURSOR_ID();
 		int32_t key_reg = INSERT_KEY_REG();
 
-		vm_cursor   *cursor = &VM.cursors[cursor_id];
+		vm_cursor	*cursor = &VM.cursors[cursor_id];
 		typed_value *first = &VM.registers[key_reg];
-		uint32_t	count = cursor->layout.columns.size() - 1;
-		bool		success;
+		uint32_t	 count = cursor->layout.columns.size() - 1;
+		bool		 success;
 
 		if (_debug)
 		{
@@ -843,11 +869,11 @@ step()
 		return OK;
 	}
 	case OP_Update: {
-		int32_t	  cursor_id = UPDATE_CURSOR_ID();
-		int32_t	  record_reg = UPDATE_RECORD_REG();
+		int32_t	   cursor_id = UPDATE_CURSOR_ID();
+		int32_t	   record_reg = UPDATE_RECORD_REG();
 		vm_cursor *cursor = &VM.cursors[cursor_id];
-		uint8_t	  data[cursor->layout.record_size];
-		uint32_t  record_count = cursor->layout.columns.size() - 1;
+		uint8_t	   data[cursor->layout.record_size];
+		uint32_t   record_count = cursor->layout.columns.size() - 1;
 
 		// record reg = key, but we need to build the record from the non key so plus 1
 		build_record(data, record_reg + 1, record_count);
@@ -906,7 +932,7 @@ step()
 
 		// Create dual type from the two component types
 		data_type dual_type = make_dual(a->type, b->type);
-		uint32_t total_size = type_size(dual_type);
+		uint32_t  total_size = type_size(dual_type);
 
 		// Allocate space for packed value
 		uint8_t packed[total_size];
@@ -963,12 +989,6 @@ step()
 		set_register(&VM.registers[first_dest], data1, type1);
 		set_register(&VM.registers[first_dest + 1], data2, type2);
 
-		VM.pc++;
-		return OK;
-	}
-
-	case OP_Debug: {
-		_debug = !_debug;
 		VM.pc++;
 		return OK;
 	}
