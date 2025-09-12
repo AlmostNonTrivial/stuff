@@ -1,13 +1,3 @@
-
-
-
-
-
-
-High level overview.
-
-
-
 ┌─────────────────────────────────────────────────────────────┐
 │                        SQL Query                            │
 │                  "SELECT * FROM users"                      │
@@ -17,82 +7,70 @@ High level overview.
 ┌─────────────────────────────────────────────────────────────┐
 │                    PARSER (parser.cpp)                      │
 │                                                             │
-│  Lexical Analysis → Tokens → Recursive Descent → AST       │
+│  Lexical Analysis → Tokens → Recursive Descent → AST        │
 │                                                             │
-│  Output: Abstract Syntax Tree                              │
+│  Output: Abstract Syntax Tree                               │
 └────────────────────┬────────────────────────────────────────┘
                      │
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              SEMANTIC ANALYZER (semantic.cpp)               │
 │                                                             │
-│  Validate tables exist, columns exist, types match         │
-│  Annotate AST with metadata                                │
-│                                                             │
-│  Output: Validated & Annotated AST                         │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
+│  Validate tables, columns, types           ┌──────────────┐ │
+│  Resolve names to IDs                      │   CATALOG    │ │
+│  Type checking                             │ (catalog.cpp)│ │
+│                                            │              │ │
+│  Output: Validated & Annotated AST         │ Schema cache │ │
+└────────────────────┬───────────────────────│ Table defs   │ │
+                     │                       │ Column types │ │
+                     ▼                       │ Index info   │ │
+┌────────────────────────────────────────────└──────────────┘─│
 │                  COMPILER (compile.cpp)                     │
 │                                                             │
-│  Generate VM bytecode from AST                             │
-│  Simple optimizations (e.g., primary key seeks)            │
+│  Transform AST → VM bytecode                                │
+│  Resolve table/column IDs to storage locations              │
+│  Select access methods (sequential scan vs index)           │
 │                                                             │
-│  Output: Array of VM paramterized Instructions                          │
+│  Output: Bytecode Program + Execution Metadata              │
 └────────────────────┬────────────────────────────────────────┘
                      │
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              VIRTUAL MACHINE (vm.cpp)                       │
 │                                                             │
-│  Register-based VM                                     │
-│  Executes bytecode instructions                            │
-│  Capable of general computation                           │
-│  Interfaces with storage through cursors                   │
+│  Register-based VM                                          │
+│  Executes bytecode instructions                             │
+│  Interfaces with storage via cursors                        │
 │                                                             │
 └────────────────────┬────────────────────────────────────────┘
                      │
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                STORAGE LAYER                                │
-│                                                             │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │           CURSOR ABSTRACTION                         │  │
-│  │                                                      │  │
-│  │  Unified iterator interface for:                    │  │
-│  │  • B+Tree (persistent, disk-based)                  │  │
-│  │  • Red-Black Tree (ephemeral, memory-only)          │  │
-│  └──────────────────┬───────────────────────────────────┘  │
+│                    STORAGE LAYER                            │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │           CURSOR ABSTRACTION                         │   │
+│  │     [Table, Index, and In-Memory cursors]            │   │
+│  └──────────────────┬───────────────────────────────────┘   │
 │                     │                                       │
-│  ┌──────────────────▼───────────────────────────────────┐  │
-│  │            B+TREE (btree.cpp)                        │  │
-│  │                                                      │  │
-│  │  Persistent storage for tables                      │  │
-│  │  Supports ordered access and range queries          │  │
-│  └──────────────────┬───────────────────────────────────┘  │
+│  ┌──────────────────▼───────────────────────────────────┐   │
+│  │     B+TREE (btree.cpp)  │  BLOB STORE (blob.cpp)     │   │
+│  └──────────────────┬──────────────┬────────────────────┘   │
+│                     │              │                        │
+│  ┌──────────────────▼──────────────▼────────────────────┐   │
+│  │                 PAGER (pager.cpp)                    │   │
+│  │         [Page cache, WAL, Free page management]      │   │
+│  └──────────────────┬───────────────────────────────────┘   │
 │                     │                                       │
-│  ┌──────────────────▼───────────────────────────────────┐  │
-│  │            PAGER (pager.cpp)                         │  │
-│  │                                                      │  │
-│  │  Page cache with LRU eviction                       │  │
-│  │  Write-ahead journaling for transactions            │  │
-│  │  Free page management                               │  │
-│  └──────────────────┬───────────────────────────────────┘  │
-│                     │                                       │
-│  ┌──────────────────▼───────────────────────────────────┐  │
-│  │         OS LAYER (os_layer.cpp)                      │  │
-│  │                                                      │  │
-│  │  Platform abstraction (Windows/Unix/Memory)         │  │
-│  │  File I/O operations                                │  │
-│  └──────────────────────────────────────────────────────┘  │
+│  ┌──────────────────▼───────────────────────────────────┐   │
+│  │              OS LAYER (os_layer.cpp)                 │   │
+│  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 
 
 // pipeline example
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│ SQL: SELECT * FROM users WHERE user_id > 50;                       │
+│ SQL: SELECT * FROM users WHERE user_id > 50;                        │
 └──────────────────────┬──────────────────────────────────────────────┘
                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -111,14 +89,14 @@ High level overview.
 ┌─────────────────────────────────────────────────────────────────────┐
 │ SEMANTIC ANALYZER - Annotated AST                                   │
 ├─────────────────────────────────────────────────────────────────────┤
-│ ✓ Table 'users' exists with 5 columns:                             │
+│ ✓ Table 'users' exists with 5 columns:                              │
 │   [0] user_id (U32) - PRIMARY KEY                                   │
 │   [1] username (CHAR32)                                             │
-│   [2] email (CHAR32)                                               │
+│   [2] email (CHAR32)                                                │
 │   [3] age (U32)                                                     │
 │   [4] city (CHAR16)                                                 │
-│                                                                      │
-│ ✓ Column 'user_id' is column index 0                               │
+│                                                                     │
+│ ✓ Column 'user_id' is column index 0                                │
 │ ✓ Literal 50 compatible with U32                                    │
 └──────────────────────┬──────────────────────────────────────────────┘
                        ▼
@@ -127,17 +105,17 @@ High level overview.
 ├─────────────────────────────────────────────────────────────────────┤
 │ PC[ 0] OPEN cursor=0 ctx=users_btree                                │
 │ PC[ 1] LOAD R[0] <- 50 (U32)           # Seek key                   │
-│ PC[ 2] SEEK cursor=0 key=R[0] op=GT -> R[1]  # Find first > 50     │
+│ PC[ 2] SEEK cursor=0 key=R[0] op=GT -> R[1]  # Find first > 50      │
 │ PC[ 3] JUMPIF R[1] FALSE -> PC[13]     # Exit if not found          │
 │        ┌─── LOOP START ───┐                                         │
 │ PC[ 4] │ COLUMN cursor=0 col=0 -> R[2]  # Extract all columns       │
-│ PC[ 5] │ COLUMN cursor=0 col=0 -> R[5]                             │
-│ PC[ 6] │ COLUMN cursor=0 col=1 -> R[6]                             │
-│ PC[ 7] │ COLUMN cursor=0 col=2 -> R[7]                             │
-│ PC[ 8] │ COLUMN cursor=0 col=3 -> R[8]                             │
-│ PC[ 9] │ COLUMN cursor=0 col=4 -> R[9]                             │
+│ PC[ 5] │ COLUMN cursor=0 col=0 -> R[5]                              │
+│ PC[ 6] │ COLUMN cursor=0 col=1 -> R[6]                              │
+│ PC[ 7] │ COLUMN cursor=0 col=2 -> R[7]                              │
+│ PC[ 8] │ COLUMN cursor=0 col=3 -> R[8]                              │
+│ PC[ 9] │ COLUMN cursor=0 col=4 -> R[9]                              │
 │ PC[10] │ RESULT R[5..9]                # Output row                 │
-│ PC[11] │ STEP cursor=0 forward -> R[1] # Next record               │
+│ PC[11] │ STEP cursor=0 forward -> R[1] # Next record                │
 │ PC[12] └ GOTO PC[3]                     # Continue loop             │
 │ PC[13] CLOSE cursor=0                                               │
 │ PC[14] HALT exit_code=0                                             │
@@ -162,29 +140,29 @@ High level overview.
 │ B+TREE STRUCTURE                                                    │
 ├─────────────────────────────────────────────────────────────────────┤
 │ Root Page (Internal Node)                                           │
-│ ┌────────────────────────────────────────┐                         │
-│ │ Keys: [30, 60, 90]                      │                         │
-│ │ Children: [p3, p5, p7, p9]              │                         │
-│ └────────┬──────┬──────┬──────┬──────────┘                         │
+│ ┌────────────────────────────────────────┐                          │
+│ │ Keys: [30, 60, 90]                     │                          │
+│ │ Children: [p3, p5, p7, p9]             │                          │
+│ └────────┬──────┬──────┬──────┬──────────┘                          │
 │          ▼      ▼      ▼      ▼                                     │
-│      ┌────┐ ┌────┐ ┌────┐ ┌────┐                                  │
-│      │ p3 │ │ p5 │ │ p7 │ │ p9 │  Leaf Pages                      │
-│      └────┘ └────┘ └────┘ └────┘                                  │
-│                                                                      │
-│ Page 3 (Leaf): [1,Alice] [15,Charlie] [29,Eve]                     │
-│         next→                                                       │
-│                                                                      │
-│ Page 5 (Leaf): [31,Frank] [42,Grace] [51,Bob] [59,Helen]           │
-│ ←prev          next→                   ↑                            │
+│      ┌────┐ ┌────┐ ┌────┐ ┌────┐                                    │
+│      │ p3 │ │ p5 │ │ p7 │ │ p9 │  Leaf Pages                        │
+│      └────┘ └────┘ └────┘ └────┘                                    │
+│                                                                     │
+│ Page 3 (Leaf): [1,Alice] [15,Charlie] [29,Eve]                      │
+│                                                                     │
+│                                                                     │
+│ Page 5 (Leaf): [31,Frank] [42,Grace] [51,Bob] [59,Helen]            │
+│                                         ↑                           │
 │                                    cursor here                      │
-│                                                                      │
-│ Page 7 (Leaf): [61,Ivan] [75,Julia] [89,Kevin]                     │
-│ ←prev          next→                                                │
-│                                                                      │
-│ Page 9 (Leaf): [91,Laura] [95,Mike] [99,Nancy]                     │
-│ ←prev                                                               │
-│                                                                      │
-│ Leaf Chain: p3 ↔ p5 ↔ p7 ↔ p9                                     │
+│                                                                     │
+│ Page 7 (Leaf): [61,Ivan] [75,Julia] [89,Kevin]                      │
+│                                                                     │
+│                                                                     │
+│ Page 9 (Leaf): [91,Laura] [95,Mike] [99,Nancy]                      │
+│                                                                     │
+│                                                                     │
+│ Leaf Chain: p3 ↔ p5 ↔ p7 ↔ p9                                       │
 └─────────────────────────────────────────────────────────────────────┘
 
 EXECUTION TRACE:
@@ -193,6 +171,39 @@ EXECUTION TRACE:
 3. STEP moves cursor to [59,Helen,...]
 4. Continue until end of tree
 5. Output: All users with user_id > 50
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

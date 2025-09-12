@@ -80,7 +80,6 @@ create_all_tables_sql(bool create)
 		return;
 	}
 
-
 	const char *create_products_sql = "CREATE TABLE products ("
 									  "product_id INT, "
 									  "title TEXT, "
@@ -136,8 +135,7 @@ load_table_from_csv_sql(const char *csv_file, const char *table_name)
 		column_list.write(structure->columns[i].name);
 	}
 
-
-	char* list = (char*)column_list.finish().data();
+	char *list = (char *)column_list.finish().data();
 	while (reader.next_row(fields))
 	{
 		if (fields.size() != structure->columns.size())
@@ -155,10 +153,10 @@ load_table_from_csv_sql(const char *csv_file, const char *table_name)
 
 		for (size_t i = 0; i < fields.size(); i++)
 		{
-			if (i > 0) {
+			if (i > 0)
+			{
 				sql.write(", ");
 			}
-
 
 			data_type col_type = structure->columns[i].type;
 
@@ -186,7 +184,7 @@ load_table_from_csv_sql(const char *csv_file, const char *table_name)
 
 		sql.write(");");
 
-		auto x = (char*)sql.finish().data();
+		auto x = (char *)sql.finish().data();
 
 		if (execute_sql_statement(x))
 		{
@@ -224,61 +222,132 @@ load_all_data_sql()
 #include <cstdio>
 
 // VM Function: LIKE pattern matching with % wildcard
+// VM Function: LIKE pattern matching with % wildcard
 bool
 vmfunc_like(typed_value *result, typed_value *args, uint32_t arg_count)
 {
-	if (arg_count != 2)
-		return false;
+    if (arg_count != 2) {
+        return false;
+    }
 
-	const char *text = args[0].as_char();
-	const char *pattern = args[1].as_char();
+    // Get pointers to the string data
+    const char *text_ptr = args[0].as_char();
+    const char *pattern_ptr = args[1].as_char();
 
-	// Simple % wildcard matching
-	const char *t = text;
-	const char *p = pattern;
-	const char *star_t = nullptr;
-	const char *star_p = nullptr;
+    // Get maximum sizes from types (e.g., 32 for CHAR32)
+    size_t text_max = type_size(args[0].type);
+    size_t pattern_max = type_size(args[1].type);
 
-	while (*t)
-	{
-		if (*p == '%')
-		{
-			star_p = p++;
-			star_t = t;
-			continue;
-		}
+    // Create local copies with proper bounds
+    char text[256];
+    char pattern[256];
 
-		if (*p == *t)
-		{
-			p++;
-			t++;
-			continue;
-		}
+    // Copy text, respecting max size and ensuring null termination
+    size_t text_len = 0;
+    while (text_len < text_max && text_len < 255 && text_ptr[text_len] != '\0') {
+        text[text_len] = text_ptr[text_len];
+        text_len++;
+    }
+    text[text_len] = '\0';
 
-		if (star_p)
-		{
-			p = star_p + 1;
-			t = ++star_t;
-			continue;
-		}
+    // Copy pattern, respecting max size and ensuring null termination
+    size_t pattern_len = 0;
+    while (pattern_len < pattern_max && pattern_len < 255 && pattern_ptr[pattern_len] != '\0') {
+        pattern[pattern_len] = pattern_ptr[pattern_len];
+        pattern_len++;
+    }
+    pattern[pattern_len] = '\0';
 
-		// No match
-		uint32_t match = 0;
-		result->type = TYPE_U32;
-		result->data = (uint8_t *)arena<query_arena>::alloc(sizeof(uint32_t));
-		*(uint32_t *)result->data = match;
-		return true;
-	}
+    // Now perform the pattern matching
+    bool match = false;
 
-	// Skip trailing % in pattern
-	while (*p == '%')
-		p++;
+    // Simple case: empty pattern matches nothing
+    if (pattern_len == 0) {
+        match = false;
+    }
+    // Pattern is just %
+    else if (pattern_len == 1 && pattern[0] == '%') {
+        match = true;
+    }
+    // Pattern starts and ends with %
+    else if (pattern[0] == '%' && pattern[pattern_len-1] == '%' && pattern_len > 1) {
+        // Extract middle part
+        char literal[256];
+        size_t literal_len = pattern_len - 2;
+        for (size_t i = 0; i < literal_len; i++) {
+            literal[i] = pattern[i + 1];
+        }
+        literal[literal_len] = '\0';
 
-	uint32_t match = (*p == '\0') ? 1 : 0;
-	result->type = TYPE_U32;
-	result->data = (uint8_t *)arena<query_arena>::alloc(sizeof(uint32_t));
-	*(uint32_t *)result->data = match;
-	return true;
+        // Check if text contains literal (manual strstr)
+        match = false;
+        for (size_t i = 0; i <= text_len - literal_len; i++) {
+            bool found = true;
+            for (size_t j = 0; j < literal_len; j++) {
+                if (text[i + j] != literal[j]) {
+                    found = false;
+                    break;
+                }
+            }
+            if (found) {
+                match = true;
+                break;
+            }
+        }
+    }
+    // Pattern starts with %
+    else if (pattern[0] == '%') {
+        // Extract suffix
+        size_t suffix_len = pattern_len - 1;
+        const char *suffix = pattern + 1;
+
+        // Check if text ends with suffix
+        if (text_len >= suffix_len) {
+            match = true;
+            for (size_t i = 0; i < suffix_len; i++) {
+                if (text[text_len - suffix_len + i] != suffix[i]) {
+                    match = false;
+                    break;
+                }
+            }
+        }
+    }
+    // Pattern ends with %
+    else if (pattern[pattern_len-1] == '%') {
+        // Extract prefix
+        size_t prefix_len = pattern_len - 1;
+
+        // Check if text starts with prefix
+        if (text_len >= prefix_len) {
+            match = true;
+            for (size_t i = 0; i < prefix_len; i++) {
+                if (text[i] != pattern[i]) {
+                    match = false;
+                    break;
+                }
+            }
+        }
+    }
+    // No wildcards - exact match
+    else {
+        if (text_len == pattern_len) {
+            match = true;
+            for (size_t i = 0; i < text_len; i++) {
+                if (text[i] != pattern[i]) {
+                    match = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Allocate and set the result
+    uint32_t match_val = match ? 1 : 0;
+    result->type = TYPE_U32;
+    result->data = (uint8_t *)arena<query_arena>::alloc(sizeof(uint32_t));
+    *(uint32_t *)result->data = match_val;
+
+    return true;
 }
 
 // VM Function: Create structure (for composite index demo)
@@ -295,7 +364,7 @@ vmfunc_create_index_structure(typed_value *result, typed_value *args, uint32_t a
 	columns.push(attribute{"key", make_dual(TYPE_U32, TYPE_U32)}); // Composite key
 
 	// Relation index = Schema::from(index_name, columns);
-	relation	index = create_relation(index_name, columns);
+	relation	 index = create_relation(index_name, columns);
 	tuple_format layout = tuple_format_from_relation(index);
 	index.storage.btree = bt_create(layout.key_type, layout.record_size, false);
 
@@ -311,30 +380,29 @@ vmfunc_create_index_structure(typed_value *result, typed_value *args, uint32_t a
 // Demo 1: LIKE pattern matching
 // Usage: .demo_like %Phone%
 
-
-
 void
 demo_like_pattern(const char *args)
 {
+    // _debug = true;
 	vm_set_result_callback(formatted_result_callback);
 	// Parse pattern from args
-	char pattern[64];
+	char pattern[32];
 	if (args && *args)
 	{
-		strncpy(pattern, args, 63);
-		pattern[63] = '\0';
+		strncpy(pattern, args, 32);
+		// pattern[32] = '\0';
 	}
 	else
 	{
-		strcpy(pattern, "%Phone%");
+		strcpy(pattern, "%osc%");
 	}
 
 	printf("\n=== LIKE Pattern Matching Demo ===\n");
-	printf("Query: SELECT * FROM products WHERE title LIKE '%s'\n\n", pattern);
+	printf("Query: SELECT * FROM users WHERE username LIKE '%s'\n\n", pattern);
 
 	program_builder prog;
 
-	relation *products = catalog.get("products");
+	relation *products = catalog.get("users");
 
 	if (!products)
 	{
@@ -347,7 +415,7 @@ demo_like_pattern(const char *args)
 
 	// Load pattern into register
 	// int pattern_reg = prog.load(TYPE_CHAR32, prog.alloc_string(pattern, 32));
-	int pattern_reg = prog.load(prog.alloc_data_type(TYPE_CHAR32, pattern, 32));
+	int pattern_reg = prog.load(prog.alloc_data_type(TYPE_CHAR32, pattern));
 
 	// Scan products
 	int	 at_end = prog.first(cursor);
@@ -530,9 +598,9 @@ demo_subquery_pattern(const char *args)
 		return;
 	}
 
-	auto		users_ctx = from_structure(*users);
+	auto		 users_ctx = from_structure(*users);
 	tuple_format temp_layout = users_ctx->layout;
-	auto		temp_ctx = red_black(temp_layout);
+	auto		 temp_ctx = red_black(temp_layout);
 
 	int users_cursor = prog.open_cursor(users_ctx);
 	int temp_cursor = prog.open_cursor(temp_ctx);
@@ -622,7 +690,7 @@ demo_composite_index(const char *args)
 
 	{
 		program_builder prog;
-		relation	  *orders = catalog.get("orders");
+		relation	   *orders = catalog.get("orders");
 		if (!orders)
 		{
 			printf("Orders table not found!\n");
@@ -679,7 +747,7 @@ demo_composite_index(const char *args)
 
 	// Create temporary index structure directly (not in catalog)
 	data_type composite_key_type = make_dual(TYPE_U32, TYPE_U32);
-	btree	 index_btree = bt_create(composite_key_type, 0, true); // No record, just key
+	btree	  index_btree = bt_create(composite_key_type, 0, true); // No record, just key
 
 	// Populate index from orders table
 	{
@@ -824,7 +892,7 @@ demo_group_by_aggregate(const char *args)
 		printf("Query: SELECT city, COUNT(*), SUM(age) FROM users GROUP BY city\n\n");
 	}
 	program_builder prog;
-	relation *users = catalog.get("users");
+	relation	   *users = catalog.get("users");
 	if (!users)
 	{
 		printf("Users table not found!\n");
@@ -837,10 +905,10 @@ demo_group_by_aggregate(const char *args)
 		(TYPE_U32),	   // sum_age
 	};
 	tuple_format agg_layout = tuple_format_from_types(agg_types);
-	auto users_ctx = from_structure(*users);
-	auto agg_ctx = red_black(agg_layout);
-	int users_cursor = prog.open_cursor(users_ctx);
-	int agg_cursor = prog.open_cursor(agg_ctx);
+	auto		 users_ctx = from_structure(*users);
+	auto		 agg_ctx = red_black(agg_layout);
+	int			 users_cursor = prog.open_cursor(users_ctx);
+	int			 agg_cursor = prog.open_cursor(agg_ctx);
 	// Phase 1: Scan users and build aggregates
 	{
 		prog.regs.push_scope();
@@ -853,18 +921,18 @@ demo_group_by_aggregate(const char *args)
 			int city_reg = prog.get_column(users_cursor, 4);
 			int age_reg = prog.get_column(users_cursor, 3);
 			// Try to find existing aggregate for this city
-			int found = prog.seek(agg_cursor, city_reg, EQ);
+			int	 found = prog.seek(agg_cursor, city_reg, EQ);
 			auto if_found = prog.begin_if(found);
 			{
 				// Update existing aggregate - FIXED: Include city in the update record
-				int city_key = prog.get_column(agg_cursor, 0);  // Get the city
+				int city_key = prog.get_column(agg_cursor, 0); // Get the city
 				int cur_count = prog.get_column(agg_cursor, 1);
 				int cur_sum = prog.get_column(agg_cursor, 2);
 
-				int update_start = prog.regs.allocate_range(3);  // Need 3 registers for full record
-				prog.move(city_key, update_start);               // City stays the same
+				int update_start = prog.regs.allocate_range(3);	  // Need 3 registers for full record
+				prog.move(city_key, update_start);				  // City stays the same
 				prog.add(cur_count, one_const, update_start + 1); // New count
-				prog.add(cur_sum, age_reg, update_start + 2);    // New sum
+				prog.add(cur_sum, age_reg, update_start + 2);	  // New sum
 
 				prog.update_record(agg_cursor, update_start);
 			}
@@ -928,10 +996,10 @@ demo_group_by_aggregate(const char *args)
 bool
 vmfunc_write_blob(typed_value *result, typed_value *args, uint32_t arg_count)
 {
-	if (arg_count != 2) {
+	if (arg_count != 2)
+	{
 		return false;
 	}
-
 
 	void	*data = (void *)args[0].as_u64();
 	uint32_t size = args[1].as_u32();
@@ -985,7 +1053,7 @@ demo_blob_storage(const char *args)
 		array<attribute, query_arena> columns = {{"doc_id", TYPE_U32}, {"title", TYPE_CHAR32}, {"blob_ref", TYPE_U32}};
 
 		pager_begin_transaction();
-		relation	docs = create_relation("documents", columns);
+		relation	 docs = create_relation("documents", columns);
 		tuple_format layout = tuple_format_from_relation(docs);
 		docs.storage.btree = bt_create(layout.key_type, layout.record_size, true);
 		catalog.insert("documents", docs);

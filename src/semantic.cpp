@@ -139,11 +139,9 @@ apply_catalog_changes(semantic_context *ctx)
 		catalog.remove(name);
 	}
 
-	for (auto [name, _] : ctx->tables_to_create)
+	for (auto [_, relation] : ctx->tables_to_create)
 	{
-        auto x= (relation*)arena<catalog_arena>::alloc(sizeof(relation));
-        memcpy(x, &_, sizeof(relation));
-		catalog.insert(name, *x);
+		catalog.insert(relation.name, relation);
 	}
 }
 

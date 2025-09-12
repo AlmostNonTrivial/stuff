@@ -1018,7 +1018,7 @@ vm_execute(vm_instruction *instructions, int instruction_count)
 		printf("\n===== EXECUTION TRACE =====\n");
 	}
 
-	_debug = false;
+
 
 	while (!VM.halted && VM.pc < VM.program_size)
 	{
