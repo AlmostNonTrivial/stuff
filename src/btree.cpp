@@ -204,6 +204,7 @@ Records: [A]  [B]  [C]  [××]  (last entry ignored)
 */
 
 #include <cstdio>
+#include <ios>
 #include <string>
 
 /*
@@ -251,6 +252,7 @@ Records: [A]  [B]  [C]  [××]  (last entry ignored)
 #include "btree.hpp"
 #include "containers.hpp"
 #include "common.hpp"
+#include "parser.hpp"
 #include "types.hpp"
 #include "pager.hpp"
 #include <cassert>
@@ -412,7 +414,7 @@ static_assert(sizeof(btree_node) == PAGE_SIZE, "btree_node must be exactly PAGE_
 ** Keys are stored contiguously from the start of the data area.
 ** This layout maximizes cache efficiency during binary search.
 */
-#define GET_KEY_AT(node, idx) ((node)->data + idx * tree->node_key_size)
+#define GET_KEY_AT(node, idx) ((node)->data + (idx) * tree->node_key_size)
 
 /*
 ** Internal node children array
