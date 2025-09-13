@@ -1136,7 +1136,7 @@ demo_blob_storage(const char *args)
 
 		// Write blob and get reference
 		int content_ptr = prog.load_ptr((char *)large_content);
-		int content_size = prog.load(TYPE_U32, strlen(large_content));
+		int content_size = prog.load(TYPE_U64, strlen(large_content));
 		int blob_ref = prog.call_function(vmfunc_write_blob, content_ptr, 2);
 
 		// Prepare document row
@@ -1144,7 +1144,7 @@ demo_blob_storage(const char *args)
 		prog.load(TYPE_U32, doc_id, row_start);
 		auto s = "Technical Manual";
 		auto sl = strlen(s);
-		prog.load(prog.load_string(TYPE_CHAR32, s, sl), row_start + 1);
+		prog.load_string(TYPE_CHAR32, s, sl, row_start + 1);
 		prog.move(blob_ref, row_start + 2);
 
 		prog.insert_record(cursor, row_start, 3);

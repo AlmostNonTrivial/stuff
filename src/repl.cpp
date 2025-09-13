@@ -378,24 +378,8 @@ run_meta_command(const char *cmd)
 		const char *args = cmd[10] ? cmd + 11 : "";
 		demo_blob_storage(args);
 	}
-	else if (strcmp(cmd, ".test_perf") == 0)
-	{
-		printf("\n-- Performance Test --\n");
-		auto start = std::chrono::high_resolution_clock::now();
-		for (int i = 0; i < 1000; i++)
-		{
-			execute_sql_statement("SELECT * FROM users WHERE age = 30");
-		}
-		auto end = std::chrono::high_resolution_clock::now();
-		auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-		printf("1000 queries executed in %ld ms (%.2f queries/sec)\n", ms.count(), 1000000.0 / ms.count());
-	}
-	else if (strcmp(cmd, ".test_order") == 0)
-	{
-		printf("\n-- ORDER BY Test --\n");
-		execute_sql_statement("SELECT user_id, username, age FROM users ORDER BY age ASC");
-		execute_sql_statement("SELECT user_id, username, age FROM users ORDER BY age DESC");
-	}
+
+
 	else
 	{
 		printf("Unknown command: %s (type .help for commands)\n", cmd);
