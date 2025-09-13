@@ -68,9 +68,9 @@ compile_literal(program_builder *prog, expr_node *expr)
 	switch (expr->lit_type)
 	{
 	case TYPE_U32:
-		return prog->load(TYPE_U32, expr->int_val);
+		return prog->load(expr->sem.resolved_type, expr->int_val);
 	case TYPE_CHAR32:
-		return prog->load_string(TYPE_CHAR32, expr->str_val.data(), expr->str_val.size());
+		return prog->load_string(expr->sem.resolved_type, expr->str_val.data(), expr->str_val.size());
 	}
 
 	assert(false);

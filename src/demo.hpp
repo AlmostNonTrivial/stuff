@@ -2,6 +2,7 @@
 #include <vector>
 #include "btree.hpp"
 #include "common.hpp"
+#include "parser.hpp"
 #include "types.hpp"
 #include "vm.hpp"
 #include "catalog.hpp"
@@ -11,59 +12,223 @@
 #include <fstream>
 #include <sstream>
 
+bool execute_sql_statement(const char *sql);
 void
 formatted_result_callback(typed_value *result, size_t count);
-// Simple CSV parser
-struct csv_reader
-{
-	std::ifstream file;
-	std::string	  line;
-
-	csv_reader(const char *filename) : file(filename)
-	{
-		if (!file.is_open())
-		{
-			fprintf(stderr, "Failed to open CSV file: %s\n", filename);
-		}
-		// Skip header
-		std::getline(file, line);
-	}
-
-	bool
-	next_row(std::vector<std::string> &fields)
-	{
-		if (!std::getline(file, line))
-		{
-			return false;
-		}
-
-		// Remove carriage return if present
-		if (!line.empty() && line.back() == '\r')
-		{
-			line.pop_back();
-		}
-
-		fields.clear();
-		std::stringstream ss(line);
-		std::string		  field;
-
-		while (std::getline(ss, field, ','))
-		{
-			fields.push_back(field);
-		}
-		return true;
-	}
-};
-
-bool
-execute_sql_statement(const char *sql);
 inline void
-create_all_tables_sql(bool create)
+load_table_from_csv_sql(const char *csv_file, const char *table_name)
 {
-	if (!create)
-	{
-		return;
-	}
+    relation *structure = catalog.get(table_name);
+    if (!structure)
+    {
+        return;
+    }
+
+    std::ifstream file(csv_file);
+    if (!file.is_open())
+    {
+        std::ostringstream error_msg;
+        error_msg << "Failed to open CSV file: " << csv_file;
+        fprintf(stderr, "%s\n", error_msg.str().c_str());
+        return;
+    }
+
+    // Skip header line
+    std::string line;
+    std::getline(file, line);
+
+    // Build column list once
+    std::ostringstream column_list_builder;
+    for (uint32_t i = 0; i < structure->columns.size(); i++)
+    {
+        if (i > 0)
+        {
+            column_list_builder << ", ";
+        }
+        column_list_builder << structure->columns[i].name;
+    }
+    std::string column_list = column_list_builder.str();
+
+    int count = 0;
+    int batch_count = 0;
+    const int BATCH_SIZE = 50;
+
+    // Process each row
+    while (std::getline(file, line))
+    {
+        // Parse CSV line
+        std::vector<std::string> fields;
+        std::stringstream line_stream(line);
+        std::string field;
+
+        while (line_stream.good())
+        {
+            char c = line_stream.peek();
+
+            if (c == '"')
+            {
+                // Handle quoted field
+                std::ostringstream field_builder;
+                line_stream.get(); // consume opening quote
+
+                char ch;
+                while (line_stream.get(ch))
+                {
+                    if (ch == '"')
+                    {
+                        if (line_stream.peek() == '"')
+                        {
+                            line_stream.get(); // consume escaped quote
+                            field_builder << '"';
+                        }
+                        else
+                        {
+                            // End of quoted field
+                            if (line_stream.peek() == ',')
+                            {
+                                line_stream.get(); // consume comma
+                            }
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        field_builder << ch;
+                    }
+                }
+                field = field_builder.str();
+            }
+            else
+            {
+                // Regular field
+                std::getline(line_stream, field, ',');
+            }
+
+            // Trim field
+            {
+                // Remove trailing \r if present
+                if (!field.empty() && field.back() == '\r')
+                {
+                    field.pop_back();
+                }
+
+                // Trim leading whitespace
+                size_t start = field.find_first_not_of(" \t\n\r");
+                if (start != std::string::npos)
+                {
+                    field = field.substr(start);
+                }
+                else
+                {
+                    field.clear(); // All whitespace
+                }
+
+                // Trim trailing whitespace
+                size_t end = field.find_last_not_of(" \t\n\r");
+                if (end != std::string::npos && start != std::string::npos)
+                {
+                    field = field.substr(0, end - start + 1);
+                }
+            }
+
+            fields.push_back(field);
+
+            if (line_stream.peek() == EOF)
+            {
+                break;
+            }
+        }
+
+        if (fields.size() != structure->columns.size())
+        {
+            printf("Warning: row has %zu fields, expected %zu\n",
+                   fields.size(), structure->columns.size());
+            continue;
+        }
+
+        // Build SQL INSERT statement
+        std::ostringstream sql_builder;
+        sql_builder << "INSERT INTO " << table_name
+                    << " (" << column_list << ") VALUES (";
+
+        for (size_t i = 0; i < fields.size(); i++)
+        {
+            if (i > 0)
+            {
+                sql_builder << ", ";
+            }
+
+            data_type col_type = structure->columns[i].type;
+
+            if (type_is_numeric(col_type))
+            {
+                sql_builder << fields[i];
+            }
+            else if (type_is_string(col_type))
+            {
+                sql_builder << "'";
+                for (char c : fields[i])
+                {
+                    if (c == '\'')
+                    {
+                        sql_builder << "''"; // Escape single quotes
+                    }
+                    else
+                    {
+                        sql_builder << c;
+                    }
+                }
+                sql_builder << "'";
+            }
+        }
+
+        sql_builder << ");";
+
+        std::string sql_statement = sql_builder.str();
+
+        std::cout << sql_statement << "\n";
+
+        print_ast(parse_sql(sql_statement.c_str()).statements[0]);
+
+        if (execute_sql_statement(sql_statement.c_str()))
+        {
+            count++;
+        }
+        else
+        {
+            printf("❌ Failed to insert row %d\n", count + 1);
+        }
+
+        if (++batch_count >= BATCH_SIZE)
+        {
+            batch_count = 0;
+        }
+    }
+}
+
+inline void
+load_all_data_sql()
+{
+    load_table_from_csv_sql("../users.csv", "users");
+    load_table_from_csv_sql("../products.csv", "products");
+    load_table_from_csv_sql("../orders.csv", "orders");
+}
+
+#include "arena.hpp"
+#include "containers.hpp"
+#include "catalog.hpp"
+#include "compile.hpp"
+#include "vm.hpp"
+#include "blob.hpp"
+#include "pager.hpp"
+#include <chrono>
+#include <cstring>
+#include <cstdio>
+
+inline void
+create_all_tables_sql()
+{
+
 
 	const char *create_users_sql = "CREATE TABLE users ("
 								   "user_id INT, "
@@ -106,119 +271,6 @@ create_all_tables_sql(bool create)
 		return;
 	}
 }
-
-inline void
-load_table_from_csv_sql(const char *csv_file, const char *table_name)
-{
-	csv_reader				 reader(csv_file);
-	std::vector<std::string> fields;
-
-	int		  count = 0;
-	int		  batch_count = 0;
-	const int BATCH_SIZE = 50;
-
-	relation *structure = catalog.get(table_name);
-	if (!structure)
-	{
-		return;
-	}
-
-	auto column_list = stream_writer<query_arena>::begin();
-	for (uint32_t i = 0; i < structure->columns.size(); i++)
-	{
-		if (i > 0)
-		{
-			column_list.write(", ");
-		}
-
-		column_list.write(structure->columns[i].name);
-	}
-
-	char *list = (char *)column_list.finish().data();
-	while (reader.next_row(fields))
-	{
-		if (fields.size() != structure->columns.size())
-		{
-			printf("Warning: row has %zu fields, expected %zu\n", fields.size(), structure->columns.size());
-			continue;
-		}
-
-		auto sql = stream_writer<query_arena>::begin();
-		sql.write("INSERT INTO ");
-		sql.write(table_name);
-		sql.write(" (");
-		sql.write(list);
-		sql.write(") VALUES (");
-
-		for (size_t i = 0; i < fields.size(); i++)
-		{
-			if (i > 0)
-			{
-				sql.write(", ");
-			}
-
-			data_type col_type = structure->columns[i].type;
-
-			if (type_is_numeric(col_type))
-			{
-				sql.write(fields[i].c_str());
-			}
-			else if (type_is_string(col_type))
-			{
-				sql.write("'");
-				for (char c : fields[i])
-				{
-					if (c == '\'')
-					{
-						sql.write("''", 1);
-					}
-					else
-					{
-						sql.write(&c, 1);
-					}
-				}
-				sql.write("'", 1);
-			}
-		}
-
-		sql.write(");");
-
-		auto x = (char *)sql.finish().data();
-
-		if (execute_sql_statement(x))
-		{
-			count++;
-		}
-		else
-		{
-			printf("❌ Failed to insert row %d\n", count + 1);
-		}
-
-		if (++batch_count >= BATCH_SIZE)
-		{
-			batch_count = 0;
-		}
-	}
-}
-
-inline void
-load_all_data_sql()
-{
-	load_table_from_csv_sql("../users.csv", "users");
-	load_table_from_csv_sql("../products.csv", "products");
-	load_table_from_csv_sql("../orders.csv", "orders");
-}
-
-#include "arena.hpp"
-#include "containers.hpp"
-#include "catalog.hpp"
-#include "compile.hpp"
-#include "vm.hpp"
-#include "blob.hpp"
-#include "pager.hpp"
-#include <chrono>
-#include <cstring>
-#include <cstdio>
 
 // VM Function: LIKE pattern matching with % wildcard
 bool
@@ -504,10 +556,9 @@ demo_nested_loop_join(const char *args)
 	int users_cursor = prog.open_cursor(users_ctx);
 	int orders_cursor = prog.open_cursor(orders_ctx);
 
+	int count_reg = prog.load(TYPE_U32, 0U);
 
-	int		 count_reg = prog.load_string(TYPE_U32, 0U);
-
-	int limit_reg = prog.load(TYPE_U32, limit);
+	int		 limit_reg = prog.load(TYPE_U32, limit);
 	uint32_t xx = 1U;
 	int		 one_reg = prog.load(TYPE_U32, 1U);
 
@@ -817,7 +868,7 @@ demo_composite_index(const char *args)
 
 		int user_reg = prog.load(TYPE_U32, user_id);
 
-		int	 order_threshold = prog.load(TYPE_U32,  min_order_id + 1);
+		int order_threshold = prog.load(TYPE_U32, min_order_id + 1);
 
 		// Create composite seek key
 		int seek_key = prog.pack2(user_reg, order_threshold);
@@ -1086,13 +1137,13 @@ demo_blob_storage(const char *args)
 									"databases handle TEXT and BLOB columns.";
 
 		// Write blob and get reference
-		int content_ptr = prog.load_ptr((void*)large_content);
-		int	 content_size = prog.load(TYPE_U32, strlen(large_content));
-		int	 blob_ref = prog.call_function(vmfunc_write_blob, content_ptr, 2);
+		int content_ptr = prog.load_ptr((char *)large_content);
+		int content_size = prog.load(TYPE_U32, strlen(large_content));
+		int blob_ref = prog.call_function(vmfunc_write_blob, content_ptr, 2);
 
 		// Prepare document row
 		int row_start = prog.regs.allocate_range(3);
-		prog.load(TYPE_U32, doc_id,  row_start);
+		prog.load(TYPE_U32, doc_id, row_start);
 		auto s = "Technical Manual";
 		auto sl = strlen(s);
 		prog.load(prog.load_string(TYPE_CHAR32, s, sl), row_start + 1);

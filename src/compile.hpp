@@ -346,7 +346,7 @@ struct program_builder
 		size_t len = src_len ? src_len : strlen((char *)src);
 		assert(len <= size && "String literal too long for column type");
 
-		void *ptr = arena<query_arena>::alloc(size); // Allocate full type size
+		void *ptr = arena<query_arena>::alloc(len); // Allocate full type size
 		memcpy(ptr, src, len);
 		((char *)ptr)[len] = '\0';
 

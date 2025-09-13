@@ -15,10 +15,8 @@
 #include <cstring>
 #include <chrono>
 
-
 static array<int, query_arena> result_column_widths;
 static const char			  *current_database_path = nullptr;
-
 
 static int
 get_column_width(data_type type)
@@ -416,7 +414,7 @@ run_repl(const char *database_path)
 	{
 		printf("Creating new database: %s\n", database_path);
 		bootstrap_master(true);
-		create_all_tables_sql(true);
+		create_all_tables_sql();
 		load_all_data_sql();
 		printf("Database initialized with sample data.\n\n");
 	}
@@ -494,6 +492,8 @@ run_repl(const char *database_path)
 			auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 			printf("Query executed in %ld ms\n", ms.count());
 		}
+
+		// arena<query_arena>::reset_and_decommit();
 	}
 
 	pager_close();
