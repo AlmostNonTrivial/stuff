@@ -514,10 +514,7 @@ semantic_resolve_statement(semantic_context *ctx, stmt_node *stmt)
 		return semantic_resolve_delete(ctx, &stmt->delete_stmt);
 
 	case STMT_CREATE_TABLE:
-		semantic_resolve_create_table(ctx, &stmt->create_table_stmt);
-		print_hash_map_info(catalog);
-
-		return true;
+		return semantic_resolve_create_table(ctx, &stmt->create_table_stmt);
 	case STMT_DROP_TABLE:
 		return semantic_resolve_drop_table(ctx, &stmt->drop_table_stmt);
 
