@@ -9,6 +9,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 /*
  * The VM can have n cursors open at a time
  * we allocate a lot for them with a simple pool allocator
@@ -361,6 +362,7 @@ struct program_builder
 	int
 	load(data_type type, const T &value, int dest_reg = -1)
 	{
+        static_assert(!std::is_pointer<T>());
 		assert(!type_is_string(type));
 		assert(sizeof(T) == type_size(type));
 
@@ -376,28 +378,21 @@ struct program_builder
 		return dest_reg;
 	}
 
+
 	int
-	load(data_type type, void *value, int dest_reg = -1)
+	load_ptr(void * ptr, int dest_reg = -1)
 	{
+
+
 		if (dest_reg == -1)
 		{
 			dest_reg = regs.allocate();
 		}
 
-		emit(LOAD_MAKE(dest_reg, (int64_t)type, value));
+
+		emit(LOAD_MAKE(dest_reg, (int64_t)TYPE_I64, ptr)); // Fixed: was just 'type'
 		return dest_reg;
 	}
-
-	// int
-	// load(const typed_value &value, int dest_reg = -1)
-	// {
-	// 	if (dest_reg == -1)
-	// 	{
-	// 		dest_reg = regs.allocate();
-	// 	}
-	// 	emit(LOAD_MAKE(dest_reg, (int64_t)value.type, value.data));
-	// 	return dest_reg;
-	// }
 
 	int
 	move(int src_reg, int dest_reg = -1)

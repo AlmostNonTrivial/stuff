@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <string_view>
 
+
+
 template <typename T, typename arena_tag = global_arena, uint32_t InitialSize = 8> struct array
 {
 
@@ -94,8 +96,6 @@ template <typename T, typename arena_tag = global_arena, uint32_t InitialSize = 
 		storage.copy_from(other.storage);
 	}
 
-
-
 	T &
 	operator[](uint32_t index)
 	{
@@ -182,9 +182,9 @@ template <typename T, typename arena_tag = global_arena, uint32_t InitialSize = 
 template <typename T, typename arena_tag = global_arena> struct queue
 {
 	contiguous<T, arena_tag, 16> storage;
-	uint32_t					head = 0;
-	uint32_t					tail = 0;
-	uint32_t					count = 0;
+	uint32_t					 head = 0;
+	uint32_t					 tail = 0;
+	uint32_t					 count = 0;
 
 	void
 	reserve(uint32_t min_capacity)
@@ -334,9 +334,137 @@ template <typename T, typename arena_tag = global_arena> struct queue
 		return storage.data;
 	}
 };
-/*----------------------------------------------------------------------------
- */
 
+// Simple fixed-size string for use as hash_map keys
+template<size_t N>
+struct fixed_string
+{
+	char data[N];
+
+	// Default constructor - zero initialize
+	fixed_string()
+	{
+		memset(data, 0, N);
+	}
+
+	// Construct from C string
+	fixed_string(const char* str)
+	{
+		if (str)
+		{
+			size_t len = strlen(str);
+			if (len >= N)
+			{
+				len = N - 1;
+			}
+			memcpy(data, str, len);
+			data[len] = '\0';
+			// Zero the rest for consistent hashing/comparison
+			if (len + 1 < N)
+			{
+				memset(data + len + 1, 0, N - len - 1);
+			}
+		}
+		else
+		{
+			memset(data, 0, N);
+		}
+	}
+
+	// Construct from string_view
+	fixed_string(std::string_view sv)
+	{
+		size_t len = sv.size();
+		if (len >= N)
+		{
+			len = N - 1;
+		}
+		memcpy(data, sv.data(), len);
+		data[len] = '\0';
+		// Zero the rest for consistent hashing/comparison
+		if (len + 1 < N)
+		{
+			memset(data + len + 1, 0, N - len - 1);
+		}
+	}
+
+	// Assignment from C string
+	fixed_string& operator=(const char* str)
+	{
+		if (str)
+		{
+			size_t len = strlen(str);
+			if (len >= N)
+			{
+				len = N - 1;
+			}
+			memcpy(data, str, len);
+			data[len] = '\0';
+			if (len + 1 < N)
+			{
+				memset(data + len + 1, 0, N - len - 1);
+			}
+		}
+		else
+		{
+			memset(data, 0, N);
+		}
+		return *this;
+	}
+
+	// Equality comparisons
+	bool operator==(const fixed_string& other) const
+	{
+		return strcmp(data, other.data) == 0;
+	}
+
+	bool operator==(const char* str) const
+	{
+		return str && strcmp(data, str) == 0;
+	}
+
+	bool operator==(std::string_view sv) const
+	{
+		size_t my_len = strlen(data);
+		return my_len == sv.size() && memcmp(data, sv.data(), my_len) == 0;
+	}
+
+	bool operator!=(const fixed_string& other) const
+	{
+		return !(*this == other);
+	}
+
+	// Get length
+	size_t length() const
+	{
+		return strlen(data);
+	}
+
+	// Check if empty
+	bool empty() const
+	{
+		return data[0] == '\0';
+	}
+
+	// Access as C string
+	const char* c_str() const
+	{
+		return data;
+	}
+
+	char* c_str()
+	{
+		return data;
+	}
+};
+
+// Type aliases for common sizes
+using string32 = fixed_string<32>;
+using string64 = fixed_string<64>;
+using string128 = fixed_string<128>;
+using string256 = fixed_string<256>;
+
+// Complete hash_map implementation with all key types
 using std::pair;
 
 template <typename K, typename V, typename arena_tag = global_arena> struct hash_map
@@ -355,49 +483,65 @@ template <typename K, typename V, typename arena_tag = global_arena> struct hash
 	};
 
 	contiguous<entry, arena_tag, 16> storage;
-	uint32_t						_size = 0;
-	uint32_t						tombstones = 0;
+	uint32_t						 _size = 0;
+	uint32_t						 tombstones = 0;
+
+	// Helper to detect if type has c_str() method
+	template<typename T, typename = void>
+	struct has_c_str : std::false_type {};
+
+	template<typename T>
+	struct has_c_str<T, std::void_t<decltype(std::declval<T>().c_str())>> : std::true_type {};
+
+	// Generic string hashing function
+	static uint32_t hash_string_data(const char* s, size_t len)
+	{
+		if (!s || len == 0) return 1;
+		uint32_t h = 2166136261u;
+		for (size_t i = 0; i < len; i++)
+		{
+			h ^= static_cast<unsigned char>(s[i]);
+			h *= 16777619u;
+		}
+		return h ? h : 1;
+	}
 
 	uint32_t
 	hash_key(const K &key) const
 	{
-		if constexpr (std::is_same_v<K, std::string_view>)
+		// Handle types with c_str() method (like fixed_string)
+		if constexpr (has_c_str<K>::value)
 		{
-			if (key.empty())
-			{
-				return 1;
-			}
-			uint32_t h = 2166136261u;
-			for (unsigned char c : key)
-			{
-				h ^= c;
-				h *= 16777619u;
-			}
-			return h ? h : 1;
+			const char* s = key.c_str();
+			return hash_string_data(s, strlen(s));
 		}
-  else if constexpr (std::is_pointer_v<K>)
-    {
-        // Hash pointer address
-        uintptr_t addr = reinterpret_cast<uintptr_t>(key);
+		else if constexpr (std::is_same_v<K, std::string_view>)
+		{
+			return hash_string_data(key.data(), key.size());
+		}
+		else if constexpr (std::is_pointer_v<K>)
+		{
+			// Hash pointer address
+			uintptr_t addr = reinterpret_cast<uintptr_t>(key);
 
-        // Mix bits using same algorithm as integers
-        if constexpr (sizeof(uintptr_t) <= 4)
-        {
-            uint32_t ux = static_cast<uint32_t>(addr);
-            ux = ((ux >> 16) ^ ux) * 0x45d9f3b;
-            ux = ((ux >> 16) ^ ux) * 0x45d9f3b;
-            ux = (ux >> 16) ^ ux;
-            return ux ? ux : 1;  // Ensure non-zero
-        }
-        else
-        {
-            uint64_t ux = static_cast<uint64_t>(addr);
-            ux = (ux ^ (ux >> 30)) * 0xbf58476d1ce4e5b9ULL;
-            ux = (ux ^ (ux >> 27)) * 0x94d049bb133111ebULL;
-            ux = ux ^ (ux >> 31);
-            return static_cast<uint32_t>(ux) ? static_cast<uint32_t>(ux) : 1;  // Ensure non-zero
-        }
-    }
+			// Mix bits using same algorithm as integers
+			if constexpr (sizeof(uintptr_t) <= 4)
+			{
+				uint32_t ux = static_cast<uint32_t>(addr);
+				ux = ((ux >> 16) ^ ux) * 0x45d9f3b;
+				ux = ((ux >> 16) ^ ux) * 0x45d9f3b;
+				ux = (ux >> 16) ^ ux;
+				return ux ? ux : 1; // Ensure non-zero
+			}
+			else
+			{
+				uint64_t ux = static_cast<uint64_t>(addr);
+				ux = (ux ^ (ux >> 30)) * 0xbf58476d1ce4e5b9ULL;
+				ux = (ux ^ (ux >> 27)) * 0x94d049bb133111ebULL;
+				ux = ux ^ (ux >> 31);
+				return static_cast<uint32_t>(ux) ? static_cast<uint32_t>(ux) : 1; // Ensure non-zero
+			}
+		}
 		else if constexpr (std::is_integral_v<K>)
 		{
 			using U = typename std::make_unsigned<K>::type;
@@ -425,10 +569,56 @@ template <typename K, typename V, typename arena_tag = global_arena> struct hash
 		}
 	}
 
+	// Hash for lookup keys (might be different type than K)
+	template<typename LookupKey>
+	uint32_t hash_lookup_key(const LookupKey& key) const
+	{
+		if constexpr (std::is_same_v<LookupKey, K>)
+		{
+			return hash_key(key);
+		}
+		else if constexpr (std::is_same_v<LookupKey, std::string_view>)
+		{
+			return hash_string_data(key.data(), key.size());
+		}
+		else if constexpr (std::is_same_v<LookupKey, const char*> || std::is_same_v<LookupKey, char*>)
+		{
+			return hash_string_data(key, key ? strlen(key) : 0);
+		}
+		else if constexpr (has_c_str<LookupKey>::value)
+		{
+			const char* s = key.c_str();
+			return hash_string_data(s, strlen(s));
+		}
+		else
+		{
+			return hash_key(key);
+		}
+	}
+
 	bool
 	keys_equal(const K &stored_key, const K &search_key) const
 	{
 		return stored_key == search_key;
+	}
+
+	// Compare stored key with lookup key (might be different type)
+	template<typename LookupKey>
+	bool keys_match(const K& stored_key, const LookupKey& lookup_key) const
+	{
+		if constexpr (std::is_same_v<LookupKey, K>)
+		{
+			return stored_key == lookup_key;
+		}
+		else if constexpr (has_c_str<K>::value)
+		{
+			// K is fixed_string, use its operator== overloads
+			return stored_key == lookup_key;
+		}
+		else
+		{
+			return false;
+		}
 	}
 
 	void
@@ -474,34 +664,57 @@ template <typename K, typename V, typename arena_tag = global_arena> struct hash
 		storage.swap(&new_storage);
 	}
 
-	V *
-	get(const K &key)
+	// Template get that works with any compatible lookup type
+	template<typename LookupKey>
+	V* get_impl(const LookupKey& key)
 	{
 		if (!storage.data || _size == 0)
 		{
 			return nullptr;
 		}
 
-		uint32_t hash = hash_key(key);
+		uint32_t hash = hash_lookup_key(key);
 		uint32_t mask = storage.capacity - 1;
 		uint32_t idx = hash & mask;
 
 		while (true)
 		{
-			entry &entry = storage.data[idx];
+			entry &e = storage.data[idx];
 
-			if (entry.state == entry::EMPTY)
+			if (e.state == entry::EMPTY)
 			{
 				return nullptr;
 			}
 
-			if (entry.state == entry::OCCUPIED && entry.hash == hash && keys_equal(entry.key, key))
+			if (e.state == entry::OCCUPIED && e.hash == hash && keys_match(e.key, key))
 			{
-				return &entry.value;
+				return &e.value;
 			}
 
 			idx = (idx + 1) & mask;
 		}
+	}
+
+	V *
+	get(const K &key)
+	{
+		return get_impl(key);
+	}
+
+	// Enable lookups with string_view when K is fixed_string
+	template<typename T = K>
+	typename std::enable_if<has_c_str<T>::value, V*>::type
+	get(std::string_view key)
+	{
+		return get_impl(key);
+	}
+
+	// Enable lookups with const char* when K is fixed_string
+	template<typename T = K>
+	typename std::enable_if<has_c_str<T>::value, V*>::type
+	get(const char* key)
+	{
+		return get_impl(key);
 	}
 
 	const V *
@@ -511,7 +724,7 @@ template <typename K, typename V, typename arena_tag = global_arena> struct hash
 	}
 
 	V *
-	insert(const K &key,const V &value)
+	insert(const K &key, const V &value)
 	{
 		if (!storage.data)
 		{
@@ -634,7 +847,7 @@ template <typename K, typename V, typename arena_tag = global_arena> struct hash
 
 		while (true)
 		{
-			entry &e= entries[idx];
+			entry &e = entries[idx];
 
 			if (e.state == entry::EMPTY || (!handle_tombstones && e.state != entry::OCCUPIED))
 			{
@@ -757,4 +970,371 @@ template <typename K, typename V, typename arena_tag = global_arena> struct hash
 		return iterator(storage.data, storage.capacity, storage.capacity);
 	}
 };
+
 template <typename K, typename arena_tag = global_arena> using hash_set = hash_map<K, char, arena_tag>;
+
+
+// ============================================================
+// CONTAINER DIAGNOSTIC FUNCTIONS
+// ============================================================
+
+/*
+ * Print diagnostic info for a contiguous container
+ */
+template <typename T, typename Tag>
+void
+print_contiguous_info(const contiguous<T, Tag> &cont, const char * name = "")
+{
+	printf("\n=== Contiguous<%s> Info: %s ===\n", typeid(T).name(), name);
+	printf("  Data ptr:  %p\n", cont.data);
+	printf("  Size:      %u / %u (%.1f%% used)\n", cont.size, cont.capacity,
+		   cont.capacity > 0 ? (100.0 * cont.size / cont.capacity) : 0);
+	printf("  Bytes:     %u used, %u allocated, %u wasted\n", cont.size * sizeof(T), cont.capacity * sizeof(T),
+		   (cont.capacity - cont.size) * sizeof(T));
+
+	if (arena<Tag>::owns_pointer(cont.data))
+	{
+		printf("  Arena:     %s (verified ownership)\n", typeid(Tag).name());
+	}
+	else if (cont.data)
+	{
+		printf("  Arena:     WARNING - pointer not owned by expected arena!\n");
+	}
+}
+
+/*
+ * Print diagnostic info for an array
+ */
+template <typename T, typename Tag>
+void
+print_array_info(const char *name, const array<T, Tag> &arr)
+{
+	printf("\n=== Array<%s> Info: %s ===\n", typeid(T).name(), name);
+	printf("  Size:      %u elements\n", arr.size());
+	printf("  Capacity:  %u elements\n", arr.capacity());
+	printf("  Empty:     %s\n", arr.empty() ? "yes" : "no");
+
+	if (arr.capacity() > 0)
+	{
+		printf("  Utilization: %.1f%%\n", (100.0 * arr.size()) / arr.capacity());
+		printf("  Memory:    %u bytes used, %u bytes allocated\n", arr.size() * sizeof(T), arr.capacity() * sizeof(T));
+	}
+
+	if (arr.data() && arena<Tag>::owns_pointer(arr.data()))
+	{
+		printf("  Arena:     %s\n", typeid(Tag).name());
+		printf("  Address:   [%p - %p]\n", arr.data(), arr.data() + arr.capacity());
+	}
+
+	// Sample first/last elements for non-empty arrays
+	if (!arr.empty() && arr.size() <= 10)
+	{
+		printf("  Elements:  ");
+		if constexpr (std::is_arithmetic_v<T>)
+		{
+			for (uint32_t i = 0; i < arr.size(); i++)
+			{
+				if constexpr (std::is_floating_point_v<T>)
+				{
+					printf("%.2f ", static_cast<double>(arr[i]));
+				}
+				else
+				{
+					printf("%lld ", static_cast<long long>(arr[i]));
+				}
+			}
+			printf("\n");
+		}
+		else
+		{
+			printf("[%u elements of type %s]\n", arr.size(), typeid(T).name());
+		}
+	}
+	else if (!arr.empty())
+	{
+		printf("  Elements:  [%u elements, showing first/last]\n", arr.size());
+		if constexpr (std::is_arithmetic_v<T>)
+		{
+			printf("    First 3: ");
+			for (uint32_t i = 0; i < std::min(3u, arr.size()); i++)
+			{
+				if constexpr (std::is_floating_point_v<T>)
+				{
+					printf("%.2f ", static_cast<double>(arr[i]));
+				}
+				else
+				{
+					printf("%lld ", static_cast<long long>(arr[i]));
+				}
+			}
+			printf("\n    Last 3:  ");
+			uint32_t start = arr.size() > 3 ? arr.size() - 3 : 0;
+			for (uint32_t i = start; i < arr.size(); i++)
+			{
+				if constexpr (std::is_floating_point_v<T>)
+				{
+					printf("%.2f ", static_cast<double>(arr[i]));
+				}
+				else
+				{
+					printf("%lld ", static_cast<long long>(arr[i]));
+				}
+			}
+			printf("\n");
+		}
+	}
+}
+
+/*
+ * Print diagnostic info for a queue
+ */
+template <typename T, typename Tag>
+void
+print_queue_info(const char *name, const queue<T, Tag> &q)
+{
+	printf("\n=== Queue<%s> Info: %s ===\n", typeid(T).name(), name);
+	printf("  Count:     %u elements\n", q.count);
+	printf("  Capacity:  %u elements\n", q.capacity());
+	printf("  Head/Tail: %u / %u\n", q.head, q.tail);
+	printf("  Empty:     %s\n", q.empty() ? "yes" : "no");
+
+	if (q.capacity() > 0)
+	{
+		printf("  Utilization: %.1f%%\n", (100.0 * q.count) / q.capacity());
+		printf("  Memory:    %u bytes used, %u bytes allocated\n", q.count * sizeof(T), q.capacity() * sizeof(T));
+	}
+
+	if (q.data() && arena<Tag>::owns_pointer(q.data()))
+	{
+		printf("  Arena:     %s\n", typeid(Tag).name());
+		printf("  Address:   [%p - %p]\n", q.data(), q.data() + q.capacity());
+	}
+
+	// Visual representation of circular buffer
+	if (q.capacity() > 0 && q.capacity() <= 32)
+	{
+		printf("  Layout:    [");
+		for (uint32_t i = 0; i < q.capacity(); i++)
+		{
+			if (q.count == 0)
+			{
+				printf(".");
+			}
+			else if (q.head <= q.tail)
+			{
+				printf("%c", (i >= q.head && i < q.tail) ? '#' : '.');
+			}
+			else
+			{
+				printf("%c", (i >= q.head || i < q.tail) ? '#' : '.');
+			}
+		}
+		printf("] (# = data, . = empty)\n");
+		if (q.count > 0)
+		{
+			printf("             ");
+			for (uint32_t i = 0; i < q.capacity(); i++)
+			{
+				if (i == q.head && i == ((q.tail - 1 + q.capacity()) % q.capacity()))
+				{
+					printf("B"); // Both head and tail
+				}
+				else if (i == q.head)
+				{
+					printf("H");
+				}
+				else if (i == ((q.tail - 1 + q.capacity()) % q.capacity()))
+				{
+					printf("T");
+				}
+				else
+				{
+					printf(" ");
+				}
+			}
+			printf("  (H = head, T = tail)\n");
+		}
+	}
+}
+
+/*
+ * Print diagnostic info for a hash_map
+ */
+template <typename K, typename V, typename Tag>
+void
+print_hash_map_info(const hash_map<K, V, Tag> &map, const char *name = "")
+{
+	printf("\n=== HashMap<%s, %s> Info: %s ===\n", typeid(K).name(), typeid(V).name(), name);
+	printf("  Size:       %u entries\n", map.size());
+	printf("  Capacity:   %u buckets\n", map.capacity());
+	printf("  Tombstones: %u\n", map.tombstone_count());
+	printf("  Empty:      %s\n", map.empty() ? "yes" : "no");
+
+	if (map.capacity() > 0)
+	{
+		double load_factor = (double)(map.size() + map.tombstone_count()) / map.capacity();
+		printf("  Load factor: %.2f (%.1f%% with tombstones)\n", (double)map.size() / map.capacity(),
+			   load_factor * 100);
+		printf("  Memory:     %zu bytes for table\n", map.capacity() * sizeof(typename hash_map<K, V, Tag>::entry));
+	}
+
+	if (map.data() && arena<Tag>::owns_pointer(const_cast<void *>(static_cast<const void *>(map.data()))))
+	{
+		printf("  Arena:      %s\n", typeid(Tag).name());
+		printf("  Address:    %p\n", map.data());
+	}
+
+	// Analyze distribution
+	if (map.capacity() > 0 && map.size() > 0)
+	{
+		uint32_t max_probe = 0;
+		uint32_t total_probe = 0;
+		uint32_t occupied = 0;
+
+		for (uint32_t i = 0; i < map.capacity(); i++)
+		{
+			auto &entry = map.entries()[i];
+			if (entry.state == hash_map<K, V, Tag>::entry::OCCUPIED)
+			{
+				occupied++;
+				uint32_t ideal_pos = entry.hash & (map.capacity() - 1);
+				uint32_t probe_dist = (i >= ideal_pos) ? (i - ideal_pos) : (map.capacity() - ideal_pos + i);
+				total_probe += probe_dist;
+				if (probe_dist > max_probe)
+				{
+					max_probe = probe_dist;
+				}
+			}
+		}
+
+		printf("  Probe stats:\n");
+		printf("    Max distance:  %u\n", max_probe);
+		printf("    Avg distance:  %.2f\n", occupied > 0 ? (double)total_probe / occupied : 0.0);
+
+		// Distribution visualization for small maps
+		if (map.capacity() <= 64)
+		{
+			printf("  Bucket map: [");
+			for (uint32_t i = 0; i < map.capacity(); i++)
+			{
+				auto &entry = map.entries()[i];
+				if (entry.state == hash_map<K, V, Tag>::entry::OCCUPIED)
+				{
+					printf("#");
+				}
+				else if (entry.state == hash_map<K, V, Tag>::entry::DELETED)
+				{
+					printf("x");
+				}
+				else
+				{
+					printf(".");
+				}
+			}
+			printf("] (# = occupied, x = deleted, . = empty)\n");
+		}
+
+		// Clustering analysis
+		uint32_t clusters = 0;
+		uint32_t max_cluster = 0;
+		uint32_t current_cluster = 0;
+		bool	 in_cluster = false;
+
+		for (uint32_t i = 0; i < map.capacity(); i++)
+		{
+			auto &entry = map.entries()[i];
+			if (entry.state != hash_map<K, V, Tag>::entry::EMPTY)
+			{
+				if (!in_cluster)
+				{
+					clusters++;
+					in_cluster = true;
+					current_cluster = 1;
+				}
+				else
+				{
+					current_cluster++;
+				}
+				if (current_cluster > max_cluster)
+				{
+					max_cluster = current_cluster;
+				}
+			}
+			else
+			{
+				in_cluster = false;
+				current_cluster = 0;
+			}
+		}
+
+		printf("  Clustering:\n");
+		printf("    Clusters:      %u\n", clusters);
+		printf("    Max cluster:   %u entries\n", max_cluster);
+		printf("    Avg cluster:   %.2f entries\n",
+			   clusters > 0 ? (double)(map.size() + map.tombstone_count()) / clusters : 0.0);
+	}
+
+	// Sample entries for small maps
+	if (map.size() > 0 && map.size() <= 5)
+	{
+		printf("  Entries:\n");
+		uint32_t shown = 0;
+		for (uint32_t i = 0; i < map.capacity() && shown < map.size(); i++)
+		{
+			auto &entry = map.entries()[i];
+			if (entry.state == hash_map<K, V, Tag>::entry::OCCUPIED)
+			{
+				printf("    [%u]: ", i);
+				if constexpr (std::is_arithmetic_v<K>)
+				{
+					if constexpr (std::is_floating_point_v<K>)
+					{
+						printf("key=%.2f", static_cast<double>(entry.key));
+					}
+					else
+					{
+						printf("key=%lld", static_cast<long long>(entry.key));
+					}
+				}
+				else if constexpr (std::is_same_v<K, std::string_view>)
+				{
+					printf("key=\"%.*s\"", (int)std::min(size_t(20), entry.key.size()), entry.key.data());
+				}
+				else
+				{
+					printf("key=[%s]", typeid(K).name());
+				}
+
+				printf(", hash=%08x\n", entry.hash);
+				shown++;
+			}
+		}
+	}
+}
+
+/*
+ * Global function to print all container stats in an arena
+ */
+template <typename Tag>
+void
+print_arena_container_stats()
+{
+	printf("\n=== Container Statistics for Arena<%s> ===\n", typeid(Tag).name());
+
+	size_t arena_used = arena<Tag>::used();
+	size_t arena_committed = arena<Tag>::committed();
+	size_t arena_freelist = arena<Tag>::freelist_bytes();
+
+	printf("Arena memory breakdown:\n");
+	printf("  Total used:     %zu bytes\n", arena_used);
+	printf("  In freelists:   %zu bytes (%.1f%%)\n", arena_freelist,
+		   arena_used > 0 ? (100.0 * arena_freelist / arena_used) : 0);
+	printf("  Net allocated:  %zu bytes\n", arena_used - arena_freelist);
+
+	double fragmentation = 0;
+	if (arena_used > arena_freelist)
+	{
+		fragmentation = (100.0 * arena_freelist) / (arena_used - arena_freelist);
+	}
+	printf("  Fragmentation:  %.1f%% (freelist/allocated)\n", fragmentation);
+}

@@ -1086,7 +1086,7 @@ demo_blob_storage(const char *args)
 									"databases handle TEXT and BLOB columns.";
 
 		// Write blob and get reference
-		int content_ptr = prog.load(TYPE_U64, large_content);
+		int content_ptr = prog.load_ptr((void*)large_content);
 		int	 content_size = prog.load(TYPE_U32, strlen(large_content));
 		int	 blob_ref = prog.call_function(vmfunc_write_blob, content_ptr, 2);
 

@@ -9,7 +9,7 @@
 #include <string_view>
 #include "compile.hpp"
 
-hash_map<string_view, relation, catalog_arena> catalog;
+hash_map<fixed_string<RELATION_NAME_MAX_SIZE>, relation, catalog_arena> catalog;
 
 /**
  * Creates a format descriptor for tuples with the given column types.

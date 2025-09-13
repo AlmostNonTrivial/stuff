@@ -28,7 +28,6 @@
 *
 */
 
-
 #include "semantic.hpp"
 #include "containers.hpp"
 #include "catalog.hpp"
@@ -39,13 +38,12 @@
 #include <cstring>
 #include <cstdio>
 
-
 struct semantic_context
 {
 	string_view error;
 	string_view context;
-	char        error_buffer[256];
-	char        context_buffer[256];
+	char		error_buffer[256];
+	char		context_buffer[256];
 };
 
 char *
@@ -426,7 +424,6 @@ semantic_resolve_create_table(semantic_context *ctx, create_table_stmt *stmt)
 		return false;
 	}
 
-
 	relation *existing = lookup_table(ctx, stmt->table_name);
 	if (existing)
 	{
@@ -461,7 +458,6 @@ semantic_resolve_create_table(semantic_context *ctx, create_table_stmt *stmt)
 		}
 	}
 
-
 	array<attribute, query_arena> cols;
 	for (attribute_node &def : stmt->columns)
 	{
@@ -477,7 +473,6 @@ semantic_resolve_create_table(semantic_context *ctx, create_table_stmt *stmt)
 
 		cols.push(attr);
 	}
-
 
 	relation new_relation = create_relation(stmt->table_name, cols);
 	catalog.insert(new_relation.name, new_relation);
@@ -495,7 +490,6 @@ semantic_resolve_drop_table(semantic_context *ctx, drop_table_stmt *stmt)
 		set_error(ctx, "Table does not exist", stmt->table_name);
 		return false;
 	}
-
 
 	catalog.remove(stmt->table_name);
 
@@ -520,8 +514,10 @@ semantic_resolve_statement(semantic_context *ctx, stmt_node *stmt)
 		return semantic_resolve_delete(ctx, &stmt->delete_stmt);
 
 	case STMT_CREATE_TABLE:
-		return semantic_resolve_create_table(ctx, &stmt->create_table_stmt);
+		semantic_resolve_create_table(ctx, &stmt->create_table_stmt);
+		print_hash_map_info(catalog);
 
+		return true;
 	case STMT_DROP_TABLE:
 		return semantic_resolve_drop_table(ctx, &stmt->drop_table_stmt);
 

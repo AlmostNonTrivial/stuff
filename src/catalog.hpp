@@ -106,7 +106,8 @@ struct tuple_format
 	data_type					  key_type;	   // Type of the key column
 };
 
-extern hash_map<string_view, relation, catalog_arena> catalog;
+
+extern hash_map<fixed_string<RELATION_NAME_MAX_SIZE>, relation, catalog_arena> catalog;
 
 void
 catalog_reload();

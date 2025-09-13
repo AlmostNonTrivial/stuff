@@ -299,7 +299,7 @@ run_meta_command(const char *cmd)
 
 		for (auto [name, relation] : catalog)
 		{
-			printf("  %.*s (%d columns)\n", (int)name.size(), name.data(), relation.columns.size());
+			printf("  %.*s (%d columns)\n", (int)name.length(), name.c_str(), relation.columns.size());
 		}
 
 		printf("\n");
