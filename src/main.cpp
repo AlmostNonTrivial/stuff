@@ -17,13 +17,12 @@ void print_usage(const char* program_name)
 
 int main(int argc, char** argv)
 {
-    // Initialize global arenas
     arena<query_arena>::init();
     arena<global_arena>::init();
     arena<catalog_arena>::init();
 
-    // Parse command line arguments
-    const char* database_path = "relational_test.db";  // Default database
+
+    const char* database_path = "relational_test.db";
 
     if (argc > 2)
     {
@@ -32,7 +31,7 @@ int main(int argc, char** argv)
     }
     else if (argc == 2)
     {
-        // Check for help flag
+
         if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)
         {
             print_usage(argv[0]);
@@ -41,6 +40,6 @@ int main(int argc, char** argv)
         database_path = argv[1];
     }
 
-    // Run the REPL with the specified database
+
     return run_repl(database_path);
 }

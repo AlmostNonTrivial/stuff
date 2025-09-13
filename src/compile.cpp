@@ -68,9 +68,9 @@ compile_literal(program_builder *prog, expr_node *expr)
 	switch (expr->lit_type)
 	{
 	case TYPE_U32:
-		return prog->load(prog->alloc_data_type(TYPE_U32, &expr->int_val));
+		return prog->load(TYPE_U32, expr->int_val);
 	case TYPE_CHAR32:
-		return prog->load(prog->alloc_data_type(TYPE_CHAR32, expr->str_val.data(), expr->str_val.size()));
+		return prog->load_string(TYPE_CHAR32, expr->str_val.data(), expr->str_val.size());
 	}
 
 	assert(false);
@@ -119,7 +119,7 @@ compile_expr(program_builder *prog, expr_node *expr, int cursor_id)
 		if (expr->unary_op == OP_NOT)
 		{
 
-			int one = prog->load(TYPE_U32, prog->alloc(1U));
+			int one = prog->load(TYPE_U32, 1U);
 			return prog->sub(one, operand_reg);
 		}
 		return operand_reg;
@@ -502,38 +502,33 @@ compile_select(stmt_node *stmt)
 			{
 				prog.regs.push_scope();
 
-				bool				should_output = true;
 				conditional_context where_ctx;
 				if (select_stmt->where_clause)
 				{
 					int where_result = compile_expr(&prog, select_stmt->where_clause, cursor);
 					where_ctx = prog.begin_if(where_result);
-					should_output = true;
 				}
 
-				if (should_output)
+				int result_start;
+				int result_count;
+
+				if (select_stmt->is_star)
 				{
-					int result_start;
-					int result_count;
-
-					if (select_stmt->is_star)
-					{
-						result_start = prog.get_columns(cursor, 0, table->columns.size());
-						result_count = table->columns.size();
-					}
-					else
-					{
-						result_count = select_stmt->sem.column_indices.size();
-						result_start = prog.regs.allocate_range(result_count);
-						for (uint32_t i = 0; i < result_count; i++)
-						{
-							int col_reg = prog.get_column(cursor, select_stmt->sem.column_indices[i]);
-							prog.move(col_reg, result_start + i);
-						}
-					}
-
-					prog.result(result_start, result_count);
+					result_start = prog.get_columns(cursor, 0, table->columns.size());
+					result_count = table->columns.size();
 				}
+				else
+				{
+					result_count = select_stmt->sem.column_indices.size();
+					result_start = prog.regs.allocate_range(result_count);
+					for (uint32_t i = 0; i < result_count; i++)
+					{
+						int col_reg = prog.get_column(cursor, select_stmt->sem.column_indices[i]);
+						prog.move(col_reg, result_start + i);
+					}
+				}
+
+				prog.result(result_start, result_count);
 
 				if (select_stmt->where_clause)
 				{
@@ -550,7 +545,6 @@ compile_select(stmt_node *stmt)
 	}
 
 	prog.halt();
-	prog.resolve_labels();
 	return prog.instructions;
 }
 
@@ -589,7 +583,6 @@ compile_insert(stmt_node *stmt)
 	prog.commit_transaction();
 	prog.halt();
 
-	prog.resolve_labels();
 	return prog.instructions;
 }
 
@@ -650,7 +643,6 @@ compile_update(stmt_node *stmt)
 	prog.commit_transaction();
 	prog.halt();
 
-	prog.resolve_labels();
 	return prog.instructions;
 }
 
@@ -680,7 +672,7 @@ compile_delete(stmt_node *stmt)
 		else
 		{
 
-			should_delete = prog.load(TYPE_U32, prog.alloc(1U));
+			should_delete = prog.load(TYPE_U32, 1U);
 		}
 
 		auto delete_if = prog.begin_if(should_delete);
@@ -716,7 +708,6 @@ compile_delete(stmt_node *stmt)
 	prog.commit_transaction();
 	prog.halt();
 
-	prog.resolve_labels();
 	return prog.instructions;
 }
 
@@ -728,8 +719,7 @@ compile_create_table(stmt_node *stmt)
 
 	prog.begin_transaction();
 
-	int table_name_reg =
-		prog.load(prog.alloc_data_type(TYPE_CHAR32, create_stmt->table_name.data(), create_stmt->table_name.size()));
+	int table_name_reg = prog.load(TYPE_CHAR32, create_stmt->table_name.data(), create_stmt->table_name.size());
 	int root_page_reg = prog.call_function(vmfunc_create_structure, table_name_reg, 1);
 
 	relation &master = *catalog.get(MASTER_CATALOG);
@@ -738,20 +728,20 @@ compile_create_table(stmt_node *stmt)
 
 	int row_start = prog.regs.allocate_range(5);
 
-	prog.load(prog.alloc_data_type(TYPE_U32, master.next_key.data), row_start);
+	prog.load(prog.load_string(TYPE_U32, master.next_key.data), row_start);
 	type_increment(master.next_key.type, master.next_key.data, master.next_key.data);
 
-	prog.load(prog.alloc_data_type(TYPE_CHAR32, create_stmt->table_name.data(), create_stmt->table_name.size()),
+	prog.load(prog.load_string(TYPE_CHAR32, create_stmt->table_name.data(), create_stmt->table_name.size()),
 			  row_start + 1);
 
-	prog.load(prog.alloc_data_type(TYPE_CHAR32, create_stmt->table_name.data(), create_stmt->table_name.size()),
+	prog.load(prog.load_string(TYPE_CHAR32, create_stmt->table_name.data(), create_stmt->table_name.size()),
 			  row_start + 2);
 
 	prog.move(root_page_reg, row_start + 3);
 
 	string_view sql = reconstruct_create_sql(create_stmt);
 
-	prog.load(prog.alloc_data_type(TYPE_CHAR256, sql.data(), sql.size()), row_start + 4);
+	prog.load(prog.load_string(TYPE_CHAR256, sql.data(), sql.size()), row_start + 4);
 
 	prog.insert_record(master_cursor, row_start, 5);
 
@@ -759,7 +749,6 @@ compile_create_table(stmt_node *stmt)
 	prog.commit_transaction();
 	prog.halt();
 
-	prog.resolve_labels();
 	return prog.instructions;
 }
 
@@ -771,8 +760,7 @@ compile_drop_table(stmt_node *stmt)
 
 	prog.begin_transaction();
 
-	int name_reg =
-		prog.load(prog.alloc_data_type(TYPE_CHAR32, drop_stmt->table_name.data(), drop_stmt->table_name.size()));
+	int name_reg = prog.load_string(TYPE_CHAR32, drop_stmt->table_name.data(), drop_stmt->table_name.size());
 	prog.call_function(vmfunc_drop_structure, name_reg, 1);
 
 	relation &master = *catalog.get(MASTER_CATALOG);
@@ -806,7 +794,6 @@ compile_drop_table(stmt_node *stmt)
 	prog.commit_transaction();
 	prog.halt();
 
-	prog.resolve_labels();
 	return prog.instructions;
 }
 

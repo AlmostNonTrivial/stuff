@@ -4,7 +4,6 @@
 ** and the filesystem. It manages fixed-size pages, implements an LRU
 ** cache, and provides ACID transactions through write-ahead journaling.
 **
-** KEY CONCEPTS
 **
 ** Pages: The database file is divided into fixed-size pages. Page 0 is
 ** reserved as the "root page" containing metadata. All other pages can be
@@ -46,15 +45,16 @@
 ** sized nodes. The Caching layer is hidden from the caller, such that when they call 'pager_get(x)'
 ** they might as well be doing an index into 'char file[LARGE_NUMBER][PAGE_SIZE]'
 **
-** Keeping the pager agnositic about how it is implemented means that we can use it many storage structures,
-** for example we have internal and leaf b+tree nodes, and BLOB nodes, an internally free-pages. The draw
+** Keeping the pager agnositic about how pages are implemented means that we can use it with different
+* storage backend, for example we have internal and leaf b+tree nodes, and BLOB nodes, an internally free-pages. The
+draw
 ** back of this, is that because the pager doesn't know the contents of the pages, it can't implement a compaction
 ** mechanism for where there are a lot of free pages built up. Since the b+tree structure is formed by
 ** pointing to specific indexes, shifting the pages without updating these keys would break everything.
 **
+
+
 */
-
-
 #include "pager.hpp"
 #include "arena.hpp"
 #include "containers.hpp"

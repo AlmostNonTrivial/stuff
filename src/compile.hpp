@@ -9,7 +9,10 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
-
+/*
+ * The VM can have n cursors open at a time
+ * we allocate a lot for them with a simple pool allocator
+ */
 struct cursor_allocator
 {
 	uint32_t				next_cursor = 0;
@@ -28,8 +31,44 @@ struct cursor_allocator
 	void
 	free(int cursor_id)
 	{
+		// no op
 	}
 };
+
+/*
+ * Registers are where we store values that we want to operate
+ * upon, for example
+ *
+ * SELECT WHERE id > 5; will load said column into a register,
+ * 5 in another and do OP_Compare outputting the result in another
+ * register, which we could then do OP_Test
+ *
+ * If we then wanted to output the row we would load the remaining columns
+ * in contigous registers and output them.
+ *
+ * The processing we do naturally uses loops (for some set of rows, do x)
+ * so to not run out of registers we have a simple scope based system.
+ *
+ * When we begin loop, we put a scope, and then pop it.
+ *
+ *
+ * For example: SELECT id, email FROM users WHERE id > 5;
+ *
+ * Load 5 into register 0,
+ * go to the beginning of the tree
+ * begin the loop and push the scope
+ * load id into register 2,
+ * test register 0 and 2, put the result in 1,
+ * if true, load email into register 3,
+ * call result, outputting registers 2 and 3,
+ * pop the scope, now registers 2 and 3 are availble
+ *
+ *
+ *
+ *
+ *
+
+ */
 
 struct register_allocator
 {
@@ -42,7 +81,6 @@ struct register_allocator
 		if (specific >= 0)
 		{
 			assert(specific < REGISTERS && "Register out of range");
-
 			assert(specific >= next_free && "Cannot allocate already-used register");
 			next_free = specific + 1;
 			return specific;
@@ -71,13 +109,6 @@ struct register_allocator
 	}
 
 	void
-	reserve(int count)
-	{
-		assert(next_free + count <= REGISTERS && "Not enough registers to reserve");
-		next_free += count;
-	}
-
-	void
 	push_scope()
 	{
 		scope_stack.push(next_free);
@@ -102,271 +133,167 @@ struct register_allocator
 		assert(mark <= next_free && "Cannot restore to future position");
 		next_free = mark;
 	}
-
-	int
-	available() const
-	{
-		return REGISTERS - next_free;
-	}
-
-	void
-	reset()
-	{
-		next_free = 0;
-		scope_stack.clear();
-	}
 };
 
-struct loop_context
-{
-	const char *start_label;
-	const char *end_label;
-	int			saved_reg_mark;
-};
+/*
+ *
+ * Try to encapulate common patterns
+ * like conditionally iterating through a table
+ * */
 
 struct while_context
 {
-	string_view condition_label;
-	string_view end_label;
-	int			condition_reg;
-	int			saved_reg_mark;
+	uint32_t loop_label;
+	uint32_t end_label;
+	int		 condition_reg;
+	int		 saved_reg_mark;
 };
 
 struct conditional_context
 {
-	const char *else_label;
-	const char *end_label;
-	int			saved_reg_mark;
-	bool		has_else;
+	uint32_t else_label;
+	uint32_t end_label;
+	int		 saved_reg_mark;
+	bool	 has_else;
 };
 
 struct program_builder
 {
-	array<vm_instruction, query_arena>			 instructions;
-	hash_map<string_view, uint32_t, query_arena> labels;
-	array<uint32_t, query_arena>				 unresolved_jumps;
-	register_allocator							 regs;
-	cursor_allocator							 cursors;
-	int											 label_counter = 0;
+	array<vm_instruction, query_arena> instructions;
 
-	loop_context current_loop;
-
-	template <typename T>
-	T *
-	alloc(const T &value)
+	// Label resolution - each label tracks where it points and what needs patching
+	struct label_info
 	{
-		T *ptr = (T *)arena<query_arena>::alloc(sizeof(T));
-		memcpy(ptr, &value, sizeof(T));
-		return ptr;
-	}
+		int32_t						 pc;		 // -1 if not yet defined
+		array<uint32_t, query_arena> patch_list; // Instruction indices that jump here
+	};
 
-	typed_value
-	alloc_data_type(data_type type, const void *src, size_t src_len = 0)
-	{
+	array<label_info, query_arena> labels;
 
-		assert(src);
-		typed_value tv;
-		tv.type = type;
-		uint32_t size = type_size(type);
-		void	*ptr = arena<query_arena>::alloc(size);
-
-		if (type_is_string(type))
-		{
-
-			size_t len = src_len ? src_len : strlen((char *)src);
-			assert(len <= size && "String literal too long for column type");
-			memcpy(ptr, src, len);
-			((char *)ptr)[len] = '\0';
-		}
-		else
-		{
-			memcpy(ptr, src, size);
-		}
-
-		tv.data = ptr;
-		return tv;
-	}
+	register_allocator regs;
+	cursor_allocator   cursors;
 
 	void
 	emit(vm_instruction inst)
 	{
 		instructions.push(inst);
-
-		if (inst.p2 == -1 || inst.p3 == -1)
-		{
-			unresolved_jumps.push(instructions.size() - 1);
-		}
+	}
+	// Create a new label that can be jumped to before it's defined
+	uint32_t
+	create_label()
+	{
+		labels.push({-1, {}});
+		return labels.size() - 1;
 	}
 
+	// Define where a label actually points
 	void
-	label(const char *name)
+	define_label(uint32_t label_id)
 	{
-		labels.insert(arena_intern<query_arena>(name), instructions.size());
-	}
+		assert(label_id < labels.size() && "Invalid label ID");
+		label_info &label = labels[label_id];
+		assert(label.pc == -1 && "Label already defined");
 
-	const char *
-	generate_label(const char *prefix = "L")
-	{
-		char name[32];
-		snprintf(name, 32, "%s%d", prefix, label_counter++);
-		return arena_intern<query_arena>(name).data();
-	}
+		label.pc = instructions.size();
 
-	int
-	here() const
-	{
-		return instructions.size();
-	}
-
-	void
-	resolve_labels()
-	{
-		for (uint32_t i = 0; i < unresolved_jumps.size(); i++)
+		// Immediately patch all forward references
+		for (uint32_t inst_idx : label.patch_list)
 		{
-			uint32_t		inst_idx = unresolved_jumps[i];
 			vm_instruction &inst = instructions[inst_idx];
-
-			if (inst.p4)
+			// Check both p2 and p3 for jump targets (JUMPIF uses both)
+			if (inst.p2 == -1)
 			{
-				const char *label_name = (const char *)inst.p4;
-
-				uint32_t *target = labels.get(label_name);
-
-				if (target)
-				{
-					if (inst.p2 == -1)
-					{
-						inst.p2 = *target;
-					}
-
-					if (inst.p3 == -1)
-					{
-						inst.p3 = *target;
-					}
-				}
-				inst.p4 = nullptr;
+				inst.p2 = label.pc;
+			}
+			if (inst.p3 == -1)
+			{
+				inst.p3 = label.pc;
 			}
 		}
+		label.patch_list.clear();
 	}
 
+	// Jump to a label (may be forward reference)
 	void
-	goto_label(const char *label_name)
+	jump_to(uint32_t label_id)
 	{
-		emit(GOTO_MAKE((void *)label_name));
+		assert(label_id < labels.size() && "Invalid label ID");
+		label_info &label = labels[label_id];
+
+		if (label.pc >= 0)
+		{
+			// Label already defined, emit direct jump
+			emit(GOTO_MAKE(label.pc));
+		}
+		else
+		{
+			// Forward reference - emit placeholder and record for patching
+			label.patch_list.push(instructions.size());
+			emit(GOTO_MAKE(-1));
+		}
 	}
 
+	// Conditional jump to a label
+	void
+	jumpif(int test_reg, uint32_t label_id, bool jump_if_true)
+	{
+		assert(label_id < labels.size() && "Invalid label ID");
+		label_info &label = labels[label_id];
+
+		if (label.pc >= 0)
+		{
+			// Label already defined
+			emit(JUMPIF_MAKE(test_reg, label.pc, jump_if_true));
+		}
+		else
+		{
+			// Forward reference
+			label.patch_list.push(instructions.size());
+			emit(JUMPIF_MAKE(test_reg, -1, jump_if_true));
+		}
+	}
 	void
 	halt(int exit_code = 0)
 	{
 		emit(HALT_MAKE(exit_code));
 	}
 
-	void
-	jumpif_true(int test_reg, const char *label)
-	{
-		emit(JUMPIF_MAKE(test_reg, (void *)label, true));
-	}
-
-	void
-	jumpif_false(int test_reg, const char *label)
-	{
-		emit(JUMPIF_MAKE(test_reg, (void *)label, false));
-	}
-
-	void
-	jumpif_zero(int test_reg, const char *label)
-	{
-		return jumpif_false(test_reg, label);
-	}
-
-	void
-	jumpif_not_zero(int test_reg, const char *label)
-	{
-		return jumpif_true(test_reg, label);
-	}
-
-	loop_context
-	begin_loop(const char *name = nullptr)
-	{
-		if (!name)
-			name = generate_label("loop");
-
-		loop_context ctx = {name, generate_label("end"), regs.mark()};
-
-		label(ctx.start_label);
-		current_loop = ctx;
-		return ctx;
-	}
-
-	void
-	end_loop(const loop_context &ctx)
-	{
-		goto_label(ctx.start_label);
-		label(ctx.end_label);
-		regs.restore(ctx.saved_reg_mark);
-	}
-
-	void
-	break_loop()
-	{
-		goto_label(current_loop.end_label);
-	}
-
-	void
-	continue_loop()
-	{
-		goto_label(current_loop.start_label);
-	}
-
 	while_context
 	begin_while(int condition_reg)
 	{
-		while_context ctx = {generate_label("while_check"), generate_label("while_end"), condition_reg, regs.mark()};
+		uint32_t loop_label = create_label();
+		uint32_t end_label = create_label();
 
-		label(ctx.condition_label.data());
-		jumpif_zero(condition_reg, ctx.end_label.data());
-		return ctx;
+		define_label(loop_label);				 // Loop starts here
+		jumpif(condition_reg, end_label, false); // Jump to end if condition false
+
+		return {loop_label, end_label, condition_reg, regs.mark()};
 	}
 
 	void
 	end_while(const while_context &ctx)
 	{
-		goto_label(ctx.condition_label.data());
-		label(ctx.end_label.data());
-		regs.restore(ctx.saved_reg_mark);
-	}
-
-	while_context
-	begin_do()
-	{
-		while_context ctx = {generate_label("do_start"), generate_label("do_end"), -1, regs.mark()};
-
-		label(ctx.condition_label.data());
-		return ctx;
-	}
-
-	void
-	end_while_condition(const while_context &ctx, int condition_reg)
-	{
-		jumpif_not_zero(condition_reg, ctx.condition_label.data());
-		label(ctx.end_label.data());
+		jump_to(ctx.loop_label);	 // Jump back to loop start
+		define_label(ctx.end_label); // End is here
 		regs.restore(ctx.saved_reg_mark);
 	}
 
 	conditional_context
 	begin_if(int test_reg)
 	{
-		conditional_context ctx = {generate_label("else"), generate_label("endif"), regs.mark(), false};
+		uint32_t else_label = create_label();
+		uint32_t end_label = create_label();
 
-		jumpif_false(test_reg, ctx.else_label);
-		return ctx;
+		jumpif(test_reg, else_label, false); // Jump to else if false
+
+		return {else_label, end_label, regs.mark(), false};
 	}
 
 	void
 	begin_else(conditional_context &ctx)
 	{
-		goto_label(ctx.end_label);
-		label(ctx.else_label);
+		jump_to(ctx.end_label);		  // Jump over else block
+		define_label(ctx.else_label); // Else starts here
 		ctx.has_else = true;
 	}
 
@@ -375,20 +302,77 @@ struct program_builder
 	{
 		if (!ctx.has_else)
 		{
-			label(ctx.else_label);
+			define_label(ctx.else_label); // No else, so else label is here
 		}
-		label(ctx.end_label);
+		define_label(ctx.end_label);
 		regs.restore(ctx.saved_reg_mark);
 	}
 
-	int
-	load(const typed_value &value, int dest_reg = -1)
+	void
+	goto_label(uint32_t label_id)
 	{
+		jump_to(label_id);
+	}
+
+	uint32_t done_label = 0;
+
+	void
+	goto_label(const char *name)
+	{
+		if (strcmp(name, "done") == 0)
+		{
+			if (done_label == 0)
+			{
+				done_label = create_label();
+			}
+			jump_to(done_label);
+		}
+	}
+
+	uint32_t
+	label(const char *name = nullptr)
+	{
+		uint32_t id = create_label();
+		define_label(id);
+		return id;
+	}
+	int
+	load_string(data_type type, const void *src, size_t src_len = 0, int dest_reg = -1)
+	{
+		assert(type_is_string(type));
+		uint32_t size = type_size(type);
+
+		size_t len = src_len ? src_len : strlen((char *)src);
+		assert(len <= size && "String literal too long for column type");
+
+		void *ptr = arena<query_arena>::alloc(size); // Allocate full type size
+		memcpy(ptr, src, len);
+		((char *)ptr)[len] = '\0';
+
 		if (dest_reg == -1)
 		{
 			dest_reg = regs.allocate();
 		}
-		emit(LOAD_MAKE(dest_reg, (int64_t)value.type, value.data));
+		emit(LOAD_MAKE(dest_reg, (int64_t)type, ptr));
+		return dest_reg;
+	}
+
+	template <typename T>
+	int
+	load(data_type type, const T &value, int dest_reg = -1)
+	{
+		assert(!type_is_string(type));
+		assert(sizeof(T) == type_size(type));
+
+		if (dest_reg == -1)
+		{
+			dest_reg = regs.allocate();
+		}
+
+		T *ptr = (T *)arena<query_arena>::alloc(sizeof(T));
+		memcpy(ptr, &value, sizeof(T));
+
+		emit(LOAD_MAKE(dest_reg, (int64_t)type, ptr)); // Fixed: was just 'type'
 		return dest_reg;
 	}
 
@@ -399,9 +383,21 @@ struct program_builder
 		{
 			dest_reg = regs.allocate();
 		}
+
 		emit(LOAD_MAKE(dest_reg, (int64_t)type, value));
 		return dest_reg;
 	}
+
+	// int
+	// load(const typed_value &value, int dest_reg = -1)
+	// {
+	// 	if (dest_reg == -1)
+	// 	{
+	// 		dest_reg = regs.allocate();
+	// 	}
+	// 	emit(LOAD_MAKE(dest_reg, (int64_t)value.type, value.data));
+	// 	return dest_reg;
+	// }
 
 	int
 	move(int src_reg, int dest_reg = -1)
@@ -549,6 +545,7 @@ struct program_builder
 	{
 		return rewind(cursor_id, false, result_reg);
 	}
+
 	int
 	last(int cursor_id, int result_reg = -1)
 	{
@@ -684,7 +681,7 @@ struct program_builder
 		if (dest_reg == -1)
 		{
 			dest_reg = regs.allocate();
-	}
+		}
 		emit(PACK2_MAKE(dest_reg, left_reg, right_reg));
 		return dest_reg;
 	}
@@ -698,13 +695,40 @@ struct program_builder
 		}
 		emit(UNPACK2_MAKE(first_dest_reg, src_reg));
 	}
+
+	// Special handling for demos that use string labels
+	void
+	jumpif_true(int test_reg, const char *label_name)
+	{
+		if (strcmp(label_name, "done") == 0)
+		{
+			if (done_label == 0)
+			{
+				done_label = create_label();
+			}
+			jumpif(test_reg, done_label, true);
+		}
+	}
+
+	void
+	jumpif_zero(int test_reg, const char *label_name)
+	{
+		if (strcmp(label_name, "done") == 0)
+		{
+			if (done_label == 0)
+			{
+				done_label = create_label();
+			}
+			jumpif(test_reg, done_label, false);
+		}
+	}
 };
 
 cursor_context *
-cursor_from_relation(relation &structure);
+btree_cursor_from_relation(relation &structure);
 
 cursor_context *
-red_black(tuple_format &layout, bool allow_duplicates = true);
+red_black_cursor_from_format(tuple_format &layout, bool allow_duplicates = true);
 
 array<vm_instruction, query_arena>
 compile_program(stmt_node *stmt, bool inject_transaction);

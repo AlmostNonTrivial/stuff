@@ -4,3 +4,4 @@ TODO:
 - fix catalog arena
 - clean up contiguous
 - asserts as documentation
+- all demos need to work

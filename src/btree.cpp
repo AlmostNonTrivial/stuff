@@ -1,14 +1,214 @@
-
-
-
 /*
 **
 ** The persistant b+tree
+*
+* A btree node only knows it's layout at runtime: nodes have
+* a block of memory of NODE_DATA_SIZE which will fit their keys and child pointers/records
+* depending on whether they are a internal or leaf node respectively. Child pointers
+* are indexes used with the page that represent the position in the data file
+* where index * PAGE_SIZE gives you the beginning of the node.
+*
+* the key type and size are known at runtime such that the btree can do comparisons
+* with them via dispatch aka
+*
+* type_compare(btree.node_key_type, u8 key1, u8 key2)
+*
+* The B+tree doesn't interpret records, and only sees them as blocks of a give size aka btree.record_size.
+* The VM will give the btree a pointer to some memory that it has packed with columns, and the btree will
+* copy it into the given position based soley of the pointer and size
+*
+* The a btree doens't store it's own type information, it's stored stored in the master catalog
+* btree (the schema for that we hardcode), and loaded on start up into the catalog.
+* For both existing and new btrees we call 'bt_create' with the key type and record_size
+* (the only salient information), and from that calculate how many max/min keys we can have
+* in a given internal and leaf node.
+*
+* A simplication is that we hardcode the space a record can occupy from the types.
+* So if we have a record [u32, char16], and we populate it with: [23, "markymark"]
+* in memory/disk that will be [u32 data, "markymark0000000"] such that there is wasted
+* space. A real database would have additional metadata in the header do pack and unpack rows
+* as tightly as possible.
+*
 **
 ** B+tree visualisation - https://www.cs.usfca.edu/~galles/visualization/BPlusTree.html
 **
-*/
 
+The following demonstrates a insert and a delete operation respectively
+where neither results in a split or merge
+
+LEAF NODE MEMORY LAYOUT
+-----------------------
+┌────────────────────────────────────────────────────────────────────────┐
+│ Header (24 bytes) │        Keys Area         │      Records Area       │
+├───────────────────┼──────────────────────────┼─────────────────────────┤
+│ index  (4)        │ key[0] │ key[1] │ key[2] │ rec[0] │ rec[1] │ rec[2]│
+│ parent (4)        │        │        │        │        │        │       │
+│ next   (4)        │  Keys stored             │  Records stored         │
+│ prev   (4)        │  contiguously            │  contiguously           │
+│ num_keys (4)      │                          │                         │
+│ is_leaf (4)       │                          │                         │
+└────────────────────────────────────────────────────────────────────────┘
+					↑                          ↑
+					data[0]                    data + (max_keys * key_size)
+
+
+
+1. SHIFT_KEYS_RIGHT - Making space for insertion
+
+
+BEFORE: (num_keys = 3, inserting at index 1)
+────────────────────────────────────────────   Want to insert key 15
+Keys:    [10] [20] [30] [  ] [  ]
+		 ↑    ↑    ↑
+		 0    1    2
+
+Records: [A]  [B]  [C]  [ ]  [ ]
+		 ↑    ↑    ↑
+		 0    1    2
+
+OPERATION: SHIFT_KEYS_RIGHT(node, from_idx=1, count=2)
+──────────────────────────────────────────────────────
+memcpy(GET_KEY_AT(node, 2),    // destination: key[2]
+	   GET_KEY_AT(node, 1),    // source: key[1]
+	   2 * key_size)           // copy key[1] and key[2]
+
+Visual:
+	   from_idx
+		  ↓
+Keys:    [10] [20] [30] [  ] [  ]
+			  └─────┴────→ copy 2 keys
+Keys:    [10] [20] [20] [30] [  ]
+			  gap  └─────┴─── shifted
+
+AFTER: (ready to insert at index 1)
+─────────────────────────────────
+Keys:    [10] [15] [20] [30] [  ]
+			  ↑
+			  ready for new key
+
+Records: [A]  [??] [B]  [C]  [ ]
+			  ↑
+			  ready for new record
+			  (after SHIFT_RECORDS_RIGHT)
+
+
+
+2. SHIFT_RECORDS_RIGHT - Corresponding record shift
+
+
+OPERATION: SHIFT_RECORDS_RIGHT(node, from_idx=1, count=2)
+──────────────────────────────────────────────────────────
+uint8_t *base = GET_RECORD_DATA(node);
+memcpy(base + (2 * record_size),    // destination: rec[2]
+	   base + (1 * record_size),    // source: rec[1]
+	   2 * record_size)             // copy rec[1] and rec[2]
+
+Visual:
+		 from_idx
+			↓
+Records: [A]  [B]  [C]  [ ]  [ ]
+			  └────┴─────→ copy 2 records
+Records: [A]  [B]  [B]  [C]  [ ]
+			  gap  └────┴─── shifted
+
+
+
+3. SHIFT_KEYS_LEFT - Removing entry 15
+
+
+BEFORE: (num_keys = 4, deleting at index 1)
+───────────────────────────────────────────
+Keys:    [10] [15] [20] [30] [  ]
+		 ↑    ↑    ↑    ↑
+		 0    1    2    3
+			  DEL
+
+Records: [A]  [X]  [B]  [C]  [ ]
+		 ↑    ↑    ↑    ↑
+		 0    1    2    3
+			  DEL
+
+OPERATION: SHIFT_KEYS_LEFT(node, from_idx=1, count=2)
+─────────────────────────────────────────────────────
+memcpy(GET_KEY_AT(node, 1),    // destination: key[1]
+	   GET_KEY_AT(node, 2),    // source: key[2]
+	   2 * key_size)           // copy key[2] and key[3]
+
+Visual:
+			  from_idx
+				 ↓
+Keys:    [10] [15] [20] [30] [  ]
+			  ←────└────┴─── copy 2 keys
+Keys:    [10] [20] [30] [30] [  ]
+			  └────┴─── shifted
+						stale (will be ignored)
+
+AFTER: (num_keys decremented to 3)
+───────────────────────────────────
+Keys:    [10] [20] [30] [××] [  ]
+		 ↑    ↑    ↑
+		 0    1    2    (ignored)
+
+Records: [A]  [B]  [C]  [××] [ ]
+		 ↑    ↑    ↑
+		 0    1    2    (ignored)
+
+
+
+4. COMPLETE INSERT EXAMPLE
+
+
+Initial state: num_keys = 3
+─────────────────────────────
+Keys:    [10] [20] [30]
+Records: [A]  [B]  [C]
+
+Want to insert: key=15, record=X at position 1
+
+Step 1: Find insertion point (binary_search returns 1)
+Step 2: SHIFT_KEYS_RIGHT(node, 1, 2)
+		Keys:    [10] [20] [20] [30]
+Step 3: SHIFT_RECORDS_RIGHT(node, 1, 2)
+		Records: [A]  [B]  [B]  [C]
+Step 4: COPY_KEY(GET_KEY_AT(node, 1), 15)
+		Keys:    [10] [15] [20] [30]
+Step 5: COPY_RECORD(GET_RECORD_AT(node, 1), X)
+		Records: [A]  [X]  [B]  [C]
+Step 6: node->num_keys++
+		num_keys = 4
+
+Final state:
+────────────
+Keys:    [10] [15] [20] [30]
+Records: [A]  [X]  [B]  [C]
+
+
+
+5. COMPLETE DELETE EXAMPLE
+
+
+Initial state: num_keys = 4
+─────────────────────────────
+Keys:    [10] [15] [20] [30]
+Records: [A]  [X]  [B]  [C]
+
+Want to delete: key=15 at position 1
+
+Step 1: Find deletion point (binary_search returns 1)
+Step 2: Calculate entries_to_shift = 4 - 1 - 1 = 2
+Step 3: SHIFT_KEYS_LEFT(node, 1, 2)
+		Keys:    [10] [20] [30] [30]
+Step 4: SHIFT_RECORDS_LEFT(node, 1, 2)
+		Records: [A]  [B]  [C]  [C]
+Step 5: node->num_keys--
+		num_keys = 3
+
+Final state:
+────────────
+Keys:    [10] [20] [30] [××]  (last entry ignored)
+Records: [A]  [B]  [C]  [××]  (last entry ignored)
+
+ */
 #include "btree.hpp"
 #include "containers.hpp"
 #include "common.hpp"
@@ -86,6 +286,13 @@ struct btree_node
 
 static_assert(sizeof(btree_node) == PAGE_SIZE, "btree_node must be exactly PAGE_SIZE");
 
+/*
+ * Use macros for common ops like pointer based access and shifting because
+ * a) these are used everywhere
+ * b) extracting them to functions means when debugging you have to step into them,
+ * but there is not actual debug info because it's just pointers, so it's just annoying
+ */
+
 /*NOCOVER_START*/
 #define IS_LEAF(node)	  ((node)->is_leaf)
 #define IS_INTERNAL(node) (!(node)->is_leaf)
@@ -140,7 +347,6 @@ static_assert(sizeof(btree_node) == PAGE_SIZE, "btree_node must be exactly PAGE_
 ** Bulk memory operations for node modifications
 */
 
-/* Key array manipulation */
 #define SHIFT_KEYS_RIGHT(node, from_idx, count)                                                                        \
 	memcpy(GET_KEY_AT(node, (from_idx) + 1), GET_KEY_AT(node, from_idx), (count) * tree->node_key_size)
 
@@ -163,7 +369,6 @@ static_assert(sizeof(btree_node) == PAGE_SIZE, "btree_node must be exactly PAGE_
 			   (count) * tree->record_size);                                                                           \
 	} while (0)
 
-/* Children array manipulation (internal nodes only) */
 #define SHIFT_CHILDREN_RIGHT(node, from_idx, count)                                                                    \
 	do                                                                                                                 \
 	{                                                                                                                  \
@@ -178,12 +383,6 @@ static_assert(sizeof(btree_node) == PAGE_SIZE, "btree_node must be exactly PAGE_
 		memcpy(&_children[from_idx], &_children[(from_idx) + 1], (count) * sizeof(uint32_t));                          \
 	} while (0)
 
-/*
-** Inter-node copy operations
-**
-** Used during splits and merges to move data between nodes.
-** These preserve the source node's data (unlike shifts).
-*/
 #define COPY_KEYS(src, src_idx, dst, dst_idx, count)                                                                   \
 	memcpy(GET_KEY_AT(dst, dst_idx), GET_KEY_AT(src, src_idx), (count) * tree->node_key_size)
 
@@ -196,7 +395,6 @@ static_assert(sizeof(btree_node) == PAGE_SIZE, "btree_node must be exactly PAGE_
 			   (count) * tree->record_size);                                                                           \
 	} while (0)
 
-/* Single element operations */
 #define COPY_KEY(dst, src)	  memcpy(dst, src, tree->node_key_size)
 #define COPY_RECORD(dst, src) memcpy(dst, src, tree->record_size)
 
@@ -260,7 +458,6 @@ binary_search(btree *tree, btree_node *node, void *key)
 		{
 			if (IS_LEAF(node))
 			{
-				// No duplicates, this is the only instance
 				return mid;
 			}
 			return mid + 1;
@@ -501,7 +698,6 @@ split(btree *tree, btree_node *node)
 	MARK_DIRTY(node);
 	MARK_DIRTY(new_right);
 
-
 	btree_node *parent = GET_PARENT(node);
 	uint32_t	position_in_parent = 0;
 
@@ -643,10 +839,6 @@ insert_element(btree *tree, void *key, void *data)
 	leaf->num_keys++;
 }
 
-// ============================================================================
-// DELETE AND REPAIR OPERATIONS - Clear strategy and flow
-// ============================================================================
-
 /*
 ** Delete a node and clean up its relationships.
 **
@@ -684,7 +876,6 @@ collapse_empty_root(btree *tree, btree_node *root)
 	// Delete the old root (now at only_child's position)
 	destroy_node(only_child);
 }
-
 
 /*
 ** Borrow an entry from the left sibling to fix underflow.
@@ -842,7 +1033,6 @@ try_borrow_from_siblings(btree *tree, btree_node *node)
 	return false;
 }
 
-
 /*
 ** Merge an underflowing node with a sibling.
 **
@@ -882,7 +1072,6 @@ perform_merge_with_sibling(btree *tree, btree_node *node)
 		right = node;
 		separator_index = child_index - 1;
 	}
-
 
 	assert(left->index == GET_CHILDREN(parent)[separator_index]);
 	assert(right->index == GET_CHILDREN(parent)[separator_index + 1]);
@@ -930,11 +1119,10 @@ perform_merge_with_sibling(btree *tree, btree_node *node)
 	return parent;
 }
 
-
 /*
 ** Fix an underflowing node after deletion.
 **
-** Uses a two-phase strategy:
+** Two-phase:
 **   1. Try borrowing from siblings (non-destructive)
 **   2. If that fails, merge with a sibling (destructive)
 **
@@ -994,7 +1182,6 @@ static void
 delete_element(btree *tree, btree_node *node, void *key, uint32_t index)
 {
 	assert(IS_LEAF(node));
-
 
 	if (IS_ROOT(node) && node->num_keys == 1)
 	{
@@ -1951,4 +2138,4 @@ btree_print(btree *tree_ptr)
 	printf("\n");
 	printf("  Total leaves: %u\n", leaf_count);
 	printf("====================================\n\n");
-}/*NOCOVER_END*/
+} /*NOCOVER_END*/

@@ -4,9 +4,12 @@
 **
 ** The VM is the execution layer of the SQL engine which it takes compiled query
 ** plans (sequences of instructions) and executes them against the storage layer.
-** This provides a clean abstraction boundary: the compiler transforms SQL into
+** This provides an abstraction boundary: the compiler transforms SQL into
 ** instructions without knowing how data is physically stored, and the storage
 ** layer doesn't need to understand SQL semantics.
+**
+** Conceptually, a VM is just a big switch statement, executes parameterized instructions based on the
+** opcode, has some state, and can do logic/arithemetic/conditions on values within registers
 **
 */
 #include "vm.hpp"
@@ -28,14 +31,25 @@
 
 bool _debug = false;
 
+/*
+ * The vm cursor wraps other cursors to
+ * provide a unified api for the vm to do data manipulation
+ *
+ * Currently there is just two cursor types, btree and ephemeral (red black)
+ * but we could have other storage backends with different properties.
+ *
+ * If we had hash based storage, while it might be contrived to have a cursor over it
+ * (as you'd rarely want to do range queries), you still could, you'd just mainly use
+ * direct seeks as opposed to calling next/prev
+ */
 struct vm_cursor
 {
 	storage_type type;
 	tuple_format layout;
 
 	union {
-		bt_cursor bptree;
-		et_cursor mem;
+		bt_cursor btree;
+		et_cursor ephemeral;
 	} cursor;
 };
 
@@ -47,8 +61,8 @@ vmcursor_open(vm_cursor *cursor, cursor_context *context)
 	case BPLUS: {
 		cursor->type = BPLUS;
 		cursor->layout = context->layout;
-		cursor->cursor.bptree.tree = context->storage.tree;
-		cursor->cursor.bptree.state = BT_CURSOR_INVALID;
+		cursor->cursor.btree.tree = context->storage.tree;
+		cursor->cursor.btree.state = BT_CURSOR_INVALID;
 		break;
 	}
 	case RED_BLACK: {
@@ -56,8 +70,8 @@ vmcursor_open(vm_cursor *cursor, cursor_context *context)
 		cursor->layout = context->layout;
 		data_type key_type = cursor->layout.columns[0];
 		bool	  allow_duplicates = (bool)context->flags;
-		cursor->cursor.mem.tree = et_create(key_type, cursor->layout.record_size, allow_duplicates);
-		cursor->cursor.mem.state = et_cursor::INVALID;
+		cursor->cursor.ephemeral.tree = et_create(key_type, cursor->layout.record_size, allow_duplicates);
+		cursor->cursor.ephemeral.state = et_cursor::INVALID;
 		break;
 	}
 	}
@@ -70,9 +84,9 @@ vmcursor_rewind(vm_cursor *cur, bool to_end)
 	switch (cur->type)
 	{
 	case RED_BLACK:
-		return to_end ? et_cursor_last(&cur->cursor.mem) : et_cursor_first(&cur->cursor.mem);
+		return to_end ? et_cursor_last(&cur->cursor.ephemeral) : et_cursor_first(&cur->cursor.ephemeral);
 	case BPLUS:
-		return to_end ? bt_cursorlast(&cur->cursor.bptree) : bt_cursorfirst(&cur->cursor.bptree);
+		return to_end ? bt_cursorlast(&cur->cursor.btree) : bt_cursorfirst(&cur->cursor.btree);
 	default:
 		return false;
 	}
@@ -84,9 +98,9 @@ vmcursor_step(vm_cursor *cur, bool forward)
 	switch (cur->type)
 	{
 	case RED_BLACK:
-		return forward ? et_cursor_next(&cur->cursor.mem) : et_cursor_previous(&cur->cursor.mem);
+		return forward ? et_cursor_next(&cur->cursor.ephemeral) : et_cursor_previous(&cur->cursor.ephemeral);
 	case BPLUS:
-		return forward ? bt_cursornext(&cur->cursor.bptree) : bt_cursorprevious(&cur->cursor.bptree);
+		return forward ? bt_cursornext(&cur->cursor.btree) : bt_cursorprevious(&cur->cursor.btree);
 	default:
 		return false;
 	}
@@ -98,10 +112,10 @@ vmcursor_clear(vm_cursor *cursor)
 	switch (cursor->type)
 	{
 	case BPLUS: {
-		bt_clear(cursor->cursor.bptree.tree);
+		bt_clear(cursor->cursor.btree.tree);
 		break;
 	case RED_BLACK: {
-		et_clear(&cursor->cursor.mem.tree);
+		et_clear(&cursor->cursor.ephemeral.tree);
 		break;
 	}
 	}
@@ -114,9 +128,9 @@ vmcursor_seek(vm_cursor *cur, comparison_op op, uint8_t *key)
 	switch (cur->type)
 	{
 	case RED_BLACK:
-		return et_cursor_seek(&cur->cursor.mem, key, op);
+		return et_cursor_seek(&cur->cursor.ephemeral, key, op);
 	case BPLUS:
-		return bt_cursorseek(&cur->cursor.bptree, key, op);
+		return bt_cursorseek(&cur->cursor.btree, key, op);
 	default:
 		return false;
 	}
@@ -128,9 +142,9 @@ vmcursor_is_valid(vm_cursor *cur)
 	switch (cur->type)
 	{
 	case RED_BLACK:
-		return et_cursor_is_valid(&cur->cursor.mem);
+		return et_cursor_is_valid(&cur->cursor.ephemeral);
 	case BPLUS:
-		return bt_cursoris_valid(&cur->cursor.bptree);
+		return bt_cursoris_valid(&cur->cursor.btree);
 	}
 	return false;
 }
@@ -142,9 +156,9 @@ vmcursor_get_key(vm_cursor *cur)
 	switch (cur->type)
 	{
 	case RED_BLACK:
-		return (uint8_t *)et_cursor_key(&cur->cursor.mem);
+		return (uint8_t *)et_cursor_key(&cur->cursor.ephemeral);
 	case BPLUS:
-		return (uint8_t *)bt_cursorkey(&cur->cursor.bptree);
+		return (uint8_t *)bt_cursorkey(&cur->cursor.btree);
 	}
 	return nullptr;
 }
@@ -155,9 +169,9 @@ vmcursor_get_record(vm_cursor *cur)
 	switch (cur->type)
 	{
 	case RED_BLACK:
-		return (uint8_t *)et_cursor_record(&cur->cursor.mem);
+		return (uint8_t *)et_cursor_record(&cur->cursor.ephemeral);
 	case BPLUS:
-		return (uint8_t *)bt_cursorrecord(&cur->cursor.bptree);
+		return (uint8_t *)bt_cursorrecord(&cur->cursor.btree);
 	}
 	return nullptr;
 }
@@ -166,6 +180,28 @@ uint8_t *
 vmcursor_column(vm_cursor *cur, uint32_t col_index)
 {
 
+	/*
+	 * keys and records are stored seperately in btree leaf nodes
+	 *
+	 * [key0, key1, ...keyn][record0,record1, recordn]
+	 *
+	 * So when we try to access column 0 (implicitly the primary key), we don't
+	 * apply any offset.
+	 *
+	 * The the trees view the record as a black box of a given size, so
+	 * we ask for the record, which points to the beginning of this memory
+	 * then the vm cursor, which has the schema information and calculated offsets
+	 * applies the nessssary offset:
+	 *
+	 * record:
+	 * [u32, char16, i32, i32]
+	 * offsets:
+	 * [0, 4, 20, 24]
+	 * vmcursor_column(3)
+	 * offsets[3 - 1] = 20
+	 * data + (u8)20 -> i32
+	 *
+	 */
 	if (col_index == 0)
 	{
 		return vmcursor_get_key(cur);
@@ -180,16 +216,15 @@ vmcursor_column_type(vm_cursor *cur, uint32_t col_index)
 	return cur->layout.columns[col_index];
 }
 
-// Modification functions
 bool
 vmcursor_insert(vm_cursor *cur, uint8_t *key, uint8_t *record, uint32_t size)
 {
 	switch (cur->type)
 	{
 	case RED_BLACK:
-		return et_cursor_insert(&cur->cursor.mem, (void *)key, (void *)record);
+		return et_cursor_insert(&cur->cursor.ephemeral, (void *)key, (void *)record);
 	case BPLUS:
-		return bt_cursorinsert(&cur->cursor.bptree, key, record);
+		return bt_cursorinsert(&cur->cursor.btree, key, record);
 	default:
 		return false;
 	}
@@ -201,9 +236,9 @@ vmcursor_update(vm_cursor *cur, uint8_t *record)
 	switch (cur->type)
 	{
 	case RED_BLACK:
-		return et_cursor_update(&cur->cursor.mem, record);
+		return et_cursor_update(&cur->cursor.ephemeral, record);
 	case BPLUS:
-		return bt_cursorupdate(&cur->cursor.bptree, record);
+		return bt_cursorupdate(&cur->cursor.btree, record);
 	default:
 		return false;
 	}
@@ -215,9 +250,9 @@ vmcursor_remove(vm_cursor *cur)
 	switch (cur->type)
 	{
 	case RED_BLACK:
-		return et_cursor_delete(&cur->cursor.mem);
+		return et_cursor_delete(&cur->cursor.ephemeral);
 	case BPLUS:
-		return bt_cursordelete(&cur->cursor.bptree);
+		return bt_cursordelete(&cur->cursor.btree);
 	default:
 		return false;
 	}
@@ -267,6 +302,25 @@ static struct
 static void
 set_register(typed_value *dest, uint8_t *src, data_type type)
 {
+	/*
+	 * Our registers operate with heap(arena) allocated memory which is reset
+	 * every query.
+	 *
+	 * If we want to set a register, that already has memory set, and that memory can
+	 * fit our new data type, just copy that data in and set the registers new type.
+	 *
+	 * Reg 1 before
+	 * type: u64, 8 bytes
+	 * [F,F,F,F,F,F,F,F]
+	 *
+	 * then set the register as a u32
+	 *
+	 * Reg 1 after
+	 * type: u32, 4 bytes
+	 * [F,F,F,F,F,F,F,F], still has 8 bytes allocated, but we only interpret the 4
+	 *
+	 *
+	 */
 	if (dest->get_size() < type_size(type))
 	{
 		arena<query_arena>::reclaim(dest->data, type_size(dest->type));
@@ -290,6 +344,20 @@ set_register(typed_value *dest, typed_value *src)
 static void
 build_record(uint8_t *data, int32_t first_reg, int32_t count)
 {
+
+	/*
+	 * In order to insert a record into a tree, we need to create one contigous
+	 * block of a given size.
+	 *
+	 * Our btree doesn't interpret records, just how large they are.
+	 *
+	 * For an insert of a record type [u32, u32, u32], we load the values
+	 * into contigous registers, then call this function pointing at the
+	 * first non-key containing register, which copies the value into a buffer
+	 * of the required size, and that will be inserted.
+	 *
+	 */
+
 	int32_t offset = 0;
 	for (int i = 0; i < count; i++)
 	{
@@ -891,6 +959,14 @@ step()
 		return ABORT;
 	}
 	case OP_Pack: {
+
+		/*
+		 * Packing and unpacking two datatypes to make composite keys
+		 * for use in indexes and multi order-by queries.
+
+		 *
+		 */
+
 		int32_t dest = PACK2_DEST_REG();
 		int32_t left = PACK2_LEFT_REG();
 		int32_t right = PACK2_RIGHT_REG();

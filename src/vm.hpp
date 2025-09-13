@@ -6,14 +6,15 @@
 #include <cstdint>
 #include <cstring>
 
-
 #define REGISTERS 20
 
 /*
  * OP_Function callback
  * for implementing some specific operations that would be contrived
  * to make an opcode for, for example, %LIKE% can be implemented
- * with a callback that does the pattern matching (see demo.cpp)
+ * by passing in a column in reg 1, a pattern in reg 2, and then put
+ * the result in reg 3
+ * (see demo.cpp)
  */
 typedef bool (*vm_function)(typed_value *result,   // Output register
 							typed_value *args,	   // Input registers array
@@ -53,7 +54,7 @@ enum OPCODE : uint8_t
 {
 
 	OP_Goto = 1,
-#define GOTO_MAKE(label)   {OP_Goto, 0, -1, 0, label, 0}
+#define GOTO_MAKE(pc)	   {OP_Goto, 0, pc, 0, nullptr, 0}
 #define GOTO_TARGET()	   (inst->p2)
 #define GOTO_DEBUG_PRINT() printf("GOTO -> PC=%d", GOTO_TARGET())
 
@@ -164,10 +165,10 @@ enum OPCODE : uint8_t
 		   debug_arith_op_name(ARITHMETIC_OP()), ARITHMETIC_RIGHT_REG())
 
 	OP_JumpIf = 52,
-#define JUMPIF_MAKE(test_reg, jump_label, jump_on_true) {OP_JumpIf, test_reg, -1, 0, jump_label, (uint8_t)jump_on_true}
-#define JUMPIF_TEST_REG()								(inst->p1)
-#define JUMPIF_JUMP_TARGET()							(inst->p2)
-#define JUMPIF_JUMP_ON_TRUE()							(inst->p5 != 0)
+#define JUMPIF_MAKE(test_reg, jump_pc, jump_on_true) {OP_JumpIf, test_reg, jump_pc, 0, nullptr, (uint8_t)jump_on_true}
+#define JUMPIF_TEST_REG()							 (inst->p1)
+#define JUMPIF_JUMP_TARGET()						 (inst->p2)
+#define JUMPIF_JUMP_ON_TRUE()						 (inst->p5 != 0)
 #define JUMPIF_DEBUG_PRINT()                                                                                           \
 	printf("JUMPIF R[%d] %s -> PC=%d", JUMPIF_TEST_REG(), JUMPIF_JUMP_ON_TRUE() ? "TRUE" : "FALSE",                    \
 		   JUMPIF_JUMP_TARGET())
@@ -238,7 +239,6 @@ enum OPCODE : uint8_t
 #define UNPACK2_DEBUG_PRINT()                                                                                          \
 	printf("UNPACK2 R[%d],R[%d] <- unpack(R[%d])", UNPACK2_FIRST_DEST_REG(), UNPACK2_FIRST_DEST_REG() + 1,             \
 		   UNPACK2_SRC_REG())
-
 };
 
 /* A loose interpretation of sqlite's opcode structure */
@@ -264,8 +264,6 @@ vm_execute(vm_instruction *instructions, int instruction_count);
 
 void
 vm_set_result_callback(result_callback callback);
-
-
 
 inline const char *
 debug_compare_op_name(comparison_op op)

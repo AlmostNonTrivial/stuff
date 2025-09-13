@@ -13,7 +13,6 @@
 
 void
 formatted_result_callback(typed_value *result, size_t count);
-
 // Simple CSV parser
 struct csv_reader
 {
@@ -222,7 +221,6 @@ load_all_data_sql()
 #include <cstdio>
 
 // VM Function: LIKE pattern matching with % wildcard
-// VM Function: LIKE pattern matching with % wildcard
 bool
 vmfunc_like(typed_value *result, typed_value *args, uint32_t arg_count)
 {
@@ -406,14 +404,12 @@ vmfunc_create_index_structure(typed_value *result, typed_value *args, uint32_t a
 void
 demo_like_pattern(const char *args)
 {
-	// _debug = true;
 	vm_set_result_callback(formatted_result_callback);
 	// Parse pattern from args
 	char pattern[32];
 	if (args && *args)
 	{
 		strncpy(pattern, args, 32);
-		// pattern[32] = '\0';
 	}
 	else
 	{
@@ -433,12 +429,11 @@ demo_like_pattern(const char *args)
 		return;
 	}
 
-	auto products_ctx = cursor_from_relation(*products);
+	auto products_ctx = btree_cursor_from_relation(*products);
 	int	 cursor = prog.open_cursor(products_ctx);
 
 	// Load pattern into register
-	// int pattern_reg = prog.load(TYPE_CHAR32, prog.alloc_string(pattern, 32));
-	int pattern_reg = prog.load(prog.alloc_data_type(TYPE_CHAR32, pattern));
+	int pattern_reg = prog.load_string(TYPE_CHAR32, pattern, 32);
 
 	// Scan products
 	int	 at_end = prog.first(cursor);
@@ -470,7 +465,6 @@ demo_like_pattern(const char *args)
 
 	prog.close_cursor(cursor);
 	prog.halt();
-	prog.resolve_labels();
 
 	vm_execute(prog.instructions.front(), prog.instructions.size());
 }
@@ -504,22 +498,18 @@ demo_nested_loop_join(const char *args)
 		return;
 	}
 
-	auto users_ctx = cursor_from_relation(*users);
-	auto orders_ctx = cursor_from_relation(*orders);
+	auto users_ctx = btree_cursor_from_relation(*users);
+	auto orders_ctx = btree_cursor_from_relation(*orders);
 
 	int users_cursor = prog.open_cursor(users_ctx);
 	int orders_cursor = prog.open_cursor(orders_ctx);
 
-	// Counter for LIMIT
-	// int count_reg = prog.load(TYPE_U32, prog.alloc_value(0U));
-	uint32_t x = 0U;
-	int		 count_reg = prog.load(prog.alloc_data_type(TYPE_U32, &x));
 
-	// int limit_reg = prog.load(TYPE_U32, prog.alloc_value((uint32_t)limit));
-	int limit_reg = prog.load(prog.alloc_data_type(TYPE_U32, &limit));
-	// int one_reg = prog.load(TYPE_U32, prog.alloc_value(1U));
+	int		 count_reg = prog.load_string(TYPE_U32, 0U);
+
+	int limit_reg = prog.load(TYPE_U32, limit);
 	uint32_t xx = 1U;
-	int		 one_reg = prog.load(prog.alloc_data_type(TYPE_U32, &xx));
+	int		 one_reg = prog.load(TYPE_U32, 1U);
 
 	// Outer loop: scan users
 	int	 at_end_users = prog.first(users_cursor);
@@ -581,7 +571,6 @@ demo_nested_loop_join(const char *args)
 	prog.close_cursor(users_cursor);
 	prog.close_cursor(orders_cursor);
 	prog.halt();
-	prog.resolve_labels();
 
 	vm_execute(prog.instructions.front(), prog.instructions.size());
 }
@@ -621,9 +610,9 @@ demo_subquery_pattern(const char *args)
 		return;
 	}
 
-	auto		 users_ctx = cursor_from_relation(*users);
+	auto		 users_ctx = btree_cursor_from_relation(*users);
 	tuple_format temp_layout = users_ctx->layout;
-	auto		 temp_ctx = red_black(temp_layout);
+	auto		 temp_ctx = red_black_cursor_from_format(temp_layout);
 
 	int users_cursor = prog.open_cursor(users_ctx);
 	int temp_cursor = prog.open_cursor(temp_ctx);
@@ -631,8 +620,7 @@ demo_subquery_pattern(const char *args)
 	// Phase 1: Materialize subquery (age > threshold) into temp tree
 	{
 		prog.regs.push_scope();
-		// int age_const = prog.load(TYPE_U32, prog.alloc_value((uint32_t)age));
-		int age_const = prog.load(prog.alloc_data_type(TYPE_U32, &age));
+		int age_const = prog.load(TYPE_U32, age);
 
 		int	 at_end = prog.first(users_cursor);
 		auto scan_loop = prog.begin_while(at_end);
@@ -658,8 +646,7 @@ demo_subquery_pattern(const char *args)
 	// Phase 2: Scan temp tree and filter by city
 	{
 		prog.regs.push_scope();
-		// int city_const = prog.load(TYPE_CHAR16, prog.alloc_string(city, 16));
-		int city_const = prog.load(prog.alloc_data_type(TYPE_CHAR32, city, 16));
+		int city_const = prog.load_string(TYPE_CHAR32, city, 32);
 
 		int	 at_end = prog.first(temp_cursor);
 		auto scan_loop = prog.begin_while(at_end);
@@ -685,7 +672,6 @@ demo_subquery_pattern(const char *args)
 	prog.close_cursor(users_cursor);
 	prog.close_cursor(temp_cursor);
 	prog.halt();
-	prog.resolve_labels();
 
 	vm_execute(prog.instructions.front(), prog.instructions.size());
 }
@@ -720,13 +706,11 @@ demo_composite_index(const char *args)
 			return;
 		}
 
-		auto orders_ctx = cursor_from_relation(*orders);
+		auto orders_ctx = btree_cursor_from_relation(*orders);
 		int	 cursor = prog.open_cursor(orders_ctx);
 
-		// int target_user = prog.load(TYPE_U32, prog.alloc_value((uint32_t)user_id));
-		int target_user = prog.load(prog.alloc_data_type(TYPE_U32, &user_id));
-		// int threshold = prog.load(TYPE_U32, prog.alloc_value((uint32_t)min_order_id));
-		int threshold = prog.load(prog.alloc_data_type(TYPE_U32, &min_order_id));
+		int target_user = prog.load(TYPE_U32, user_id);
+		int threshold = prog.load(TYPE_U32, min_order_id);
 
 		int	 at_end = prog.first(cursor);
 		auto loop = prog.begin_while(at_end);
@@ -753,7 +737,6 @@ demo_composite_index(const char *args)
 
 		prog.close_cursor(cursor);
 		prog.halt();
-		prog.resolve_labels();
 
 		vm_execute(prog.instructions.front(), prog.instructions.size());
 	}
@@ -777,7 +760,7 @@ demo_composite_index(const char *args)
 		program_builder prog;
 
 		relation *orders = catalog.get("orders");
-		auto	  orders_ctx = cursor_from_relation(*orders);
+		auto	  orders_ctx = btree_cursor_from_relation(*orders);
 
 		// Create a context for the temporary index
 		cursor_context index_context;
@@ -811,7 +794,6 @@ demo_composite_index(const char *args)
 		prog.close_cursor(orders_cursor);
 		prog.close_cursor(index_cursor);
 		prog.halt();
-		prog.resolve_labels();
 
 		vm_execute(prog.instructions.front(), prog.instructions.size());
 	}
@@ -833,11 +815,9 @@ demo_composite_index(const char *args)
 
 		prog.regs.push_scope();
 
-		// int user_reg = prog.load(TYPE_U32, prog.alloc_value((uint32_t)user_id));
-		int user_reg = prog.load(prog.alloc_data_type(TYPE_U32, &user_id));
-		// int order_threshold = prog.load(TYPE_U32, prog.alloc_value((uint32_t)(min_order_id + 1)));
-		auto x = min_order_id + 1;
-		int	 order_threshold = prog.load(prog.alloc_data_type(TYPE_U32, &x));
+		int user_reg = prog.load(TYPE_U32, user_id);
+
+		int	 order_threshold = prog.load(TYPE_U32,  min_order_id + 1);
 
 		// Create composite seek key
 		int seek_key = prog.pack2(user_reg, order_threshold);
@@ -878,7 +858,6 @@ demo_composite_index(const char *args)
 
 		prog.close_cursor(cursor);
 		prog.halt();
-		prog.resolve_labels();
 
 		vm_execute(prog.instructions.front(), prog.instructions.size());
 	}
@@ -928,15 +907,14 @@ demo_group_by_aggregate(const char *args)
 		(TYPE_U32),	   // sum_age
 	};
 	tuple_format agg_layout = tuple_format_from_types(agg_types);
-	auto		 users_ctx = cursor_from_relation(*users);
-	auto		 agg_ctx = red_black(agg_layout);
+	auto		 users_ctx = btree_cursor_from_relation(*users);
+	auto		 agg_ctx = red_black_cursor_from_format(agg_layout);
 	int			 users_cursor = prog.open_cursor(users_ctx);
 	int			 agg_cursor = prog.open_cursor(agg_ctx);
 	// Phase 1: Scan users and build aggregates
 	{
 		prog.regs.push_scope();
-		// int one_const = prog.load(TYPE_U32, prog.alloc_value(1U));
-		int	 one_const = prog.load(prog.alloc_data_type(TYPE_U32, prog.alloc(1U)));
+		int	 one_const = prog.load(TYPE_U32, 1U);
 		int	 at_end = prog.first(users_cursor);
 		auto scan_loop = prog.begin_while(at_end);
 		{
@@ -1011,7 +989,7 @@ demo_group_by_aggregate(const char *args)
 	prog.close_cursor(users_cursor);
 	prog.close_cursor(agg_cursor);
 	prog.halt();
-	prog.resolve_labels();
+
 	vm_execute(prog.instructions.front(), prog.instructions.size());
 }
 
@@ -1089,10 +1067,9 @@ demo_blob_storage(const char *args)
 	}
 
 	program_builder prog;
-	// prog.begin_transaction();
 
 	relation *docs = catalog.get("documents");
-	auto	  docs_ctx = cursor_from_relation(*docs);
+	auto	  docs_ctx = btree_cursor_from_relation(*docs);
 	int		  cursor = prog.open_cursor(docs_ctx);
 
 	// Insert a document with blob
@@ -1109,21 +1086,16 @@ demo_blob_storage(const char *args)
 									"databases handle TEXT and BLOB columns.";
 
 		// Write blob and get reference
-		// int content_ptr = prog.load(TYPE_U64, prog.alloc_value((uint64_t)large_content));
-		int content_ptr = prog.load(prog.alloc_data_type(TYPE_U64, large_content));
-		// int content_size = prog.load(TYPE_U32, prog.alloc_value((uint32_t)strlen(large_content)));
-		auto xxx = strlen(large_content);
-		int	 content_size = prog.load(prog.alloc_data_type(TYPE_U32, &xxx));
+		int content_ptr = prog.load(TYPE_U64, large_content);
+		int	 content_size = prog.load(TYPE_U32, strlen(large_content));
 		int	 blob_ref = prog.call_function(vmfunc_write_blob, content_ptr, 2);
 
 		// Prepare document row
 		int row_start = prog.regs.allocate_range(3);
-		// prog.load(TYPE_U32, prog.alloc_value((uint32_t)doc_id), row_start);
-		prog.load(prog.alloc_data_type(TYPE_U32, &doc_id), row_start);
-		// prog.load(TYPE_CHAR32, prog.alloc_string("Technical Manual", 32), row_start + 1);
+		prog.load(TYPE_U32, doc_id,  row_start);
 		auto s = "Technical Manual";
 		auto sl = strlen(s);
-		prog.load(prog.alloc_data_type(TYPE_CHAR32, s, sl), row_start + 1);
+		prog.load(prog.load_string(TYPE_CHAR32, s, sl), row_start + 1);
 		prog.move(blob_ref, row_start + 2);
 
 		prog.insert_record(cursor, row_start, 3);
@@ -1138,8 +1110,7 @@ demo_blob_storage(const char *args)
 	{
 		prog.regs.push_scope();
 
-		// int search_key = prog.load(TYPE_U32, prog.alloc_value((uint32_t)doc_id));
-		int search_key = prog.load(prog.alloc_data_type(TYPE_U32, &doc_id));
+		int search_key = prog.load(TYPE_U32, doc_id);
 		int found = prog.seek(cursor, search_key, EQ);
 
 		auto if_found = prog.begin_if(found);
@@ -1150,15 +1121,6 @@ demo_blob_storage(const char *args)
 
 			// Read blob content
 			int blob_content = prog.call_function(vmfunc_read_blob, blob_ref_col, 1);
-
-			// printf("Document found:\n");
-			// int result_start = prog.regs.allocate_range(4);
-			// prog.move(doc_id_col, result_start);
-			// prog.move(title_col, result_start + 1);
-			// prog.move(blob_ref_col, result_start + 2);
-			// prog.move(blob_content, result_start + 3);
-
-			// prog.result(result_start, 4);
 		}
 		prog.end_if(if_found);
 
@@ -1168,7 +1130,6 @@ demo_blob_storage(const char *args)
 	prog.close_cursor(cursor);
 	prog.commit_transaction();
 	prog.halt();
-	prog.resolve_labels();
 
 	vm_execute(prog.instructions.front(), prog.instructions.size());
 }

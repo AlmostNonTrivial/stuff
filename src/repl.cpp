@@ -15,11 +15,11 @@
 #include <cstring>
 #include <chrono>
 
-// Module-local state
+
 static array<int, query_arena> result_column_widths;
 static const char			  *current_database_path = nullptr;
 
-// Helper functions for formatting
+
 static int
 get_column_width(data_type type)
 {
