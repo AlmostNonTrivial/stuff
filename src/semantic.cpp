@@ -1,3 +1,34 @@
+/*
+*
+* After parsing the SQL into an abstract syntax tree, we know that there are
+* no syntatic and lexical errors, so we then check for semantic errors.
+*
+* For example, while "SELECT username FROM table_that_doesnt_exist;" is
+* valid SQL, it's not semantically valid unless said table actually exists
+* in our database. Similary with the columns we select, and our where expressions.
+*
+* As we validate a statement, we also want to resolve information
+* about the data types and schema information we're operating upon to make the
+* ast easier to compile. For example, our expression node:
+*
+* struct expr_node
+{
+	EXPR_TYPE type;
+
+	struct
+	{
+		data_type resolved_type = TYPE_NULL;
+		int32_t	  column_index = -1;
+	} sem
+
+	...
+*
+* has a 'sem(antic)' context. 'SELECT * FROM users WHERE age > 50;' will
+* resolve to expr_node.sem.resolved_type = TYPE_U32, .column_index = 2
+*
+*/
+
+
 #include "semantic.hpp"
 #include "containers.hpp"
 #include "catalog.hpp"
@@ -395,7 +426,7 @@ semantic_resolve_create_table(semantic_context *ctx, create_table_stmt *stmt)
 		return false;
 	}
 
-	// Check if table already exists
+
 	relation *existing = lookup_table(ctx, stmt->table_name);
 	if (existing)
 	{
@@ -430,7 +461,7 @@ semantic_resolve_create_table(semantic_context *ctx, create_table_stmt *stmt)
 		}
 	}
 
-	// Build the column array for the new relation
+
 	array<attribute, query_arena> cols;
 	for (attribute_node &def : stmt->columns)
 	{
@@ -447,7 +478,7 @@ semantic_resolve_create_table(semantic_context *ctx, create_table_stmt *stmt)
 		cols.push(attr);
 	}
 
-	// Create and immediately insert the new relation into the catalog
+
 	relation new_relation = create_relation(stmt->table_name, cols);
 	catalog.insert(new_relation.name, new_relation);
 
@@ -465,7 +496,7 @@ semantic_resolve_drop_table(semantic_context *ctx, drop_table_stmt *stmt)
 		return false;
 	}
 
-	// Immediately remove the table from the catalog
+
 	catalog.remove(stmt->table_name);
 
 	return true;
