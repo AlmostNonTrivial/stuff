@@ -10,7 +10,7 @@
  * tests passing, and absent-mindedly reduced the cache size, then the next
  * day ran the tests again after change a variable name, for them to fail.
  */
-#define MAX_CACHE_ENTRIES 64
+#define MAX_CACHE_ENTRIES 500
 #define PAGE_SIZE		  1024
 
 /*

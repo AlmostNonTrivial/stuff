@@ -43,7 +43,7 @@
 #include <string_view>
 
 cursor_context *
-from_structure(relation &structure)
+cursor_from_relation(relation &structure)
 {
 	cursor_context *cctx = (cursor_context *)arena<query_arena>::alloc(sizeof(cursor_context));
 	cctx->storage.tree = &structure.storage.btree;
@@ -355,7 +355,7 @@ compile_select(stmt_node *stmt)
 		auto rb_ctx = red_black(rb_layout, true);
 		int	 rb_cursor = prog.open_cursor(rb_ctx);
 
-		auto table_ctx = from_structure(*table);
+		auto table_ctx = cursor_from_relation(*table);
 		int	 table_cursor = prog.open_cursor(table_ctx);
 
 		int	 at_end = prog.first(table_cursor);
@@ -445,7 +445,7 @@ compile_select(stmt_node *stmt)
 	else
 	{
 
-		auto table_ctx = from_structure(*table);
+		auto table_ctx = cursor_from_relation(*table);
 		int	 cursor = prog.open_cursor(table_ctx);
 
 		comparison_op seek_op;
@@ -563,7 +563,7 @@ compile_insert(stmt_node *stmt)
 	prog.begin_transaction();
 
 	relation *table = catalog.get(insert_stmt->table_name);
-	auto	  table_ctx = from_structure(*table);
+	auto	  table_ctx = cursor_from_relation(*table);
 	int		  cursor = prog.open_cursor(table_ctx);
 
 	int row_size = table->columns.size();
@@ -602,7 +602,7 @@ compile_update(stmt_node *stmt)
 	prog.begin_transaction();
 
 	relation *table = catalog.get(update_stmt->table_name);
-	auto	  table_ctx = from_structure(*table);
+	auto	  table_ctx = cursor_from_relation(*table);
 	int		  cursor = prog.open_cursor(table_ctx);
 
 	int at_end = prog.first(cursor);
@@ -663,7 +663,7 @@ compile_delete(stmt_node *stmt)
 	prog.begin_transaction();
 
 	relation *table = catalog.get(delete_stmt->table_name);
-	auto	  table_ctx = from_structure(*table);
+	auto	  table_ctx = cursor_from_relation(*table);
 	int		  cursor = prog.open_cursor(table_ctx);
 
 	int at_end = prog.first(cursor);
@@ -733,7 +733,7 @@ compile_create_table(stmt_node *stmt)
 	int root_page_reg = prog.call_function(vmfunc_create_structure, table_name_reg, 1);
 
 	relation &master = *catalog.get(MASTER_CATALOG);
-	auto	  master_ctx = from_structure(master);
+	auto	  master_ctx = cursor_from_relation(master);
 	int		  master_cursor = prog.open_cursor(master_ctx);
 
 	int row_start = prog.regs.allocate_range(5);
@@ -776,7 +776,7 @@ compile_drop_table(stmt_node *stmt)
 	prog.call_function(vmfunc_drop_structure, name_reg, 1);
 
 	relation &master = *catalog.get(MASTER_CATALOG);
-	auto	  master_ctx = from_structure(master);
+	auto	  master_ctx = cursor_from_relation(master);
 	int		  cursor = prog.open_cursor(master_ctx);
 
 	int	 at_end = prog.first(cursor);

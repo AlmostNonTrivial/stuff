@@ -41,7 +41,6 @@ test_btree_sequential_ops()
 		bt_validate(&tree);
 	}
 
-	btree_print(&tree);
 
 	for (int i = 0; i < COUNT; i++)
 	{

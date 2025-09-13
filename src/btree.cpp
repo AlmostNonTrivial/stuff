@@ -1,13 +1,13 @@
 
+
+
 /*
 **
 ** The persistant b+tree
 **
 ** B+tree visualisation - https://www.cs.usfca.edu/~galles/visualization/BPlusTree.html
 **
-**
 */
-
 
 #include "btree.hpp"
 #include "containers.hpp"
@@ -1825,7 +1825,7 @@ btree_print(btree *tree_ptr)
 	}
 
 	printf("====================================\n");
-	printf("B+Tree Structure (BFS)\n");
+	printf("B+Tree Structure\n");
 	printf("====================================\n");
 	printf("Root: page_%u\n", tree_ptr->root_page_index);
 	printf("Key type: %s, Record size: %u bytes\n", type_name(tree_ptr->node_key_type), tree_ptr->record_size);

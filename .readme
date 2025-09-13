@@ -284,11 +284,11 @@ LEAF NODE MEMORY LAYOUT
 
 
 ================================================================================
-1. SHIFT_KEYS_RIGHT - Making space for insertion at index 1
+1. SHIFT_KEYS_RIGHT - Making space for insertion
 ================================================================================
 
 BEFORE: (num_keys = 3, inserting at index 1)
-────────────────────────────────────────────
+────────────────────────────────────────────   Want to insert key 15
 Keys:    [10] [20] [30] [  ] [  ]
 		 ↑    ↑    ↑
 		 0    1    2
@@ -313,7 +313,7 @@ Keys:    [10] [20] [20] [30] [  ]
 
 AFTER: (ready to insert at index 1)
 ─────────────────────────────────
-Keys:    [10] [??] [20] [30] [  ]
+Keys:    [10] [15] [20] [30] [  ]
 			  ↑
 			  ready for new key
 
@@ -344,7 +344,7 @@ Records: [A]  [B]  [B]  [C]  [ ]
 
 
 ================================================================================
-3. SHIFT_KEYS_LEFT - Removing entry at index 1
+3. SHIFT_KEYS_LEFT - Removing entry 15
 ================================================================================
 
 BEFORE: (num_keys = 4, deleting at index 1)

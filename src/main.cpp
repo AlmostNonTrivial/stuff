@@ -191,7 +191,6 @@ execute_sql_statement(const char *sql, bool test_mode)
 		return false;
 	}
 
-
 	for (auto &stmt : result.statements)
 	{
 		semantic_result res = semantic_analyze(stmt);
@@ -482,13 +481,12 @@ run_repl()
 			auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 			printf("Query executed in %ld ms\n", ms.count());
 		}
-		arena<query_arena>::reset_and_decommit();
+		// arena<query_arena>::reset_and_decommit();
 	}
 
 	pager_close();
 	return 0;
 }
-#include "tests/btree.hpp"
 
 int
 main(int argc, char **argv)
@@ -497,6 +495,12 @@ main(int argc, char **argv)
 	arena<global_arena>::init();
 	arena<catalog_arena>::init();
 
-	// run_repl();
-	test_btree();
+	run_repl();
+	// test_btree();
+	// test_blob();
+
+	// auto x = parse_sql("SELECT username, age from la_table_elitaire WHERE age > 50 AND NOT NOT age = 60 ORDER BY
+	// age;") 			 .statements[0];
+
+	// print_ast(x);
 }

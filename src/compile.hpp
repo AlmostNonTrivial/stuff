@@ -701,7 +701,7 @@ struct program_builder
 };
 
 cursor_context *
-from_structure(relation &structure);
+cursor_from_relation(relation &structure);
 
 cursor_context *
 red_black(tuple_format &layout, bool allow_duplicates = true);

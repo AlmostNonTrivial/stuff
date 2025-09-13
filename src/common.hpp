@@ -16,8 +16,7 @@ enum arith_op : uint8_t
 	ARITH_ADD = 0,
 	ARITH_SUB = 1,
 	ARITH_MUL = 2,
-	ARITH_DIV = 3,
-	ARITH_MOD = 4,
+	ARITH_DIV = 3
 };
 
 enum logic_op : uint8_t

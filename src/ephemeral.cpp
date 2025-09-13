@@ -1,5 +1,4 @@
 /*
-** 2024 SQL-FromScratch
 **
 ** A Red-Black (balanced binary) tree data that can
 ** be used as ephemeral storage by the VM during the execution of a program.

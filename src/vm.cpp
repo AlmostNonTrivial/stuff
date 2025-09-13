@@ -1,33 +1,13 @@
 /*
-** 2024 SQL-FromScratch
 **
-** Virtual Machine Execution Engine
+** Virtual Machine
 **
-** The VM is the execution layer of the SQL engine - it takes compiled query
+** The VM is the execution layer of the SQL engine which it takes compiled query
 ** plans (sequences of instructions) and executes them against the storage layer.
 ** This provides a clean abstraction boundary: the compiler transforms SQL into
 ** instructions without knowing how data is physically stored, and the storage
 ** layer doesn't need to understand SQL semantics.
 **
-** The instruction set is domain-specific for database operations. Rather than
-** general-purpose computation, the opcodes directly represent database concepts:
-** opening cursors, scanning tables, seeking to keys, extracting columns,
-** and emitting result rows. This makes the compiled programs readable and
-** the execution model clear.
-**
-** The VM acts as an interpreter that maintains execution context (program counter,
-** registers for intermediate values, open cursors) and steps through instructions
-** sequentially. Each instruction performs one logical operation - seek to a row,
-** test a condition, extract a value, etc.
-**
-** This design separates concerns cleanly:
-**   - The parser/compiler handles SQL syntax and semantics
-**   - The VM handles execution flow and data movement
-**   - The btree layer handles physical storage and retrieval
-**
-** The boundary between logical and physical is particularly important for
-** education - you can understand how a query executes without diving into
-** page layouts, and you can understand storage without parsing SQL.
 */
 #include "vm.hpp"
 #include "cassert"
@@ -185,6 +165,7 @@ vmcursor_get_record(vm_cursor *cur)
 uint8_t *
 vmcursor_column(vm_cursor *cur, uint32_t col_index)
 {
+
 	if (col_index == 0)
 	{
 		return vmcursor_get_key(cur);
@@ -242,7 +223,6 @@ vmcursor_remove(vm_cursor *cur)
 	}
 }
 
-// Utility functions
 const char *
 vmcursor_type_name(vm_cursor *cur)
 {
@@ -273,9 +253,6 @@ vmcursor_print_current(vm_cursor *cur)
 	printf("\n");
 }
 
-// ============================================================================
-// VM State
-// ============================================================================
 static struct
 {
 	vm_instruction *program;
@@ -287,9 +264,6 @@ static struct
 	result_callback emit_row;
 } VM = {};
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
 static void
 set_register(typed_value *dest, uint8_t *src, data_type type)
 {
@@ -367,15 +341,10 @@ vm_debug_print_all_registers()
 	printf("====================\n");
 }
 
-// ============================================================================
-// Main Execution Step
-// ============================================================================
 static VM_RESULT
 step()
 {
 	vm_instruction *inst = &VM.program[VM.pc];
-
-	// Instruction decode removed - just show execution results
 
 	switch (inst->opcode)
 	{
@@ -506,7 +475,6 @@ step()
 			printf(")\n");
 		}
 
-		// Pass registers directly as array
 		bool success = fn(&VM.registers[dest], &VM.registers[first_arg], count);
 
 		if (!success)
@@ -602,7 +570,6 @@ step()
 			printf("\n");
 		}
 
-		// Allocate output array using the context's allocator
 		typed_value *values = (typed_value *)arena<query_arena>::alloc(sizeof(typed_value) * reg_count);
 
 		for (int i = 0; i < reg_count; i++)
@@ -796,15 +763,14 @@ step()
 		return OK;
 	}
 	case OP_Delete: {
-		int32_t		cursor_id = DELETE_CURSOR_ID();
-		int32_t		delete_occured = DELETE_DELETE_OCCURED_REG();
-		int32_t		cursor_valid = DELETE_CURSOR_VALID_REG();
-		vm_cursor  *cursor = &VM.cursors[cursor_id];
+		int32_t	   cursor_id = DELETE_CURSOR_ID();
+		int32_t	   delete_occured = DELETE_DELETE_OCCURED_REG();
+		int32_t	   cursor_valid = DELETE_CURSOR_VALID_REG();
+		vm_cursor *cursor = &VM.cursors[cursor_id];
 
+		int32_t success = vmcursor_remove(cursor) ? 1 : 0;
 
-		int32_t		success = vmcursor_remove(cursor) ? 1 : 0;
-
-		int32_t		valid = vmcursor_is_valid(cursor) ? 1 : 0;
+		int32_t valid = vmcursor_is_valid(cursor) ? 1 : 0;
 
 		typed_value src_success = typed_value::make(TYPE_U32, &success);
 		typed_value src_valid = typed_value::make(TYPE_U32, &valid);
@@ -932,14 +898,11 @@ step()
 		typed_value *a = &VM.registers[left];
 		typed_value *b = &VM.registers[right];
 
-		// Create dual type from the two component types
 		data_type dual_type = make_dual(a->type, b->type);
 		uint32_t  total_size = type_size(dual_type);
 
-		// Allocate space for packed value
 		uint8_t packed[total_size];
 
-		// Pack the two values
 		pack_dual(packed, a->type, a->data, b->type, b->data);
 
 		if (_debug)
@@ -966,15 +929,12 @@ step()
 
 		assert(type_is_dual(dual_val->type));
 
-		// Get component types
 		data_type type1 = dual_component_type(dual_val->type, 0);
 		data_type type2 = dual_component_type(dual_val->type, 1);
 
-		// Allocate space for unpacked values
 		uint8_t data1[type_size(type1)];
 		uint8_t data2[type_size(type2)];
 
-		// Unpack
 		unpack_dual(dual_val->type, dual_val->data, data1, data2);
 
 		if (_debug)
@@ -1001,10 +961,6 @@ step()
 	}
 }
 
-// ============================================================================
-// Main VM Execute Function
-// ============================================================================
-
 VM_RESULT
 vm_execute(vm_instruction *instructions, int instruction_count)
 {
@@ -1017,8 +973,6 @@ vm_execute(vm_instruction *instructions, int instruction_count)
 		vm_debug_print_program(instructions, instruction_count);
 		printf("\n===== EXECUTION TRACE =====\n");
 	}
-
-
 
 	while (!VM.halted && VM.pc < VM.program_size)
 	{

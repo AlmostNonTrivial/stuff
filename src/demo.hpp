@@ -226,128 +226,151 @@ load_all_data_sql()
 bool
 vmfunc_like(typed_value *result, typed_value *args, uint32_t arg_count)
 {
-    if (arg_count != 2) {
-        return false;
-    }
+	if (arg_count != 2)
+	{
+		return false;
+	}
 
-    // Get pointers to the string data
-    const char *text_ptr = args[0].as_char();
-    const char *pattern_ptr = args[1].as_char();
+	// Get pointers to the string data
+	const char *text_ptr = args[0].as_char();
+	const char *pattern_ptr = args[1].as_char();
 
-    // Get maximum sizes from types (e.g., 32 for CHAR32)
-    size_t text_max = type_size(args[0].type);
-    size_t pattern_max = type_size(args[1].type);
+	// Get maximum sizes from types (e.g., 32 for CHAR32)
+	size_t text_max = type_size(args[0].type);
+	size_t pattern_max = type_size(args[1].type);
 
-    // Create local copies with proper bounds
-    char text[256];
-    char pattern[256];
+	// Create local copies with proper bounds
+	char text[256];
+	char pattern[256];
 
-    // Copy text, respecting max size and ensuring null termination
-    size_t text_len = 0;
-    while (text_len < text_max && text_len < 255 && text_ptr[text_len] != '\0') {
-        text[text_len] = text_ptr[text_len];
-        text_len++;
-    }
-    text[text_len] = '\0';
+	// Copy text, respecting max size and ensuring null termination
+	size_t text_len = 0;
+	while (text_len < text_max && text_len < 255 && text_ptr[text_len] != '\0')
+	{
+		text[text_len] = text_ptr[text_len];
+		text_len++;
+	}
+	text[text_len] = '\0';
 
-    // Copy pattern, respecting max size and ensuring null termination
-    size_t pattern_len = 0;
-    while (pattern_len < pattern_max && pattern_len < 255 && pattern_ptr[pattern_len] != '\0') {
-        pattern[pattern_len] = pattern_ptr[pattern_len];
-        pattern_len++;
-    }
-    pattern[pattern_len] = '\0';
+	// Copy pattern, respecting max size and ensuring null termination
+	size_t pattern_len = 0;
+	while (pattern_len < pattern_max && pattern_len < 255 && pattern_ptr[pattern_len] != '\0')
+	{
+		pattern[pattern_len] = pattern_ptr[pattern_len];
+		pattern_len++;
+	}
+	pattern[pattern_len] = '\0';
 
-    // Now perform the pattern matching
-    bool match = false;
+	// Now perform the pattern matching
+	bool match = false;
 
-    // Simple case: empty pattern matches nothing
-    if (pattern_len == 0) {
-        match = false;
-    }
-    // Pattern is just %
-    else if (pattern_len == 1 && pattern[0] == '%') {
-        match = true;
-    }
-    // Pattern starts and ends with %
-    else if (pattern[0] == '%' && pattern[pattern_len-1] == '%' && pattern_len > 1) {
-        // Extract middle part
-        char literal[256];
-        size_t literal_len = pattern_len - 2;
-        for (size_t i = 0; i < literal_len; i++) {
-            literal[i] = pattern[i + 1];
-        }
-        literal[literal_len] = '\0';
+	// Simple case: empty pattern matches nothing
+	if (pattern_len == 0)
+	{
+		match = false;
+	}
+	// Pattern is just %
+	else if (pattern_len == 1 && pattern[0] == '%')
+	{
+		match = true;
+	}
+	// Pattern starts and ends with %
+	else if (pattern[0] == '%' && pattern[pattern_len - 1] == '%' && pattern_len > 1)
+	{
+		// Extract middle part
+		char   literal[256];
+		size_t literal_len = pattern_len - 2;
+		for (size_t i = 0; i < literal_len; i++)
+		{
+			literal[i] = pattern[i + 1];
+		}
+		literal[literal_len] = '\0';
 
-        // Check if text contains literal (manual strstr)
-        match = false;
-        for (size_t i = 0; i <= text_len - literal_len; i++) {
-            bool found = true;
-            for (size_t j = 0; j < literal_len; j++) {
-                if (text[i + j] != literal[j]) {
-                    found = false;
-                    break;
-                }
-            }
-            if (found) {
-                match = true;
-                break;
-            }
-        }
-    }
-    // Pattern starts with %
-    else if (pattern[0] == '%') {
-        // Extract suffix
-        size_t suffix_len = pattern_len - 1;
-        const char *suffix = pattern + 1;
+		// Check if text contains literal (manual strstr)
+		match = false;
+		for (size_t i = 0; i <= text_len - literal_len; i++)
+		{
+			bool found = true;
+			for (size_t j = 0; j < literal_len; j++)
+			{
+				if (text[i + j] != literal[j])
+				{
+					found = false;
+					break;
+				}
+			}
+			if (found)
+			{
+				match = true;
+				break;
+			}
+		}
+	}
+	// Pattern starts with %
+	else if (pattern[0] == '%')
+	{
+		// Extract suffix
+		size_t		suffix_len = pattern_len - 1;
+		const char *suffix = pattern + 1;
 
-        // Check if text ends with suffix
-        if (text_len >= suffix_len) {
-            match = true;
-            for (size_t i = 0; i < suffix_len; i++) {
-                if (text[text_len - suffix_len + i] != suffix[i]) {
-                    match = false;
-                    break;
-                }
-            }
-        }
-    }
-    // Pattern ends with %
-    else if (pattern[pattern_len-1] == '%') {
-        // Extract prefix
-        size_t prefix_len = pattern_len - 1;
+		// Check if text ends with suffix
+		if (text_len >= suffix_len)
+		{
+			match = true;
+			for (size_t i = 0; i < suffix_len; i++)
+			{
+				if (text[text_len - suffix_len + i] != suffix[i])
+				{
+					match = false;
+					break;
+				}
+			}
+		}
+	}
+	// Pattern ends with %
+	else if (pattern[pattern_len - 1] == '%')
+	{
+		// Extract prefix
+		size_t prefix_len = pattern_len - 1;
 
-        // Check if text starts with prefix
-        if (text_len >= prefix_len) {
-            match = true;
-            for (size_t i = 0; i < prefix_len; i++) {
-                if (text[i] != pattern[i]) {
-                    match = false;
-                    break;
-                }
-            }
-        }
-    }
-    // No wildcards - exact match
-    else {
-        if (text_len == pattern_len) {
-            match = true;
-            for (size_t i = 0; i < text_len; i++) {
-                if (text[i] != pattern[i]) {
-                    match = false;
-                    break;
-                }
-            }
-        }
-    }
+		// Check if text starts with prefix
+		if (text_len >= prefix_len)
+		{
+			match = true;
+			for (size_t i = 0; i < prefix_len; i++)
+			{
+				if (text[i] != pattern[i])
+				{
+					match = false;
+					break;
+				}
+			}
+		}
+	}
+	// No wildcards - exact match
+	else
+	{
+		if (text_len == pattern_len)
+		{
+			match = true;
+			for (size_t i = 0; i < text_len; i++)
+			{
+				if (text[i] != pattern[i])
+				{
+					match = false;
+					break;
+				}
+			}
+		}
+	}
 
-    // Allocate and set the result
-    uint32_t match_val = match ? 1 : 0;
-    result->type = TYPE_U32;
-    result->data = (uint8_t *)arena<query_arena>::alloc(sizeof(uint32_t));
-    *(uint32_t *)result->data = match_val;
+	// Allocate and set the result
+	uint32_t match_val = match ? 1 : 0;
+	result->type = TYPE_U32;
+	result->data = (uint8_t *)arena<query_arena>::alloc(sizeof(uint32_t));
+	*(uint32_t *)result->data = match_val;
 
-    return true;
+	return true;
 }
 
 // VM Function: Create structure (for composite index demo)
@@ -383,7 +406,7 @@ vmfunc_create_index_structure(typed_value *result, typed_value *args, uint32_t a
 void
 demo_like_pattern(const char *args)
 {
-    // _debug = true;
+	// _debug = true;
 	vm_set_result_callback(formatted_result_callback);
 	// Parse pattern from args
 	char pattern[32];
@@ -410,7 +433,7 @@ demo_like_pattern(const char *args)
 		return;
 	}
 
-	auto products_ctx = from_structure(*products);
+	auto products_ctx = cursor_from_relation(*products);
 	int	 cursor = prog.open_cursor(products_ctx);
 
 	// Load pattern into register
@@ -481,8 +504,8 @@ demo_nested_loop_join(const char *args)
 		return;
 	}
 
-	auto users_ctx = from_structure(*users);
-	auto orders_ctx = from_structure(*orders);
+	auto users_ctx = cursor_from_relation(*users);
+	auto orders_ctx = cursor_from_relation(*orders);
 
 	int users_cursor = prog.open_cursor(users_ctx);
 	int orders_cursor = prog.open_cursor(orders_ctx);
@@ -598,7 +621,7 @@ demo_subquery_pattern(const char *args)
 		return;
 	}
 
-	auto		 users_ctx = from_structure(*users);
+	auto		 users_ctx = cursor_from_relation(*users);
 	tuple_format temp_layout = users_ctx->layout;
 	auto		 temp_ctx = red_black(temp_layout);
 
@@ -697,7 +720,7 @@ demo_composite_index(const char *args)
 			return;
 		}
 
-		auto orders_ctx = from_structure(*orders);
+		auto orders_ctx = cursor_from_relation(*orders);
 		int	 cursor = prog.open_cursor(orders_ctx);
 
 		// int target_user = prog.load(TYPE_U32, prog.alloc_value((uint32_t)user_id));
@@ -754,7 +777,7 @@ demo_composite_index(const char *args)
 		program_builder prog;
 
 		relation *orders = catalog.get("orders");
-		auto	  orders_ctx = from_structure(*orders);
+		auto	  orders_ctx = cursor_from_relation(*orders);
 
 		// Create a context for the temporary index
 		cursor_context index_context;
@@ -905,7 +928,7 @@ demo_group_by_aggregate(const char *args)
 		(TYPE_U32),	   // sum_age
 	};
 	tuple_format agg_layout = tuple_format_from_types(agg_types);
-	auto		 users_ctx = from_structure(*users);
+	auto		 users_ctx = cursor_from_relation(*users);
 	auto		 agg_ctx = red_black(agg_layout);
 	int			 users_cursor = prog.open_cursor(users_ctx);
 	int			 agg_cursor = prog.open_cursor(agg_ctx);
@@ -1000,8 +1023,7 @@ vmfunc_write_blob(typed_value *result, typed_value *args, uint32_t arg_count)
 	{
 		return false;
 	}
-
-	void	*data = (void *)args[0].as_u64();
+	void	*data = args[0].data; // Direct access to the data
 	uint32_t size = args[1].as_u32();
 
 	uint32_t index = blob_create(data, size);
@@ -1016,18 +1038,25 @@ bool
 vmfunc_read_blob(typed_value *result, typed_value *args, uint32_t arg_count)
 {
 	if (arg_count != 1)
+	{
 		return false;
+	}
 
 	uint32_t page_idx = args[0].as_u32();
 
 	size_t size;
 	auto   data = blob_read_full(page_idx, &size);
 
+	std::cout << data << std::endl;
+
 	if (!size)
+	{
 		return false;
+	}
 
 	result->type = TYPE_VARCHAR(size);
 	result->data = (uint8_t *)data;
+
 	return true;
 }
 
@@ -1063,7 +1092,7 @@ demo_blob_storage(const char *args)
 	// prog.begin_transaction();
 
 	relation *docs = catalog.get("documents");
-	auto	  docs_ctx = from_structure(*docs);
+	auto	  docs_ctx = cursor_from_relation(*docs);
 	int		  cursor = prog.open_cursor(docs_ctx);
 
 	// Insert a document with blob
@@ -1123,13 +1152,13 @@ demo_blob_storage(const char *args)
 			int blob_content = prog.call_function(vmfunc_read_blob, blob_ref_col, 1);
 
 			// printf("Document found:\n");
-			int result_start = prog.regs.allocate_range(4);
-			prog.move(doc_id_col, result_start);
-			prog.move(title_col, result_start + 1);
-			prog.move(blob_ref_col, result_start + 2);
-			prog.move(blob_content, result_start + 3);
+			// int result_start = prog.regs.allocate_range(4);
+			// prog.move(doc_id_col, result_start);
+			// prog.move(title_col, result_start + 1);
+			// prog.move(blob_ref_col, result_start + 2);
+			// prog.move(blob_content, result_start + 3);
 
-			prog.result(result_start, 4);
+			// prog.result(result_start, 4);
 		}
 		prog.end_if(if_found);
 

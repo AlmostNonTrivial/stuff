@@ -1,5 +1,4 @@
 /*
-** 2024 SQL-FromScratch
 **
 ** The catalog is essentially an in-memory copy of the contents of the master catalog
 ** table, which contains data about other, user created tables.
