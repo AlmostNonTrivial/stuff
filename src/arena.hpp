@@ -4,6 +4,9 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <chrono>
+#include <vector>
+#include <algorithm>
 #include "os_layer.hpp"
 #include "pager.hpp"
 #include <cstring>
@@ -57,10 +60,41 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 	 */
 	static inline free_block *freelists[32] = {};
 	static inline uint32_t	  occupied_buckets = 0; // Bitmask: which buckets have blocks
-#ifdef DEBUG
+
+	// Diagnostic counters
+	static inline size_t total_allocations = 0;
+	static inline size_t total_reclamations = 0;
+	static inline size_t total_bytes_allocated = 0;
+	static inline size_t peak_usage = 0;
 	static inline size_t reclaimed_bytes = 0;
 	static inline size_t reused_bytes = 0;
-#endif
+	static inline size_t allocation_histogram[32] = {};
+	static inline std::chrono::steady_clock::time_point init_time;
+
+	// Arena registry for cross-arena diagnostics
+	struct arena_info
+	{
+		const char *tag_name;
+		uint8_t    *base;
+		size_t      reserved;
+		void       *arena_ptr;
+	};
+	static inline std::vector<arena_info> *arena_registry = nullptr;
+
+	static void
+	register_arena()
+	{
+		if (!arena_registry)
+		{
+			arena_registry = new std::vector<arena_info>();
+		}
+		arena_info info;
+		info.tag_name = typeid(Tag).name();
+		info.base = base;
+		info.reserved = reserved_capacity;
+		info.arena_ptr = nullptr;
+		arena_registry->push_back(info);
+	}
 
 	static void
 	init(size_t initial = PAGE_SIZE, size_t maximum = 0)
@@ -108,13 +142,20 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 		for (int i = 0; i < 32; i++)
 		{
 			freelists[i] = nullptr;
+			allocation_histogram[i] = 0;
 		}
 		occupied_buckets = 0;
-#ifdef DEBUG
 
+		// Reset diagnostic counters
+		total_allocations = 0;
+		total_reclamations = 0;
+		total_bytes_allocated = 0;
+		peak_usage = 0;
 		reclaimed_bytes = 0;
 		reused_bytes = 0;
-#endif
+		init_time = std::chrono::steady_clock::now();
+
+		register_arena();
 
 		printf("Arena<%s> initialized at %p (size: %zu)\n", typeid(Tag).name(), base, reserved_capacity);
 	}
@@ -137,12 +178,12 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 			}
 			occupied_buckets = 0;
 
-#ifdef DEBUG
-
+			total_allocations = 0;
+			total_reclamations = 0;
+			total_bytes_allocated = 0;
+			peak_usage = 0;
 			reclaimed_bytes = 0;
 			reused_bytes = 0;
-
-#endif
 		}
 	}
 
@@ -200,13 +241,12 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 		freelists[size_class] = block;
 
 		occupied_buckets |= (1u << size_class);
-#ifdef DEBUG
+
 		reclaimed_bytes += size;
-#endif
+		total_reclamations++;
 	}
 
 	/*
-
 	 * Check freelists for a suitable reclaimed block but
 	 * fall back to bump allocation from current pointer
 	 *
@@ -254,9 +294,8 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 		{
 			occupied_buckets &= ~(1u << cls); // Bucket now empty
 		}
-#ifdef DEBUG
+
 		reused_bytes += block->size;
-#endif
 
 		return block;
 	}
@@ -264,9 +303,13 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 	static void *
 	alloc(size_t size)
 	{
-
 		assert(size > 0);
 		assert(size < reserved_capacity);
+
+		// Update diagnostic counters
+		total_allocations++;
+		total_bytes_allocated += size;
+		allocation_histogram[get_size_class(size)]++;
 
 		void *recycled = try_alloc_from_freelist(size);
 		if (recycled)
@@ -326,6 +369,14 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 		}
 
 		current = next;
+
+		// Update peak usage
+		size_t current_usage = used();
+		if (current_usage > peak_usage)
+		{
+			peak_usage = current_usage;
+		}
+
 		return aligned;
 	}
 
@@ -366,11 +417,8 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 		}
 		occupied_buckets = 0;
 
-#ifdef DEBUG
-
 		reclaimed_bytes = 0;
 		reused_bytes = 0;
-#endif
 	}
 
 	static void
@@ -398,12 +446,8 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 		}
 		occupied_buckets = 0;
 
-#ifdef DEBUG
-
 		reclaimed_bytes = 0;
 		reused_bytes = 0;
-
-#endif
 	}
 
 	static size_t
@@ -424,21 +468,13 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 	static size_t
 	reclaimed()
 	{
-#ifdef DEBUG
 		return reclaimed_bytes;
-#else
-		return 0;
-#endif
 	}
 
 	static size_t
 	reused()
 	{
-#ifdef DEBUG
 		return reused_bytes;
-#else
-		return 0;
-#endif
 	}
 
 	static size_t
@@ -457,6 +493,13 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 		return total;
 	}
 
+	// ============================================================
+	// DIAGNOSTIC FUNCTIONS
+	// ============================================================
+
+	/*
+	 * Print basic statistics about the arena
+	 */
 	static void
 	print_stats()
 	{
@@ -468,10 +511,12 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 		{
 			printf("  Maximum:   %zu bytes (%.2f MB)\n", max_capacity, max_capacity / (1024.0 * 1024.0));
 		}
-#ifdef DEBUG
-		printf("  Reclaimed: %zu bytes (%.2f MB)\n", reclaimed_bytes, reclaimed_bytes / (1024.0 * 1024.0));
+		printf("  Peak usage: %zu bytes (%.2f MB)\n", peak_usage, peak_usage / (1024.0 * 1024.0));
+		printf("  Total allocations: %zu\n", total_allocations);
+		printf("  Total bytes allocated: %zu (%.2f MB)\n", total_bytes_allocated, total_bytes_allocated / (1024.0 * 1024.0));
+		printf("  Reclaimed: %zu bytes (%.2f MB) in %zu operations\n",
+		       reclaimed_bytes, reclaimed_bytes / (1024.0 * 1024.0), total_reclamations);
 		printf("  Reused:    %zu bytes (%.2f MB)\n", reused_bytes, reused_bytes / (1024.0 * 1024.0));
-#endif
 		printf("  In freelists: %zu bytes (%.2f MB)\n", freelist_bytes(), freelist_bytes() / (1024.0 * 1024.0));
 
 		if (occupied_buckets)
@@ -486,6 +531,401 @@ template <typename Tag = global_arena, bool zero_on_reset = true, size_t Align =
 			}
 			printf("\n");
 		}
+	}
+
+	/*
+	 * Print memory range information
+	 */
+	static void
+	print_memory_ranges()
+	{
+		printf("\n=== Memory Ranges for Arena<%s> ===\n", typeid(Tag).name());
+		printf("Reserved range: [%p - %p] (%zu bytes)\n",
+		       base, base + reserved_capacity, reserved_capacity);
+		printf("Committed range: [%p - %p] (%zu bytes)\n",
+		       base, base + committed_capacity, committed_capacity);
+		printf("Used range: [%p - %p] (%zu bytes)\n",
+		       base, current, used());
+		printf("Available in committed: %zu bytes\n",
+		       committed_capacity - used());
+		printf("Available in reserved: %zu bytes\n",
+		       reserved_capacity - used());
+	}
+
+	/*
+	 * Visual memory layout representation
+	 */
+	static void
+	print_memory_layout()
+	{
+		printf("\n=== Memory Layout for Arena<%s> ===\n", typeid(Tag).name());
+		printf("Address: [%p - %p]\n", base, base + reserved_capacity);
+		printf("Visual:  [");
+
+		const int bar_width = 50;
+		size_t used_blocks = (used() * bar_width) / reserved_capacity;
+		size_t committed_blocks = (committed_capacity * bar_width) / reserved_capacity;
+
+		for (int i = 0; i < bar_width; i++)
+		{
+			if (i < used_blocks) printf("#");
+			else if (i < committed_blocks) printf("-");
+			else printf(".");
+		}
+		printf("]\n");
+		printf("Legend:  # = used (%.1f%%), - = committed (%.1f%%), . = reserved\n",
+		       (100.0 * used()) / reserved_capacity,
+		       (100.0 * committed_capacity) / reserved_capacity);
+	}
+
+	/*
+	 * Print allocation size histogram
+	 */
+	static void
+	print_allocation_histogram()
+	{
+		printf("\n=== Allocation Size Distribution ===\n");
+		printf("Size Class | Range          | Count      | Percentage\n");
+		printf("-----------|----------------|------------|------------\n");
+
+		size_t total = 0;
+		for (int i = 0; i < 32; i++)
+		{
+			total += allocation_histogram[i];
+		}
+
+		if (total == 0)
+		{
+			printf("No allocations recorded.\n");
+			return;
+		}
+
+		for (int i = 0; i < 32; i++)
+		{
+			if (allocation_histogram[i] > 0)
+			{
+				size_t min_size = 1u << i;
+				size_t max_size = (1u << (i + 1)) - 1;
+				double percentage = (100.0 * allocation_histogram[i]) / total;
+
+				printf("%10d | %6zu - %6zu | %10zu | %10.2f%%\n",
+				       i, min_size, max_size, allocation_histogram[i], percentage);
+			}
+		}
+		printf("Total allocations: %zu\n", total);
+	}
+
+	/*
+	 * Print detailed freelist information
+	 */
+	static void
+	print_freelist_details()
+	{
+		printf("\n=== Freelist Details ===\n");
+		printf("Bucket | Size Range     | Blocks | Total Bytes | Max Block | Avg Chain\n");
+		printf("-------|----------------|--------|-------------|-----------|----------\n");
+
+		size_t total_blocks = 0;
+		size_t total_freelist_bytes = 0;
+
+		for (int i = 0; i < 32; i++)
+		{
+			if (freelists[i])
+			{
+				size_t count = 0;
+				size_t total_size = 0;
+				size_t max_size = 0;
+
+				free_block *block = freelists[i];
+				while (block)
+				{
+					count++;
+					total_size += block->size;
+					if (block->size > max_size)
+					{
+						max_size = block->size;
+					}
+					block = block->next;
+				}
+
+				size_t min_range = 1u << i;
+				size_t max_range = (1u << (i + 1)) - 1;
+				double avg_size = (double)total_size / count;
+
+				printf("%6d | %6zu - %6zu | %6zu | %11zu | %9zu | %9.1f\n",
+				       i, min_range, max_range, count, total_size, max_size, avg_size);
+
+				total_blocks += count;
+				total_freelist_bytes += total_size;
+			}
+		}
+
+		printf("\nTotal: %zu blocks, %zu bytes (%.2f MB)\n",
+		       total_blocks, total_freelist_bytes,
+		       total_freelist_bytes / (1024.0 * 1024.0));
+
+		// Calculate fragmentation
+		if (reclaimed_bytes > 0)
+		{
+			double efficiency = (100.0 * reused_bytes) / reclaimed_bytes;
+			printf("Reuse efficiency: %.2f%% (reused/reclaimed)\n", efficiency);
+		}
+	}
+
+	/*
+	 * Check if a pointer belongs to this arena
+	 */
+	static bool
+	owns_pointer(void *ptr)
+	{
+		uint8_t *addr = (uint8_t *)ptr;
+		return addr >= base && addr < base + reserved_capacity;
+	}
+
+	/*
+	 * Get largest available block from freelists
+	 */
+	static size_t
+	largest_available_block()
+	{
+		if (!occupied_buckets)
+		{
+			return 0;
+		}
+
+		// Find highest set bit = largest bucket with blocks
+#ifdef _MSC_VER
+		unsigned long highest;
+		_BitScanReverse(&highest, occupied_buckets);
+#else
+		int highest = 31 - __builtin_clz(occupied_buckets);
+#endif
+
+		// The actual largest block might be bigger than the minimum for this bucket
+		size_t max_size = 0;
+		for (int i = highest; i >= 0; i--)
+		{
+			if (occupied_buckets & (1u << i))
+			{
+				free_block *block = freelists[i];
+				while (block)
+				{
+					if (block->size > max_size)
+					{
+						max_size = block->size;
+					}
+					block = block->next;
+				}
+			}
+		}
+
+		return max_size;
+	}
+
+	/*
+	 * Verify freelist integrity
+	 */
+	static bool
+	verify_freelist_integrity()
+	{
+		printf("\n=== Verifying Freelist Integrity ===\n");
+		bool valid = true;
+
+		for (int i = 0; i < 32; i++)
+		{
+			if (freelists[i])
+			{
+				free_block *slow = freelists[i];
+				free_block *fast = freelists[i];
+				size_t count = 0;
+
+				// Floyd's cycle detection
+				while (fast && fast->next)
+				{
+					slow = slow->next;
+					fast = fast->next->next;
+					count++;
+
+					if (slow == fast)
+					{
+						printf("ERROR: Cycle detected in bucket %d\n", i);
+						valid = false;
+						break;
+					}
+
+					// Sanity check - no freelist should be this long
+					if (count > 100000)
+					{
+						printf("WARNING: Suspiciously long chain in bucket %d (>100k nodes)\n", i);
+						break;
+					}
+				}
+
+				// Verify all blocks are within arena bounds
+				free_block *block = freelists[i];
+				while (block)
+				{
+					if (!owns_pointer(block))
+					{
+						printf("ERROR: Block %p in bucket %d is outside arena bounds\n", block, i);
+						valid = false;
+					}
+
+					// Verify size is reasonable for this bucket
+					int expected_class = get_size_class(block->size);
+					if (expected_class != i && block->size < (1u << i))
+					{
+						printf("WARNING: Block size %zu in wrong bucket %d (expected %d)\n",
+						       block->size, i, expected_class);
+					}
+
+					block = block->next;
+				}
+			}
+		}
+
+		if (valid)
+		{
+			printf("All freelists are valid.\n");
+		}
+
+		return valid;
+	}
+
+	/*
+	 * Print temporal statistics
+	 */
+	static void
+	print_temporal_stats()
+	{
+		auto now = std::chrono::steady_clock::now();
+		auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - init_time);
+
+		printf("\n=== Temporal Statistics ===\n");
+		printf("Arena active for: %lld seconds\n", duration.count());
+
+		if (duration.count() > 0)
+		{
+			double alloc_rate = (double)total_allocations / duration.count();
+			double byte_rate = (double)total_bytes_allocated / duration.count();
+
+			printf("Allocation rate: %.2f ops/sec\n", alloc_rate);
+			printf("Byte allocation rate: %.2f MB/sec\n", byte_rate / (1024.0 * 1024.0));
+
+			// Growth rate
+			double growth_rate = (double)used() / duration.count();
+			printf("Net growth rate: %.2f KB/sec\n", growth_rate / 1024.0);
+		}
+	}
+
+	/*
+	 * Dump memory at specific address (if it belongs to arena)
+	 */
+	static void
+	dump_memory(void *addr, size_t size)
+	{
+		if (!owns_pointer(addr))
+		{
+			printf("Address %p does not belong to Arena<%s>\n", addr, typeid(Tag).name());
+			return;
+		}
+
+		printf("\n=== Memory Dump at %p ===\n", addr);
+		uint8_t *bytes = (uint8_t *)addr;
+
+		for (size_t i = 0; i < size; i += 16)
+		{
+			printf("%p: ", bytes + i);
+
+			// Hex bytes
+			for (size_t j = 0; j < 16 && i + j < size; j++)
+			{
+				printf("%02x ", bytes[i + j]);
+			}
+
+			// Padding if last line is short
+			for (size_t j = size - i; j < 16 && i + 16 > size; j++)
+			{
+				printf("   ");
+			}
+
+			printf(" |");
+
+			// ASCII representation
+			for (size_t j = 0; j < 16 && i + j < size; j++)
+			{
+				uint8_t c = bytes[i + j];
+				printf("%c", (c >= 32 && c < 127) ? c : '.');
+			}
+
+			printf("|\n");
+		}
+	}
+
+	/*
+	 * Print all arena diagnostics
+	 */
+	static void
+	print_all_diagnostics()
+	{
+		printf("\n" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=\n");
+		printf("COMPLETE ARENA DIAGNOSTICS: %s\n", typeid(Tag).name());
+		printf("=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=\n");
+
+		print_stats();
+		print_memory_ranges();
+		print_memory_layout();
+		print_allocation_histogram();
+		print_freelist_details();
+		print_temporal_stats();
+		verify_freelist_integrity();
+
+		printf("\n" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=" "=\n");
+	}
+
+	/*
+	 * Print cross-arena statistics (static function callable without template)
+	 */
+	static void
+	print_global_arena_stats()
+	{
+		if (!arena_registry || arena_registry->empty())
+		{
+			printf("No arenas registered.\n");
+			return;
+		}
+
+		printf("\n=== Global Arena Statistics ===\n");
+		printf("Active arenas: %zu\n", arena_registry->size());
+
+		size_t total_reserved = 0;
+		size_t total_committed = 0;
+
+		for (const auto &info : *arena_registry)
+		{
+			printf("  %s: base=%p, reserved=%zu MB\n",
+			       info.tag_name, info.base, info.reserved / (1024 * 1024));
+			total_reserved += info.reserved;
+
+			// Check for overlaps
+			for (const auto &other : *arena_registry)
+			{
+				if (&info != &other)
+				{
+					uint8_t *end1 = info.base + info.reserved;
+					uint8_t *end2 = other.base + other.reserved;
+
+					if ((info.base >= other.base && info.base < end2) ||
+					    (end1 > other.base && end1 <= end2))
+					{
+						printf("  WARNING: Overlap detected with %s!\n", other.tag_name);
+					}
+				}
+			}
+		}
+
+		printf("Total reserved across all arenas: %.2f GB\n",
+		       total_reserved / (1024.0 * 1024.0 * 1024.0));
 	}
 };
 /**
