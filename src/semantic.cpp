@@ -11,12 +11,10 @@
 
 struct semantic_context
 {
-	string_view									 error;
-	string_view									 context;
-	hash_map<string_view, relation, query_arena> tables_to_create;
-	hash_set<string_view, query_arena>			 tables_to_drop;
-	char										 error_buffer[256];
-	char										 context_buffer[256];
+	string_view error;
+	string_view context;
+	char        error_buffer[256];
+	char        context_buffer[256];
 };
 
 char *
@@ -39,17 +37,6 @@ set_error(semantic_context *ctx, string_view error, string_view context = {})
 static relation *
 lookup_table(semantic_context *ctx, string_view name)
 {
-	if (ctx->tables_to_drop.contains(name))
-	{
-		return nullptr;
-	}
-
-	relation *pending = ctx->tables_to_create.get(name);
-	if (pending)
-	{
-		return pending;
-	}
-
 	return catalog.get(name);
 }
 
@@ -70,7 +57,6 @@ static bool
 resolve_column_list(semantic_context *ctx, relation *table, array<string_view, query_arena> &column_names,
 					array<int32_t, query_arena> &out_indices)
 {
-
 	out_indices.clear();
 
 	for (auto column_name : column_names)
@@ -128,27 +114,6 @@ validate_literal_value(semantic_context *ctx, expr_node *expr, data_type expecte
 
 	expr->sem.resolved_type = expected_type;
 	return true;
-}
-
-static void
-apply_catalog_changes(semantic_context *ctx)
-{
-	for (auto [name, _] : ctx->tables_to_drop)
-	{
-		catalog.remove(name);
-	}
-
-	for (auto [_, relation] : ctx->tables_to_create)
-	{
-		catalog.insert(relation.name, relation);
-	}
-}
-
-static void
-clear_catalog_changes(semantic_context *ctx)
-{
-	ctx->tables_to_create.clear();
-	ctx->tables_to_drop.clear();
 }
 
 static bool
@@ -430,6 +395,7 @@ semantic_resolve_create_table(semantic_context *ctx, create_table_stmt *stmt)
 		return false;
 	}
 
+	// Check if table already exists
 	relation *existing = lookup_table(ctx, stmt->table_name);
 	if (existing)
 	{
@@ -445,7 +411,6 @@ semantic_resolve_create_table(semantic_context *ctx, create_table_stmt *stmt)
 
 	for (uint32_t i = 0; i < stmt->columns.size(); i++)
 	{
-
 		if (stmt->columns[i].name.size() > ATTRIBUTE_NAME_MAX_SIZE)
 		{
 			set_error(ctx,
@@ -465,6 +430,7 @@ semantic_resolve_create_table(semantic_context *ctx, create_table_stmt *stmt)
 		}
 	}
 
+	// Build the column array for the new relation
 	array<attribute, query_arena> cols;
 	for (attribute_node &def : stmt->columns)
 	{
@@ -481,9 +447,9 @@ semantic_resolve_create_table(semantic_context *ctx, create_table_stmt *stmt)
 		cols.push(attr);
 	}
 
+	// Create and immediately insert the new relation into the catalog
 	relation new_relation = create_relation(stmt->table_name, cols);
-
-	ctx->tables_to_create.insert(new_relation.name, new_relation);
+	catalog.insert(new_relation.name, new_relation);
 
 	stmt->sem.created_structure = stmt->table_name;
 	return true;
@@ -499,7 +465,8 @@ semantic_resolve_drop_table(semantic_context *ctx, drop_table_stmt *stmt)
 		return false;
 	}
 
-	ctx->tables_to_drop.insert(stmt->table_name, 1);
+	// Immediately remove the table from the catalog
+	catalog.remove(stmt->table_name);
 
 	return true;
 }
@@ -549,23 +516,14 @@ semantic_analyze(stmt_node *statement)
 	semantic_context ctx;
 	ctx.error = {};
 	ctx.context = {};
-	clear_catalog_changes(&ctx);
-
-	ctx.error = {};
-	ctx.context = {};
 
 	if (!semantic_resolve_statement(&ctx, statement))
 	{
 		result.success = false;
 		result.error = ctx.error;
 		result.error_context = ctx.context;
-
-		clear_catalog_changes(&ctx);
-
 		return result;
 	}
-
-	apply_catalog_changes(&ctx);
 
 	return result;
 }

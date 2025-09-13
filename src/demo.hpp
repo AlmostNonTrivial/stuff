@@ -57,7 +57,7 @@ struct csv_reader
 };
 
 bool
-execute_sql_statement(const char *sql, bool asda = false);
+execute_sql_statement(const char *sql);
 inline void
 create_all_tables_sql(bool create)
 {
